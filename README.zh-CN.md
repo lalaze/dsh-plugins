@@ -14,6 +14,7 @@
 | `dsh-magpie-fast` | [packages/magpie-fast](packages/magpie-fast/README.zh-CN.md) | 仅 GPT 显示的闪电开关，沿用已有提供商为远端 Magpie 等请求开启 Fast |
 | `dsh-magpie-quota` | [packages/magpie-quota](packages/magpie-quota/README.zh-CN.md) | 输入框旁的账号额度图标、窗口明细、重置时间和单账号刷新 |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Sidebar Browser 网页内的元素、Console 和网络调试浮窗 |
+| `dsh-translate` | [packages/translate](packages/translate/README.zh-CN.md) | 在聊天选中文本或输入框草稿中调用 OpenAI 兼容接口进行翻译 |
 
 ## 初始化
 
@@ -68,6 +69,7 @@ packages/
   magpie-fast/          # 现有 GPT 模型的 Fast 闪电开关
   magpie-quota/         # Magpie 各账号额度图标与详情
   browser-devtools/     # Sidebar Browser 网页内调试浮窗
+  translate/            # DSH 聊天选区与草稿翻译
 scripts/
   build-client.mjs      # 共用的 DSH Web 客户端打包脚本
 tsconfig.base.json     # 共用 TypeScript 编译选项

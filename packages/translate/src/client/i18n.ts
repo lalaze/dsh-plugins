@@ -1,0 +1,2 @@
+export function ui(en: string, zh: string): string { return navigator.language.toLowerCase().startsWith('zh') ? zh : en; }
+export function localizeError(error: unknown): string { const message = error instanceof Error ? error.message : String(error); const map: Record<string, string> = { 'Enter the Translation API URL first': '请先填写翻译 API 地址', 'Enter a translation model first': '请先填写翻译模型名', 'The Translation API returned no translation': '翻译 API 没有返回结果', 'Too many translations are running. Try again later': '同时进行的翻译过多，请稍后重试' }; return map[message] ?? message; }
