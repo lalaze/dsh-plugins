@@ -23,6 +23,8 @@ importers:
         specifier: ^5.9.3
         version: 5.9.3
 
+  packages/browser-devtools: {}
+
   packages/claude-ssh:
     devDependencies:
       '@deepseek-ai/cordis':

@@ -13,6 +13,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
 | `dsh-magpie-fast` | [packages/magpie-fast](packages/magpie-fast/README.md) | GPT-only lightning toggle for priority processing on existing providers, including remote Magpie |
 | `dsh-magpie-quota` | [packages/magpie-quota](packages/magpie-quota/README.md) | Compact per-account Magpie quota icons, window details, reset times and refresh |
+| `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | In-page element, Console and network debugger for DSH Sidebar Browser |
 
 ## Setup
 
@@ -66,6 +67,7 @@ packages/
   gallery/              # Local wallpaper library and DSH backgrounds
   magpie-fast/          # GPT Fast composer toggle for existing providers
   magpie-quota/         # Magpie account quota icons and details
+  browser-devtools/     # In-page debugger for Sidebar Browser tabs
 scripts/
   build-client.mjs      # Shared DSH web client bundler
 tsconfig.base.json     # Shared TypeScript compiler options
