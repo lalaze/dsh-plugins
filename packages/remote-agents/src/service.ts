@@ -196,15 +196,29 @@ export class RemoteAgentsService {
       }
       if (!task.agentId) throw new RemoteError('Recover task creation before sending a follow-up', 409);
       return this.use(task.hostId, async backend => {
-        const agent = await backend.agent(task.agentId!); this.assertAgent(task, agent);
-        if (agent.status !== 'idle' || agent.activeTurn || agent.pendingPermissions.length) throw new RemoteError('Wait for this task to finish or stop it before sending a follow-up', 409);
-        task = await this.updateTask(id, next => { next.submissions.push({ id: messageId, text, state: 'pending' }); });
+        const release = backend.retain?.(task.agentId!);
         try {
-          await backend.send(task.agentId!, text, messageId);
-          return this.task(id); // Native output, rather than a successful pipe write, confirms delivery.
-        } catch (error) {
-          return this.updateTask(id, next => { const submission = next.submissions.find(s => s.id === messageId)!; submission.state = 'uncertain'; submission.error = this.safeError(error); });
-        }
+          const agent = await backend.agent(task.agentId!); this.assertAgent(task, agent);
+          if (agent.status !== 'idle' || agent.activeTurn || agent.pendingPermissions.length) throw new RemoteError('Wait for this task to finish or stop it before sending a follow-up', 409);
+          task = await this.updateTask(id, next => { next.submissions.push({ id: messageId, text, state: 'pending' }); });
+          try {
+            await backend.send(task.agentId!, text, messageId);
+            return this.task(id); // Native output, rather than a successful pipe write, confirms delivery.
+          } catch (error) {
+            return await this.updateTask(id, next => { const submission = next.submissions.find(s => s.id === messageId)!; submission.state = 'uncertain'; submission.error = this.safeError(error); });
+          }
+        } finally { release?.(); }
+      }, task.serverId);
+    });
+  }
+  async disconnect(id: string): Promise<void> {
+    return this.serial(id, async () => {
+      const task = this.task(id);
+      if (!task.agentId) throw new RemoteError('Remote task is not ready', 409);
+      await this.use(task.hostId, async backend => {
+        const agent = await backend.agent(task.agentId!); this.assertAgent(task, agent);
+        if (!backend.disconnect) throw new RemoteError('This backend cannot disconnect individual sessions', 409);
+        await backend.disconnect(agent.id);
       }, task.serverId);
     });
   }

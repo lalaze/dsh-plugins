@@ -323,8 +323,8 @@ test('Claude streams once, returns structured questions and resumes its UUID ove
   assert.equal(ssh.admissions.length, 1);
 });
 
-test('completed sessions are reclaimed so a host can execute more than eight tasks and resume old tasks without replay', async t => {
-  const { service, ssh, request } = await fixture(t);
+for (const provider of ['codex', 'dsh']) test(`${provider} completed sessions are reclaimed and resume without replay after more than eight tasks`, async t => {
+  const { service, ssh, request } = await fixture(t, provider);
   const tasks = [];
   for (let index = 0; index < 12; index++) {
     const task = await service.create({ ...request, id: randomUUID() });
@@ -335,7 +335,8 @@ test('completed sessions are reclaimed so a host can execute more than eight tas
   assert.equal((await service.detail(tasks[0].id)).agent!.status, 'closed');
   const nativeId = tasks[0].native!.sessionId;
   await service.retry(tasks[0].id);
-  assert.equal(ssh.live.sent.find(m => m.method === 'thread/resume')!.params.threadId, nativeId);
+  const resumed = ssh.live.sent.find(m => m.method === (provider === 'dsh' ? 'session/resume' : 'thread/resume'))!;
+  assert.equal(provider === 'dsh' ? resumed.params.sessionId : resumed.params.threadId, nativeId);
   assert.equal(ssh.admissions.length, 12);
   await service.send(tasks[0].id, { id: randomUUID(), text: 'Continue the first task' });
   assert.equal(ssh.admissions.length, 13);
@@ -347,6 +348,7 @@ test('session recycling never interrupts running tasks or pending approvals', as
   for (let index = 0; index < 8; index++) tasks.push(await service.create({ ...request, id: randomUUID() }));
   const live = ssh.children.filter(c => !c.stopped);
   live[0].emit({ id: 42, method: 'item/commandExecution/requestApproval', params: { command: 'pnpm test' } });
+  await assert.rejects(service.disconnect(tasks[0].id), /finish or stop/);
   const ninth = await service.create({ ...request, id: randomUUID() });
   assert.equal(ninth.state, 'uncertain');
   assert.match(ninth.error!, /eight open CLI sessions/);
@@ -379,6 +381,75 @@ test('session recycling protects a follow-up while its delivery record is being 
     assert.equal((await service.create({ ...request, id: randomUUID() })).state, 'uncertain');
     assert.equal(first.stopped, false);
   } finally { release(); await send; }
+  assert.equal(ssh.admissions.length, 9);
+});
+
+test('session recycling protects the service-level Store admission before the backend sees a follow-up', async t => {
+  const { service, ssh, request, store } = await fixture(t);
+  const tasks = [];
+  for (let index = 0; index < 8; index++) tasks.push(await service.create({ ...request, id: randomUUID() }));
+  const first = ssh.children.find(c => !c.stopped)!, messageId = randomUUID();
+  first.finish(); await tick();
+  let entered!: () => void, release!: () => void;
+  const waiting = new Promise<void>(resolve => { entered = resolve; });
+  const blocked = new Promise<void>(resolve => { release = resolve; });
+  const update = store.update.bind(store);
+  t.mock.method(store, 'update', async (change: Parameters<Store['update']>[0]) => {
+    const before = store.snapshot(), next = structuredClone(before); change(next);
+    const admitting = !before.tasks[0].submissions.some(s => s.id === messageId) && next.tasks[0].submissions.some(s => s.id === messageId);
+    await update(change);
+    if (admitting) { entered(); await blocked; }
+  });
+  const send = service.send(tasks[0].id, { id: messageId, text: 'Do not evict during Store admission' });
+  try {
+    await waiting;
+    assert.equal(store.snapshot().tasks[0].submissions[0].state, 'pending');
+    assert.equal((await service.create({ ...request, id: randomUUID() })).state, 'uncertain');
+    assert.equal(first.stopped, false);
+  } finally { release(); await send; }
+  assert.equal(ssh.admissions.length, 9);
+  assert.notEqual(store.snapshot().tasks[0].submissions[0].state, 'uncertain');
+});
+
+test('idle ACP sessions without either resume capability remain connected and accept follow-ups', async t => {
+  const { service, ssh, request } = await fixture(t, 'grok'); ssh.loadSession = false;
+  const tasks = [];
+  for (let index = 0; index < 8; index++) {
+    tasks.push(await service.create({ ...request, id: randomUUID() })); ssh.live.finish(); await tick();
+  }
+  const first = ssh.children.find(c => !c.stopped)!;
+  const ninth = await service.create({ ...request, id: randomUUID() });
+  assert.equal(ninth.state, 'uncertain');
+  assert.equal(first.stopped, false);
+  assert.equal((await service.detail(tasks[0].id)).agent!.resumable, false);
+  await service.send(tasks[0].id, { id: randomUUID(), text: 'Continue the non-resumable session' });
+  assert.equal(ssh.admissions.length, 9);
+  first.finish(); await tick();
+  await service.disconnect(tasks[0].id);
+  const detail = await service.detail(tasks[0].id);
+  assert.equal(first.stopped, true); assert.equal(detail.agent!.status, 'closed');
+  assert.ok(detail.timeline!.entries.some(e => e.item.text === 'Continue the non-resumable session'));
+  await assert.rejects(service.retry(tasks[0].id), /cannot resume/);
+  assert.equal((await service.retry(ninth.id)).state, 'ready');
+  assert.equal(ssh.admissions.length, 10);
+});
+
+test('a failed Store write releases the session lease without sending the follow-up', async t => {
+  const { service, ssh, request, store } = await fixture(t);
+  const tasks = [];
+  for (let index = 0; index < 8; index++) tasks.push(await service.create({ ...request, id: randomUUID() }));
+  const first = ssh.children.find(c => !c.stopped)!, messageId = randomUUID();
+  first.finish(); await tick();
+  const update = store.update.bind(store);
+  t.mock.method(store, 'update', async (change: Parameters<Store['update']>[0]) => {
+    const next = store.snapshot(); change(next);
+    if (next.tasks[0].submissions.some(s => s.id === messageId)) throw new Error('simulated registry write failure');
+    await update(change);
+  });
+  await assert.rejects(service.send(tasks[0].id, { id: messageId, text: 'Do not send without a durable record' }), /registry write failure/);
+  assert.equal(ssh.admissions.length, 8);
+  assert.equal((await service.create({ ...request, id: randomUUID() })).state, 'ready');
+  assert.equal(first.stopped, true);
   assert.equal(ssh.admissions.length, 9);
 });
 

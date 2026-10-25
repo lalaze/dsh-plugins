@@ -53,8 +53,12 @@ const server = createServer(async (request, response) => {
     const chunks = []; for await (const chunk of request) chunks.push(chunk);
     const body = Buffer.concat(chunks);
     if (request.url === '/__fixture') {
-      if (request.method === 'POST') failReads = JSON.parse(body.toString()).failReads === true;
-      response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ creates: remote.creates, stops: remote.stops, sends: remote.sends, answers: remote.answers, state: service.snapshot() })); return;
+      if (request.method === 'POST') {
+        const input = JSON.parse(body.toString());
+        if (input.failReads !== undefined) failReads = input.failReads === true;
+        if (input.resumable === false) for (const agent of remote.agents.values()) agent.resumable = false;
+      }
+      response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ creates: remote.creates, stops: remote.stops, sends: remote.sends, disconnects: remote.disconnects, answers: remote.answers, state: service.snapshot() })); return;
     }
     if (request.url?.startsWith('/dsh-oh-my-claude')) {
       if (request.url.includes('/events')) { response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store' }); response.write(': fixture stream\n\n'); return; }

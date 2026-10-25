@@ -21,6 +21,9 @@ export interface Backend {
   recover?(task: Task): Promise<Agent>;
   agent(id: string): Promise<Agent | null>;
   timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage>;
+  /** Synchronous lease for backends that can recycle an attached session. */
+  retain?(id: string): () => void;
+  disconnect?(id: string): Promise<void>;
   send(id: string, text: string, messageId: string): Promise<void>;
   stop(id: string): Promise<void>;
   respond(id: string, requestId: string, answer: PermissionAnswer, input?: Record<string, unknown>): Promise<void>;
@@ -161,7 +164,7 @@ export class SshBackend implements Backend {
     this.assertOpen();
     if ([...this.sessions.values()].filter(s => s.alive).length >= 8) {
       const idle = [...this.sessions].find(([id, session]) => !this.starting.has(id) && session.evictable);
-      if (!idle) throw new Error('This SSH host already has eight open CLI sessions');
+      if (!idle) throw new Error('This SSH host already has eight open CLI sessions. Disconnect an idle session or wait for a resumable task to finish.');
       idle[1].close(); this.sessions.delete(idle[0]);
     }
     const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : argv;
@@ -177,7 +180,7 @@ export class SshBackend implements Backend {
   async agent(id: string): Promise<Agent | null> {
     const task = this.task(id), session = this.sessions.get(task.id);
     if (session) return structuredClone(session.agent);
-    return { id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'closed', pendingPermissions: [], nativeSessionId: task.native?.sessionId, lastError: 'The CLI process is not attached. Reconnect the saved session to continue; the previous prompt will not be replayed.' };
+    return { id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'closed', pendingPermissions: [], nativeSessionId: task.native?.sessionId, resumable: task.native?.resumable, lastError: 'The CLI process is not attached. Reconnect the saved session to continue; the previous prompt will not be replayed.' };
   }
   async timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage> { return (await this.history(this.task(id).id)).page(cursor, direction); }
   private session(id: string): CliSession {
@@ -187,6 +190,13 @@ export class SshBackend implements Backend {
     return session;
   }
   async send(id: string, text: string, messageId: string): Promise<void> { await this.session(id).send(text, messageId); }
+  retain(id: string): () => void { return this.session(id).retain(); }
+  async disconnect(id: string): Promise<void> {
+    const session = this.sessions.get(this.task(id).id);
+    if (!session?.alive) return;
+    if (!session.disconnectable) throw new RemoteError('Wait for this task to finish or stop it before disconnecting', 409);
+    session.close();
+  }
   async stop(id: string): Promise<void> { await this.session(id).stop(); }
   async respond(id: string, requestId: string, answer: PermissionAnswer): Promise<void> { await this.session(id).respond(requestId, answer); }
   async close(): Promise<void> {

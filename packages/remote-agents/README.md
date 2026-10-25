@@ -23,7 +23,7 @@ Grok uses the official Grok Build CLI with leader mode explicitly disabled. Code
 
 ## Install and migrate
 
-Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build/install `dist/dsh-remote-agents-0.4.0.tgz` using the host's plugin installer.
+Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build/install `dist/dsh-remote-agents-0.4.1.tgz` using the host's plugin installer.
 
 **Disable the old `dsh-claude-ssh` plugin before enabling this merged package, then restart DSH.** Do not delete its data. The embedded engine retains `DSH_OMC_STATE_DIR` (default `~/.local/state/dsh-oh-my-claude`), provider IDs, login, sessions, SSH boxes and remote workspace routing. Move custom native plugin options under this package's `claude` configuration object.
 
@@ -43,9 +43,11 @@ Closing the panel or refreshing the browser leaves tasks running. DSH shutdown, 
 
 Creation persists a unique request ID, then the native session binding, before sending any prompt. Messages persist their IDs before sending. Duplicate HTTP requests do not resend admitted instructions. Only native CLI acknowledgments/output confirm delivery; uncertain messages are not automatically retried. Losing the session creation response may create an empty native session on retry, before any prompt is submitted.
 
-Each host keeps up to eight CLI connections. When full, the least recently used idle session is released while retaining its output and native session ID for reconnection. Running tasks, pending approvals and in-flight message admissions are protected from eviction.
+Each host keeps up to eight CLI connections. When full, the least recently used idle session that advertised recovery support is released while retaining its output and native session ID. Running tasks, pending approvals and in-flight message admissions are protected, including service-level Store persistence before the backend send begins. Failed persistence releases that protection.
 
-Definitive submission rejection clears the pending browser record and retains the instructions for editing. Timeouts and lost responses retain the original request ID. “Discard saved submission” clears that local record without stopping an existing task; check the task list before submitting again.
+ACP sessions that advertise neither `loadSession` nor `session/resume` stay connected. To free a slot, use “Disconnect session” after the task finishes; the panel warns when recovery was not advertised. Output remains available after disconnection, but continuing that conversation is not guaranteed. Running tasks and pending approvals cannot be disconnected.
+
+Definitive rejection of task creation or a follow-up clears its pending browser record and retains the content for editing; both inputs are limited to 100,000 characters. Timeouts and lost responses retain the original request ID. “Discard saved submission” and “Discard saved message” clear only their local records, without stopping tasks or retracting messages. Check the task list and output before submitting again.
 
 Hosts pin their SSH machine identity. Tasks bind the host, canonical directory, provider and native session. State lives at `$DSH_HOME/storages/dsh-remote-agents/state.json` (default `~/.dsh`); output is stored in adjacent `events/*.jsonl`. Files use `0600`; `stateDir` can override the directory. CLI credentials stay remote and SSH passwords are not stored.
 
@@ -60,4 +62,4 @@ pnpm --filter dsh-claude-ssh check
 pnpm --filter dsh-remote-agents pack:plugin
 ```
 
-The 36 protocol/service tests, 76 original Claude test files and desktop/mobile browser regressions pass. Protocol tests use isolated transports, the Antigravity forwarder uses a real child process to verify signal interruption, and browser tests use simulated hosts. Local installed Codex, Claude, Grok and CodeBuddy passed initialization/catalog smoke checks; real DSH and agy passed empty-session initialization and recovery without inference prompts. Real tasks and remote SSH environments still need deployment verification. Original Claude attribution and MIT notices are included in `lib/claude/`.
+The 40 protocol/service tests, 76 original Claude test files and desktop/mobile browser regressions pass. Protocol tests use isolated transports, the Antigravity forwarder uses a real child process to verify signal interruption, and browser tests use simulated hosts. Local installed Codex, Claude, Grok and CodeBuddy passed initialization/catalog smoke checks; real DSH and agy passed empty-session initialization and recovery without inference prompts. Real tasks and remote SSH environments still need deployment verification. Original Claude attribution and MIT notices are included in `lib/claude/`.

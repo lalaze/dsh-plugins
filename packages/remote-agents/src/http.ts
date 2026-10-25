@@ -30,6 +30,7 @@ export function createHandler(service: RemoteAgentsService) {
         }
         case 'send': result = await service.send(taskId(), input.message); break;
         case 'stop': await service.stop(taskId()); result = { ok: true }; break;
+        case 'disconnect': await service.disconnect(taskId()); result = { ok: true }; break;
         case 'respond': await service.respond(taskId(), field(input.requestId, 'permission request', 500), input.answer); result = { ok: true }; break;
         default: throw new RemoteError('Unknown remote task action');
       }

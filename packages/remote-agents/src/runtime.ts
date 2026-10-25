@@ -8,11 +8,11 @@ import { configureAcpSession } from './acp.js';
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 const contentText = (content: unknown): string => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
 export async function initializeCodex(peer: JsonlPeer): Promise<void> {
-  await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.4.0' }, capabilities: {} });
+  await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.4.1' }, capabilities: {} });
   peer.send({ method: 'initialized', params: {} });
 }
 export async function initializeAcp(peer: JsonlPeer): Promise<any> {
-  const result = await peer.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'dsh-remote-agents', version: '0.4.0' } });
+  const result = await peer.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'dsh-remote-agents', version: '0.4.1' } });
   if (result?.protocolVersion !== 1) throw new Error(`Unsupported ACP protocol version: ${result?.protocolVersion}. This client supports ACP v1.`);
   return result;
 }
@@ -26,6 +26,7 @@ export class CliSession {
   private intentionalClose = false;
   private diskFailed = false;
   private admitting = false;
+  private retained = 0;
   private interrupting = false;
   private permissions = new Map<string, (answer: PermissionAnswer) => void>();
   private tools = new Map<string, Record<string, unknown>>();
@@ -36,12 +37,21 @@ export class CliSession {
     peer.onExit(error => { if (this.interrupting) this.close(); else if (!this.intentionalClose) this.fail(error); });
   }
   get alive(): boolean { return this.peer.alive; }
-  get evictable(): boolean { return this.alive && !this.admitting && ['idle', 'error'].includes(this.agent.status) && !this.agent.activeTurn && !this.agent.pendingPermissions.length; }
+  get disconnectable(): boolean { return this.alive && !this.admitting && !this.retained && ['idle', 'error'].includes(this.agent.status) && !this.agent.activeTurn && !this.agent.pendingPermissions.length; }
+  get evictable(): boolean { return this.agent.resumable === true && this.disconnectable; }
+  /** Protect service-level validation and persistence before send() starts its own admission. */
+  retain(): () => void {
+    if (!this.alive) throw new Error('Reconnect the saved CLI session before continuing');
+    this.retained++;
+    let released = false;
+    return () => { if (!released) { released = true; this.retained--; } };
+  }
   private append(item: Record<string, unknown> & { type: string }): void {
     if (this.diskFailed) return;
     void this.history.append(item, this.agent.activeTurn?.turnId).catch(error => { this.diskFailed = true; this.agent.status = 'error'; this.agent.lastError = `Could not save task history: ${String(error)}`; this.peer.close(); });
   }
   async initialize(protocol: NativeProtocol, argv: string[], resume = false): Promise<void> {
+    this.agent.resumable = protocol !== 'acp';
     if (protocol === 'codex') {
       await initializeCodex(this.peer);
       const mode = this.task.modeId ?? 'workspace-write';
@@ -59,6 +69,7 @@ export class CliSession {
       const capabilities = await initializeAcp(this.peer);
       const resumeMethod = capabilities.agentCapabilities?.loadSession ? 'session/load'
         : capabilities.agentCapabilities?.sessionCapabilities?.resume ? 'session/resume' : undefined;
+      this.agent.resumable = !!resumeMethod;
       if (resume && !resumeMethod) throw new Error('This ACP CLI cannot resume sessions. The saved task history remains available.');
       const response = await this.peer.request(resume ? resumeMethod! : 'session/new', { cwd: this.agent.cwd, mcpServers: [], ...(resume ? { sessionId: this.task.native!.sessionId } : {}) });
       this.nativeId = resume ? this.task.native!.sessionId : response?.sessionId;
@@ -75,7 +86,7 @@ export class CliSession {
     await this.store.update(state => {
       const task = state.tasks.find(t => t.id === this.task.id)!;
       task.agentId = this.agent.id; task.executionCwd = this.agent.cwd;
-      task.native = { protocol, sessionId: this.nativeId, argv, initialSent: task.native?.initialSent ?? false, initialConfirmed: task.native?.initialConfirmed };
+      task.native = { protocol, sessionId: this.nativeId, argv, resumable: this.agent.resumable, initialSent: task.native?.initialSent ?? false, initialConfirmed: task.native?.initialConfirmed };
     });
     this.agent.nativeSessionId = this.nativeId; this.agent.status = 'idle'; this.suspended = false;
   }

@@ -67,6 +67,7 @@ export interface Agent {
   pendingPermissions: Permission[];
   lastError?: string;
   nativeSessionId?: string | null;
+  resumable?: boolean;
 }
 export interface TaskInput {
   id: string;
@@ -85,7 +86,7 @@ export interface Task extends TaskInput {
   createdAt: string;
   agentId?: string;
   executionCwd?: string;
-  native?: { protocol: NativeProtocol; sessionId: string; argv: string[]; initialSent: boolean; initialConfirmed?: boolean };
+  native?: { protocol: NativeProtocol; sessionId: string; argv: string[]; resumable?: boolean; initialSent: boolean; initialConfirmed?: boolean };
   state: 'creating' | 'ready' | 'uncertain';
   error?: string;
   submissions: Submission[];

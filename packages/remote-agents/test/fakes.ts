@@ -11,7 +11,7 @@ import { Store } from '../src/store.js';
 export const providers: Provider[] = [{ id: 'codex', label: 'Codex', status: 'ready', models: [{ id: 'remote-model', label: 'Remote model', isDefault: true, thinkingOptions: [{ id: 'high', label: 'High' }] }], modes: [{ id: 'ask', label: 'Ask before commands' }], defaultModeId: 'ask' }, { id: 'claude', label: 'Claude Code', status: 'unavailable', models: [], modes: [] }];
 export class FakeRemote {
   serverId = 'remote-box-1';
-  creates = 0; sends = 0; stops = 0; closes = 0;
+  creates = 0; sends = 0; stops = 0; closes = 0; disconnects = 0;
   loseCreate = false; loseSend = false;
   agents = new Map<string, Agent>();
   receipts = new Map<string, Agent>();
@@ -49,6 +49,7 @@ export class FakeRemote {
       if (this.loseSend) { this.loseSend = false; throw new Error('Send receipt lost'); }
     },
     stop: async id => { this.stops++; const agent = this.agents.get(id)!; agent.status = 'idle'; agent.activeTurn = null; agent.pendingPermissions = []; },
+    disconnect: async id => { this.disconnects++; this.agents.get(id)!.status = 'closed'; },
     respond: async (id, requestId, answer) => {
       this.answers.push({ id, requestId, answer });
       const agent = this.agents.get(id)!; agent.pendingPermissions = agent.pendingPermissions.filter(p => p.id !== requestId);

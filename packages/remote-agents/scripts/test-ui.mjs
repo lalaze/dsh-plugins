@@ -78,7 +78,31 @@ try {
   expect('document.querySelectorAll(".ra-message[data-kind=user_message]").length === 1');
   expect('document.querySelectorAll(".ra-tool").length === 1');
   if (state().answers.at(-1).answer.answers.Checks !== 'Unit tests, Type check, Smoke test') throw new Error('Question response lost selections or free text');
+  const firstTask = state().state.tasks[0], messageStorageKey = `dsh-remote-agents.message.${firstTask.id}`;
+  evaluate(`localStorage.setItem(${JSON.stringify(messageStorageKey)},JSON.stringify({taskId:${JSON.stringify(firstTask.id)},id:'rejected-followup-000',text:'x'.repeat(100001)}))`);
+  browser('open', base); wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="查看送达状态")');
+  browser('click', 'button:text-is("查看送达状态")'); wait('document.querySelector("[role=alert]")');
+  expect(`localStorage.getItem(${JSON.stringify(messageStorageKey)}) === null`);
+  expect('document.querySelector("[aria-label=后续指令]").value.length === 100001 && document.querySelector("[aria-label=后续指令]").maxLength === 100000 && !document.querySelector("[aria-label=后续指令]").disabled');
+  if (state().sends !== 0) throw new Error('Rejected follow-up reached the CLI');
+  browser('open', base); wait('document.querySelector(".ra-output")?.textContent.includes("测试全部通过")');
+  expect(`localStorage.getItem(${JSON.stringify(messageStorageKey)}) === null`);
+  evaluate(`localStorage.setItem(${JSON.stringify(messageStorageKey)},JSON.stringify({taskId:${JSON.stringify(firstTask.id)},id:'timeout-followup-000',text:'Keep this follow-up for editing'}))`);
+  browser('open', base); wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="查看送达状态")');
+  evaluate(`window.actualFetch=window.fetch;window.fetch=(...args)=>args[1]?.body&&JSON.parse(args[1].body).action==='send'?Promise.resolve(Response.json({error:'模拟消息超时'},{status:408})):window.actualFetch(...args)`);
+  browser('click', 'button:text-is("查看送达状态")'); wait('document.querySelector("[role=alert]")?.textContent.includes("模拟消息超时")');
+  expect(`JSON.parse(localStorage.getItem(${JSON.stringify(messageStorageKey)})).id === 'timeout-followup-000' && document.querySelector('[aria-label=后续指令]').disabled`);
+  browser('click', 'button:text-is("清除此消息记录")');
+  expect(`localStorage.getItem(${JSON.stringify(messageStorageKey)}) === null && document.querySelector('[aria-label=后续指令]').value === 'Keep this follow-up for editing' && !document.querySelector('[aria-label=后续指令]').disabled`);
+  if (state().sends !== 0) throw new Error('Discarding a local follow-up sent a message');
+  browser('open', base); wait('document.querySelector(".ra-output")?.textContent.includes("测试全部通过")');
+  evaluate(`window.actualFetch=window.fetch;window.dropFollowup=true;window.fetch=async(...args)=>{const response=await window.actualFetch(...args);if(args[1]?.body&&JSON.parse(args[1].body).action==='send'&&window.dropFollowup){window.dropFollowup=false;throw new Error('模拟消息响应丢失')}return response}`);
   browser('fill', '[aria-label="后续指令"]', 'Review the result once more'); browser('click', 'button:text-is("发送后续指令")');
+  wait('window.dropFollowup === false');
+  expect(`localStorage.getItem(${JSON.stringify(messageStorageKey)}) !== null`);
+  browser('open', base); wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="查看送达状态")');
+  browser('click', 'button:text-is("查看送达状态")');
+  wait(`localStorage.getItem(${JSON.stringify(messageStorageKey)}) === null`);
   wait('document.querySelector(".ra-output")?.textContent.includes("Follow-up completed.")');
   if (state().sends !== 1) throw new Error('Follow-up sent more than once');
   browser('open', base); wait('document.querySelector(".ra-output")?.textContent.includes("Follow-up completed.")');
@@ -112,8 +136,13 @@ try {
   browser('press', 'Escape'); wait('!document.querySelector("dialog")');
   expect('window.hostEscapeCount === 0 && document.activeElement.getAttribute("aria-label") === "打开远程任务"');
   if (state().stops !== 1) throw new Error('Closing the task dialog canceled remote work');
+  evaluate('(async()=>await fetch("/__fixture",{method:"POST",body:JSON.stringify({resumable:false})}))()');
+  wait('document.querySelector(".ra-main")?.textContent.includes("此 CLI 未声明会话恢复能力")');
+  browser('click', 'button:text-is("断开会话")'); wait('document.querySelector(".ra-main [data-status=closed]")');
+  if (state().disconnects !== 1 || state().stops !== 1) throw new Error('Disconnect did not release only the idle session');
+  expect('document.querySelector(".ra-output").textContent.includes("Follow-up completed.")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
-  console.log('PASS: rejected submission unlock, timeout preservation and local discard, HTTP recovery without duplicate execution, host/project/provider/model selection, approvals, questions, follow-ups, reconnect history, stop, locales, desktop/mobile layouts and dialog keyboard isolation');
+  console.log('PASS: create/follow-up rejection unlock, timeout preservation and local discard, lost-response recovery without duplicate sends, non-resumable session notice and manual disconnect, host/project/provider selection, approvals, questions, reconnect history, stop, locales, layouts and dialog keyboard isolation');
 } finally {
   try { browser('close'); } catch {}
   server.kill('SIGTERM');
