@@ -1,3 +1,4 @@
+import { createLocaleFixture } from '../../../../scripts/locale-fixture.js';
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { apply } from '../../src/client/index.js';
@@ -8,7 +9,8 @@ let snapshot = { current: { provider: 'remote-magpie', model: MODEL } as Selecti
 const listeners = new Set<() => void>();
 const store = { getSnapshot: () => snapshot, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; } };
 let Control!: React.FC<{ sessionId?: string }>;
-const fixture = {
+const locale = createLocaleFixture();
+const fixture = { setLocale: locale.setLocale,
   failRead: false, failWrite: false, requestCount: 0, slot: {} as Record<string, unknown>,
   setModel(selection: Selection) { snapshot = { current: selection }; for (const listener of listeners) listener(); },
 };
@@ -21,7 +23,7 @@ window.fetch = (input, init) => {
   }
   return originalFetch(input, init);
 };
-apply({ slots: {
+apply({ get: () => locale, effect: setup => { setup(); }, slots: {
   inject: (_name, factory) => factory(),
   register: (spec, component) => { fixture.slot = spec; Control = component; },
 }, modelDirectories: { directoryFor: () => ({ store }) } });

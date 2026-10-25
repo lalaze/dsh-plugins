@@ -2,6 +2,8 @@
 
 [English](README.md) | **简体中文**
 
+支持英语和简体中文，随 DSH 的语言设置即时切换；宿主未提供语言服务时回退到英语。
+
 `dsh-magpie-fast` 在聊天输入框的工具栏中添加一个闪电按钮，放在权限控制之后、任务列表之前。**仅当前模型为 GPT 时显示**。点亮后，本会话的后续 GPT 请求携带 `service_tier: "priority"`；再次点击关闭。
 
 沿用原有提供商、模型 ID、远端地址、网关密钥和推理强度，不创建额外的“Fast 提供商”，也不修改 Magpie 配置。支持 dsh 自定义 OpenAI Chat Completions / Responses 提供商，包括远端 Magpie。CLI 子进程及其他协议的提供商会显示禁用状态和说明。模型 ID 需要是 `gpt-*` 或 `provider/gpt-*`；不猜测自定义别名、路由组的实际模型。

@@ -29,6 +29,11 @@ const current = 'document.querySelector("[data-dsh-gallery-background] img")';
 try {
   browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', url);
   wait(ready); browser('snapshot', '-i');
+  evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".gg-heading h2").textContent === "Gallery"');
+  browser('set', 'viewport', '390', '844');
+  expect('document.documentElement.scrollWidth <= innerWidth');
+  evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".gg-heading h2").textContent === "图库"');
+  browser('set', 'viewport', '1120', '900');
   expect('!document.body.hasAttribute("data-dsh-gallery-active")');
   browser('click', 'button:text-is("获取 Bing 壁纸")'); wait(count(8));
   expect('document.querySelectorAll(".gg-card").length === 8 && !document.body.hasAttribute("data-dsh-gallery-active")');
@@ -49,6 +54,9 @@ try {
   browser('click', 'button:text-is("恢复每日")'); wait(`${snapshot}.preferences.selectedId === null && ${ready}`);
   browser('click', '[aria-label="预览 静谧海岸"]'); wait('document.querySelector("dialog[open]")');
   wait('document.querySelector(".gg-lightbox-view img")?.naturalWidth === 960');
+  evaluate('window.fixture.setLocale("en")'); wait('document.querySelector("dialog").getAttribute("aria-label").startsWith("Image preview:")');
+  expect('document.querySelector(".gg-lightbox a[download]").download === "静谧海岸.jpg"');
+  evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector("dialog").getAttribute("aria-label").startsWith("图片预览：")');
   expect('document.querySelector(".gg-lightbox a[download]").download === "静谧海岸.jpg"');
   const savedJpeg = join(temp, 'wallpaper.jpg'); browser('download', '.gg-lightbox a[download]', savedJpeg);
   if (!(await readFile(savedJpeg)).subarray(0, 3).equals(Buffer.from([255, 216, 255]))) throw new Error('Downloaded wallpaper is not a JPEG');

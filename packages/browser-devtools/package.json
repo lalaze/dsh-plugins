@@ -54,5 +54,6 @@
         "@deepseek-ai/dsh-client-ui-sidebar-browser"
       ]
     }
-  }
+  },
+  "devDependencies": { "@dsh-plugins/i18n": "workspace:*" }
 }

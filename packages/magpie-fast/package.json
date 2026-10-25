@@ -110,6 +110,7 @@
     }
   },
   "devDependencies": {
+    "@dsh-plugins/i18n": "workspace:*",
     "@earendil-works/pi-ai": "1.3.0",
     "@deepseek-ai/cordis": "~4.0.5",
     "@deepseek-ai/dsh-attachment": "0.2.1-rc.2",

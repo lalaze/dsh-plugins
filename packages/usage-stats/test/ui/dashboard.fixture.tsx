@@ -1,9 +1,13 @@
+import { installLocale } from '../../src/client/i18n.js';
+import { createLocaleFixture } from '../../../../scripts/locale-fixture.js';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Dashboard } from '../../src/client/index.js';
 import { parseQuery, report, toCsv, type UsageRecord } from '../../src/domain.js';
 
-const fixture = { fail: false, empty: false, demo: location.hash === '#demo', requests: [] as string[] };
+const locale = createLocaleFixture();
+installLocale({ get: () => locale });
+const fixture = { setLocale: locale.setLocale, fail: false, empty: false, demo: location.hash === '#demo', requests: [] as string[] };
 Object.assign(window, { fixture });
 const records: UsageRecord[] = [
   { id: 'local', provider: 'deepseek', model: 'deepseek-chat', sessionId: 'local-session', purpose: 'conversation', startedAt: '2026-10-21T12:00:00.000Z', durationMs: 100, status: 'completed', usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 30 } },

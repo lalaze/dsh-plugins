@@ -1,5 +1,9 @@
 # DSH Browser Debugger
 
+**English** | [简体中文](README.zh-CN.md)
+
+Supports English and Simplified Chinese, following DSH’s language setting with live updates. English is the fallback when the host has no locale service.
+
 `dsh-browser-devtools` adds a small debugger to DSH Desktop's Sidebar Browser. It runs inside the selected page, so it does not require Electron's native DevTools to be enabled.
 
 The floating panel provides:

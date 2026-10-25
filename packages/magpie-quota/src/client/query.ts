@@ -46,9 +46,9 @@ export class QuotaQuery {
       try {
         const response = await this.fetcher(`/api/magpie-quota${reload ? '?reload=1' : ''}`, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
         const body: unknown = await response.json();
-        if (!response.ok || !validReport(body)) throw new Error('无法读取 Magpie 额度，请稍后重试');
+        if (!response.ok || !validReport(body)) throw new Error("Could not read Magpie quota. Try again later");
         if (generation === this.generation && !controller.signal.aborted) this.set({ report: body, error: undefined });
-      } catch (e) { if (generation === this.generation && !controller.signal.aborted) this.set({ error: e instanceof Error ? e.message : '无法读取额度' }); }
+      } catch (e) { if (generation === this.generation && !controller.signal.aborted) this.set({ error: e instanceof Error ? e.message : "Could not read quota" }); }
       finally { if (generation === this.generation && !controller.signal.aborted) this.set({ loading: false }); }
     })();
     this.pending = task;
@@ -71,11 +71,11 @@ export class QuotaQuery {
         reread = [401, 403, 404].includes(response.status);
         const seconds = response.status === 429 ? Number(response.headers.get('retry-after') || body.retryAfter || 30) : 0;
         if (seconds > 0 && generation === this.generation) this.set({ cooldowns: { ...this.state.cooldowns, [key]: Date.now() + Math.min(300, seconds) * 1000 } });
-        throw new Error(typeof body.error === 'string' ? body.error : '刷新失败，请稍后重试');
+        throw new Error(typeof body.error === 'string' ? body.error : "Refresh failed. Try again later");
       }
-      if (!validReport(body)) throw new Error('额度响应无效，请重新读取');
+      if (!validReport(body)) throw new Error("Invalid quota response. Reload to try again");
       if (generation === this.generation && !controller.signal.aborted) this.set({ report: body, cooldowns: { ...this.state.cooldowns, [key]: Date.now() + 30000 } });
-    } catch (e) { if (generation === this.generation && !controller.signal.aborted) this.set({ error: e instanceof Error ? e.message : '刷新失败，请稍后重试' }); }
+    } catch (e) { if (generation === this.generation && !controller.signal.aborted) this.set({ error: e instanceof Error ? e.message : "Refresh failed. Try again later" }); }
     finally {
       if (generation === this.generation && !controller.signal.aborted) {
         this.set({ refreshing: undefined, loading: false });

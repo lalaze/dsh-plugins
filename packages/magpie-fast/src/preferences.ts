@@ -13,17 +13,17 @@ export class Preferences {
     try { data = JSON.parse(await readFile(this.path, 'utf8')); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
     const stored = record(data);
-    if (stored?.version !== 1 || !Array.isArray(stored.sessions) || stored.sessions.length > 10000) throw new Error('GPT Fast 开关文件格式无效');
+    if (stored?.version !== 1 || !Array.isArray(stored.sessions) || stored.sessions.length > 10000) throw new Error("Invalid GPT Fast preferences file");
     const entries = new Map<string, boolean>();
     for (const row of stored.sessions) {
-      if (!Array.isArray(row) || row.length !== 2 || !validSessionId(row[0]) || typeof row[1] !== 'boolean') throw new Error('GPT Fast 会话记录无效');
+      if (!Array.isArray(row) || row.length !== 2 || !validSessionId(row[0]) || typeof row[1] !== 'boolean') throw new Error("Invalid GPT Fast session record");
       entries.set(row[0], row[1]);
     }
     this.entries = entries;
   }
   get(sessionId: string, fallback: boolean) { return this.entries.get(sessionId) ?? fallback; }
   set(sessionId: string, enabled: boolean): Promise<void> {
-    if (!validSessionId(sessionId)) return Promise.reject(new Error('无效的会话'));
+    if (!validSessionId(sessionId)) return Promise.reject(new Error("Invalid session"));
     const operation = this.pending.then(async () => {
       const entries = new Map(this.entries); entries.delete(sessionId); entries.set(sessionId, enabled);
       while (entries.size > 10000) entries.delete(entries.keys().next().value!);

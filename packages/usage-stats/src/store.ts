@@ -41,14 +41,14 @@ export class UsageStore {
     try { raw = await readFile(this.path, 'utf8'); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
     const value = JSON.parse(raw);
-    if (value?.version !== 1 || !Array.isArray(value.records) || !value.records.every(validRecord)) throw new Error('使用量数据格式无效；请保留并检查原文件');
+    if (value?.version !== 1 || !Array.isArray(value.records) || !value.records.every(validRecord)) throw new Error("Invalid usage data format; preserve and inspect the original file");
     this.records = value.records;
   }
   snapshot(): readonly UsageRecord[] { return structuredClone(this.records); }
   append(record: UsageRecord): Promise<void> {
     const copy = structuredClone(record);
     const task = this.queue.then(async () => {
-      if (!validRecord(copy)) throw new Error('使用量记录无效');
+      if (!validRecord(copy)) throw new Error("Invalid usage record");
       const next = [...this.records, copy];
       const temp = `${this.path}.${randomUUID()}.tmp`;
       try {

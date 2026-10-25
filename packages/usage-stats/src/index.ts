@@ -22,7 +22,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
       const turn = acquireUsageStore(path);
       try {
         const store = await turn.ready;
-        yield* observe(options, next, record => store.append(record), error => console.warn('[dsh-usage-stats] 使用量记录失败', error));
+        yield* observe(options, next, record => store.append(record), error => console.warn("[dsh-usage-stats] Could not record usage", error));
       } finally { turn.release(); }
     })(), { global: true, prepend: true });
     // The host connection supplies authentication, origin checks and native carriers.
@@ -30,12 +30,12 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
       try {
         const url = new URL(request.url);
         const format = url.searchParams.get('format');
-        if (format && format !== 'csv') throw new Error('不支持的导出格式');
+        if (format && format !== 'csv') throw new Error("Unsupported export format");
         const data = report(store.snapshot(), parseQuery(url), store.failedWrites);
         const headers = { 'Cache-Control': 'no-store' };
         if (format === 'csv') return new Response(toCsv(data), { headers: { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="dsh-usage.csv"' } });
         return Response.json(data, { headers });
-      } catch (error) { return Response.json({ error: error instanceof Error ? error.message : '无法读取使用量' }, { status: 400, headers: { 'Cache-Control': 'no-store' } }); }
+      } catch (error) { return Response.json({ error: error instanceof Error ? error.message : "Could not read usage" }, { status: 400, headers: { 'Cache-Control': 'no-store' } }); }
     } });
   } catch (error) { lease.release(); throw error; }
 }

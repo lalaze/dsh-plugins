@@ -1,4 +1,5 @@
 import { guestScript, type GuestCommand, type GuestState } from './guest.js';
+import { activeLocale } from './i18n.js';
 
 /** The small subset of Electron's webview tag used by the client plugin. */
 export interface Inspectable extends EventTarget {
@@ -49,7 +50,7 @@ export function controlDevTools(view: Inspectable, changed: (state: State) => vo
   const query = async () => {
     if (disposed || !ready() || state.busy) return;
     try {
-      const value = await view.executeJavaScript(guestScript('state'), false);
+      const value = await view.executeJavaScript(guestScript('state', activeLocale()), false);
       if (isGuestResult(value)) {
         state.opened = value.opened;
         state.error = undefined;
@@ -108,7 +109,7 @@ export function controlDevTools(view: Inspectable, changed: (state: State) => vo
       }, timeoutMs);
       const command: GuestCommand = opening ? 'open' : 'close';
       void Promise.resolve()
-        .then(() => view.executeJavaScript(guestScript(command), true))
+        .then(() => view.executeJavaScript(guestScript(command, activeLocale()), true))
         .then(result => { if (!disposed) settled(result, opening); })
         .catch(() => {
           if (disposed) return;

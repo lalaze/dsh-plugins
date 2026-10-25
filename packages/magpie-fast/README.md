@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+Supports English and Simplified Chinese, following DSH’s language setting with live updates. English is the fallback when the host has no locale service.
+
 `dsh-magpie-fast` adds a lightning button to the composer toolbar, after permissions and before the task list. It appears only when the selected model is GPT. Turn it on to send subsequent GPT requests in that session with `service_tier: "priority"`; click again to turn it off.
 
 The plugin uses the existing provider, model ID, endpoint, credentials and reasoning selection. It adds no provider and does not modify Magpie configuration. Supported routes are existing custom OpenAI Chat Completions / Responses providers configured in dsh's pi-ai adapter, including remote Magpie. GPT models provided by a CLI subprocess or an unsupported route show a disabled button with an explanation. IDs must be `gpt-*` or `provider/gpt-*`; arbitrary aliases and routing-group contents are not inferred.

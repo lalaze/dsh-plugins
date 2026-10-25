@@ -1,3 +1,4 @@
+import { createLocaleFixture } from '../../../../scripts/locale-fixture.js';
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { apply } from '../../src/client/index.js';
@@ -13,7 +14,8 @@ const accounts: AccountQuota[] = [
   { id: 'claude-one', provider: 'claude', name: 'Claude', kind: 'subscription', user: 'studio@example.com', plan: 'Max', readAt: now, refreshable: true, windows: [window('five', '5 hours', 100), window('weekly', '7 days', 100)] },
   { id: 'gemini-one', provider: 'gemini', name: 'Gemini', kind: 'subscription', user: 'design@example.com', plan: 'AI Pro', readAt: now, refreshable: true, windows: [window('daily', '1 day', 88)] },
 ];
-const fixture = {
+const locale = createLocaleFixture();
+const fixture = { setLocale: locale.setLocale,
   scenario: 'normal', failRead: new URLSearchParams(globalThis.location.search).has('failRead'), failRefresh: false, reads: 0, writes: 0, registrations: [] as Record<string, unknown>[],
   report(): QuotaReport {
     const data = structuredClone(accounts);
@@ -44,7 +46,7 @@ globalThis.fetch = async (input, init) => {
   }
   return Response.json(fixture.report());
 };
-apply({ effect: setup => { setup(); }, slots: { inject: (_name, factory) => factory(), register: (spec, component) => {
+apply({ get: () => locale, effect: setup => { setup(); }, slots: { inject: (_name, factory) => factory(), register: (spec, component) => {
   fixture.registrations.push(spec);
   if (spec.name === 'conversation.composer.dock') Strip = component;
   else Dashboard = component;

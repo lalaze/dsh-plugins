@@ -1,3 +1,4 @@
+import { ui, useLocale } from './i18n.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { isGpt, type FastState, type Selection } from '../gpt.js';
 
@@ -9,6 +10,7 @@ export function FastControl({ sessionId, selection }: { sessionId: string; selec
   return <Toggle key={`${sessionId}/${selection.provider}/${selection.model}`} sessionId={sessionId} selection={selection} />;
 }
 function Toggle({ sessionId, selection }: { sessionId: string; selection: Selection }) {
+  useLocale();
   const [state, setState] = useState<FastState>();
   const [pending, setPending] = useState(true);
   const [error, setError] = useState('');
@@ -22,11 +24,11 @@ function Toggle({ sessionId, selection }: { sessionId: string; selection: Select
       try {
         const query = new URLSearchParams({ sessionId, ...selection });
         const response = await fetch(`/api/magpie-fast?${query}`, { credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
-        if (!response.ok) throw new Error('无法读取 GPT Fast 状态，点击重试');
+        if (!response.ok) throw new Error("Could not read GPT Fast status. Click to retry");
         const data: FastState = await response.json();
-        if (typeof data.enabled !== 'boolean' || typeof data.supported !== 'boolean') throw new Error('GPT Fast 状态无效，点击重试');
+        if (typeof data.enabled !== 'boolean' || typeof data.supported !== 'boolean') throw new Error("Invalid GPT Fast status. Click to retry");
         if (!controller.signal.aborted && !writing.current) { setState(data); setError(''); }
-      } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : '无法读取 GPT Fast 状态，点击重试'); }
+      } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "Could not read GPT Fast status. Click to retry"); }
       finally { if (!controller.signal.aborted && !writing.current) setPending(false); }
     };
     void read();
@@ -44,15 +46,15 @@ function Toggle({ sessionId, selection }: { sessionId: string; selection: Select
       const response = await fetch('/api/magpie-fast', { method: 'POST', credentials: 'same-origin', signal: controller.signal,
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, ...selection, enabled: !state.enabled }),
       });
-      if (!response.ok) throw new Error('无法保存 GPT Fast 开关，请重试');
+      if (!response.ok) throw new Error("Could not save the GPT Fast setting. Try again");
       const data: FastState = await response.json();
-      if (typeof data.enabled !== 'boolean' || typeof data.supported !== 'boolean') throw new Error('GPT Fast 状态无效，请重试');
+      if (typeof data.enabled !== 'boolean' || typeof data.supported !== 'boolean') throw new Error("Invalid GPT Fast status. Try again");
       if (!controller.signal.aborted) setState(data);
-    } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : '无法保存 GPT Fast 开关，请重试'); }
+    } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : "Could not save the GPT Fast setting. Try again"); }
     finally { writing.current = false; if (!controller.signal.aborted) setPending(false); }
   };
-  const label = state?.enabled ? '关闭 GPT Fast' : '开启 GPT Fast';
-  const title = error || (state?.supported === false ? state.reason : `${state?.enabled ? 'GPT Fast 已开启' : 'GPT Fast 已关闭'}；优先处理，按上游规则计费`);
+  const label = state?.enabled ? ui("Turn off GPT Fast") : ui("Turn on GPT Fast");
+  const title = error ? ui(error) : (state?.supported === false ? ui(state.reason ?? "") : ui("{0}; priority processing, billed according to upstream pricing", { 0: state?.enabled ? ui("GPT Fast is on") : ui("GPT Fast is off") }));
   return <span className="dsh-fast-control" data-dsh-gpt-fast>
     <style>{css}</style>
     <button type="button" className="dsh-fast-button" aria-label={label} aria-pressed={state?.enabled ?? false} aria-busy={pending || undefined}
@@ -60,6 +62,6 @@ function Toggle({ sessionId, selection }: { sessionId: string; selection: Select
       title={title} onMouseDown={event => event.preventDefault()} onClick={() => void toggle()}>
       <svg width="16" height="16" viewBox="0 0 16 16" fill={state?.enabled ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.5 1.5 3 9h4.5l-1 5.5L13 7H8.5l1-5.5Z" /></svg>
     </button>
-    {error && <span className="dsh-fast-error" role="alert">{error}</span>}
+    {error && <span className="dsh-fast-error" role="alert">{ui(error)}</span>}
   </span>;
 }

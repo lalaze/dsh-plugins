@@ -1,3 +1,5 @@
+import { installLocale } from '../../src/client/i18n.js';
+import { createLocaleFixture } from '../../../../scripts/locale-fixture.js';
 import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { GalleryController } from '../../src/client/controller.js';
@@ -7,7 +9,9 @@ import { installBackground } from '../../src/client/background.js';
 import { type Wallpaper } from '../../src/domain.js';
 
 const testMode = new URLSearchParams(location.search).has('test');
-const fixture = { fail: false, failImage: false, nextDay: false, requests: [] as string[], controller: undefined as GalleryController | undefined, dispose: () => {} };
+const locale = createLocaleFixture();
+installLocale({ get: () => locale });
+const fixture = { setLocale: locale.setLocale, fail: false, failImage: false, nextDay: false, requests: [] as string[], controller: undefined as GalleryController | undefined, dispose: () => {} };
 Object.assign(window, { fixture });
 if (testMode) {
   const canvas = document.createElement('canvas'); canvas.width = 960; canvas.height = 540;

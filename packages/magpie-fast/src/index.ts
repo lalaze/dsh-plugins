@@ -20,7 +20,7 @@ export async function resolveGatewayKey(ctx: Context, source: SourceProvider): P
   if (source.profile.apiKeyEnv) {
     const ref = credentialRef(source.profile.apiKeyEnv);
     const value = credentials ? (await credentials.resolve(ref))?.value : launchEnvironmentOf(ctx).get(ref)?.value;
-    if (!value) throw new LlmError(`缺少网关凭据 ${source.profile.apiKeyEnv}，请检查当前模型提供商的凭据配置`, 'MISSING_CREDENTIAL');
+    if (!value) throw new LlmError(`Missing gateway credential ${source.profile.apiKeyEnv}. Check the current model provider's credentials`, 'MISSING_CREDENTIAL');
     return assertUsableApiKey(value, name, ref);
   }
   if (credentials && isCredentialKeySegment(source.id)) {
@@ -30,7 +30,7 @@ export async function resolveGatewayKey(ctx: Context, source: SourceProvider): P
   if (Object.keys(source.profile.headers ?? {}).some(key => key.toLowerCase() === 'authorization')) return 'magpie-dsh';
   const hostname = new URL(source.profile.baseURL!).hostname;
   if (['localhost', '127.0.0.1', '[::1]'].includes(hostname)) return 'magpie-dsh';
-  throw new LlmError('远端 GPT Fast 需要复用当前提供商的网关密钥，请先配置 apiKeyEnv', 'MISSING_CREDENTIAL');
+  throw new LlmError("Remote GPT Fast requires the current provider's gateway key. Configure apiKeyEnv first", 'MISSING_CREDENTIAL');
 }
 
 export async function apply(ctx: Context, config: PluginConfig = {}, dependencies: { fetch?: typeof globalThis.fetch } = {}) {
@@ -55,21 +55,21 @@ export async function apply(ctx: Context, config: PluginConfig = {}, dependencie
         let body: Record<string, unknown> | undefined;
         if (request.method === 'POST') {
           const text = await request.text();
-          if (text.length > 4096) return Response.json({ error: '请求过大' }, { status: 400 });
-          try { body = record(JSON.parse(text)); } catch { return Response.json({ error: '请求必须是 JSON' }, { status: 400 }); }
+          if (text.length > 4096) return Response.json({ error: "Request is too large" }, { status: 400 });
+          try { body = record(JSON.parse(text)); } catch { return Response.json({ error: "Request must be JSON" }, { status: 400 }); }
         } else body = Object.fromEntries(url.searchParams);
         const sessionId = body?.sessionId;
-        if (!validSessionId(sessionId) || typeof body?.provider !== 'string' || typeof body?.model !== 'string') return Response.json({ error: '无效的会话或模型' }, { status: 400 });
+        if (!validSessionId(sessionId) || typeof body?.provider !== 'string' || typeof body?.model !== 'string') return Response.json({ error: "Invalid session or model" }, { status: 400 });
         const supported = !!supportedSource(sources(), body.provider, body.model);
         if (request.method === 'POST') {
-          if (typeof body.enabled !== 'boolean') return Response.json({ error: 'enabled 必须是布尔值' }, { status: 400 });
-          if (!supported && body.enabled) return Response.json({ error: '当前 GPT 提供商尚不支持此开关；需要已配置的 OpenAI Chat/Responses API 模型' }, { status: 409 });
+          if (typeof body.enabled !== 'boolean') return Response.json({ error: "enabled must be a boolean" }, { status: 400 });
+          if (!supported && body.enabled) return Response.json({ error: "This GPT provider does not support the toggle. Configure an OpenAI Chat/Responses API model" }, { status: 409 });
           await preferences.set(sessionId, body.enabled);
         }
         return Response.json({ enabled: preferences.get(sessionId, config.defaultEnabled ?? false), supported,
-          reason: supported ? undefined : '需要已有的 OpenAI Chat/Responses API 提供商（支持远端 Magpie）',
+          reason: supported ? undefined : "Requires an existing OpenAI Chat/Responses API provider (remote Magpie supported)",
         }, { headers: { 'Cache-Control': 'no-store' } });
-      } catch { return Response.json({ error: '无法读取或保存 GPT Fast 开关，请重试' }, { status: 500, headers: { 'Cache-Control': 'no-store' } }); }
+      } catch { return Response.json({ error: "Could not read or save the GPT Fast setting. Try again" }, { status: 500, headers: { 'Cache-Control': 'no-store' } }); }
     } });
   } catch (error) { lease.release(); throw error; }
 }

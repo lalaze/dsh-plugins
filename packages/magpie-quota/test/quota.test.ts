@@ -30,7 +30,7 @@ test('响应按字段白名单过滤，账号 ID 不含上游密钥；旧数据�
   const secret = 'source-secret-credential';
   const [account] = normalizeQuotas(list({ ...row(secret), from: 'remote', alias: 'Friendly name', asOf: '2026-10-22T10:00:00Z', readDeferred: true,
     error: `bad ${secret}`, accessToken: secret, headers: { Authorization: secret }, holds: { token: secret } }), [secret]);
-  assert.ok(!JSON.stringify(account).includes(secret)); assert.equal(account.user, '[已隐藏]'); assert.equal(account.refreshable, false);
+  assert.ok(!JSON.stringify(account).includes(secret)); assert.equal(account.user, '[redacted]'); assert.equal(account.refreshable, false);
   assert.equal(account.readDeferred, true); assert.equal(account.asOf, '2026-10-22T10:00:00Z');
 });
 test('网关路径保留反代前缀；拒绝非 HTTP 和带凭据的 URL', () => {
@@ -53,8 +53,8 @@ test('后端复用凭据、保存的 API Key 及显式认证头，缺失远端�
     assert.equal((await resolveHeaders(ctx, src)).get('authorization'), 'Bearer record-key');
     assert.equal((await resolveHeaders(ctx, { ...src, profile: { ...src.profile, apiKeyEnv: 'MISSING', headers: { 'x-api-key': 'explicit', 'X-Route': 'office' } } })).get('x-api-key'), 'explicit');
     ctx.set('credentials', { resolve: async () => undefined, readRecord: async () => undefined });
-    await assert.rejects(resolveHeaders(ctx, src), /需要已有提供商/);
-    await assert.rejects(resolveHeaders(ctx, { ...src, profile: { ...src.profile, apiKeyEnv: 'MISSING' } }), /缺少 Magpie/);
+    await assert.rejects(resolveHeaders(ctx, src), /requires an existing provider/);
+    await assert.rejects(resolveHeaders(ctx, { ...src, profile: { ...src.profile, apiKeyEnv: 'MISSING' } }), /Missing Magpie/);
     assert.equal((await resolveHeaders(ctx, { ...src, profile: { baseURL: 'http://127.0.0.1:3425/v1' } })).get('authorization'), 'Bearer magpie-dsh');
   } finally { await ctx.fiber.dispose(); }
 });

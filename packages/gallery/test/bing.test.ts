@@ -33,7 +33,7 @@ test('concurrent feed reads share one upstream request, cache for an hour and re
   await service.feed('zh-CN'); assert.equal(count, 1);
   now += 3_600_001; fail = true; await assert.rejects(service.feed('zh-CN'), /503/);
   fail = false; await service.feed('zh-CN'); assert.equal(count, 3);
-  await assert.rejects(service.feed('unknown'), /地区/); assert.equal(count, 3);
+  await assert.rejects(service.feed('unknown'), /region/); assert.equal(count, 3);
 });
 test('image proxy validates bytes, bounds streamed bodies and prevents redirect/proxy injection', async () => {
   let calls = 0;

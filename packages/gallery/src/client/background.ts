@@ -38,7 +38,7 @@ export function installBackground(controller: GalleryController): () => void {
     let nextUrl: string | undefined;
     try {
       const blob = await controller.storage.image(entry.id);
-      if (!blob) throw new Error('当前壁纸的本地文件丢失，请重新更新或上传');
+      if (!blob) throw new Error("The local wallpaper file is missing. Refresh or upload it again");
       nextUrl = URL.createObjectURL(blob);
       const preload = new Image(); preload.src = nextUrl; await preload.decode();
       if (token !== generation || disposed) { URL.revokeObjectURL(nextUrl); return; }

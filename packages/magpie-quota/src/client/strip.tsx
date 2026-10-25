@@ -1,3 +1,4 @@
+import { ui, useLocale } from './i18n.js';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { accountLabel, summary, type AccountQuota, type GatewayQuota } from '../types.js';
@@ -7,6 +8,7 @@ import { QuotaQuery, useQuota } from './query.js';
 import { styles } from './styles.js';
 
 export function QuotaStrip({ query }: { query: QuotaQuery }) {
+  useLocale();
   const state = useQuota(query);
   const [opened, setOpened] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -48,26 +50,27 @@ export function QuotaStrip({ query }: { query: QuotaQuery }) {
   }, [visible]);
   const failed = !!state.error || state.report?.gateways.some(g => g.error);
   return <div className="mq mq-shell" ref={root} data-dsh-magpie-quota><style>{styles}</style>
-    <div className="mq-strip" role="group" aria-label="Magpie 各账号剩余额度">
+    <div className="mq-strip" role="group" aria-label={ui("Remaining Magpie quota by account")}>
       {rows.map(({ gateway, account, key }) => {
         const value = summary(account);
         const stale = !!gateway.stale || !!account.asOf || !!account.readDeferred;
         const warning = !!account.error || !!gateway.error || stale || account.windows.some(w => !w.unlimited && w.remaining === null);
-        const title = `${account.name} · ${accountLabel(account)}${account.plan ? ` · ${account.plan}` : ''}\n${value.remaining !== null ? `已知窗口最低剩余 ${value.text}` : value.text === '∞' ? '不限额' : account.balance ? `余额 ${account.balance}` : '暂无读数'}${warning ? '\n读数待更新，点击查看详情' : ''}`;
+        const title = `${account.name} · ${accountLabel(account)}${account.plan ? ` · ${account.plan}` : ''}\n${value.remaining !== null ? ui("Lowest known window remaining: {0}", { 0: value.text }) : value.text === '∞' ? ui("Unlimited") : account.balance ? ui("Balance {0}", { 0: account.balance }) : ui("No reading yet")}${warning ? ui("\nReading needs updating. Click for details") : ''}`;
         return <button type="button" key={key} className="mq-chip" data-tone={tone(value.remaining)} data-stale={stale || undefined} aria-label={`${account.name} ${accountLabel(account)} ${value.text}`} aria-haspopup="dialog" aria-expanded={opened === key} title={title} onClick={e => open(key, e.currentTarget)}><ProviderIcon provider={account.provider} /><span className="mq-chip-value">{value.text}</span>{warning && <span className="mq-warning-dot" />}</button>;
       })}
-      {(!rows.length || failed) && <button type="button" className="mq-chip" aria-label="查看 Magpie 额度状态" aria-haspopup="dialog" aria-expanded={opened === 'status'} title={state.loading ? '正在读取额度' : '查看 Magpie 连接和额度状态'} onClick={e => open('status', e.currentTarget)}><ProviderIcon provider="magpie" /><span>{state.loading ? '…' : '额度'}</span>{failed && <span className="mq-warning-dot" />}</button>}
+      {(!rows.length || failed) && <button type="button" className="mq-chip" aria-label={ui("View Magpie quota status")} aria-haspopup="dialog" aria-expanded={opened === 'status'} title={state.loading ? ui("Loading quota") : ui("View Magpie connection and quota status")} onClick={e => open('status', e.currentTarget)}><ProviderIcon provider="magpie" /><span>{state.loading ? '…' : ui("Quota")}</span>{failed && <span className="mq-warning-dot" />}</button>}
     </div>
-    {visible && createPortal(<div className="mq mq-popover" role="dialog" aria-label="账号额度详情" tabIndex={-1} ref={panel} style={position}>
-      <div className="mq-panel-top"><strong>账号额度</strong><button type="button" className="mq-close" aria-label="关闭额度详情" onClick={() => close(true)}>×</button></div>
-      {state.error && <div className="mq-notice" role="alert">{state.error}</div>}
-      {opened === 'status' && state.report?.gateways.filter(g => g.error).map(g => <div key={g.id} className="mq-notice" role="status">{g.name}：{g.error?.message}</div>)}
-      {rows.length > 1 && <select className="mq-select" aria-label="选择额度账号" value={selected?.key} onChange={e => setOpened(e.target.value)}>{rows.map(row => <option key={row.key} value={row.key}>{row.account.name} · {accountLabel(row.account)}{row.account.plan ? ` · ${row.account.plan}` : ''}</option>)}</select>}
-      {selected ? <SelectedAccount query={query} row={selected} /> : <><div className="mq-empty">{state.loading ? '正在读取额度…' : state.error ? '暂时无法读取额度，请重试' : state.report?.gateways.length ? '暂时没有可见的账号额度' : '请添加 Magpie 提供商，或在插件配置中指定网关。'}</div><button className="mq-button" type="button" disabled={state.loading} onClick={() => void query.read(true)}><RefreshIcon />重新读取</button></>}
+    {visible && createPortal(<div className="mq mq-popover" role="dialog" aria-label={ui("Account quota details")} tabIndex={-1} ref={panel} style={position}>
+      <div className="mq-panel-top"><strong>{ui("Account quota")}</strong><button type="button" className="mq-close" aria-label={ui("Close quota details")} onClick={() => close(true)}>×</button></div>
+      {state.error && <div className="mq-notice" role="alert">{ui(state.error)}</div>}
+      {opened === 'status' && state.report?.gateways.filter(g => g.error).map(g => <div key={g.id} className="mq-notice" role="status">{ui(g.name)}: {ui(g.error?.message ?? "")}</div>)}
+      {rows.length > 1 && <select className="mq-select" aria-label={ui("Select quota account")} value={selected?.key} onChange={e => setOpened(e.target.value)}>{rows.map(row => <option key={row.key} value={row.key}>{row.account.name} · {accountLabel(row.account)}{row.account.plan ? ` · ${row.account.plan}` : ''}</option>)}</select>}
+      {selected ? <SelectedAccount query={query} row={selected} /> : <><div className="mq-empty">{state.loading ? ui("Loading quota…") : state.error ? ui("Could not read quota right now. Try again") : state.report?.gateways.length ? ui("No visible account quota yet") : ui("Add a Magpie provider or specify a gateway in plugin settings.")}</div><button className="mq-button" type="button" disabled={state.loading} onClick={() => void query.read(true)}><RefreshIcon />{ui("Reload")}</button></>}
     </div>, document.body)}
   </div>;
 }
 function SelectedAccount({ query, row }: { query: QuotaQuery; row: { gateway: GatewayQuota; account: AccountQuota } }) {
+  useLocale();
   const now = useClock();
-  return <>{row.gateway.error && <div className="mq-notice" role="status">{row.gateway.error.message}；保留上次读数。</div>}<AccountCard gateway={row.gateway} account={row.account} query={query} now={now} /><p className="mq-small">{row.gateway.name} · 各窗口单独计量，百分比不相加</p></>;
+  return <>{row.gateway.error && <div className="mq-notice" role="status">{ui(row.gateway.error.message)}{ui("; previous readings are retained.")}</div>}<AccountCard gateway={row.gateway} account={row.account} query={query} now={now} /><p className="mq-small">{ui(row.gateway.name)}  {ui("· Windows are measured separately; percentages are not added")}</p></>;
 }

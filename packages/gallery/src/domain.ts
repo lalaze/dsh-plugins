@@ -1,6 +1,6 @@
 export const MARKETS = {
-  'zh-CN': '中国', 'en-US': '美国', 'en-GB': '英国', 'ja-JP': '日本',
-  'de-DE': '德国', 'fr-FR': '法国', 'en-CA': '加拿大', 'en-AU': '澳大利亚',
+  'zh-CN': "China", 'en-US': "United States", 'en-GB': "United Kingdom", 'ja-JP': "Japan",
+  'de-DE': "Germany", 'fr-FR': "France", 'en-CA': "Canada", 'en-AU': "Australia",
 } as const;
 export type Market = keyof typeof MARKETS;
 export interface Wallpaper {
@@ -29,7 +29,7 @@ export const REFRESH_INTERVAL = 60 * 60 * 1000;
 export const isMarket = (value: string): value is Market => Object.hasOwn(MARKETS, value);
 export function validateBingId(value: string): string {
   if (value.length > 180 || !/^OHR\.[A-Za-z0-9_-]+_1920x1080\.jpg$/.test(value)) {
-    throw new Error('无效的 Bing 图片 ID');
+    throw new Error("Invalid Bing image ID");
   }
   return value;
 }

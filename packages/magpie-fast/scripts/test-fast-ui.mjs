@@ -22,6 +22,11 @@ try {
   browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', base);
   wait(ready); console.log(JSON.stringify(browser('snapshot', '-i')));
   expect('window.fixture.slot.name === "conversation.input.left" && window.fixture.slot.order === 10');
+  evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".dsh-fast-button").getAttribute("aria-label") === "Turn on GPT Fast"');
+  browser('set', 'viewport', '390', '844');
+  expect('document.documentElement.scrollWidth <= innerWidth');
+  evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".dsh-fast-button").getAttribute("aria-label") === "开启 GPT Fast"');
+  browser('set', 'viewport', '1120', '900');
   browser('click', '[aria-label="开启 GPT Fast"]'); wait(`${button}.getAttribute('aria-pressed') === 'true' && ${ready}`);
   browser('open', base); wait(`${button}?.getAttribute('aria-pressed') === 'true' && ${ready}`);
   browser('select', '[aria-label="模型"]', 'claude'); wait(`!${button}`);

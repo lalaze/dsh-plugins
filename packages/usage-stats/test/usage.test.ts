@@ -94,7 +94,7 @@ test('写入失败计数且后续写入可恢复；不覆盖损坏的旧文件',
     const path = join(root, 'bad.json'); await writeFile(path, '{bad'); await assert.rejects(new UsageStore(path).load());
     assert.equal(await readFile(path, 'utf8'), '{bad');
     await writeFile(path, JSON.stringify({ version: 1, records: [record({ usage: { inputTokens: -1, outputTokens: 0 } })] }));
-    await assert.rejects(new UsageStore(path).load(), /格式无效/);
+    await assert.rejects(new UsageStore(path).load(), /Invalid usage data format/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 test('CSV 正确转义，并中和分组名称中的电子表格公式', () => {

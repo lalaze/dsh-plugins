@@ -1,9 +1,12 @@
+import type { LocaleContext } from '@dsh-plugins/i18n';
+import { installLocale } from './i18n.js';
 import React, { useSyncExternalStore } from 'react';
 import { FastControl } from './control.js';
 import type { Selection } from '../gpt.js';
 
 interface DirectoryStore { subscribe(callback: () => void): () => void; getSnapshot(): { current: Selection | null } }
-interface Client {
+interface Client extends LocaleContext {
+  effect(factory: () => () => void): void;
   slots: {
     inject(name: string, factory: () => void): unknown;
     register(spec: Record<string, unknown>, component: React.FC<{ sessionId?: string }>): unknown;
@@ -22,6 +25,7 @@ function DirectoryControl({ store, sessionId }: { store: DirectoryStore; session
   return <FastControl sessionId={sessionId} selection={selected} />;
 }
 export function apply(ctx: Client) {
+  ctx.effect(() => installLocale(ctx));
   ctx.slots.inject('conversation.input.left', () => {
     ctx.slots.register({ name: 'conversation.input.left', id: 'gpt-fast', order: 10 }, props => props.sessionId ? <SessionControl ctx={ctx} sessionId={props.sessionId} /> : null);
   });

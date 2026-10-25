@@ -6,7 +6,7 @@ export interface GuestState { opened: boolean; available?: boolean }
  * webview. Keep all helpers inside it: the guest has no access to this
  * extension's JavaScript realm or module loader.
  */
-export function guestController(command: GuestCommand): GuestState {
+export function guestController(command: GuestCommand, language: 'en' | 'zh' = 'en'): GuestState {
   const key = '__DSH_BROWSER_DEVTOOLS__';
   // `any` is intentional here. The function is compiled into a string and
   // evaluated in a different realm, where Electron's webview owns the types.
@@ -15,6 +15,7 @@ export function guestController(command: GuestCommand): GuestState {
   if (!document || !document.documentElement) return { opened: false, available: false };
 
   const existing = page[key];
+  existing?.setLocale?.(language);
   if (command === 'state') return { opened: Boolean(existing?.opened), available: true };
   if (command === 'close') {
     existing?.close();
@@ -44,6 +45,8 @@ export function guestController(command: GuestCommand): GuestState {
   let picking = false;
   let activeTab = 'elements';
   let closed = false;
+  let locale = language;
+  const ui = (en: string, zh: string) => locale === 'zh' ? zh : en;
 
   const text = (value: unknown): string => {
     if (value instanceof Error) return `${value.name}: ${value.message}`;
@@ -78,12 +81,12 @@ export function guestController(command: GuestCommand): GuestState {
     return `${tag}${id}${classes}`;
   };
   const describe = (node: Element | null): string => {
-    if (!node) return 'No element selected';
+    if (!node) return ui('No element selected', '未选择元素');
     const attrs = Array.from(node.attributes).map(attribute => `${attribute.name}="${attribute.value}"`).join(' ');
     const html = node.outerHTML.length > 1600 ? `${node.outerHTML.slice(0, 1600)}…` : node.outerHTML;
     const computed = pageWindow?.getComputedStyle(node);
     const box = node.getBoundingClientRect();
-    return `${formatElement(node)}\n${attrs || '(no attributes)'}\n\n${html}\n\nsize: ${Math.round(box.width)} × ${Math.round(box.height)}\ndisplay: ${computed?.display ?? 'unknown'}\ncolor: ${computed?.color ?? 'unknown'}`;
+    return `${formatElement(node)}\n${attrs || ui('(no attributes)', '（无属性）')}\n\n${html}\n\n${ui('size', '尺寸')}: ${Math.round(box.width)} × ${Math.round(box.height)}\ndisplay: ${computed?.display ?? ui('unknown', '未知')}\ncolor: ${computed?.color ?? ui('unknown', '未知')}`;
   };
   const recordLog = (level: string, values: unknown[]) => {
     logs.push({ level, values, time: Date.now() }); if (logs.length > 200) logs.shift();
@@ -100,10 +103,10 @@ export function guestController(command: GuestCommand): GuestState {
     const list = root.querySelector('[data-dsh-list="console"]'); if (!list) return; clear(list);
     for (const entry of logs) {
       const row = el('div', `dsh-bdt-log dsh-bdt-log-${entry.level}`);
-      const stamp = el('time', 'dsh-bdt-time'); stamp.textContent = new Date(entry.time).toLocaleTimeString();
+      const stamp = el('time', 'dsh-bdt-time'); stamp.textContent = new Date(entry.time).toLocaleTimeString(locale === 'zh' ? 'zh-CN' : 'en-US');
       const value = el('pre'); value.textContent = entry.values.map(text).join(' '); row.append(stamp, value); list.append(row);
     }
-    if (logs.length === 0) { const empty = el('p', 'dsh-bdt-empty'); empty.textContent = 'Console is empty'; list.append(empty); }
+    if (logs.length === 0) { const empty = el('p', 'dsh-bdt-empty'); empty.textContent = ui('Console is empty', '控制台暂无日志'); list.append(empty); }
     (list as HTMLElement).scrollTop = list.scrollHeight;
   };
   const renderNetwork = () => {
@@ -115,7 +118,7 @@ export function guestController(command: GuestCommand): GuestState {
       const meta = el('small'); meta.textContent = `${entry.kind} · ${Math.round(entry.duration)} ms`;
       row.append(heading, url, meta); list.append(row);
     }
-    if (network.length === 0) { const empty = el('p', 'dsh-bdt-empty'); empty.textContent = 'No requests recorded'; list.append(empty); }
+    if (network.length === 0) { const empty = el('p', 'dsh-bdt-empty'); empty.textContent = ui('No requests recorded', '暂无网络请求'); list.append(empty); }
     (list as HTMLElement).scrollTop = list.scrollHeight;
   };
   const renderElements = () => {
@@ -213,11 +216,30 @@ export function guestController(command: GuestCommand): GuestState {
     if (OriginalXHR && originalXHROpen && originalXHRSend) { OriginalXHR.prototype.open = originalXHROpen; OriginalXHR.prototype.send = originalXHRSend; }
     delete page[key];
   };
-  page[key] = { opened: true, open: () => { root.hidden = false; page[key].opened = true; }, close };
+  const localize = () => {
+    root.lang = locale;
+    const labels: Array<[string, string]> = [
+      ['.dsh-bdt-title', ui('Page debugger', '网页调试器')],
+      ['[data-dsh-tab="elements"]', ui('Elements', '元素')],
+      ['[data-dsh-tab="console"]', ui('Console', '控制台')],
+      ['[data-dsh-tab="network"]', ui('Network', '网络')],
+      ['[data-dsh-pick]', ui('Pick element', '选择元素')],
+    ];
+    for (const [selector, label] of labels) {
+      const node = root.querySelector(selector); if (node) node.textContent = label;
+    }
+    root.querySelector('[data-dsh-close]')?.setAttribute('aria-label', ui('Close', '关闭'));
+    root.querySelectorAll('[data-dsh-clear]').forEach((node: Element) => { node.textContent = ui('Clear', '清空'); });
+    render();
+  };
+  page[key] = { opened: true, open: () => { root.hidden = false; page[key].opened = true; }, close,
+    setLocale: (next: 'en' | 'zh') => { if (locale !== next) { locale = next; localize(); } },
+  };
+  localize();
   render(); renderTabs();
   return { opened: true, available: true };
 }
 
-export function guestScript(command: GuestCommand): string {
-  return `(${guestController.toString()})(${JSON.stringify(command)})`;
+export function guestScript(command: GuestCommand, language: 'en' | 'zh' = 'en'): string {
+  return `(${guestController.toString()})(${JSON.stringify(command)},${JSON.stringify(language)})`;
 }

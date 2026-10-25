@@ -7,8 +7,8 @@ function modelReasoning(efforts: PiAiModelProfile['reasoningEfforts']): Pick<Mod
   if (!efforts || !Object.keys(efforts).length) return { reasoning: false };
   const map: Partial<Record<ModelThinkingLevel, string | null>> = Object.fromEntries(LEVELS.map(level => [level, null]));
   for (const [key, value] of Object.entries(efforts)) {
-    if (!LEVELS.includes(key as ModelThinkingLevel)) throw new LlmError(`不支持的推理等级 ${key}`, 'INVALID_CONFIG');
-    if (key !== 'off' && (typeof value !== 'string' || !value)) throw new LlmError(`推理等级 ${key} 缺少 API 参数值`, 'INVALID_CONFIG');
+    if (!LEVELS.includes(key as ModelThinkingLevel)) throw new LlmError(`Unsupported reasoning level ${key}`, 'INVALID_CONFIG');
+    if (key !== 'off' && (typeof value !== 'string' || !value)) throw new LlmError(`Reasoning level ${key} is missing its API parameter value`, 'INVALID_CONFIG');
     if (value === null) delete map[key as ModelThinkingLevel];
     else map[key as ModelThinkingLevel] = value;
   }
@@ -21,7 +21,7 @@ export function materializeModels(source: SourceProvider): { models: Model<Proto
     if (m.maxTokens !== undefined) caps.set(m.id, m.maxTokens);
     const contextWindow = m.contextWindow ?? profile.defaultContextWindow ?? 262144;
     const maxTokens = m.maxTokens ?? profile.defaultMaxTokens ?? 32768;
-    if (![contextWindow, maxTokens].every(n => Number.isSafeInteger(n) && n > 0)) throw new LlmError(`模型 ${m.id} 的 token 容量无效`, 'INVALID_CONFIG');
+    if (![contextWindow, maxTokens].every(n => Number.isSafeInteger(n) && n > 0)) throw new LlmError(`Invalid token capacity for model ${m.id}`, 'INVALID_CONFIG');
     return {
       id: m.id, name: m.name ?? m.id, api: profile.api as Protocol, provider: source.id, baseUrl,
       input: m.input?.length ? m.input : profile.defaultInput ?? ['text'], contextWindow, maxTokens,

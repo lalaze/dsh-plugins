@@ -10,6 +10,6 @@ test('guest debugger commands are self-contained and parse as page scripts', () 
   assert.match(script, /data-dsh-pick/);
   assert.match(script, /XMLHttpRequest/);
   assert.match(script, /originalFetch/);
-  assert.match(guestScript('close'), /"close"\)$/);
-  assert.match(guestScript('state'), /"state"\)$/);
+  assert.match(guestScript('close'), /"close","en"\)$/);
+  assert.match(guestScript('state', 'zh'), /"state","zh"\)$/);
 });

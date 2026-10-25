@@ -21,7 +21,7 @@ interface Options {
   now?: () => number;
   cacheSeconds?: number;
 }
-const unavailable = () => new QuotaError('UNREACHABLE', '无法连接 Magpie，请确认网关已启动、地址可达', 502);
+const unavailable = () => new QuotaError('UNREACHABLE', "Could not connect to Magpie. Check that the gateway is running and reachable", 502);
 const publicError = (error: unknown): QuotaError => error instanceof QuotaError ? error : unavailable();
 const headerEntries = (headers: Headers): [string, string][] => {
   const entries: [string, string][] = []; headers.forEach((value, name) => entries.push([name, value])); return entries;
@@ -41,7 +41,7 @@ export class QuotaService {
   }
   close(): void { this.closed = true; this.cache.clear(); }
   private async sources(): Promise<ResolvedSource[]> {
-    if (this.closed) throw new QuotaError('CLOSED', '额度插件已关闭', 503);
+    if (this.closed) throw new QuotaError('CLOSED', "Quota plugin is closed", 503);
     const sources = await this.options.sources();
     const unique = new Map<string, ResolvedSource>();
     for (const source of sources) unique.set(source.error ? source.id : stamp(source), source);
@@ -58,20 +58,20 @@ export class QuotaService {
   private async request(source: ResolvedSource, method: 'GET' | 'POST', target?: Target): Promise<{ accounts: GatewayQuota['accounts']; targets: Map<string, Target> }> {
     let url: URL;
     try { url = gatewayURL(source.profile.baseURL, method === 'POST' ? 'refresh' : 'quotas'); }
-    catch { throw new QuotaError('INVALID_ADDRESS', 'Magpie 网关地址无效，请检查提供商配置', 400); }
+    catch { throw new QuotaError('INVALID_ADDRESS', "Invalid Magpie gateway URL. Check the provider settings", 400); }
     if (target) { url.searchParams.set('provider', target.provider); if (target.user) url.searchParams.set('user', target.user); }
     let response: Response;
     try { response = await this.fetch(url, { method, headers: source.headers, redirect: 'error', signal: AbortSignal.timeout(method === 'POST' ? 35000 : 15000) }); }
     catch { throw unavailable(); }
     if (!response.ok) {
-      if (response.status === 401) throw new QuotaError('UNAUTHORIZED', 'Magpie 未接受网关密钥，请检查提供商凭据', 401);
-      if (response.status === 403) throw new QuotaError('FORBIDDEN', '网关密钥无权查看这些账号的额度，请检查 Magpie 的共享和额度可见权限', 403);
-      if (response.status === 404) throw new QuotaError('UNSUPPORTED', '未找到 Magpie 额度接口，请检查地址或更新 Magpie', 404);
-      if (response.status === 429) throw new QuotaError('THROTTLED', 'Magpie 暂时限制额度查询，请稍后重试', 429, 30);
-      throw new QuotaError('UPSTREAM_ERROR', `Magpie 额度接口暂不可用（${response.status}）`);
+      if (response.status === 401) throw new QuotaError('UNAUTHORIZED', "Magpie rejected the gateway key. Check the provider's credentials", 401);
+      if (response.status === 403) throw new QuotaError('FORBIDDEN', "The gateway key cannot view these accounts' quotas. Check sharing and quota visibility permissions in Magpie", 403);
+      if (response.status === 404) throw new QuotaError('UNSUPPORTED', "Magpie quota endpoint not found. Check the URL or update Magpie", 404);
+      if (response.status === 429) throw new QuotaError('THROTTLED', "Magpie is rate-limiting quota queries. Try again later", 429, 30);
+      throw new QuotaError('UPSTREAM_ERROR', `Magpie quota endpoint is unavailable (${response.status})`);
     }
     const maxBytes = 2 * 1024 * 1024;
-    if (Number(response.headers.get('content-length')) > maxBytes) { await response.body?.cancel(); throw new QuotaError('INVALID_RESPONSE', 'Magpie 额度响应过大'); }
+    if (Number(response.headers.get('content-length')) > maxBytes) { await response.body?.cancel(); throw new QuotaError('INVALID_RESPONSE', "Magpie quota response is too large"); }
     let raw: unknown;
     try {
       const reader = response.body?.getReader();
@@ -96,7 +96,7 @@ export class QuotaService {
         targets.set(quotaId(provider, kind, user, from), { provider, user });
       }
       return { accounts, targets };
-    } catch { throw new QuotaError('INVALID_RESPONSE', 'Magpie 返回的额度数据无法解析，请稍后重试'); }
+    } catch { throw new QuotaError('INVALID_RESPONSE', "Could not parse Magpie quota data. Try again later"); }
   }
   private async read(source: ResolvedSource, reload = false): Promise<GatewayQuota> {
     if (source.error) return { id: source.id, name: source.name, accounts: [], error: { code: source.error.code, message: source.error.message } };
@@ -136,18 +136,18 @@ export class QuotaService {
   }
   async refresh(gatewayId: string, accountId: string): Promise<QuotaReport> {
     const source = (await this.sources()).find(s => s.id === gatewayId);
-    if (!source) throw new QuotaError('UNKNOWN_GATEWAY', '该 Magpie 网关配置已变更，请重新读取', 404);
+    if (!source) throw new QuotaError('UNKNOWN_GATEWAY', "This Magpie gateway configuration has changed. Reload to try again", 404);
     if (source.error) throw source.error;
     const snapshot = await this.read(source);
     const account = snapshot.accounts.find(a => a.id === accountId);
-    if (!account) throw new QuotaError('UNKNOWN_ACCOUNT', '账号已变更或不可见，请重新读取', 404);
-    if (!account.refreshable) throw new QuotaError('REMOTE_ACCOUNT', '请连接账号所属的 Magpie 后刷新此账号', 409);
+    if (!account) throw new QuotaError('UNKNOWN_ACCOUNT', "Account changed or is no longer visible. Reload to try again", 404);
+    if (!account.refreshable) throw new QuotaError('REMOTE_ACCOUNT', "Connect to the Magpie instance that owns this account before refreshing", 409);
     const entry = this.entry(source);
     if (entry.pending) await entry.pending;
     const elapsed = this.now() - (entry.refreshedAt.get(accountId) ?? -Infinity);
-    if (elapsed < 30000) throw new QuotaError('THROTTLED', '该账号刚刚刷新过，请稍后重试', 429, Math.ceil((30000 - elapsed) / 1000));
+    if (elapsed < 30000) throw new QuotaError('THROTTLED', "This account was just refreshed. Try again later", 429, Math.ceil((30000 - elapsed) / 1000));
     const target = entry.targets.get(accountId);
-    if (!target) throw new QuotaError('UNKNOWN_ACCOUNT', '账号已变更，请重新读取', 404);
+    if (!target) throw new QuotaError('UNKNOWN_ACCOUNT', "Account changed. Reload to try again", 404);
     entry.refreshedAt.set(accountId, this.now());
     const task = this.update(source, entry, 'POST', target); entry.pending = task;
     let updated: GatewayQuota;

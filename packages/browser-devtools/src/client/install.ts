@@ -1,19 +1,12 @@
-import { controlDevTools, type Inspectable } from './control.js';
+import { controlDevTools, type Inspectable, type State } from './control.js';
+import { i18n, ui } from './i18n.js';
 
 const selector = 'webview[data-sidebar-browser-frame="webview"]';
 const messages = {
-  zh: {
-    open: '打开调试浮窗', close: '关闭调试浮窗', loading: '正在打开调试浮窗…',
-    waiting: '网页加载后可打开调试浮窗', dismiss: '关闭提示',
-    unavailable: '当前网页尚未准备好调试浮窗，请重新加载网页后再试。',
-    failed: '无法在当前网页打开调试浮窗，请重新加载网页后再试。',
-  },
-  en: {
     open: 'Open page debugger', close: 'Close page debugger', loading: 'Opening page debugger…',
     waiting: 'The page debugger will be available after the page loads', dismiss: 'Dismiss message',
     unavailable: 'The page is not ready for the debugger. Reload the page and try again.',
     failed: 'Could not open the in-page debugger. Reload the page and try again.',
-  },
 };
 const css = `
 .dsh-bdt-button{width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm,5px);background:transparent;color:var(--dsw-alias-label-secondary,#aaa);display:inline-flex;flex:none;align-items:center;justify-content:center;cursor:pointer}
@@ -38,7 +31,7 @@ function toolbarFor(view: Element): HTMLFormElement | undefined {
 export function installDevTools(doc: Document): () => void {
   const win = doc.defaultView;
   if (!win) return () => {};
-  const entries = new Map<Element, { toolbar: HTMLFormElement; button: HTMLButtonElement; notice: HTMLDivElement; dispose(): void }>();
+  const entries = new Map<Element, { toolbar: HTMLFormElement; button: HTMLButtonElement; notice: HTMLDivElement; render(): void; dispose(): void }>();
   const style = doc.createElement('style');
   style.dataset.dshBrowserDevtools = '';
   style.textContent = css;
@@ -63,7 +56,6 @@ export function installDevTools(doc: Document): () => void {
       if (typeof view.executeJavaScript !== 'function' || typeof view.getURL !== 'function') continue;
       const toolbar = toolbarFor(element);
       if (!toolbar) continue;
-      const text = /^(zh)(-|_|$)/i.test(doc.documentElement.lang || win.navigator.language) ? messages.zh : messages.en;
       const button = doc.createElement('button');
       button.type = 'button';
       button.className = 'dsh-bdt-button';
@@ -79,25 +71,28 @@ export function installDevTools(doc: Document): () => void {
       dismiss.type = 'button';
       dismiss.className = 'dsh-bdt-button';
       dismiss.textContent = '×';
-      dismiss.setAttribute('aria-label', text.dismiss);
       notice.append(description, dismiss);
-      const control = controlDevTools(view as HTMLElement & Inspectable, state => {
+      let latest: State;
+      const render = (state = latest) => {
+        latest = state;
+        dismiss.setAttribute('aria-label', ui(messages.dismiss));
         button.disabled = !state.ready || state.busy;
         button.setAttribute('aria-pressed', String(state.opened));
         button.setAttribute('aria-busy', String(state.busy));
-        button.setAttribute('aria-label', state.opened ? text.close : text.open);
-        button.title = !state.ready ? text.waiting : state.busy ? text.loading : state.opened ? text.close : text.open;
+        button.setAttribute('aria-label', ui(state.opened ? messages.close : messages.open));
+        button.title = ui(!state.ready ? messages.waiting : state.busy ? messages.loading : state.opened ? messages.close : messages.open);
         notice.hidden = !state.error;
-        const message = state.error ? text[state.error] : '';
+        const message = state.error ? ui(messages[state.error]) : '';
         if (description.textContent !== message) description.textContent = message;
-      });
+      };
+      const control = controlDevTools(view as HTMLElement & Inspectable, render);
       const click = (event: Event) => { event.preventDefault(); event.stopPropagation(); control.toggle(); };
       const dismissClick = () => { control.dismiss(); button.focus(); };
       button.addEventListener('click', click);
       dismiss.addEventListener('click', dismissClick);
       toolbar.append(button);
       toolbar.after(notice);
-      entries.set(element, { toolbar, button, notice, dispose() {
+      entries.set(element, { toolbar, button, notice, render, dispose() {
         control.dispose();
         button.removeEventListener('click', click);
         dismiss.removeEventListener('click', dismissClick);
@@ -111,9 +106,11 @@ export function installDevTools(doc: Document): () => void {
     win.queueMicrotask(scan);
   });
   observer.observe(doc.body, { childList: true, subtree: true });
+  const unsubscribe = i18n.subscribe(() => { for (const entry of entries.values()) entry.render(); });
   scan();
   return () => {
     stopped = true;
+    unsubscribe();
     observer.disconnect();
     for (const entry of entries.values()) entry.dispose();
     entries.clear(); style.remove();

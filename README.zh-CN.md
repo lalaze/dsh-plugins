@@ -16,6 +16,12 @@
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Sidebar Browser 网页内的元素、Console 和网络调试浮窗 |
 | `dsh-translate` | [packages/translate](packages/translate/README.zh-CN.md) | 在聊天选中文本或输入框草稿中调用 OpenAI 兼容接口进行翻译 |
 
+## 语言
+
+插件界面支持英语和简体中文，以英语作为源文案和回退语言。宿主提供 DSH locale 服务时，插件跟随「设置 → 通用 → 语言」即时切换，包括已打开的面板和插件自身的错误提示；未提供该服务的旧宿主使用英语。API 诊断和 CSV 列名使用英语，用户内容、模型 ID 和命令语法保持原文。
+
+私有的 `packages/i18n` 工具在构建时打入各客户端，插件安装包仍可独立安装。
+
 ## 初始化
 
 需要 Node.js ≥ 22.15.0，pnpm **10.34.7**（已在 `package.json` 中锁定）。

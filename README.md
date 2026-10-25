@@ -16,6 +16,12 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | In-page element, Console and network debugger for DSH Sidebar Browser |
 | `dsh-translate` | [packages/translate](packages/translate/README.md) | Translate selected chat text and composer drafts through an OpenAI-compatible API |
 
+## Languages
+
+Plugin interfaces support English and Simplified Chinese. English is the source and fallback language. On hosts with the DSH locale service, plugins follow **Settings → General → Language** and update immediately, including open panels and known error messages. Older hosts without that service use English. API diagnostics and CSV column names use English; user content, model IDs and command syntax stay in their original language.
+
+The private `packages/i18n` helper is bundled into each client at build time, so plugin archives remain independently installable.
+
 ## Setup
 
 Requires Node.js ≥ 22.15.0 and pnpm **10.34.7**, pinned in `package.json`.

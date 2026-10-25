@@ -60,8 +60,8 @@ export class GalleryController {
         credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(25_000)]),
       });
       const body = await response.json() as { entries?: Wallpaper[]; error?: string };
-      if (!response.ok) throw new Error(body.error || `图库请求失败 (${response.status})`);
-      if (!Array.isArray(body.entries) || !body.entries.length || body.entries.length > 8) throw new Error('Bing 图片列表为空，请稍后重试');
+      if (!response.ok) throw new Error(body.error || `Gallery request failed (${response.status})`);
+      if (!Array.isArray(body.entries) || !body.entries.length || body.entries.length > 8) throw new Error("The Bing image list is empty. Try again later");
       const queue = [...body.entries]; const saved: SavedImage[] = [];
       // Two downloads at a time; publish the complete batch only after every image is safe locally.
       const worker = async () => {
@@ -72,9 +72,9 @@ export class GalleryController {
           const image = await this.request(`/api/gallery/image?id=${encodeURIComponent(entry.id)}`, {
             credentials: 'same-origin', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]),
           });
-          if (!image.ok) throw new Error(`图片下载失败 (${image.status})，已保留原壁纸`);
+          if (!image.ok) throw new Error(`Image download failed (${image.status}); your previous wallpaper was kept`);
           const blob = await image.blob();
-          if (blob.size > MAX_IMAGE_BYTES || imageMime(new Uint8Array(await blob.slice(0, 16).arrayBuffer())) !== 'image/jpeg') throw new Error('下载的图片无效，已保留原壁纸');
+          if (blob.size > MAX_IMAGE_BYTES || imageMime(new Uint8Array(await blob.slice(0, 16).arrayBuffer())) !== 'image/jpeg') throw new Error("The downloaded image is invalid; your previous wallpaper was kept");
           await decodeImage(blob);
           saved.push({ entry, blob });
         }
@@ -107,17 +107,17 @@ export class GalleryController {
   };
   remove = (id: string): Promise<void> => this.operation(() => this.storage.remove(id));
   upload = (files: File[]): Promise<void> => this.operation(async () => {
-    if (files.length > 20) throw new Error('一次最多上传 20 张图片');
+    if (files.length > 20) throw new Error("Upload no more than 20 images at a time");
     const images: SavedImage[] = [];
     for (const file of files) {
-      if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name} 超过 10 MB`);
+      if (file.size > MAX_IMAGE_BYTES) throw new Error(`${file.name} exceeds 10 MB`);
       const type = imageMime(new Uint8Array(await file.slice(0, 16).arrayBuffer()));
-      if (!type) throw new Error(`${file.name}：请选择 JPG、PNG 或 WebP 图片`);
+      if (!type) throw new Error(`${file.name}: Choose a JPG, PNG or WebP image`);
       const blob = file.slice(0, file.size, type); await decodeImage(blob);
       const random = Array.from(crypto.getRandomValues(new Uint8Array(12)), n => n.toString(16).padStart(2, '0')).join('');
       images.push({ entry: {
-        id: `local-${random}`, source: 'local', title: file.name.replace(/\.[^.]+$/, '').slice(0, 200) || '本地图片',
-        date: new Date(this.now()).toISOString(), copyright: '本地上传',
+        id: `local-${random}`, source: 'local', title: file.name.replace(/\.[^.]+$/, '').slice(0, 200) || "Local image",
+        date: new Date(this.now()).toISOString(), copyright: "Local uploads",
       }, blob });
     }
     await this.storage.archive(images);
@@ -130,6 +130,6 @@ export async function decodeImage(blob: Blob): Promise<void> {
   try {
     const image = new Image(); image.src = url;
     await image.decode();
-    if (!image.naturalWidth || image.naturalWidth * image.naturalHeight > 40_000_000) throw new Error('图片尺寸过大，请使用 4000 万像素以内的图片');
+    if (!image.naturalWidth || image.naturalWidth * image.naturalHeight > 40_000_000) throw new Error("Image dimensions are too large. Use an image under 40 megapixels");
   } finally { URL.revokeObjectURL(url); }
 }

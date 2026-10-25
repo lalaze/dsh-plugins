@@ -2,7 +2,9 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-`dsh-magpie-quota` adds a compact row of provider icons and remaining percentages below the DSH composer, one per account. Click an icon for its windows, reset countdowns, plan, balance, reading time and refresh button. **Settings → Magpie 额度** shows every account.
+Supports English and Simplified Chinese, following DSH’s language setting with live updates. English is the fallback when the host has no locale service.
+
+`dsh-magpie-quota` adds a compact row of provider icons and remaining percentages below the DSH composer, one per account. Click an icon for its windows, reset countdowns, plan, balance, reading time and refresh button. **Settings → Magpie quota** shows every account.
 
 Each icon shows the lowest remaining percentage among the account's known, limited windows. A 75% five-hour window and a 63% weekly window show 63%, with both windows listed in the details. Unlimited is `∞`, unknown is `—`. Warnings mark failed or deferred readings. Percentages are never added together or converted into estimated tokens.
 

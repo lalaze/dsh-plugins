@@ -11,8 +11,8 @@ export const LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'
 export type Protocol = 'openai-completions' | 'openai-responses';
 export const defaultStateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', NAME);
 export const Config = Schema.object({
-  defaultEnabled: Schema.boolean().default(false).description('新会话默认开启 GPT Fast（priority 优先处理，按上游规则计费）'),
-  stateDir: Schema.string().default(defaultStateDir()).description('会话开关的保存目录'),
+  defaultEnabled: Schema.boolean().default(false).description("Enable GPT Fast for new sessions by default (priority processing, billed according to upstream pricing)").i18n({"en": "Enable GPT Fast for new sessions by default (priority processing, billed according to upstream pricing)", "zh": "新会话默认开启 GPT Fast（priority 优先处理，按上游规则计费）"}),
+  stateDir: Schema.string().default(defaultStateDir()).description("Directory for saved session preferences").i18n({"en": "Directory for saved session preferences", "zh": "会话开关的保存目录"}),
 });
 export interface PluginConfig { defaultEnabled?: boolean; stateDir?: string }
 export interface SourceProvider { id: string; profile: PiAiProviderProfile }
@@ -34,9 +34,9 @@ export function supportedSource(sources: readonly SourceProvider[], provider: st
 }
 export function sourceAddress(source: SourceProvider): string {
   let url: URL;
-  try { url = new URL(source.profile.baseURL!); } catch { throw new LlmError('当前提供商的 baseURL 无效', 'INVALID_CONFIG'); }
+  try { url = new URL(source.profile.baseURL!); } catch { throw new LlmError("The current provider's baseURL is invalid", 'INVALID_CONFIG'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
-    throw new LlmError('GPT Fast 需要使用 http/https 的 API 地址', 'INVALID_CONFIG');
+    throw new LlmError("GPT Fast requires an HTTP/HTTPS API URL", 'INVALID_CONFIG');
   }
   return source.profile.baseURL!;
 }

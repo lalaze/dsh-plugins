@@ -102,6 +102,6 @@ test('复用 host 凭据服务；命名引用缺失不降级为假密钥', async
   const ctx = new Context(); let resolved = '';
   ctx.provide('credentials', { resolve: async (ref: string) => { resolved = ref; return { value: '  stored-key  ' }; } });
   assert.equal(await resolveGatewayKey(ctx, source()), 'stored-key'); assert.equal(resolved, 'MAGPIE_GATEWAY_KEY');
-  ctx.set('credentials', { resolve: async () => undefined }); await assert.rejects(resolveGatewayKey(ctx, source()), /缺少网关凭据/);
+  ctx.set('credentials', { resolve: async () => undefined }); await assert.rejects(resolveGatewayKey(ctx, source()), /Missing gateway credential/);
   await ctx.fiber.dispose();
 });

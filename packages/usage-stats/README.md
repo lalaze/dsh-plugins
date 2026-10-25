@@ -2,7 +2,9 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-`dsh-usage-stats` tracks DSH model calls and remote Claude Code turns made through `dsh-claude-ssh`. Open **Settings → 使用量统计** to filter by source, UTC date, provider, model or session, group by day/source/model/session, and export CSV. The initial UI is in Chinese.
+Supports English and Simplified Chinese, following DSH’s language setting with live updates. English is the fallback when the host has no locale service.
+
+`dsh-usage-stats` tracks DSH model calls and remote Claude Code turns made through `dsh-claude-ssh`. Open **Settings → Usage statistics** to filter by source, UTC date, provider, model or session, group by day/source/model/session, and export CSV.
 
 The dashboard includes four headline metrics, a Token/request trend, a source breakdown, date presets, expandable filters and a paginated detail table. It supports light/dark themes and narrow windows. Trends include quiet dates and aggregate long ranges into at most 48 equal time buckets without dropping usage.
 

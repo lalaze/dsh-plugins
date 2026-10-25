@@ -28,6 +28,9 @@ try {
   expect('Array.from(document.querySelectorAll(".mq-chip-value")).map(e=>e.textContent).join(",") === "80%,63%,100%,88%"');
   if (shots) { await mkdir(shots, { recursive: true }); browser('screenshot', join(shots, 'quota-dark.png')); }
   browser('click', '.mq-chip:nth-child(2)'); wait(dialog); snapshot();
+  evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".mq-panel-top strong").textContent === "Account quota"');
+  expect('document.querySelector(".mq-popover").textContent.includes("Resets in")');
+  evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".mq-panel-top strong").textContent === "账号额度"');
   expect('document.querySelectorAll("[role=progressbar]").length === 2 && document.querySelector(".mq-popover").textContent.includes("重置")');
   expect('(()=>{const p=document.querySelector(".mq-popover").getBoundingClientRect();return p.left>=0&&p.top>=0&&p.bottom<=innerHeight&&p.right<=innerWidth})()');
   if (shots) browser('screenshot', join(shots, 'quota-detail-dark.png'));

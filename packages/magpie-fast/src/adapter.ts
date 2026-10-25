@@ -21,7 +21,7 @@ async function providerApi(protocol: Protocol): Promise<ProviderStreams> {
   const entry = exports?.[`./api/${protocol}`] ?? exports?.['./api/*'];
   const target = typeof entry === 'string' ? entry : record(entry)?.import ?? record(entry)?.default;
   if (!manifestPath || typeof target !== 'string' || !target.startsWith('./')) {
-    throw new LlmError('当前 DSH 内置 pi-ai 未提供所需的 OpenAI API 入口，请更新 DSH', 'UNSUPPORTED_HOST_RUNTIME');
+    throw new LlmError("The pi-ai bundled with DSH lacks the required OpenAI API entry point. Update DSH", 'UNSUPPORTED_HOST_RUNTIME');
   }
   // pi-ai's public export map is ESM-only; require.resolve cannot select it.
   return import(new URL(target.replaceAll('*', protocol), pathToFileURL(manifestPath)).href);
@@ -116,7 +116,7 @@ export class FastPool {
         kind: request.signal?.aborted ? 'aborted' : 'error',
         failure: record(failure) && typeof record(failure)?.code === 'string'
           ? failure as { code: string; message: string }
-          : { code: request.signal?.aborted ? 'ABORTED' : 'MAGPIE_FAST_ERROR', message: request.signal?.aborted ? '请求已取消' : '无法准备 GPT Fast 请求，请检查当前提供商配置与网关凭据' },
+          : { code: request.signal?.aborted ? 'ABORTED' : 'MAGPIE_FAST_ERROR', message: request.signal?.aborted ? "Request cancelled" : "Could not prepare the GPT Fast request. Check the provider settings and gateway credentials" },
       } };
     } finally {
       if (generation) { generation.active--; if (!generation.active && generation.retired) void generation.scope.fiber.dispose(); }

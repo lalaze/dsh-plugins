@@ -28,6 +28,11 @@ try {
   const total = `document.querySelector(${JSON.stringify('article[aria-label="总 Token"] strong')})`;
   const count = `document.querySelector(${JSON.stringify('article[aria-label="调用次数"] strong')})`;
   wait('document.querySelectorAll("tbody tr").length === 3');
+  evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".us-title h2").textContent === "Usage statistics"');
+  browser('set', 'viewport', '390', '844');
+  expect('document.documentElement.scrollWidth <= innerWidth');
+  evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".us-title h2").textContent === "使用量统计"');
+  browser('set', 'viewport', '1120', '900');
   expect(`${count}.textContent === "3" && ${total}.textContent === "83"`);
   expect('document.querySelectorAll(".us-bar-hit").length === 2 && document.querySelector("[aria-label=来源占比]").textContent.includes("72.3%")');
   browser('click', '.us-bar-hit:first-child');

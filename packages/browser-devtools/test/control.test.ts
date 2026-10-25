@@ -14,9 +14,9 @@ class Guest extends EventTarget {
   executeJavaScript(code: string): Promise<unknown> {
     this.scripts.push(code);
     if (this.fail) return Promise.reject(new Error('destroyed'));
-    if (code.endsWith('(\"state\")')) return Promise.resolve({ opened: this.opened, available: true });
+    if (code.endsWith('(\"state\",\"en\")')) return Promise.resolve({ opened: this.opened, available: true });
     if (this.blocked) return Promise.resolve({ opened: false, available: false });
-    if (code.endsWith('(\"open\")')) {
+    if (code.endsWith('(\"open\",\"en\")')) {
       this.opened = true;
       return Promise.resolve({ opened: true, available: true });
     }

@@ -1,5 +1,9 @@
 # DSH 浏览器调试浮窗
 
+[English](README.md) | **简体中文**
+
+支持英语和简体中文，随 DSH 的语言设置即时切换；宿主未提供语言服务时回退到英语。
+
 `dsh-browser-devtools` 为 DSH Desktop 的 Sidebar Browser 增加网页内调试浮窗，不需要桌面端开启 Electron 原生 DevTools。
 
 浮窗提供：
