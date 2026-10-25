@@ -27,7 +27,17 @@ Grok 使用官方 Grok Build CLI，显式关闭 leader 模式；CodeBuddy 使用
 
 需要 Node.js ≥22.15.0、DSH ≥0.2.1-rc.2 且 <0.3.0。
 
-使用宿主的插件安装入口安装 `dist/dsh-remote-agents-0.4.1.tgz`；若安装入口是网页，上传这个 tgz 即可。
+在**运行 DSH 的机器**下载安装包，无需克隆或构建仓库。下载见 [Remote Agents 0.4.1 Release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.1)。Web profile 安装命令：
+
+```sh
+curl -fL -o dsh-remote-agents-0.4.1.tgz \
+  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.1/dsh-remote-agents-0.4.1.tgz
+dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.1.tgz"
+```
+
+安装后重启对应的 DSH profile 并刷新浏览器，在「设置 → 远程任务」进入。使用自定义 profile 时将 `web` 替换为其名称。桌面端请先完全退出应用，使用**桌面应用自带的 `dsh` 命令**，将安装参数改为 `--profile desktop`，然后重新打开应用；npm 版 CLI 不能管理这个保留 profile。若宿主提供上传安装入口，也可上传下载的 tgz。
+
+远端执行机器只需 SSH 和已安装、已登录的目标 CLI；使用反重力时还需 Node.js 22+。不必在每台执行机器上再安装本插件。插件尚未发布到 npm，请使用 Release 安装包，不要直接安装仓库根目录。
 
 已经启用 `dsh-claude-ssh` 时，先在 DSH 中停用旧插件，再启用合并包并重启 DSH。不要让两个插件同时注册 Claude。**无需删除旧数据**：合并包沿用 `DSH_OMC_STATE_DIR` 或 `~/.local/state/dsh-oh-my-claude`，保留 `claude-code` / SSH 主机供应商 ID、登录状态、会话和远程工作区路由。旧版自定义插件参数放到合并包的 `claude` 配置对象下。
 

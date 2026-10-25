@@ -23,7 +23,19 @@ Grok uses the official Grok Build CLI with leader mode explicitly disabled. Code
 
 ## Install and migrate
 
-Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build/install `dist/dsh-remote-agents-0.4.1.tgz` using the host's plugin installer.
+Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0.
+
+Download the archive on the **machine running DSH** from the [Remote Agents 0.4.1 release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.1). No repository checkout or build is needed. To install into the Web profile:
+
+```sh
+curl -fL -o dsh-remote-agents-0.4.1.tgz \
+  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.1/dsh-remote-agents-0.4.1.tgz
+dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.1.tgz"
+```
+
+Restart that DSH profile, refresh the browser and open **Settings → Remote agents**. Substitute your profile name for `web` if needed. For Desktop, fully quit the app, use the **desktop application's bundled `dsh` command** with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. Hosts with an upload installer can also accept the downloaded tgz.
+
+Remote execution machines only need SSH and the installed, authenticated target CLI, plus Node.js 22+ for Antigravity. They do not each need this plugin. The package is not published to npm; use the release archive rather than installing the repository root.
 
 **Disable the old `dsh-claude-ssh` plugin before enabling this merged package, then restart DSH.** Do not delete its data. The embedded engine retains `DSH_OMC_STATE_DIR` (default `~/.local/state/dsh-oh-my-claude`), provider IDs, login, sessions, SSH boxes and remote workspace routing. Move custom native plugin options under this package's `claude` configuration object.
 
