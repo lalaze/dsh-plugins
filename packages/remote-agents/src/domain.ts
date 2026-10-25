@@ -8,6 +8,8 @@ export interface Host {
   error?: string;
 }
 export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string }
+export interface SshConfigHost { alias: string; connection: string }
+export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
 export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string }
 export interface Provider {

@@ -4,6 +4,7 @@ import { api, ApiError, newRequestId, readLocal, saveLocal } from './api.js';
 import { localizeError, ui, useLocale } from './i18n.js';
 import { TaskView } from './task-view.js';
 import { styles } from './styles.js';
+import { SshHostPicker } from './ssh-host-picker.js';
 
 const initial: Dashboard = { hosts: [], tasks: [] };
 export function RemoteAgentsApp() {
@@ -93,6 +94,7 @@ export function RemoteAgentsApp() {
         const next = await api<Dashboard>('addHost', { host: { label, connection } });
         setDashboard(next); chooseHost(next.hosts.at(-1)!.id); setLabel(''); setConnection('');
       }); }}>
+        <SshHostPicker hosts={dashboard.hosts} connection={connection} disabled={!!busy} select={host => { setLabel(host.alias.slice(0, 100)); setConnection(host.connection); }} />
         <div className="ra-grid"><label className="ra-field">{ui('Host name')}<input aria-label={ui('Host name')} required maxLength={100} value={label} onChange={event => setLabel(event.target.value)} placeholder="Development server" /></label><label className="ra-field">{ui('Connection')}<input aria-label={ui('Connection')} required value={connection} onChange={event => setConnection(event.target.value)} placeholder="ssh://user@build-box:22" autoComplete="off" /></label><div className="ra-field" style={{ justifyContent: 'end' }}><button className="ra-primary" disabled={!!busy || !label.trim() || !connection.trim()}>{ui(busy === 'host' ? 'Saving…' : 'Save host')}</button></div></div>
         <p className="ra-foot">{ui('SSH uses the DSH server’s keys and SSH config.')}</p>
       </form></details>

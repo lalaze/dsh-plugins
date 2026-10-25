@@ -40,7 +40,8 @@ const factory = host => {
   };
   return backend;
 };
-const service = new RemoteAgentsService(store, factory), handler = createHandler(service);
+const sshConfig = { hosts: [{ alias: 'build-box', connection: 'ssh://build-box' }, { alias: 'ubuntu-dev', connection: 'ssh://ubuntu-dev' }], warnings: [] };
+const service = new RemoteAgentsService(store, factory, async () => sshConfig), handler = createHandler(service);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = await build({ absWorkingDir: root, entryPoints: ['test/ui/app.fixture.tsx'], bundle: true, write: false, outfile: 'preview.js', loader: { '.woff2': 'dataurl', '.woff': 'dataurl', '.ttf': 'dataurl' }, platform: 'browser', format: 'esm', target: 'es2022' });
 const css = output.outputFiles.filter(file => file.path.endsWith('.css')).map(file => file.text).join('\n');
@@ -56,6 +57,7 @@ const server = createServer(async (request, response) => {
       if (request.method === 'POST') {
         const input = JSON.parse(body.toString());
         if (input.failReads !== undefined) failReads = input.failReads === true;
+        if (input.sshConfig) { sshConfig.hosts = input.sshConfig.hosts; sshConfig.warnings = input.sshConfig.warnings ?? []; }
         if (input.resumable === false) for (const agent of remote.agents.values()) agent.resumable = false;
       }
       response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ creates: remote.creates, stops: remote.stops, sends: remote.sends, disconnects: remote.disconnects, answers: remote.answers, state: service.snapshot() })); return;

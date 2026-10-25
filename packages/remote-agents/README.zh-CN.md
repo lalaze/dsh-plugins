@@ -27,12 +27,12 @@ Grok 使用官方 Grok Build CLI，显式关闭 leader 模式；CodeBuddy 使用
 
 需要 Node.js ≥22.15.0、DSH ≥0.2.1-rc.2 且 <0.3.0。
 
-在**运行 DSH 的机器**下载安装包，无需克隆或构建仓库。下载见 [Remote Agents 0.4.1 Release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.1)。Web profile 安装命令：
+在**运行 DSH 的机器**下载安装包，无需克隆或构建仓库。下载见 [Remote Agents 0.4.2 Release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.2)。Web profile 安装命令：
 
 ```sh
-curl -fL -o dsh-remote-agents-0.4.1.tgz \
-  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.1/dsh-remote-agents-0.4.1.tgz
-dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.1.tgz"
+curl -fL -o dsh-remote-agents-0.4.2.tgz \
+  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.2/dsh-remote-agents-0.4.2.tgz
+dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.2.tgz"
 ```
 
 安装后重启对应的 DSH profile 并刷新浏览器，在「设置 → 远程任务」进入。使用自定义 profile 时将 `web` 替换为其名称。桌面端请先完全退出应用，使用**桌面应用自带的 `dsh` 命令**，将安装参数改为 `--profile desktop`，然后重新打开应用；npm 版 CLI 不能管理这个保留 profile。若宿主提供上传安装入口，也可上传下载的 tgz。
@@ -46,11 +46,13 @@ dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.1.tgz"
 ## 使用
 
 1. 在运行 DSH 的机器上，确认可用密钥或 SSH agent 非交互连接远端，且已验证并保存 SSH 主机密钥。插件使用 `BatchMode=yes` 和 `StrictHostKeyChecking=yes`，支持 `~/.ssh/config` 别名与 ProxyJump。
-2. 在「设置 → 远程任务 → CLI 任务」添加 `build-box`、`user@build-box` 或 `ssh://user@build-box:2222`。
+2. 在「设置 → 远程任务 → CLI 任务 → 添加机器」的「已有 SSH 配置」选择别名，确认自动填入的名称和连接地址后保存。列表读取运行 DSH 的机器上的 `~/.ssh/config`、系统 SSH 配置及其 `Include`；可随时「刷新 SSH 配置」。也可以手动填写 `build-box`、`user@build-box` 或 `ssh://user@build-box:2222`。
 3. 输入远端项目的绝对目录，点击「发现 CLI」，选择可用供应商、模型、权限模式和思考强度。
 4. 输入任务并开始；在面板中处理原生审批、问题、工具输出、后续指令和停止操作。输入框旁也有远程任务入口。
 
 任务在所选远程机器的项目目录运行。已有工作区列表展示此面板曾使用的目录，也可以直接输入任意可访问的绝对路径。不自动同步当前本地项目，不自动创建 worktree。
+
+SSH 配置选择器只列出具体的 `Host` 别名，不展开通配主机，也不执行 `Match exec` 或建立连接。保存时保留别名，由系统 SSH 在连接时解析 `HostName`、`User`、`Port`、`IdentityFile` 和 `ProxyJump`。条件 Include 中声明的别名也可能出现在列表里，是否生效由 SSH 连接时决定；依赖目标主机才能展开的 Include 路径需手动填写别名。没有配置或读取失败时仍可手动输入。
 
 ## 生命周期与数据
 
@@ -77,4 +79,4 @@ pnpm --filter dsh-claude-ssh check
 pnpm --filter dsh-remote-agents pack:plugin
 ```
 
-40 项协议与服务测试、原 Claude 的 76 个测试文件，以及桌面/手机浏览器回归已通过。协议回归使用隔离的 CLI 测试传输，反重力进程转发器使用真实子进程检查信号中断，浏览器回归使用模拟远程机器。另已用本机真实 Codex、Claude、Grok、CodeBuddy 验证初始化与模型发现，用真实 DSH/agy 验证空会话启动和恢复；这些检查不发送推理任务。真实供应商任务与远程 SSH 环境仍需部署时验证。
+46 项协议与服务测试、原 Claude 的 76 个测试文件，以及桌面/手机浏览器回归已通过。协议回归使用隔离的 CLI 测试传输，反重力进程转发器使用真实子进程检查信号中断，浏览器回归使用模拟远程机器。另已用本机真实 Codex、Claude、Grok、CodeBuddy 验证初始化与模型发现，用真实 DSH/agy 验证空会话启动和恢复；这些检查不发送推理任务。真实供应商任务与远程 SSH 环境仍需部署时验证。

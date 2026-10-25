@@ -17,6 +17,7 @@ export function createHandler(service: RemoteAgentsService) {
       const hostId = () => identifier(input.hostId), taskId = () => identifier(input.taskId);
       let result: unknown;
       switch (action) {
+        case 'sshConfig': result = await service.sshConfig(); break;
         case 'addHost': result = await service.addHost(input.host); break;
         case 'removeHost': result = await service.removeHost(hostId()); break;
         case 'connect': result = await service.connect(hostId()); break;

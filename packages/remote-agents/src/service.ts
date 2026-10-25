@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend, type Backend, type BackendFactory } from './backend.js';
 import { Store } from './store.js';
+import { readSshConfigHosts } from './ssh-config.js';
 import { field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task, type TaskDetail, type TaskInput } from './domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
@@ -9,7 +10,8 @@ export class RemoteAgentsService {
   private readonly locks = new Map<string, Promise<unknown>>();
   private closed = false;
   private readonly factory: BackendFactory;
-  constructor(readonly store: Store, factory?: BackendFactory) { this.factory = factory ?? (host => new SshBackend(host, store)); }
+  constructor(readonly store: Store, factory?: BackendFactory, private readonly readSshConfig = readSshConfigHosts) { this.factory = factory ?? (host => new SshBackend(host, store)); }
+  async sshConfig() { return this.readSshConfig(); }
   snapshot(): Dashboard {
     const state = this.store.snapshot();
     return {
