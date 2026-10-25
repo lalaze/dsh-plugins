@@ -9,6 +9,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | Package | Directory | Description |
 | --- | --- | --- |
 | `dsh-claude-ssh` | [packages/claude-ssh](packages/claude-ssh/README.md) | Use remote Claude Code over system OpenSSH in DSH |
+| `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Complete Claude SSH integration plus direct SSH tasks for Claude, Codex, DSH, Antigravity, Grok and CodeBuddy, with approvals and recovery |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
 | `dsh-magpie-fast` | [packages/magpie-fast](packages/magpie-fast/README.md) | GPT-only lightning toggle for priority processing on existing providers, including remote Magpie |

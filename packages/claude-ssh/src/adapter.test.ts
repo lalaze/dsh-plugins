@@ -418,12 +418,12 @@ const skill = (name: string): LooseMessage =>
 }
 // image-only / attachment-only user turn: no typed text, but not rejected — synthesize a prompt
 assert.equal(
-  buildPrompt([
+  buildPrompt(messageList([
     {
       role: "user",
-      content: [{ type: "image", attachment: { path: "/x.png" } }],
+      content: [{ type: "image", attachment: { attachmentId: "image-only", mediaType: "image/png" } }],
     },
-  ]),
+  ])),
   "(see attached)",
 );
 // no user turn at all still rejects

@@ -10880,7 +10880,12 @@ function IdleChip({ sessionId }: { sessionId: string }) {
 
 /** Wire the plugin into a mounted dsh context: follow deep links and start every watcher, so a
  *  fresh session gets turn status, notices, folds and hints. */
-export function apply(ctx: ClientCtx) {
+export interface EmbeddedClientOptions {
+  /** Mount the original settings view inside a parent plugin instead of adding another row. */
+  registerSettings?: (component: FC<{ close?: () => void }>) => void;
+  settingsLabel?: string;
+}
+export function apply(ctx: ClientCtx, embedded: EmbeddedClientOptions = {}) {
   // A context applied after an earlier one of this same module was disposed starts live, and dsh's
   // own dispose is what ends it.
   revive();
@@ -10917,7 +10922,7 @@ export function apply(ctx: ClientCtx) {
   window.addEventListener(HINTS_EVENT, reapplyTheme);
   whenContextGone(() => window.removeEventListener(HINTS_EVENT, reapplyTheme));
 
-  const SECTION_LABEL = "Oh My Claude";
+  const SECTION_LABEL = embedded.settingsLabel ?? "Oh My Claude";
 
   /**
    * Renders nothing; on each mount and update finds the settings nav row labelled SECTION_LABEL
@@ -10961,7 +10966,7 @@ export function apply(ctx: ClientCtx) {
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
           <Spark size={16} />
           <h2 id="dsh-oh-my-claude-heading" style={{ margin: 0, fontSize: 18 }}>
-            Oh My Claude
+            {SECTION_LABEL}
           </h2>
           {/* A newer plugin on npm is a fact about the plugin, so it sits by its name, not in a
               box row: the one place everyone who opens this section looks. */}
@@ -11037,7 +11042,8 @@ export function apply(ctx: ClientCtx) {
     );
   }
 
-  ctx.slots.inject("settings.section", () => {
+  if (embedded.registerSettings) embedded.registerSettings(Section);
+  else ctx.slots.inject("settings.section", () => {
     ctx.slots.register(
       {
         name: "settings.section",
@@ -11056,7 +11062,7 @@ export function apply(ctx: ClientCtx) {
   // mounts whenever the dialog opens (`settings.header` is single, dsh's own title holds it), so
   // a registrant there that renders nothing can swap our row's gear for the spark, in the row's
   // own text colour like dsh's glyphs.
-  ctx.slots.inject("settings.action", () => {
+  if (!embedded.registerSettings) ctx.slots.inject("settings.action", () => {
     ctx.slots.register(
       { name: "settings.action", id: "claude-nav-icon", order: 99, inject: () => ({}) },
       SectionNavIcon,

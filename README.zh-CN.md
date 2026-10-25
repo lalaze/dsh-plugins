@@ -9,6 +9,7 @@
 | 插件 | 目录 | 功能 |
 | --- | --- | --- |
 | `dsh-claude-ssh` | [packages/claude-ssh](packages/claude-ssh/README.zh-CN.md) | 在 DSH 中通过系统 OpenSSH 使用远端 Claude Code |
+| `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | 合并完整 Claude SSH 接入；DSH 直接通过 SSH 选择远程机器、CLI 和模型，管理任务、审批与恢复 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
 | `dsh-magpie-fast` | [packages/magpie-fast](packages/magpie-fast/README.zh-CN.md) | 仅 GPT 显示的闪电开关，沿用已有提供商为远端 Magpie 等请求开启 Fast |

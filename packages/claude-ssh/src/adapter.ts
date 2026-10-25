@@ -12,6 +12,7 @@ import { loadStarted, loadCommandCatalog, STATE_DIR, trace } from "./state.js";
 import { type ToolMode } from "./rows-probe.js";
 import { errorText } from "./process.js";
 import { bindServerLocale } from "./locale.js";
+import { claimClaudeRuntime } from './runtime-owner.js';
 export { markBusy, takeInterrupted } from "./state.js";
 export { forkTranscriptText } from "./transcript.js";
 export { Translator, type TranslatorBlock, type FallbackRecord } from "./translator.js";
@@ -172,6 +173,14 @@ export { ADAPTER_CURRENT };
 
 /** The entry point dsh calls: build the adapter, register its provider and adapter, probe the login, and pin the instance on globalThis so a re-instantiation at boot shares the one already running. */
 export function apply(ctx: PluginContext, config: Schemastery.TypeT<typeof Config>) {
+  const release = claimClaudeRuntime(ctx, config.providerId || 'claude-code');
+  try {
+    ctx.effect?.(() => release);
+    return installClaude(ctx, config);
+  } catch (error) { release(); throw error; }
+}
+
+function installClaude(ctx: PluginContext, config: Schemastery.TypeT<typeof Config>) {
   // Looked up on every read: `settings` is not in `inject`, so at apply it may not be mounted yet, and
   // a reference taken now stays undefined for the life of the process (every header wrote English).
   bindServerLocale({

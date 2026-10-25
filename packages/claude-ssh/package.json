@@ -11,12 +11,15 @@
   "exports": {
     ".": { "types": "./lib/server/adapter.d.ts", "default": "./lib/server/adapter.js" },
     "./client": "./lib/client.js",
+    "./embedded-client": { "types": "./lib/server/embedded-client.d.ts", "default": "./lib/server/embedded-client.js" },
+    "./process": { "types": "./lib/server/process.d.ts", "default": "./lib/server/process.js" },
     "./package.json": "./package.json",
     "./locale/*.json": "./locale/*.json"
   },
   "files": ["lib", "locale", "icon.svg", "cordis.patch.yml", "README.md", "README.zh-CN.md", "LICENSE", "THIRD_PARTY_NOTICES.md", "UPSTREAM.md", "CHANGELOG.md", "docs"],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs",
+    "build": "pnpm run build:server && node ../../scripts/build-client.mjs",
+    "build:server": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test.mjs",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",

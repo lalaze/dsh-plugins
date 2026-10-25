@@ -1,0 +1,121 @@
+import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
+
+const session = `dsh-remote-ui-${process.pid}`;
+const screenshots = process.env.DSH_REMOTE_SCREENSHOTS;
+if (screenshots) await mkdir(screenshots, { recursive: true });
+const server = spawn(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('./preview.mjs', import.meta.url))], { env: { ...process.env, DSH_REMOTE_PREVIEW_PORT: '0' }, stdio: ['ignore', 'pipe', 'inherit'] });
+function browser(...args) {
+  const result = JSON.parse(execFileSync('agent-browser', ['--session', session, '--json', ...args], { encoding: 'utf8', timeout: 35000, maxBuffer: 1024 * 1024 * 3 }));
+  if (!result.success) throw new Error(result.error ?? 'Browser command failed'); return result.data;
+}
+const evaluate = source => browser('eval', '-b', Buffer.from(source).toString('base64')).result;
+const wait = source => browser('wait', '--fn', source);
+const expect = source => { if (!evaluate(source)) throw new Error(`UI assertion failed: ${source}`); };
+const state = () => evaluate('(async()=>await (await fetch("/__fixture")).json())()');
+const image = name => { if (screenshots) browser('screenshot', '--full', `${screenshots}/${name}.png`); };
+try {
+  const base = await new Promise((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => reject(new Error('Preview startup timed out')), 20000);
+    server.stdout.on('data', chunk => { output += chunk; const match = output.match(/http:\/\/100\.96\.195\.115:\d+\//); if (match) { clearTimeout(timer); resolve(match[0]); } });
+    server.once('exit', code => { clearTimeout(timer); reject(new Error(`Preview exited ${code}`)); });
+    server.once('error', error => { clearTimeout(timer); reject(error); });
+  });
+  browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', base);
+  wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")'); browser('snapshot', '-i');
+  browser('fill', '[aria-label="机器名称"]', 'Build server');
+  browser('fill', '[aria-label="连接地址"]', 'ssh://builder@build-box');
+  browser('click', 'button:text-is("保存机器")');
+  wait('document.querySelector("[aria-label=已有工作区] option[value=workspace-one]")'); browser('snapshot', '-i');
+  browser('select', '[aria-label="已有工作区"]', 'workspace-one'); browser('click', 'button:text-is("发现 CLI")');
+  wait(`document.querySelector('[aria-label="CLI 供应商"] option[value="codex"]')`); browser('snapshot', '-i');
+  expect(`document.querySelector('[aria-label="CLI 供应商"] option[value="claude"]').disabled`);
+  browser('select', '[aria-label="CLI 供应商"]', 'dsh'); expect('document.querySelector("[aria-label=模型]").value === "dsh-remote"');
+  browser('select', '[aria-label="CLI 供应商"]', 'antigravity'); expect('document.querySelector("[aria-label=模型]").value === "agy-remote" && document.querySelector(".dsh-ra").textContent.includes("反重力无头模式会拒绝")');
+  browser('select', '[aria-label="CLI 供应商"]', 'grok'); expect('document.querySelector("[aria-label=模型]").value === "grok-remote"');
+  browser('select', '[aria-label="CLI 供应商"]', 'codebuddy'); expect('document.querySelector("[aria-label=模型]").value === "codebuddy-remote" && document.querySelector("[aria-label=思考强度]").value === "high"');
+  expect('!document.querySelector("[aria-label=\\"CLI 供应商\\"] option[value=kimi]") && !document.querySelector("[aria-label=\\"CLI 供应商\\"] option[value=opencode]")');
+  expect('!document.querySelector("[aria-label=\\"CLI 供应商\\"] option[value=gemini]")');
+  browser('select', '[aria-label="CLI 供应商"]', 'codex'); browser('select', '[aria-label="思考强度"]', 'high');
+  expect('document.querySelector("[aria-label=权限模式]").value === "ask"');
+  // A rejected saved submission must release the persistent creation lock.
+  evaluate(`localStorage.setItem('dsh-remote-agents.create', JSON.stringify({ id: 'invalid-saved-create', hostId: document.querySelector('[aria-label=机器]').value, cwd: '/srv/project', provider: 'codex', model: 'remote-model', prompt: 'x'.repeat(100001) }))`);
+  browser('open', base); wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="找回此次提交")');
+  browser('click', 'button:text-is("找回此次提交")'); wait('document.querySelector("[role=alert]")');
+  expect('localStorage.getItem("dsh-remote-agents.create") === null');
+  expect('!Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="找回此次提交")');
+  expect('document.querySelector("[aria-label=任务指令]").value.length === 100001 && document.querySelector("[aria-label=任务指令]").maxLength === 100000');
+  if (state().creates !== 0) throw new Error('Rejected instructions created a task');
+  browser('open', base); wait('document.querySelector("[aria-label=远程项目]")');
+  expect('localStorage.getItem("dsh-remote-agents.create") === null');
+  // An ambiguous timeout retains the request ID; the user can discard the local record.
+  evaluate(`localStorage.setItem('dsh-remote-agents.create', JSON.stringify({ id: 'timeout-saved-create', hostId: document.querySelector('[aria-label=机器]').value, cwd: '/srv/project', provider: 'codex', model: 'remote-model', prompt: 'Keep these instructions for editing' }))`);
+  browser('open', base); wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="找回此次提交")');
+  evaluate(`window.actualFetch=window.fetch;window.fetch=(...args)=>args[1]?.body&&JSON.parse(args[1].body).action==='create'?Promise.resolve(Response.json({error:'模拟提交超时'},{status:408})):window.actualFetch(...args)`);
+  browser('click', 'button:text-is("找回此次提交")'); wait('document.querySelector("[role=alert]")?.textContent.includes("模拟提交超时")');
+  expect('JSON.parse(localStorage.getItem("dsh-remote-agents.create")).id === "timeout-saved-create"');
+  browser('click', 'button:text-is("清除此提交记录")');
+  expect('localStorage.getItem("dsh-remote-agents.create") === null && document.querySelector("[aria-label=任务指令]").value === "Keep these instructions for editing"');
+  if (state().creates !== 0) throw new Error('Discarding a saved submission started a task');
+  browser('open', base); wait('document.querySelector("[aria-label=远程项目]")');
+  browser('click', 'button:text-is("发现 CLI")'); wait('document.querySelector("[aria-label=模型]").value === "remote-model"');
+  browser('fill', '[aria-label="任务指令"]', '修复远程项目中的校验逻辑，并运行测试');
+  // Drop only the HTTP response after the real server accepted creation.
+  evaluate(`window.actualFetch=window.fetch;window.dropCreate=true;window.fetch=async(...args)=>{const response=await window.actualFetch(...args);if(args[1]?.body&&JSON.parse(args[1].body).action==='create'&&window.dropCreate){window.dropCreate=false;throw new Error('模拟提交响应丢失')}return response}`);
+  browser('click', 'button:text-is("开始任务")');
+  wait('document.querySelector("[role=alert]")?.textContent.includes("模拟提交响应丢失")');
+  browser('open', base); wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="找回此次提交")'); browser('snapshot', '-i');
+  browser('click', 'button:text-is("找回此次提交")');
+  wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="允许运行一次")'); browser('snapshot', '-i');
+  if (state().creates !== 1) throw new Error('Creation recovery duplicated the remote task');
+  image('approval-desktop'); browser('click', 'button:text-is("允许运行一次")');
+  wait('document.querySelector(".ra-question input[type=checkbox]")'); browser('snapshot', '-i');
+  browser('check', 'label:has-text("Unit tests") input'); browser('check', 'label:has-text("Type check") input');
+  browser('fill', 'textarea[aria-label^="Checks:"]', 'Smoke test'); browser('click', 'button:text-is("提交回答")');
+  wait('document.querySelector(".ra-output")?.textContent.includes("测试全部通过")');
+  expect('document.querySelectorAll(".ra-message[data-kind=user_message]").length === 1');
+  expect('document.querySelectorAll(".ra-tool").length === 1');
+  if (state().answers.at(-1).answer.answers.Checks !== 'Unit tests, Type check, Smoke test') throw new Error('Question response lost selections or free text');
+  browser('fill', '[aria-label="后续指令"]', 'Review the result once more'); browser('click', 'button:text-is("发送后续指令")');
+  wait('document.querySelector(".ra-output")?.textContent.includes("Follow-up completed.")');
+  if (state().sends !== 1) throw new Error('Follow-up sent more than once');
+  browser('open', base); wait('document.querySelector(".ra-output")?.textContent.includes("Follow-up completed.")');
+  expect('document.querySelectorAll(".ra-message[data-kind=user_message]").length === 2');
+  evaluate('(async()=>await fetch("/__fixture",{method:"POST",body:JSON.stringify({failReads:true})}))()');
+  wait('document.querySelector("[role=alert]")?.textContent.includes("模拟连接中断")');
+  evaluate('(async()=>await fetch("/__fixture",{method:"POST",body:JSON.stringify({failReads:false})}))()');
+  wait('!document.querySelector("[role=alert]")');
+  expect('document.querySelectorAll(".ra-message[data-kind=user_message]").length === 2');
+  browser('click', 'button:text-is("新建任务")'); wait('document.querySelector("[aria-label=远程项目]")');
+  browser('click', 'button:text-is("发现 CLI")'); wait('document.querySelector("[aria-label=模型]").value === "remote-model"');
+  browser('fill', '[aria-label="任务指令"]', '保持运行以验证原生停止'); browser('click', 'button:text-is("开始任务")');
+  wait('document.querySelector(".ra-permission")'); browser('snapshot', '-i');
+  browser('click', 'button:text-is("停止任务")'); wait('!document.querySelector(".ra-permission")');
+  if (state().stops !== 1) throw new Error('Native cancel was not called');
+  browser('click', '.ra-task-button:last-child'); wait('document.querySelector(".ra-output")?.textContent.includes("Follow-up completed.")');
+  evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".ra-top h2").textContent === "Remote agents"');
+  evaluate('window.fixture.setLocale("zh-CN")'); wait('document.querySelector(".ra-top h2").textContent === "远程任务"');
+  browser('set', 'viewport', '1440', '1000'); browser('set', 'media', 'dark'); image('task-dark');
+  browser('set', 'media', 'light'); image('task-light');
+  browser('set', 'viewport', '390', '844'); image('task-mobile');
+  expect('document.documentElement.scrollWidth <= 390');
+  browser('click', '[aria-label="打开远程任务"]'); wait('document.querySelector("dialog[open]")'); browser('snapshot', '-i');
+  expect('document.querySelector("dialog").contains(document.activeElement)');
+  evaluate('window.hostEscapeCount=0;document.addEventListener("keydown",event=>{if(event.key==="Escape")window.hostEscapeCount++})');
+  browser('click', 'dialog button:text-is("Claude SSH")'); wait('document.querySelector("[data-remote-native-claude] [data-omc-settings]")');
+  expect('window.fixture.slots.some(key=>key.includes("conversation.input.left:oh-my-claude"))');
+  expect('document.querySelector("#dsh-oh-my-claude-heading").textContent === "Claude SSH"');
+  image('merged-claude-settings');
+  browser('press', 'Tab'); expect('document.querySelector("dialog").contains(document.activeElement)');
+  browser('press', 'Escape'); wait('!document.querySelector("dialog")');
+  expect('window.hostEscapeCount === 0 && document.activeElement.getAttribute("aria-label") === "打开远程任务"');
+  if (state().stops !== 1) throw new Error('Closing the task dialog canceled remote work');
+  const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
+  console.log('PASS: rejected submission unlock, timeout preservation and local discard, HTTP recovery without duplicate execution, host/project/provider/model selection, approvals, questions, follow-ups, reconnect history, stop, locales, desktop/mobile layouts and dialog keyboard isolation');
+} finally {
+  try { browser('close'); } catch {}
+  server.kill('SIGTERM');
+  if (server.exitCode === null) await new Promise(resolve => server.once('exit', resolve));
+}
