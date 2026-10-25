@@ -7,6 +7,8 @@ export const zh: Record<string, string> = {
   'Remote agents': '远程任务', 'Run a coding CLI in a remote project.': '选择远程项目，交给那台机器上的 CLI 执行。',
   'Hosts': '远程机器', 'Add host': '添加机器', 'Host name': '机器名称', 'Connection': '连接地址',
   'SSH config host': '已有 SSH 配置', 'Choose an SSH alias…': '选择 SSH 别名…',
+  'Choose SSH connection': '选择 SSH 连接', 'Search SSH aliases': '搜索 SSH 别名', 'Search SSH aliases…': '搜索 SSH 别名…',
+  'No matching SSH aliases': '没有匹配的 SSH 别名', '{count} connections': '{count} 个连接', 'Navigate': '切换', 'Select': '选择',
   'Loading SSH config…': '正在读取 SSH 配置…', 'Refresh SSH config': '刷新 SSH 配置', 'Already saved': '已添加',
   'Choose a Host alias from this DSH machine’s SSH config. SSH keeps its user, port, key and jump-host settings.': '从运行 DSH 的机器已有的 SSH 配置中选择别名，沿用其用户、端口、密钥和跳板设置。',
   'No concrete Host aliases found in SSH config. You can enter a connection below.': 'SSH 配置中没有可选的具体主机别名，也可以在下方手动填写连接地址。',

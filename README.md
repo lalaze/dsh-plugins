@@ -57,7 +57,7 @@ Claude's check includes the upstream regression suite and remote-workspace compa
 
 ## Installation
 
-Download the merged [Remote Agents 0.4.2 archive](https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.2/dsh-remote-agents-0.4.2.tgz) without building. See the [installation and Claude migration instructions](packages/remote-agents/README.md#install-and-migrate) for use on another machine.
+Download the merged [Remote Agents 0.4.3 archive](https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.3/dsh-remote-agents-0.4.3.tgz) without building. See the [installation and Claude migration instructions](packages/remote-agents/README.md#install-and-migrate) for use on another machine.
 
 Install an individual built archive into the desired DSH profile:
 

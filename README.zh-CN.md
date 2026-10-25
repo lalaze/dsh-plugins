@@ -57,7 +57,7 @@ Claude 的 check 包含模板回归与远程工作区兼容测试。离线测试
 
 ## 安装插件
 
-远程任务合并插件可直接下载 [Remote Agents 0.4.2 安装包](https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.2/dsh-remote-agents-0.4.2.tgz)，无需构建。跨机器安装命令与原 Claude 插件迁移步骤见[安装说明](packages/remote-agents/README.zh-CN.md#安装与原-claude-插件迁移)。
+远程任务合并插件可直接下载 [Remote Agents 0.4.3 安装包](https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.3/dsh-remote-agents-0.4.3.tgz)，无需构建。跨机器安装命令与原 Claude 插件迁移步骤见[安装说明](packages/remote-agents/README.zh-CN.md#安装与原-claude-插件迁移)。
 
 构建后按插件安装到目标 DSH profile：
 

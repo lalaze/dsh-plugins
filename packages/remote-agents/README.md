@@ -25,12 +25,12 @@ Grok uses the official Grok Build CLI with leader mode explicitly disabled. Code
 
 Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0.
 
-Download the archive on the **machine running DSH** from the [Remote Agents 0.4.2 release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.2). No repository checkout or build is needed. To install into the Web profile:
+Download the archive on the **machine running DSH** from the [Remote Agents 0.4.3 release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.3). No repository checkout or build is needed. To install into the Web profile:
 
 ```sh
-curl -fL -o dsh-remote-agents-0.4.2.tgz \
-  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.2/dsh-remote-agents-0.4.2.tgz
-dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.2.tgz"
+curl -fL -o dsh-remote-agents-0.4.3.tgz \
+  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.3/dsh-remote-agents-0.4.3.tgz
+dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.3.tgz"
 ```
 
 Restart that DSH profile, refresh the browser and open **Settings → Remote agents**. Substitute your profile name for `web` if needed. For Desktop, fully quit the app, use the **desktop application's bundled `dsh` command** with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. Hosts with an upload installer can also accept the downloaded tgz.
@@ -50,6 +50,8 @@ Open **Settings → Remote agents → CLI tasks → Add host**, choose an **SSH 
 Tasks execute in the selected remote project. Saved workspaces list directories previously used by this panel; arbitrary accessible absolute paths can also be entered. Local project synchronization and automatic worktree creation are outside this release.
 
 The SSH config picker lists concrete `Host` aliases without expanding wildcard hosts, running `Match exec` or opening a connection. It saves the original alias so OpenSSH resolves `HostName`, `User`, `Port`, `IdentityFile` and `ProxyJump` at connection time. Aliases declared in conditional Includes may also appear; OpenSSH decides whether those conditions apply when connecting. Include paths that require a target-specific context cannot be enumerated; enter those aliases manually. Manual entry remains available when configuration is absent or unreadable.
+
+The dropdown follows the DSH theme, supports alias search and arrow/Enter selection, and keeps long lists within a scrolling panel. Saved connections are marked. Escape closes only the dropdown and returns focus to its trigger.
 
 ## Persistence and recovery
 

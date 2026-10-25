@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { Host, SshConfigHost, SshConfigHosts } from '../domain.js';
 import { api } from './api.js';
 import { localizeError, ui } from './i18n.js';
+import { SshAliasSelect } from './ssh-alias-select.js';
 
 export function SshHostPicker({ hosts, connection, disabled, select }: { hosts: Host[]; connection: string; disabled: boolean; select: (host: SshConfigHost) => void }) {
   const [config, setConfig] = useState<SshConfigHosts>({ hosts: [], warnings: [] });
@@ -13,15 +14,9 @@ export function SshHostPicker({ hosts, connection, disabled, select }: { hosts: 
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [revision]);
-  const selected = config.hosts.some(host => host.connection === connection) ? connection : '';
   return <div className="ra-ssh-config">
     <div className="ra-actions" style={{ alignItems: 'end' }}>
-      <label className="ra-field" style={{ flex: '1 1 220px', minWidth: 0 }}>{ui('SSH config host')}
-        <select aria-label={ui('SSH config host')} disabled={disabled || loading || !config.hosts.length} value={selected} onChange={event => { const host = config.hosts.find(host => host.connection === event.target.value); if (host) select(host); }}>
-          <option value="">{ui(loading ? 'Loading SSH config…' : 'Choose an SSH alias…')}</option>
-          {config.hosts.map(host => { const saved = hosts.some(saved => saved.connection === host.connection); return <option value={host.connection} key={host.alias} disabled={saved}>{host.alias}{saved ? ` · ${ui('Already saved')}` : ''}</option>; })}
-        </select>
-      </label>
+      <SshAliasSelect options={config.hosts} hosts={hosts} connection={connection} disabled={disabled} loading={loading} select={select} />
       <button type="button" disabled={disabled || loading} onClick={() => setRevision(value => value + 1)}>{ui('Refresh SSH config')}</button>
     </div>
     <p className="ra-foot">{ui('Choose a Host alias from this DSH machine’s SSH config. SSH keeps its user, port, key and jump-host settings.')}</p>

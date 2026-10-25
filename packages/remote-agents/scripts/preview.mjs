@@ -40,7 +40,7 @@ const factory = host => {
   };
   return backend;
 };
-const sshConfig = { hosts: [{ alias: 'build-box', connection: 'ssh://build-box' }, { alias: 'ubuntu-dev', connection: 'ssh://ubuntu-dev' }], warnings: [] };
+const sshConfig = { hosts: ['build-box', 'code', 'code-233', 'code-home', 'code-home-233', 'docker', 'macmini', 'mihomo', 'pve', 'ubuntu-dev', 'unraid', 'window'].map(alias => ({ alias, connection: `ssh://${alias}` })), warnings: [] };
 const service = new RemoteAgentsService(store, factory, async () => sshConfig), handler = createHandler(service);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = await build({ absWorkingDir: root, entryPoints: ['test/ui/app.fixture.tsx'], bundle: true, write: false, outfile: 'preview.js', loader: { '.woff2': 'dataurl', '.woff': 'dataurl', '.ttf': 'dataurl' }, platform: 'browser', format: 'esm', target: 'es2022' });

@@ -14,6 +14,11 @@ const evaluate = source => browser('eval', '-b', Buffer.from(source).toString('b
 const wait = source => browser('wait', '--fn', source);
 const expect = source => { if (!evaluate(source)) throw new Error(`UI assertion failed: ${source}`); };
 const state = () => evaluate('(async()=>await (await fetch("/__fixture")).json())()');
+const chooseSsh = connection => {
+  browser('click', '.ra-ssh-trigger'); wait('document.querySelector(".ra-ssh-menu:popover-open")');
+  browser('click', `.ra-ssh-menu:popover-open [data-connection="${connection}"]`);
+  wait('!document.querySelector(".ra-ssh-menu:popover-open")');
+};
 const image = name => { if (screenshots) browser('screenshot', '--full', `${screenshots}/${name}.png`); };
 try {
   const base = await new Promise((resolve, reject) => {
@@ -25,8 +30,27 @@ try {
   });
   browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', base);
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")'); browser('snapshot', '-i');
-  wait('document.querySelector("[aria-label=\\"已有 SSH 配置\\"] option[value=\\"ssh://build-box\\"]")');
-  browser('select', '[aria-label="已有 SSH 配置"]', 'ssh://build-box');
+  wait('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://build-box\\"]")');
+  browser('click', '.ra-ssh-trigger'); wait('document.querySelector(".ra-ssh-menu:popover-open")');
+  expect('document.activeElement.getAttribute("aria-label") === "搜索 SSH 别名"');
+  browser('set', 'viewport', '1440', '1000'); browser('set', 'media', 'dark'); image('ssh-dropdown-dark');
+  expect('document.querySelector(".ra-ssh-menu:popover-open .ra-ssh-options").scrollHeight > document.querySelector(".ra-ssh-menu:popover-open .ra-ssh-options").clientHeight');
+  browser('set', 'media', 'light'); image('ssh-dropdown-light');
+  browser('set', 'viewport', '390', '844'); image('ssh-dropdown-mobile');
+  expect('(()=>{const r=document.querySelector(".ra-ssh-menu:popover-open").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})()');
+  browser('set', 'viewport', '1440', '1000');
+  browser('fill', '[aria-label="搜索 SSH 别名"]', 'code-home');
+  expect('document.querySelectorAll(".ra-ssh-menu:popover-open [role=option]").length === 2');
+  browser('press', 'ArrowDown'); browser('press', 'Enter'); wait('!document.querySelector(".ra-ssh-menu:popover-open")');
+  expect('document.querySelector("[aria-label=连接地址]").value === "ssh://code-home-233" && document.activeElement.classList.contains("ra-ssh-trigger")');
+  browser('click', '.ra-ssh-trigger'); wait('document.querySelector(".ra-ssh-menu:popover-open")');
+  expect('document.querySelector("[aria-label=\\"搜索 SSH 别名\\"]").value === ""');
+  browser('fill', '[aria-label="搜索 SSH 别名"]', 'no-such-alias'); browser('press', 'Enter');
+  expect('document.querySelector(".ra-ssh-menu:popover-open").textContent.includes("没有匹配的 SSH 别名")');
+  if (state().state.hosts.length) throw new Error('Enter in the alias search submitted the host form');
+  browser('press', 'Escape'); wait('!document.querySelector(".ra-ssh-menu:popover-open")');
+  expect('document.activeElement.classList.contains("ra-ssh-trigger")');
+  chooseSsh('ssh://build-box');
   expect('document.querySelector("[aria-label=机器名称]").value === "build-box" && document.querySelector("[aria-label=连接地址]").value === "ssh://build-box"');
   if (state().state.hosts.length) throw new Error('Selecting an alias saved or connected a host before submission');
   evaluate('(async()=>await fetch("/__fixture",{method:"POST",body:JSON.stringify({sshConfig:{hosts:[]}})}))()');
@@ -38,9 +62,9 @@ try {
   expect('!document.querySelector("[aria-label=连接地址]").disabled');
   evaluate('window.fetch=window.originalSshFetch');
   evaluate('(async()=>await fetch("/__fixture",{method:"POST",body:JSON.stringify({sshConfig:{hosts:[{alias:"build-box",connection:"ssh://build-box"},{alias:"new-from-include",connection:"ssh://new-from-include"}]}})}))()');
-  browser('click', 'button:text-is("刷新 SSH 配置")'); wait('document.querySelector("[aria-label=\\"已有 SSH 配置\\"] option[value=\\"ssh://new-from-include\\"]")');
+  browser('click', 'button:text-is("刷新 SSH 配置")'); wait('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://new-from-include\\"]")');
   expect('!document.querySelector(".ra-ssh-config [role=alert]") && document.querySelector("[aria-label=连接地址]").value === "ssh://manual@build-box"');
-  browser('select', '[aria-label="已有 SSH 配置"]', 'ssh://build-box');
+  chooseSsh('ssh://build-box');
   browser('set', 'viewport', '1440', '1000'); image('ssh-config-desktop');
   browser('set', 'viewport', '390', '844'); image('ssh-config-mobile');
   expect('document.documentElement.scrollWidth <= 390');
@@ -49,7 +73,7 @@ try {
   browser('click', 'button:text-is("保存机器")');
   wait('document.querySelector("[aria-label=已有工作区] option[value=workspace-one]")'); browser('snapshot', '-i');
   if (state().state.hosts[0].connection !== 'ssh://build-box') throw new Error('Saved host lost its SSH config alias');
-  expect('document.querySelector("[aria-label=\\"已有 SSH 配置\\"] option[value=\\"ssh://build-box\\"]").disabled');
+  expect('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://build-box\\"]").getAttribute("aria-disabled") === "true"');
   browser('select', '[aria-label="已有工作区"]', 'workspace-one'); browser('click', 'button:text-is("发现 CLI")');
   wait(`document.querySelector('[aria-label="CLI 供应商"] option[value="codex"]')`); browser('snapshot', '-i');
   expect(`document.querySelector('[aria-label="CLI 供应商"] option[value="claude"]').disabled`);
@@ -110,8 +134,9 @@ try {
   expect(`localStorage.getItem(${JSON.stringify(messageStorageKey)}) === null`);
   evaluate(`localStorage.setItem(${JSON.stringify(messageStorageKey)},JSON.stringify({taskId:${JSON.stringify(firstTask.id)},id:'timeout-followup-000',text:'Keep this follow-up for editing'}))`);
   browser('open', base); wait('Array.from(document.querySelectorAll("button")).some(b=>b.textContent==="查看送达状态")');
-  evaluate(`window.actualFetch=window.fetch;window.fetch=(...args)=>args[1]?.body&&JSON.parse(args[1].body).action==='send'?Promise.resolve(Response.json({error:'模拟消息超时'},{status:408})):window.actualFetch(...args)`);
-  browser('click', 'button:text-is("查看送达状态")'); wait('document.querySelector("[role=alert]")?.textContent.includes("模拟消息超时")');
+  evaluate(`window.actualFetch=window.fetch;window.followupTimeoutRequests=0;window.fetch=(...args)=>{if(args[1]?.body&&JSON.parse(args[1].body).action==='send'){window.followupTimeoutRequests++;return Promise.resolve(Response.json({error:'模拟消息超时'},{status:408}))}return window.actualFetch(...args)}`);
+  // Polling can clear a transient action alert; wait for the timeout response, then check durable UI state.
+  browser('click', 'button:text-is("查看送达状态")'); wait('window.followupTimeoutRequests === 1');
   expect(`JSON.parse(localStorage.getItem(${JSON.stringify(messageStorageKey)})).id === 'timeout-followup-000' && document.querySelector('[aria-label=后续指令]').disabled`);
   browser('click', 'button:text-is("清除此消息记录")');
   expect(`localStorage.getItem(${JSON.stringify(messageStorageKey)}) === null && document.querySelector('[aria-label=后续指令]').value === 'Keep this follow-up for editing' && !document.querySelector('[aria-label=后续指令]').disabled`);
@@ -149,6 +174,15 @@ try {
   browser('click', '[aria-label="打开远程任务"]'); wait('document.querySelector("dialog[open]")'); browser('snapshot', '-i');
   expect('document.querySelector("dialog").contains(document.activeElement)');
   evaluate('window.hostEscapeCount=0;document.addEventListener("keydown",event=>{if(event.key==="Escape")window.hostEscapeCount++})');
+  browser('click', 'dialog .ra-host-form summary'); browser('click', 'dialog .ra-ssh-trigger'); wait('document.querySelector("dialog .ra-ssh-menu:popover-open")');
+  expect('document.activeElement === document.querySelector("dialog [aria-label=\\"搜索 SSH 别名\\"]")');
+  expect('document.querySelector("dialog .ra-ssh-menu:popover-open [data-connection=\\"ssh://build-box\\"]").getAttribute("aria-disabled") === "true"');
+  browser('press', 'Escape'); wait('!document.querySelector("dialog .ra-ssh-menu:popover-open")');
+  expect('document.querySelector("dialog[open]") && window.hostEscapeCount === 0 && document.activeElement === document.querySelector("dialog .ra-ssh-trigger")');
+  browser('click', 'dialog .ra-ssh-trigger'); wait('document.querySelector("dialog .ra-ssh-menu:popover-open")');
+  browser('fill', 'dialog [aria-label="搜索 SSH 别名"]', 'new-from'); browser('press', 'Enter');
+  wait('!document.querySelector("dialog .ra-ssh-menu:popover-open")');
+  expect('document.querySelector("dialog [aria-label=连接地址]").value === "ssh://new-from-include" && document.querySelector("dialog[open]")');
   browser('click', 'dialog button:text-is("Claude SSH")'); wait('document.querySelector("[data-remote-native-claude] [data-omc-settings]")');
   expect('window.fixture.slots.some(key=>key.includes("conversation.input.left:oh-my-claude"))');
   expect('document.querySelector("#dsh-oh-my-claude-heading").textContent === "Claude SSH"');
@@ -163,7 +197,7 @@ try {
   if (state().disconnects !== 1 || state().stops !== 1) throw new Error('Disconnect did not release only the idle session');
   expect('document.querySelector(".ra-output").textContent.includes("Follow-up completed.")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
-  console.log('PASS: create/follow-up rejection unlock, timeout preservation and local discard, lost-response recovery without duplicate sends, non-resumable session notice and manual disconnect, host/project/provider selection, approvals, questions, reconnect history, stop, locales, layouts and dialog keyboard isolation');
+  console.log('PASS: searchable SSH picker, keyboard selection, top-layer dialog behavior, scroll and theme/layout checks; create/follow-up rejection unlock, timeout preservation, lost-response recovery, session disconnect, approvals, reconnect, stop, locales and dialog keyboard isolation');
 } finally {
   try { browser('close'); } catch {}
   server.kill('SIGTERM');

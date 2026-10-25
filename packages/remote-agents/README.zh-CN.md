@@ -27,12 +27,12 @@ Grok 使用官方 Grok Build CLI，显式关闭 leader 模式；CodeBuddy 使用
 
 需要 Node.js ≥22.15.0、DSH ≥0.2.1-rc.2 且 <0.3.0。
 
-在**运行 DSH 的机器**下载安装包，无需克隆或构建仓库。下载见 [Remote Agents 0.4.2 Release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.2)。Web profile 安装命令：
+在**运行 DSH 的机器**下载安装包，无需克隆或构建仓库。下载见 [Remote Agents 0.4.3 Release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.3)。Web profile 安装命令：
 
 ```sh
-curl -fL -o dsh-remote-agents-0.4.2.tgz \
-  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.2/dsh-remote-agents-0.4.2.tgz
-dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.2.tgz"
+curl -fL -o dsh-remote-agents-0.4.3.tgz \
+  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.3/dsh-remote-agents-0.4.3.tgz
+dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.3.tgz"
 ```
 
 安装后重启对应的 DSH profile 并刷新浏览器，在「设置 → 远程任务」进入。使用自定义 profile 时将 `web` 替换为其名称。桌面端请先完全退出应用，使用**桌面应用自带的 `dsh` 命令**，将安装参数改为 `--profile desktop`，然后重新打开应用；npm 版 CLI 不能管理这个保留 profile。若宿主提供上传安装入口，也可上传下载的 tgz。
@@ -53,6 +53,8 @@ dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.2.tgz"
 任务在所选远程机器的项目目录运行。已有工作区列表展示此面板曾使用的目录，也可以直接输入任意可访问的绝对路径。不自动同步当前本地项目，不自动创建 worktree。
 
 SSH 配置选择器只列出具体的 `Host` 别名，不展开通配主机，也不执行 `Match exec` 或建立连接。保存时保留别名，由系统 SSH 在连接时解析 `HostName`、`User`、`Port`、`IdentityFile` 和 `ProxyJump`。条件 Include 中声明的别名也可能出现在列表里，是否生效由 SSH 连接时决定；依赖目标主机才能展开的 Include 路径需手动填写别名。没有配置或读取失败时仍可手动输入。
+
+下拉列表跟随 DSH 主题，支持搜索别名、方向键切换和 Enter 选择；长列表在面板内滚动，已添加的连接显示标记。Escape 只关闭当前下拉列表，并把焦点返回选择按钮。
 
 ## 生命周期与数据
 
