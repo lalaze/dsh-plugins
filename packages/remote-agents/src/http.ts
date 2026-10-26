@@ -29,7 +29,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'removeChatProject': result = await projects.remove(identifier(input.projectId)); break;
         case 'sshConfig': result = await service.sshConfig(); break;
         case 'addHost': result = await service.addHost(input.host, { discoverModels: true }); break;
-        case 'removeHost': result = await service.removeHost(hostId()); break;
+        case 'removeHost': result = await service.removeHost(hostId(), { deleteAgents: input.deleteAgents === true }); break;
         case 'connect': result = await service.connect(hostId()); break;
         case 'providers': result = await service.providers(hostId(), remotePath(input.cwd), input.refresh === true); break;
         case 'create': result = await service.create(input.agent, input.title === undefined ? {} : { title: field(input.title, 'title', 100) }); break;

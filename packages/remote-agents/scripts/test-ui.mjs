@@ -183,6 +183,34 @@ try {
   const sessionErrors = browser('errors'); if (sessionErrors.errors?.length) throw new Error(JSON.stringify(sessionErrors.errors));
   console.log('PASS: unified sessions, filters, native navigation, pagination, approval reopening and scope, lost-send recovery, rename/archive/restore, new sessions and mobile layouts');
 
+  // An SSH failure must not trap hosts behind undeletable saved sessions.
+  evaluate('window.fixture.setLocale("zh")');
+  const saved = state().state.agents;
+  evaluate(`(async()=>await fetch('/api/remote-agents',{method:'POST',headers:{'content-type':'application/json','X-DSH-Remote-Agents':'1'},body:JSON.stringify({action:'archive',agentId:${JSON.stringify(saved[0].id)}})}))()`);
+  fixture({ connectionError: 'ssh: Could not resolve hostname ubuntu-claude-103: nodename nor servname provided, or not known' });
+  browser('open', `${base}?offline-removal`);
+  wait('document.querySelector(".ra-host-row")');
+  browser('click', '.ra-host-row button:text-is("刷新模型")');
+  wait('document.querySelector(".ra-host-error")?.textContent.includes("Could not resolve hostname")');
+  expect('!document.querySelector(".ra-host-top button.ra-danger").disabled');
+  browser('click', '.ra-host-top button.ra-danger');
+  wait('document.querySelector(".ra-remove-confirm")');
+  expect(`document.querySelector('.ra-remove-confirm').textContent.includes('${saved.length} 个已保存会话') && document.querySelector('.ra-remove-confirm').textContent.includes('包括已归档会话')`);
+  if (state().state.agents.length !== saved.length) throw new Error('Opening removal confirmation deleted sessions');
+  browser('set', 'viewport', '390', '844');
+  expect('document.documentElement.scrollWidth <= innerWidth'); image('host-removal-offline-mobile');
+  browser('click', '.ra-remove-confirm button:text-is("取消")');
+  wait('!document.querySelector(".ra-remove-confirm")');
+  if (state().state.agents.length !== saved.length) throw new Error('Cancelling removal deleted sessions');
+  browser('click', '.ra-host-top button.ra-danger');
+  browser('click', '.ra-remove-confirm button:text-is("移除机器并删除会话")');
+  wait('!document.querySelector(".ra-host-row")');
+  const removed = state();
+  if (removed.state.hosts.length || removed.state.agents.length || removed.tasks.length || removed.modelGroups.length) throw new Error('Offline removal left host sessions or models behind');
+  fixture({ connectionError: '' });
+  browser('set', 'viewport', '1440', '1000');
+  console.log('PASS: offline host removal with active/archived sessions, explicit confirmation, cancellation and model cleanup');
+
   }
   const trigger = '[data-native-picker] button';
   const menu = '[data-menu-material]';

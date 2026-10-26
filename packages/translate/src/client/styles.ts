@@ -7,6 +7,8 @@ const CSS = `
 .dsh-translate-composer-button[data-dsh-translate-error]{color:var(--dsw-alias-state-error-primary,#e5484d)}
 .dsh-translate-composer-button svg{flex:none;width:14px;height:14px}
 .dsh-translate-composer-button [data-dsh-translate-label]{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.dsh-translate-composer-button [data-dsh-translate-lock]{flex:none;padding:0 3px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--dsw-alias-border-l3,rgba(127,127,127,.35));color:var(--dsw-alias-label-caption,currentColor);font-size:10px;font-weight:600;line-height:14px;letter-spacing:.02em}
+.dsh-translate-composer-button:is([data-dsh-translate-busy],[data-dsh-translate-undo],[data-dsh-translate-error]) [data-dsh-translate-lock]{display:none}
 `;
 
 export function installStyles(): () => void {

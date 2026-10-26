@@ -1,19 +1,21 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { access, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenSshTransport, quote } from '../src/ssh.js';
 
-async function fixture(t: TestContext, shell: 'bash' | 'zsh') {
+async function fixture(t: TestContext, shell: 'bash' | 'zsh', options: { closeDescriptors?: boolean; startup?: string } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-shell-environment-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const profile = join(root, 'profile'), executable = join(root, shell), ssh = join(root, 'ssh');
+  const temporary = join(root, "temporary ' login exports"); await mkdir(temporary);
   // Deliberately try to read stdin and emit a JSON-looking banner before the CLI starts.
-  const startup = `export DSH_TEST_REMOTE_AUTH='profile-loaded'
+  const startup = `${options.closeDescriptors ? 'exec 3<&- 4>&-\n' : ''}export DSH_TEST_REMOTE_AUTH='profile-loaded'
 printf '{"startup":"must not enter the protocol"}\\n'
 IFS= read -r dsh_startup_input || true
 export DSH_TEST_STARTUP_INPUT="$dsh_startup_input"
+${options.startup ?? ''}
 `;
   if (shell === 'bash') {
     await writeFile(profile, startup);
@@ -34,12 +36,12 @@ exec /bin/zsh "$@"
   await writeFile(ssh, `#!${process.execPath}
 const { spawn } = require('node:child_process');
 const child = spawn('/bin/sh', ['-c', process.argv.at(-1)], {
-  stdio: 'inherit', env: { ...process.env, SHELL: ${JSON.stringify(executable)} }
+  stdio: 'inherit', env: { ...process.env, SHELL: ${JSON.stringify(executable)}, TMPDIR: ${JSON.stringify(temporary)} }
 });
 child.on('error', () => process.exit(98));
 child.on('exit', code => process.exit(code ?? 99));
 `, { mode: 0o755 });
-  return { root, transport: new OpenSshTransport('ssh://fixture.invalid', ssh) };
+  return { root, temporary, transport: new OpenSshTransport('ssh://fixture.invalid', ssh) };
 }
 
 for (const shell of ['bash', 'zsh'] as const) {
@@ -72,5 +74,46 @@ for (const shell of ['bash', 'zsh'] as const) {
     child.write(message);
     assert.deepEqual(JSON.parse(await output), { auth: 'profile-loaded', startupInput: '', input: message,
       cwd: await realpath(cwd), argument });
+  });
+
+  test(`${shell}: SSH probes survive startup scripts closing inherited descriptors`, async t => {
+    try { await access(`/bin/${shell}`); } catch { t.skip('Shell unavailable'); return; }
+    const { transport } = await fixture(t, shell, { closeDescriptors: true });
+    assert.equal(await transport.exec('printf "%s" "${DSH_TEST_REMOTE_AUTH:-missing}"'), 'profile-loaded');
+  });
+
+  test(`${shell}: CLI input survives startup scripts closing inherited descriptors`, async t => {
+    try { await access(`/bin/${shell}`); } catch { t.skip('Shell unavailable'); return; }
+    const { root, temporary, transport } = await fixture(t, shell, { closeDescriptors: true });
+    const child = transport.start(root, [process.execPath, '-e', 'process.stdin.pipe(process.stdout)']);
+    t.after(() => child.stop());
+    const message = '{"type":"user","message":"hello after login"}\n';
+    const output = new Promise<string>((resolve, reject) => {
+      let received = '';
+      const timer = setTimeout(() => reject(new Error('Native CLI did not receive its input')), 5000);
+      child.onData(data => { received += data.toString(); if (received === message) { clearTimeout(timer); resolve(received); } });
+      child.onExit(error => { clearTimeout(timer); reject(error); });
+    });
+    child.write(message);
+    assert.equal(await output, message);
+    assert.deepEqual(await readdir(temporary), [], 'temporary exports are gone before the CLI handles a message');
+  });
+
+  test(`${shell}: exported environment keeps quotes, newlines and shell syntax literal`, async t => {
+    try { await access(`/bin/${shell}`); } catch { t.skip('Shell unavailable'); return; }
+    const value = 'literal $HOME $(printf changed) `printf changed` "double" \'single\'\nsecond line 中文';
+    const { temporary, transport } = await fixture(t, shell, { startup: `export DSH_TEST_COMPLEX=${quote(value)}` });
+    assert.equal(await transport.exec('printf "%s" "$DSH_TEST_COMPLEX"'), value);
+    assert.deepEqual(await readdir(temporary), []);
+  });
+
+  test(`${shell}: failed or interrupted login initialization leaves no saved environment`, async t => {
+    try { await access(`/bin/${shell}`); } catch { t.skip('Shell unavailable'); return; }
+    const failed = await fixture(t, shell, { startup: 'printf "startup-failed\\n" >&2; exit 23' });
+    await assert.rejects(failed.transport.exec('printf should-not-run'), /startup-failed/);
+    assert.deepEqual(await readdir(failed.temporary), []);
+    const ended = await fixture(t, shell, { startup: 'exit 0' });
+    await assert.rejects(ended.transport.exec('printf should-not-run'), /Remote login shell did not export its environment/);
+    assert.deepEqual(await readdir(ended.temporary), []);
   });
 }
