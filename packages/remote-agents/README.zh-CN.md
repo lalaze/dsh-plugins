@@ -86,10 +86,12 @@ DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要�
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.10.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.11.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.10 升级：** 修复远端登录脚本关闭文件描述符时出现 `3: Bad file descriptor`、无法检测模型或启动 CLI 的问题。更新后重启 DSH，再刷新机器的模型。
 
 **从 0.2.9 升级：** 修复 SSH 报错后机器因关联会话而无法移除的问题。现在可确认一并删除插件会话与输出，无需连接远程机器。
 
