@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend } from './backend.js';
 import { readSshConfigHosts } from './ssh-config.js';
-import { busy, enabledProvidersOf, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput } from './domain.js';
+import { busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput } from './domain.js';
 export class RemoteAgentsService {
     store;
     readSshConfig;
@@ -188,7 +188,7 @@ export class RemoteAgentsService {
             id: task.id, hostId: task.hostId, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model,
             ...(task.chat ? { chatSessionId: task.chat.sessionId } : {}),
             ...(task.modeId ? { modeId: task.modeId } : {}), ...(task.thinkingOptionId ? { thinkingOptionId: task.thinkingOptionId } : {}),
-            modes: task.modes ?? [], title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
+            modes: permissionModes(task.provider, task.modes ?? []), title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
             archived: task.archived === true, delegated: task.origin === 'dsh', started: !!task.agentId, attached: !!live && live.status !== 'closed', status, pendingPermissions: pending,
             ...(error ? { error } : {}), ...(resumable !== undefined ? { resumable } : {}), ...(task.native?.sessionId ? { nativeSessionId: task.native.sessionId } : {}),
         };
@@ -488,7 +488,7 @@ export class RemoteAgentsService {
     async setMode(id, modeId) {
         return this.serial(id, async () => {
             const task = this.task(id);
-            if (!task.modes?.some(m => m.id === modeId))
+            if (!permissionModes(task.provider, task.modes ?? []).some(m => m.id === modeId))
                 throw new RemoteError('This mode is not available for this agent', 409);
             if (task.modeId === modeId)
                 return this.summary(id);

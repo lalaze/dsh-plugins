@@ -43,6 +43,8 @@ export interface Choice {
     label: string;
     isDefault?: boolean;
 }
+/** Older saved Claude catalogs also need a way to return to the remote CLI's settings. */
+export declare function permissionModes(provider: string, modes: Choice[]): Choice[];
 export interface Model extends Choice {
     thinkingOptions?: Choice[];
     defaultThinkingOptionId?: string;
@@ -107,7 +109,7 @@ export interface Permission {
         id: string;
         label: string;
         behavior: 'allow' | 'deny';
-        scope?: 'once' | 'session';
+        scope?: 'once' | 'session' | 'project';
     }[];
 }
 export interface PermissionAnswer {

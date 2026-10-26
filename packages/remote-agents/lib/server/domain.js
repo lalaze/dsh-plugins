@@ -1,3 +1,7 @@
+/** Older saved Claude catalogs also need a way to return to the remote CLI's settings. */
+export function permissionModes(provider, modes) {
+    return provider === 'claude' && !modes.some(m => m.id === 'inherit') ? [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes] : modes;
+}
 export const PROVIDER_LABELS = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };
 /** Older machines retain their providers until the user explicitly changes the selection. */
 export const enabledProvidersOf = (host) => host.enabledProviders ?? Object.keys(PROVIDER_LABELS);

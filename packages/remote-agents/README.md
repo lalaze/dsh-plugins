@@ -27,6 +27,10 @@ Model catalogs are saved per machine on the DSH server and shared between client
 
 Open **Settings → Remote agents → Open sessions**. There is no remote sessions entry in the sidebar. The list includes main-chat bindings and delegated agents, with search by title, CLI, host or path, and filters for pending requests and archived sessions.
 
+Choose **Permission mode** when creating a session or while an existing session is idle. Changes apply to the next message, including main-chat follow-ups. Claude defaults to **Remote CLI settings**, preserving the remote account/project permission configuration instead of forcing `default`. Existing sessions keep their explicit mode; select **Remote CLI settings** to return to the remote default. DSH workspace access does not grant remote CLI permissions. **Accept edits** still asks for commands requiring approval; **Full access** permits commands and edits without individual approval.
+
+Native DSH approvals remain one-time grants. When Claude supplies matching allow-rule suggestions, its pending request in this panel also offers session or project approval. Review **Details** before selecting one: project approval sends only those native rules to the remote `.claude/settings.local.json`, so matching requests can be approved in future sessions. The plugin does not create global allow rules or save a one-time approval as a lasting grant. Requests without a suitable suggestion continue to offer one-time approval.
+
 - **Create:** choose a saved machine, CLI and model, then describe the task. The current DSH workspace path is used on that machine.
 - **History and follow-ups:** read streaming output, expandable reasoning and tool details, and load earlier history. Send follow-ups to background agents here; use **Open in main chat** for bound conversations so their native DSH history stays consistent.
 - **Approvals:** the sidebar counts sessions needing attention. Dismissing a native DSH approval keeps the request pending; respond in the session panel using the CLI's actual permission choices or question form. **Stop** explicitly interrupts the turn.
@@ -86,10 +90,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.11.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.12.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.11:** Claude now inherits remote permission settings by default. Permission modes and matching session/project approvals are available in **Open sessions**. Existing sessions keep their explicit mode; stop an active session and select **Remote CLI settings** to inherit the remote default.
 
 **Upgrading from 0.2.10:** Fixes `3: Bad file descriptor` when remote login scripts close inherited descriptors, blocking model discovery or CLI startup. Restart DSH after updating, then refresh the host’s models.
 

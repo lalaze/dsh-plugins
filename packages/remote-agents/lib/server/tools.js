@@ -69,14 +69,15 @@ export async function decidePermission(host, permission, exec, signal, subject) 
     }
     const detail = JSON.stringify(permission.detail ?? permission.input ?? {}, null, 2).slice(0, 4000);
     const outcome = await host.approval.request({ agent: exec.agent, toolName: permission.name, callId: exec.callId, signal,
-        reason: [`Remote agent ${subject} asks: ${permission.title ?? permission.name}`, permission.description, detail].filter(Boolean).join('\n') });
+        reason: [`Remote agent ${subject} asks: ${permission.title ?? permission.name}`, permission.description, detail,
+            permission.actions?.some(a => a.behavior === 'allow' && (a.scope === 'session' || a.scope === 'project')) ? 'To remember a matching approval, open Settings → Remote agents → Open sessions.' : undefined].filter(Boolean).join('\n') });
     const deny = permission.actions?.find(a => a.behavior === 'deny');
     if (outcome === 'rejected')
         return { behavior: 'deny', message: 'The user denied this request', ...(deny ? { selectedActionId: deny.id } : {}) };
     if (outcome !== 'allowed-once')
         return;
     // A one-time DSH approval must never silently grant a session-wide CLI permission.
-    const action = permission.actions?.find(a => a.behavior === 'allow' && a.scope !== 'session' && !/session|always|remember/i.test(`${a.id} ${a.label}`));
+    const action = permission.actions?.find(a => a.behavior === 'allow' && (!a.scope || a.scope === 'once') && !/session|project|always|remember/i.test(`${a.id} ${a.label}`));
     if (permission.actions?.length && !action)
         return;
     return { behavior: 'allow', ...(action ? { selectedActionId: action.id } : {}) };
