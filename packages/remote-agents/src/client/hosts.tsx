@@ -23,11 +23,15 @@ export function HostManager({ dashboard, update }: { dashboard: Dashboard; updat
   const [label, setLabel] = useState(''), [connection, setConnection] = useState('');
   const [selection, setSelection] = useState<string[]>([]);
   const [busy, setBusy] = useState(''), [error, setError] = useState('');
+  const [removing, setRemoving] = useState('');
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key); setError('');
     try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(''); }
   };
   const hosts = dashboard.hosts;
+  const remove = (hostId: string, deleteAgents = false) => void run(`remove:${hostId}`, async () => {
+    update(await api<Dashboard>('removeHost', { hostId, deleteAgents })); setRemoving('');
+  });
   return <div className="ra-page ra-hosts">
     <h2>{ui('Hosts')}</h2>
     <p className="ra-muted">{ui('Choose which CLIs to enable on each machine. No project registration is needed.')}</p>
@@ -43,8 +47,13 @@ export function HostManager({ dashboard, update }: { dashboard: Dashboard; updat
         </div>
         <span className="ra-badge" data-status={host.status}>{ui(host.status)}</span>
         <button type="button" disabled={!!busy || !enabledProvidersOf(host).length} onClick={() => void run(`discover:${host.id}`, async () => update(await api<Dashboard>('discoverHost', { hostId: host.id })))}>{ui(busy === `discover:${host.id}` ? 'Detecting models…' : 'Refresh models')}</button>
-        <button type="button" className="ra-danger" disabled={!!busy || agents > 0} title={agents ? ui('Delete this host’s agents, including archived ones, before removing it') : undefined}
-          onClick={() => void run(`remove:${host.id}`, async () => update(await api<Dashboard>('removeHost', { hostId: host.id })))}>{ui('Remove')}</button></div>
+        <button type="button" className="ra-danger" disabled={!!busy}
+          onClick={() => agents ? setRemoving(host.id) : remove(host.id)}>{ui('Remove')}</button></div>
+        {removing === host.id && <div className="ra-banner ra-remove-confirm" role="alert">
+          <span>{ui('Remove {host} and permanently delete its {count} saved sessions, including archived sessions, and their output? Attached CLI processes will be stopped.', { host: host.label, count: agents })}</span>
+          <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
+            <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove host and sessions')}</button></div>
+        </div>}
         <HostProviders key={enabledProvidersOf(host).join(',')} host={host} busy={!!busy} apply={providers => void run(`providers:${host.id}`, async () => update(await api<Dashboard>('setHostProviders', { hostId: host.id, providers })))} />
       </li>;
     })}</ul>}

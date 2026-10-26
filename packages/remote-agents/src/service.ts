@@ -173,17 +173,22 @@ export class RemoteAgentsService {
     if (options.discoverModels) return this.discoverHost(host.id);
     return this.snapshot();
   }
-  async removeHost(id: string): Promise<Dashboard> {
-    this.host(id);
-    await this.store.update(state => {
-      if (state.tasks.some(t => t.hostId === id)) throw new RemoteError('Delete this host’s agents, including archived ones, before removing it', 409);
-      state.hosts = state.hosts.filter(h => h.id !== id);
-      state.mainChatProjects = state.mainChatProjects?.filter(p => p.hostId !== id);
+  async removeHost(id: string, options: { deleteAgents?: boolean } = {}): Promise<Dashboard> {
+    return this.serial(`catalog:${id}`, async () => {
+      this.host(id);
+      // Forget local sessions and output without probing an unreachable SSH host.
+      if (options.deleteAgents) for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id)) await this.delete(task.id);
+      await this.store.update(state => {
+        // A concurrently created session still requires confirmation on the next attempt.
+        if (state.tasks.some(t => t.hostId === id)) throw new RemoteError('Delete this host’s agents, including archived ones, before removing it', 409);
+        state.hosts = state.hosts.filter(h => h.id !== id);
+        state.mainChatProjects = state.mainChatProjects?.filter(p => p.hostId !== id);
+      });
+      const connection = this.connections.get(id); this.connections.delete(id);
+      await connection?.backend.close();
+      this.catalogChanged();
+      return this.snapshot();
     });
-    const connection = this.connections.get(id); this.connections.delete(id);
-    await connection?.backend.close();
-    this.catalogChanged();
-    return this.snapshot();
   }
   async connect(hostId: string): Promise<Dashboard> {
     await this.use(hostId, async () => {});
