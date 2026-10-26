@@ -79,6 +79,7 @@ export const zh: Record<string, string> = {
   "This remote host is already saved": "这台远程机器已经保存过了。",
   "Remote SSH machine identity changed": "远程 SSH 机器身份已变化。",
   "SSH probe timed out": "SSH 检测超时。",
+  "Remote login shell did not export its environment": "远端登录 Shell 未导出环境配置，请检查该机器的 Shell 启动脚本。",
   "This SSH host already has {count} working CLI sessions. Wait for one to finish, or archive an idle agent.": "这台机器已有 {count} 个运行中的 CLI 会话。请等待其中一个结束，或归档空闲的智能体。",
   "Select remote CLIs in the DSH model picker and chat in the main conversation.": "在 DSH 模型选择器中选择远程 CLI，直接在主对话中使用。",
   "Retry": "重试",

@@ -86,10 +86,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.10.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.11.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.10:** Fixes `3: Bad file descriptor` when remote login scripts close inherited descriptors, blocking model discovery or CLI startup. Restart DSH after updating, then refresh the host’s models.
 
 **Upgrading from 0.2.9:** Hosts with saved sessions can now be removed after an SSH error. Confirm removal to delete their plugin sessions and saved output without reconnecting.
 
