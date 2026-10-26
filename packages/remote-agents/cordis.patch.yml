@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-remote-agents
+      name: dsh-remote-agents
+      config: {}

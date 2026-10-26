@@ -1,0 +1,8 @@
+{
+  "title": "Remote Agents",
+  "description": "Choose the CLIs enabled on each machine and use their models in the native DSH picker, with the current workspace path.",
+  "meta": {
+    "title": "Remote Agents",
+    "description": "Choose the CLIs enabled on each machine and use their models in the native DSH picker, with the current workspace path."
+  }
+}

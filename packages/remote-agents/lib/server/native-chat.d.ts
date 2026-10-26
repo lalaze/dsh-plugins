@@ -1,0 +1,46 @@
+import { LlmAdapter, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
+import type { Session } from '@deepseek-ai/dsh-session';
+import { ChatProjects } from './chat-projects.js';
+import { type ToolHost } from './tools.js';
+import type { WorkspacePlacement } from './workspace-access.js';
+export declare const CHAT_PROVIDER = "remote-cli";
+export declare const chatProviderId: (cli: string) => string;
+/** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
+export declare const CHAT_PROVIDERS: string[];
+export interface ChatHost extends Partial<ToolHost> {
+    agent(sessionId: NonNullable<GenerateOptions['sessionId']>): unknown;
+    cwd?(sessionId: NonNullable<GenerateOptions['sessionId']>): string | undefined;
+    workspace?(cwd: string, signal?: AbortSignal): Promise<WorkspacePlacement>;
+    step(sessionId: NonNullable<GenerateOptions['sessionId']>): {
+        session: Session;
+        turn: number;
+        step: number;
+    } | undefined;
+}
+export declare const chatModelId: (projectId: string, provider: string, model: string) => string;
+export declare class RemoteCliAdapter extends LlmAdapter {
+    readonly projects: ChatProjects;
+    private readonly host;
+    private readonly pollMs;
+    private active;
+    private controllers;
+    private auxiliaryDirectories;
+    constructor(projects: ChatProjects, host: ChatHost, pollMs?: number);
+    providerInfo(provider: string): {
+        id: string;
+        name: string;
+    };
+    providerRetryPolicy(): {
+        mode: "normal";
+        maxRetries: number;
+        retryableCodes: never[];
+        initialDelayMs: number;
+        maxDelayMs: number;
+        jitterRatio: number;
+    };
+    listModels(provider: string): Promise<LlmModelInfo[]>;
+    private route;
+    resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
+    close(): void;
+    stream(options: GenerateOptions): AsyncGenerator<StreamChunk>;
+}

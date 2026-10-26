@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-gallery
+      name: dsh-gallery
+      config: {}

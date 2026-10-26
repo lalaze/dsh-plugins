@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" fill="none" role="img" aria-label="DSH Gallery">
+  <defs>
+    <linearGradient id="tile" x1="8" y1="4" x2="56" y2="64" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4C8FE8"/>
+      <stop offset="1" stop-color="#294CB4"/>
+    </linearGradient>
+    <linearGradient id="sky" x1="31" y1="21" x2="31" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#91D7F5"/>
+      <stop offset="1" stop-color="#E0F4F2"/>
+    </linearGradient>
+    <clipPath id="landscape">
+      <rect x="12" y="21" width="38" height="27" rx="3"/>
+    </clipPath>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#tile)"/>
+  <rect x="19" y="12" width="34" height="32" rx="6" transform="rotate(10 36 28)" fill="#B8D9FF"/>
+  <rect x="9" y="20" width="44" height="35" rx="6" fill="#193784" fill-opacity=".24"/>
+  <rect x="9" y="18" width="44" height="35" rx="6" fill="#F2F8FF"/>
+  <g clip-path="url(#landscape)">
+    <path fill="url(#sky)" d="M12 21h38v27H12z"/>
+    <circle cx="41" cy="28" r="4" fill="#FFD389"/>
+    <path d="m12 42 12-14 12 14 7-8 7 8v6H12z" fill="#6097C4"/>
+    <path d="m19 34 5-6 5 6-5-2z" fill="#F2F8FF"/>
+    <path d="m12 46 12-9 9 8 8-7 9 7v3H12z" fill="#228E99"/>
+    <path d="M12 47c9-6 18-3 25 1H12Z" fill="#60C5B0"/>
+  </g>
+</svg>
