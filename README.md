@@ -4,11 +4,8 @@
 
 A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plugin has its own manifest, source, tests, documentation, and installable package.
 
-**`dsh-claude-ssh` is a modified version of [Oh My Claude](https://github.com/lcestou/dsh-oh-my-claude), based on upstream version 1.5.5.** It retains the upstream Claude Code integration and adds verified remote-workspace routing, workspace-specific model visibility, and compatibility fixes for DSH. Thanks to the Oh My Claude authors for the original implementation. See [upstream provenance](packages/claude-ssh/UPSTREAM.md) and [third-party notices](packages/claude-ssh/THIRD_PARTY_NOTICES.md) for the exact revision and attribution.
-
 | Package | Directory | Description |
 | --- | --- | --- |
-| `dsh-claude-ssh` | [packages/claude-ssh](packages/claude-ssh/README.md) | Use remote Claude Code over system OpenSSH in DSH |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
@@ -47,11 +44,9 @@ pnpm pack:plugins   # Build and pack packages into dist/
 Work on one plugin with a package filter:
 
 ```sh
-pnpm --filter dsh-claude-ssh check
-pnpm --filter dsh-claude-ssh pack:plugin
+pnpm --filter dsh-remote-agents check
+pnpm --filter dsh-remote-agents pack:plugin
 ```
-
-Claude's check includes the upstream regression suite and remote-workspace compatibility checks. See the [plugin documentation](packages/claude-ssh/README.md#development-and-validation) for the distinction between offline tests and live verification.
 
 ## Installation
 
@@ -61,7 +56,7 @@ Install an individual built archive into the desired DSH profile:
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-claude-ssh-0.3.2.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.7.tgz"
 ```
 
 For Desktop, fully quit DSH and use the desktop application's bundled `dsh` command with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. For Web, restart the updated profile and refresh the browser. Plugins are not currently published to npm. The repository root is a private workspace; install individual plugin archives rather than the GitHub root.
@@ -70,7 +65,7 @@ For Desktop, fully quit DSH and use the desktop application's bundled `dsh` comm
 
 ```text
 packages/
-  claude-ssh/           # dsh-claude-ssh: source, tests, manifest, docs
+  remote-agents/        # dsh-remote-agents: source, tests, manifest, docs
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds
   browser-devtools/     # In-page debugger for Sidebar Browser tabs

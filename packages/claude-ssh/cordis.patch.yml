@@ -1,4 +1,0 @@
-- insert:
-    - id: dsh-claude-ssh
-      name: dsh-claude-ssh
-      config: {}

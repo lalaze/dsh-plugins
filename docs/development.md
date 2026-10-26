@@ -19,7 +19,7 @@ TypeScript、tsx、esbuild 和 Node 类型由根目录提供。React、DSH 接�
    }
    ```
 
-4. 按插件实际入口设置 `main`、`types`、`exports`、`files`、DSH 清单和构建配置。当前插件的服务端编译结果位于 `lib/server/`，客户端为 `lib/client.js`，可参考 [Claude SSH 清单](../packages/claude-ssh/package.json)。后端插件无需客户端构建步骤。
+4. 按插件实际入口设置 `main`、`types`、`exports`、`files`、DSH 清单和构建配置。当前插件的服务端编译结果位于 `lib/server/`，客户端为 `lib/client.js`，可参考 [Remote Agents 清单](../packages/remote-agents/package.json)。后端插件无需客户端构建步骤。
 5. 定义 `build`、`typecheck`、`test` 和 `prepack` 脚本；`check` 可组合前三项，`test:ui` 按需添加。当前使用 Node test runner，命令为 `node --import tsx --test test/*.test.ts`。让 `prepack` 执行构建，确保归档包含最新产物。
 6. 在根目录执行 `pnpm install` 更新唯一锁文件，再运行 `pnpm --filter <包名> check`。根目录 README 的插件表需要同时更新。
 
@@ -49,7 +49,7 @@ pnpm pack:plugins
 单独打包当前插件：
 
 ```sh
-pnpm --filter dsh-claude-ssh pack:plugin
+pnpm --filter dsh-remote-agents pack:plugin
 ```
 
 新增插件若需要同样的快捷命令，在自己的 `scripts` 中添加 `"pack:plugin": "pnpm pack --pack-destination ../../dist"`。每个可发布包应通过 `files` 明确包含编译产物、patch、README、LICENSE 和必要文档，源码测试及根目录工具不进入安装包。

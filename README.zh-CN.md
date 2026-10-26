@@ -4,11 +4,8 @@
 
 用于开发多个 DeepSeek Harness 插件的 pnpm 大仓。每个插件独立维护包名、版本、清单、源码、测试、文档和安装包。
 
-**其中 `dsh-claude-ssh` 是基于 [Oh My Claude](https://github.com/lcestou/dsh-oh-my-claude) 1.5.5 修改的版本。** 本插件沿用上游的 Claude Code 接入实现，在此基础上增加远程工作区验证与路由、按工作区显示模型，以及 DSH 兼容性修复。感谢 Oh My Claude 作者提供原始实现。具体上游提交、许可与署名见[来源说明](packages/claude-ssh/UPSTREAM.md)和[第三方声明](packages/claude-ssh/THIRD_PARTY_NOTICES.md)。
-
 | 插件 | 目录 | 功能 |
 | --- | --- | --- |
-| `dsh-claude-ssh` | [packages/claude-ssh](packages/claude-ssh/README.zh-CN.md) | 在 DSH 中通过系统 OpenSSH 使用远端 Claude Code |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
@@ -47,11 +44,9 @@ pnpm pack:plugins   # 构建并打包，产物集中到 dist/
 只操作某个插件：
 
 ```sh
-pnpm --filter dsh-claude-ssh check
-pnpm --filter dsh-claude-ssh pack:plugin
+pnpm --filter dsh-remote-agents check
+pnpm --filter dsh-remote-agents pack:plugin
 ```
-
-Claude 的 check 包含模板回归与远程工作区兼容测试。离线测试和真实运行验收的区别见[插件文档](packages/claude-ssh/README.zh-CN.md#开发与验收)。
 
 ## 安装插件
 
@@ -61,7 +56,7 @@ Claude 的 check 包含模板回归与远程工作区兼容测试。离线测试
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-claude-ssh-0.3.2.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.7.tgz"
 ```
 
 桌面端请完全退出 DSH，使用桌面应用自带的 `dsh` 命令，将参数改为 `--profile desktop` 后安装并重新打开；npm 版 CLI 不能管理这个保留 profile。Web 端请重启更新的 profile 并刷新浏览器。插件目前未发布到 npm。仓库根目录是私有工作区，安装时应使用各插件的压缩包。
@@ -70,7 +65,7 @@ dsh plugin --profile web add "$PWD/dist/dsh-claude-ssh-0.3.2.tgz"
 
 ```text
 packages/
-  claude-ssh/           # dsh-claude-ssh 的源码、测试、清单和文档
+  remote-agents/        # dsh-remote-agents 的源码、测试、清单和文档
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景
   browser-devtools/     # Sidebar Browser 网页内调试浮窗
