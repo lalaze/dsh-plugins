@@ -76,7 +76,7 @@ Add machines under **Settings → Remote agents**. Pick a `Host` alias from the 
 
 The DSH server needs noninteractive key or agent access and verified host keys (`BatchMode=yes`, `StrictHostKeyChecking=yes`). Passwords are not stored. Remote machines need only SSH and the signed-in CLIs, not this plugin. Each host pins its SSH machine identity; if it changes, add the machine again.
 
-Noninteractive SSH commands retain an already configured Node.js ≥22. If the current runtime is too old, the plugin selects a compatible installed nvm or Homebrew runtime. Without one, it keeps the existing environment and reports CLI errors; it never installs or upgrades Node automatically.
+Before running discovery or a CLI, SSH loads the remote user’s interactive login environment for Bash, Zsh and Fish. This includes proxy, authentication and configuration-directory variables that may be set only in interactive startup files. Startup output is separated from CLI protocol output, and startup scripts cannot consume CLI input. Other login shells keep the POSIX launch path. The plugin retains an already configured Node.js ≥22. If the current runtime is too old, the plugin selects a compatible installed nvm or Homebrew runtime. Without one, it keeps the existing environment and reports CLI errors; it never installs or upgrades Node automatically.
 
 ## Install and upgrade
 
@@ -84,10 +84,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.8.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.9.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.8:** Remote CLIs now load the remote shell’s interactive login environment. This addresses authentication failures caused by missing shell environment when the same Claude command succeeds in an interactive terminal. Update and restart DSH, refresh the machine’s models, and retry the conversation.
 
 **Upgrading from 0.2.7:** Remote sessions now open only through settings; the sidebar entry has been removed. Update the plugin and refresh the client.
 

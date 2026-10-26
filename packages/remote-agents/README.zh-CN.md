@@ -76,7 +76,7 @@ DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要�
 
 运行 DSH 的机器需要能以密钥或 SSH agent 非交互登录，且主机密钥已验证（`BatchMode=yes`、`StrictHostKeyChecking=yes`），不保存密码。远程机器只需要 SSH 和已登录的 CLI，无需安装本插件。每台机器都会锁定 SSH 机器身份；身份变化时请重新添加。
 
-SSH 非交互环境优先使用已配置的 Node.js ≥22；若当前版本过旧，会从已安装的 nvm 和 Homebrew 运行时中选择可用的新版本。没有符合要求的版本时会保留原环境并报告 CLI 自己的错误，不自动安装或升级 Node。
+检测模型和启动 CLI 前，会先加载远端用户的 Bash、Zsh 或 Fish 交互式登录环境，继承终端中配置的代理、认证和配置目录变量。启动配置输出与 CLI 协议输出隔离，启动脚本不会读取 CLI 的输入消息；其他登录 shell 保留原有 POSIX 启动方式。Node.js 优先使用已配置的 ≥22 版本；若当前版本过旧，会从已安装的 nvm 和 Homebrew 运行时中选择可用的新版本。没有符合要求的版本时会保留原环境并报告 CLI 自己的错误，不自动安装或升级 Node。
 
 ## 安装与升级
 
@@ -84,10 +84,12 @@ SSH 非交互环境优先使用已配置的 Node.js ≥22；若当前版本过�
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.8.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.9.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.8 升级：** 远程 CLI 会加载交互式登录 shell 环境，修复因缺少环境配置导致“终端正常、SSH 调用 Claude 报认证错误”的情况。更新并重启 DSH，刷新该机器的模型后重试对话。
 
 **从 0.2.7 升级：** 移除侧栏的“远程会话”入口，仅保留设置中的“打开会话”。更新插件并刷新客户端后生效。
 

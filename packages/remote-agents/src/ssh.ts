@@ -64,8 +64,22 @@ export class OpenSshTransport implements SshTransport {
     this.args = ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', ...(url.port ? ['-p', url.port] : []), '--', `${decodeURIComponent(url.username) ? `${decodeURIComponent(url.username)}@` : ''}${url.hostname}`];
   }
   private spawn(script: string): ChildProcessWithoutNullStreams {
-    // SSH may use zsh/fish; execute our POSIX bootstrap in sh (unmatched nvm globs are harmless).
-    return spawn(this.binary, [...this.args, `sh -c ${quote(REMOTE_PATH + script)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    // Auth/proxy exports often live after an interactive-shell guard in the user's rc file.
+    // Keep startup output on stderr and stdin at EOF until the POSIX payload takes over,
+    // so banners and profile reads cannot corrupt CLI JSON or consume its first message.
+    const payload = `exec 0<&3 1>&4 3<&- 4>&-\n${REMOTE_PATH}${script}`;
+    const command = `
+dsh_login_shell="\${SHELL:-/bin/sh}"
+case "\${dsh_login_shell##*/}" in
+  bash|zsh|fish)
+    exec 3<&0 4>&1
+    exec 0</dev/null 1>&2
+    exec "$dsh_login_shell" -lic ${quote(`exec /bin/sh -c ${quote(payload)}`)}
+    ;;
+  *) exec /bin/sh -c ${quote(REMOTE_PATH + script)} ;;
+esac
+`;
+    return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   }
   exec(script: string, timeout = 20_000): Promise<string> {
     return new Promise((resolve, reject) => {
