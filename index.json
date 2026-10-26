@@ -17,7 +17,7 @@
         "zh": "DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务"
       },
       "author": "lalaze",
-      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/remote-agents",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/chore/remove-claude-ssh/packages/remote-agents",
       "repository": {
         "url": "https://github.com/lalaze/dsh-plugins",
         "directory": "packages/remote-agents"
@@ -26,6 +26,19 @@
         "keywords": []
       },
       "versions": [
+        {
+          "version": "0.2.10",
+          "publishTimestamp": 1793034063,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "11044da98c98f606c8218e13df64747caa390f1a",
+            "path": "packages/remote-agents"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
         {
           "version": "0.2.9",
           "publishTimestamp": 1793019392,
@@ -52,7 +65,7 @@
         "zh": "在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型"
       },
       "author": "lalaze",
-      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/session-models",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/chore/remove-claude-ssh/packages/session-models",
       "repository": {
         "url": "https://github.com/lalaze/dsh-plugins",
         "directory": "packages/session-models"
@@ -90,7 +103,7 @@
         "zh": "统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出"
       },
       "author": "lalaze",
-      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/usage-stats",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/chore/remove-claude-ssh/packages/usage-stats",
       "repository": {
         "url": "https://github.com/lalaze/dsh-plugins",
         "directory": "packages/usage-stats"
@@ -129,7 +142,7 @@
       },
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0IiBmaWxsPSJub25lIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkRTSCBHYWxsZXJ5Ij4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0idGlsZSIgeDE9IjgiIHkxPSI0IiB4Mj0iNTYiIHkyPSI2NCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBzdG9wLWNvbG9yPSIjNEM4RkU4Ii8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzI5NENCNCIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0ic2t5IiB4MT0iMzEiIHkxPSIyMSIgeDI9IjMxIiB5Mj0iNDgiIGdyYWRpZW50VW5pdHM9InVzZXJTcGFjZU9uVXNlIj4KICAgICAgPHN0b3Agc3RvcC1jb2xvcj0iIzkxRDdGNSIvPgogICAgICA8c3RvcCBvZmZzZXQ9IjEiIHN0b3AtY29sb3I9IiNFMEY0RjIiLz4KICAgIDwvbGluZWFyR3JhZGllbnQ+CiAgICA8Y2xpcFBhdGggaWQ9ImxhbmRzY2FwZSI+CiAgICAgIDxyZWN0IHg9IjEyIiB5PSIyMSIgd2lkdGg9IjM4IiBoZWlnaHQ9IjI3IiByeD0iMyIvPgogICAgPC9jbGlwUGF0aD4KICA8L2RlZnM+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTYiIGZpbGw9InVybCgjdGlsZSkiLz4KICA8cmVjdCB4PSIxOSIgeT0iMTIiIHdpZHRoPSIzNCIgaGVpZ2h0PSIzMiIgcng9IjYiIHRyYW5zZm9ybT0icm90YXRlKDEwIDM2IDI4KSIgZmlsbD0iI0I4RDlGRiIvPgogIDxyZWN0IHg9IjkiIHk9IjIwIiB3aWR0aD0iNDQiIGhlaWdodD0iMzUiIHJ4PSI2IiBmaWxsPSIjMTkzNzg0IiBmaWxsLW9wYWNpdHk9Ii4yNCIvPgogIDxyZWN0IHg9IjkiIHk9IjE4IiB3aWR0aD0iNDQiIGhlaWdodD0iMzUiIHJ4PSI2IiBmaWxsPSIjRjJGOEZGIi8+CiAgPGcgY2xpcC1wYXRoPSJ1cmwoI2xhbmRzY2FwZSkiPgogICAgPHBhdGggZmlsbD0idXJsKCNza3kpIiBkPSJNMTIgMjFoMzh2MjdIMTJ6Ii8+CiAgICA8Y2lyY2xlIGN4PSI0MSIgY3k9IjI4IiByPSI0IiBmaWxsPSIjRkZEMzg5Ii8+CiAgICA8cGF0aCBkPSJtMTIgNDIgMTItMTQgMTIgMTQgNy04IDcgOHY2SDEyeiIgZmlsbD0iIzYwOTdDNCIvPgogICAgPHBhdGggZD0ibTE5IDM0IDUtNiA1IDYtNS0yeiIgZmlsbD0iI0YyRjhGRiIvPgogICAgPHBhdGggZD0ibTEyIDQ2IDEyLTkgOSA4IDgtNyA5IDd2M0gxMnoiIGZpbGw9IiMyMjhFOTkiLz4KICAgIDxwYXRoIGQ9Ik0xMiA0N2M5LTYgMTgtMyAyNSAxSDEyWiIgZmlsbD0iIzYwQzVCMCIvPgogIDwvZz4KPC9zdmc+Cg==",
       "author": "lalaze",
-      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/gallery",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/chore/remove-claude-ssh/packages/gallery",
       "repository": {
         "url": "https://github.com/lalaze/dsh-plugins",
         "directory": "packages/gallery"
@@ -168,7 +181,7 @@
         "zh": "Sidebar Browser 网页内的元素、Console 和网络调试浮窗"
       },
       "author": "lalaze",
-      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/browser-devtools",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/chore/remove-claude-ssh/packages/browser-devtools",
       "repository": {
         "url": "https://github.com/lalaze/dsh-plugins",
         "directory": "packages/browser-devtools"
@@ -206,7 +219,7 @@
         "zh": "在聊天选中文本或输入框草稿中调用 OpenAI 兼容接口进行翻译"
       },
       "author": "lalaze",
-      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/translate",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/chore/remove-claude-ssh/packages/translate",
       "repository": {
         "url": "https://github.com/lalaze/dsh-plugins",
         "directory": "packages/translate"
