@@ -62,6 +62,18 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.9.tgz"
 
 桌面端请完全退出 DSH，使用桌面应用自带的 `dsh` 命令，将参数改为 `--profile desktop` 后安装并重新打开；npm 版 CLI 不能管理这个保留 profile。Web 端请重启更新的 profile 并刷新浏览器。插件目前未发布到 npm。仓库根目录是私有工作区，安装时应使用各插件的压缩包。
 
+### 插件市场
+
+`pnpm release:market` 构建全部插件，将可直接安装的包提交到 `market` 分支，并更新其中的 `index.json`：一份 DSH 插件市场索引，列出每个已发布版本，并固定到对应提交。之后用 `git push origin market` 发布。发布要求工作区干净；索引中已有的版本会跳过，代码改动但未升级版本号的插件会给出提示。`--dry-run` 可预览。不要改写或强制推送 `market`，已安装版本依赖其中的提交。
+
+在 DSH 中安装和更新：打开 **插件**，在实验插件中开启 **Custom plugin markets**，然后在 **Discover** 中添加索引地址：
+
+```text
+https://raw.githubusercontent.com/lalaze/dsh-plugins/market/index.json
+```
+
+有新版本时 Discover 会显示 **Update available**；打开插件，在已安装版本之上安装推荐版本即可。DSH 只为官方插件提供一键更新。
+
 ## 目录与新增插件
 
 ```text

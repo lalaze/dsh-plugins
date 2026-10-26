@@ -62,6 +62,18 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.9.tgz"
 
 For Desktop, fully quit DSH and use the desktop application's bundled `dsh` command with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. For Web, restart the updated profile and refresh the browser. Plugins are not currently published to npm. The repository root is a private workspace; install individual plugin archives rather than the GitHub root.
 
+### Plugin market
+
+`pnpm release:market` builds every plugin, commits the install-ready packages to the `market` branch, and updates `index.json` there: a DSH plugin market index listing every released version, each pinned to a commit. Publish with `git push origin market`. A release requires a clean working tree; versions already in the index are skipped, and a plugin that changed without a version bump is reported. `--dry-run` previews the release. Never rewrite or force-push `market`, because installed versions resolve through its commits.
+
+To install and update from DSH, open **Plugins**, switch on **Custom plugin markets** under experimental plugins, and add this index source on the **Discover** tab:
+
+```text
+https://raw.githubusercontent.com/lalaze/dsh-plugins/market/index.json
+```
+
+Discover marks a newer release **Update available**; open the plugin and install the recommended version over the installed one. DSH offers one-click updates only for its official plugins.
+
 ## Layout and new plugins
 
 ```text

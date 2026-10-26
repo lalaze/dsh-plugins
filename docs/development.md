@@ -56,6 +56,8 @@ pnpm --filter dsh-remote-agents pack:plugin
 
 发布前检查归档内容，并从归档验证入口可以解析。使用 `.tgz` 安装时不需要用户拿到整个大仓；不要把 GitHub 根仓库地址作为子包安装地址。
 
+通过插件市场发布时运行 `pnpm release:market`（可加 `--dry-run`），再 `git push origin market`。脚本要求工作区干净，按 `pnpm pack` 的产物生成去掉 `scripts` 与 `devDependencies` 的安装包，提交到只追加的 `market` 分支，并用 DSH 自带的校验器（`@deepseek-ai/dsh-plugin-market-index`）检查索引。插件标题取自各包 README 的一级标题，简介取自根目录 README 的插件表，所以新增插件时更新插件表即可。发布新版本前必须升级版本号；同一版本内容变化会被提示并跳过。
+
 ## 共享代码
 
 实际出现复用需求后再建立 `packages/shared` 等公共包，不从其他插件的 `src` 使用跨包相对导入。workspace 内依赖可使用 `workspace:*`，pnpm 打包时会转换为对应版本依赖。
