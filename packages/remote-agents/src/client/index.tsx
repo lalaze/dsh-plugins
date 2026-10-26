@@ -7,9 +7,11 @@ import { installLocale, localizeError, ui, useLocale } from './i18n.js';
 import { HostManager } from './hosts.js';
 import { styles } from './styles.js';
 import { Sessions, useDashboard } from './sessions.js';
+import { GroupedModelPicker, type ModelPickerProps, type PickerStore, type ModelSelection, type SelectionResult } from './model-picker.js';
 
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
+  inject?(services: string[], factory: (scoped: Client) => void): unknown;
   slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC): unknown };
 }
 function Settings({ openSessions }: { openSessions: () => void }) {
@@ -72,4 +74,22 @@ export function apply(ctx: Client): void {
   };
   ctx.slots.inject('settings.section', () => { ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, () => <Surface settings />); });
   ctx.slots.inject('sidebar.footer.action', () => { ctx.slots.register({ name: 'sidebar.footer.action', id: 'remote-agents-sessions', order: 74 }, Surface); });
+  const installPicker = (scoped: Client) => {
+    const get = (name: string) => (scoped.get as ((name: string) => unknown) | undefined)?.call(scoped, name);
+    const directories = get?.('modelDirectories') as { directoryFor(id: string): { store: PickerStore; load(): Promise<unknown>; select(selection: ModelSelection): Promise<SelectionResult> } } | undefined;
+    const sessions = get?.('sessions') as { subagentAddress?(id: string): unknown } | undefined;
+    if (!directories?.directoryFor) return;
+    scoped.slots.inject('conversation.input.model', () => {
+      scoped.slots.register({ name: 'conversation.input.model', id: 'remote-agents-model-groups', priority: -1,
+        children: { 'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true } },
+        inject: (sessionId: string): Omit<ModelPickerProps, 'locked' | 'renderSlot'> => {
+          const directory = directories.directoryFor(sessionId), available = sessions?.subagentAddress?.(sessionId) === undefined;
+          return { available, directory: directory.store,
+            load: () => { if (available) void directory.load().catch(() => {}); },
+            select: selection => available ? directory.select(selection) : Promise.resolve(undefined) };
+        },
+      }, GroupedModelPicker as React.FC);
+    });
+  };
+  if (ctx.inject) ctx.inject(['modelDirectories', 'sessions'], installPicker); else installPicker(ctx);
 }

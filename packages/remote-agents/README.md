@@ -13,6 +13,8 @@ Each CLI appears as a separate provider in DSH's ordinary model picker:
 
 Change the CLI checkboxes on a machine card and click **Apply selection**. Disabled CLIs are neither probed nor shown in the model picker; existing agents keep running. New machines start with no CLIs selected, while older saved machines retain their existing provider scope.
 
+**Collapsible model groups:** click a provider heading, such as **CodeBuddy Code**, to expand or collapse its models. The current model’s group starts expanded; other groups start collapsed. Manual choices are remembered in this browser. Searching expands matching groups, and clearing the search restores your choices. Model selection and thinking levels use DSH’s shared model directory through its public composer slot.
+
 Model catalogs are saved per machine on the DSH server and shared between clients. The same model entry works across workspaces without per-project duplicates. Opening the picker reads cached data; use **Refresh models** beside the machine after CLI/account changes or to discover an existing host after upgrading. Discovery uses the remote account's home directory; execution uses the conversation's workspace directory, and project-specific model availability is validated at startup.
 
 - Each DSH conversation and selected machine / CLI has an independent native CLI session, with its working directory bound on the first message. Follow-ups reuse it, including after a DSH restart when that CLI supports resume. Switching models within a CLI resumes that same session; a non-resumable CLI asks you to start a new conversation. Previously separate model sessions remain accessible. Switching machines or CLIs supplies available conversation text as context; DSH's local system prompt, injected workspace instructions and local tool schemas are excluded.
@@ -82,10 +84,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.4.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.5.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.4:** Provider headings in the composer model menu now expand and collapse. Refresh the client after upgrading; no machine or session migration is needed.
 
 **Upgrading from 0.2.3:** Per-machine CLI selection is now available, and SSH no longer selects an old nvm runtime ahead of a compatible installed Node. Adjust the checkboxes and click **Apply selection**.
 
@@ -112,8 +116,10 @@ Earlier Paseo-based task records remain readable but are not converted.
 
 ```sh
 pnpm --filter dsh-remote-agents check     # typecheck, protocol/integration tests, build
-pnpm --filter dsh-remote-agents test:ui   # sessions, approvals, settings and SSH picker browser regression
+pnpm --filter dsh-remote-agents test:ui   # sessions, approvals, settings, SSH picker and collapsible model groups
 pnpm --filter dsh-remote-agents preview:ui
 ```
 
 Tests cover the native protocols with simulated CLIs over a fake SSH transport, including interrupt-on-send and resume, plus the service and delegation tools with a simulated DSH host. Native-chat tests also load the installed DSH LLM registry and session implementation, exercise durable retry/cancellation/approvals, and connect all six model routes through the real backend to simulated SSH CLIs. The Antigravity forwarder test uses a real child process. Real remote CLIs over SSH have not been exercised by these tests.
+
+Browser tests render the public model slot with DSH UI primitives and a simulated shared directory. They verify folding persistence, search, keyboard navigation, reasoning selection, failure recovery and narrow layouts. The Desktop app itself is not launched by these tests.

@@ -55,7 +55,7 @@ Claude's check includes the upstream regression suite and remote-workspace compa
 
 ## Installation
 
-Remote Agents **0.2.4** lists remote Claude, Codex and other CLIs as separate providers in DSH's native model picker and main conversation. The sidebar’s Remote sessions view brings history, follow-ups and pending approvals together; delegation tools remain available. Build `dist/dsh-remote-agents-0.2.4.tgz` with `pnpm --filter dsh-remote-agents pack:plugin`. See [install and upgrade](packages/remote-agents/README.md#install-and-upgrade), including what changed from 0.1.x.
+Remote Agents **0.2.5** lists remote Claude, Codex and other CLIs as collapsible provider groups in DSH's model picker and main conversation. The sidebar’s Remote sessions view brings history, follow-ups and pending approvals together; delegation tools remain available. Build `dist/dsh-remote-agents-0.2.5.tgz` with `pnpm --filter dsh-remote-agents pack:plugin`. See [install and upgrade](packages/remote-agents/README.md#install-and-upgrade), including what changed from 0.1.x.
 
 Install an individual built archive into the desired DSH profile:
 

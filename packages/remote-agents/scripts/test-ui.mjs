@@ -23,7 +23,7 @@ const chooseSsh = connection => {
   browser('click', `.ra-ssh-menu:popover-open [data-connection="${connection}"]`);
   wait('!document.querySelector(".ra-ssh-menu:popover-open")');
 };
-const image = name => { if (screenshots) browser('screenshot', ...(name.startsWith('sessions-') ? [] : ['--full']), `${screenshots}/${name}.png`); };
+const image = name => { if (screenshots) browser('screenshot', ...(name.startsWith('sessions-') || name.startsWith('model-groups-') ? [] : ['--full']), `${screenshots}/${name}.png`); };
 try {
   const base = await new Promise((resolve, reject) => {
     let output = '';
@@ -37,7 +37,7 @@ try {
 
   // Settings remain available alongside the sidebar session entry.
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 2 && window.fixture.slots[0] === "settings.section:remote-agents"');
+  expect('window.fixture.slots.length === 3 && window.fixture.slots[0] === "settings.section:remote-agents"');
   expect('!document.querySelector(".ra-launch,.ra-workspace,dialog")');
   expect('!document.querySelector(".ra-chat-projects,[aria-label=项目名称],[aria-label=远程项目路径]")');
   wait('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://build-box\\"]")');
@@ -120,7 +120,7 @@ try {
   wait('document.querySelector(".ra-settings [role=alert]")?.textContent.includes("模拟连接中断")');
   fixture({ failReads: false }); browser('click', 'button:text-is("重试")');
   wait('document.querySelector(".ra-hosts input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 2 && !document.querySelector(".ra-launch,.ra-workspace,dialog")');
+  expect('window.fixture.slots.length === 3 && !document.querySelector(".ra-launch,.ra-workspace,dialog")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
   console.log('PASS: settings load failure and retry; session entry available without opening a panel or adding a composer launcher');
 
@@ -182,6 +182,65 @@ try {
   browser('press', 'Escape'); wait('!document.querySelector("dialog[open]")');
   const sessionErrors = browser('errors'); if (sessionErrors.errors?.length) throw new Error(JSON.stringify(sessionErrors.errors));
   console.log('PASS: unified sessions, filters, native navigation, pagination, approval reopening and scope, lost-send recovery, rename/archive/restore, new sessions and mobile layouts');
+
+  evaluate('window.fixture.setLocale("zh")');
+  browser('set', 'viewport', '1440', '1000');
+  browser('click', '.ra-model-trigger'); wait('document.querySelector(".ra-model-root-row")');
+  browser('click', '.ra-model-root-row:first-of-type'); wait('document.querySelector(".ra-model-group-toggle")');
+  expect('document.querySelectorAll(".ra-model-group-toggle").length === 4');
+  expect('document.querySelector("[data-model-provider=remote-cli-codex] button").getAttribute("aria-expanded") === "true"');
+  expect('document.querySelector("[data-model-provider=remote-cli-codebuddy] button").getAttribute("aria-expanded") === "false"');
+  browser('click', '[data-model-provider="remote-cli-codebuddy"] > button');
+  expect('document.querySelectorAll("[data-model-provider=remote-cli-codebuddy] .ra-model-option").length === 24');
+  browser('set', 'media', 'dark'); image('model-groups-expanded-dark');
+  browser('click', '[data-model-provider="remote-cli-codebuddy"] > button');
+  expect('document.querySelectorAll("[data-model-provider=remote-cli-codebuddy] .ra-model-option").length === 0');
+  browser('set', 'media', 'light'); image('model-groups-collapsed-light');
+  browser('fill', '[aria-label="搜索模型"]', 'Balanced');
+  expect('document.querySelectorAll(".ra-model-option").length === 1 && document.querySelector(".ra-model-group-toggle").getAttribute("aria-expanded") === "true"');
+  browser('click', '[aria-label="清除模型搜索"]');
+  expect('document.querySelectorAll("[data-model-provider=remote-cli-codebuddy] .ra-model-option").length === 0');
+  browser('fill', '[aria-label="搜索模型"]', 'Balanced'); browser('press', 'Enter');
+  wait('!document.querySelector(".ra-model-menu") && document.querySelector(".ra-model-trigger").textContent.includes("Balanced")');
+  expect('window.fixture.picker.selections.at(-1).provider === "remote-cli-codebuddy" && window.fixture.picker.selections.at(-1).model === "buddy-2"');
+  expect('document.activeElement.classList.contains("ra-model-trigger")');
+  browser('click', '.ra-model-trigger'); browser('click', '.ra-model-root-row:first-of-type'); wait('document.querySelector(".ra-model-group-toggle")');
+  expect('document.querySelectorAll(".ra-model-option").length === 0');
+  browser('press', 'ArrowDown');
+  expect('document.activeElement.classList.contains("ra-model-group-toggle")');
+  browser('press', 'ArrowRight'); browser('press', 'ArrowDown');
+  expect('document.activeElement.querySelector("[data-provider-id=deepseek-account]") !== null');
+  browser('press', 'Enter'); wait('!document.querySelector(".ra-model-menu")');
+  expect('window.fixture.picker.selections.at(-1).provider === "deepseek-account"');
+  evaluate('window.fixture.picker.current({provider:"remote-cli-codex",model:"codex-model",reasoningEffort:"medium"})');
+  browser('click', '.ra-model-trigger'); wait('document.querySelectorAll(".ra-model-root-row").length === 2');
+  browser('click', '.ra-model-root-row:nth-of-type(2)'); wait('document.querySelector(".ra-model-options")');
+  browser('click', '.ra-model-options button:has-text("High")'); wait('!document.querySelector(".ra-model-menu")');
+  expect('window.fixture.picker.selections.at(-1).reasoningEffort === "high" && document.querySelector(".ra-model-trigger").textContent.includes("High")');
+  browser('click', '.ra-model-trigger'); browser('click', '.ra-model-root-row:first-of-type');
+  browser('fill', '[aria-label="搜索模型"]', 'no-such-model');
+  expect('document.querySelectorAll(".ra-model-option").length === 0 && document.querySelector(".ra-model-menu [role=status]").textContent === "没有匹配的模型。"');
+  browser('fill', '[aria-label="搜索模型"]', 'Codex Fast');
+  evaluate('window.fixture.picker.rejectNext = true'); browser('press', 'Enter');
+  wait('document.querySelector(".ra-model-menu [role=alert]")?.textContent.includes("Selection rejected by host")');
+  expect('window.fixture.picker.snapshot().current.model === "codex-model"');
+  browser('click', '.ra-model-error button'); wait('!document.querySelector(".ra-model-error")');
+  browser('click', '[aria-label="清除模型搜索"]');
+  evaluate('window.fixture.picker.addModel()');
+  wait('document.querySelector("[data-model-provider=remote-cli-codebuddy] .ra-model-count")?.textContent === "25"');
+  expect('document.querySelectorAll("[data-model-provider=remote-cli-codebuddy] .ra-model-option").length === 0');
+  browser('set', 'viewport', '390', '844');
+  expect('(()=>{const r=document.querySelector(".ra-model-menu").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})()');
+  image('model-groups-mobile');
+  browser('press', 'Escape'); browser('press', 'Escape'); wait('!document.querySelector(".ra-model-menu")');
+  browser('open', `${base}?fold-persistence`);
+  wait('document.querySelector(".ra-model-trigger")'); browser('click', '.ra-model-trigger'); browser('click', '.ra-model-root-row:first-of-type');
+  wait('document.querySelector(".ra-model-group-toggle")');
+  expect('document.querySelector("[data-model-provider=remote-cli-codebuddy] button").getAttribute("aria-expanded") === "false"');
+  browser('press', 'Escape'); browser('press', 'Escape');
+  const pickerErrors = browser('errors'); if (pickerErrors.errors?.length) throw new Error(JSON.stringify(pickerErrors.errors));
+  console.log('PASS: native model seat grouping, persisted collapse, fuzzy search, keyboard visibility, shared selection, reasoning, failed selection, live catalogs and narrow viewport');
+
 } finally {
   try { browser('close'); } catch {}
   server.kill('SIGTERM');

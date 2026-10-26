@@ -194,5 +194,17 @@ export const zh: Record<string, string> = {
   "No CLIs enabled. Select the ones you want to use.": "尚未启用 CLI，请勾选你要使用的工具。",
   "Enable the CLIs you want on each machine. Conversations use the current DSH workspace path on that machine.": "为机器勾选需要的 CLI；对话使用当前 DSH 工作区在该机器上的同路径。",
   "Invalid CLI selection": "CLI 选择无效",
-  "This CLI is disabled on this machine. Enable it in Settings → Remote agents.": "这台机器尚未启用该 CLI，请在设置 → 远程智能体中启用。"
+  "This CLI is disabled on this machine. Enable it in Settings → Remote agents.": "这台机器尚未启用该 CLI，请在设置 → 远程智能体中启用。",
+  "Choose model": "选择模型",
+  "Model selection": "模型选择",
+  "Search models": "搜索模型",
+  "Clear model search": "清除模型搜索",
+  "Models by provider": "按提供方分组的模型",
+  "Thinking level": "思考强度",
+  "Provider default": "提供方默认",
+  "Current provider": "当前提供方",
+  "No matching models.": "没有匹配的模型。",
+  "No models available.": "暂无可用模型。",
+  "Model selection is unavailable.": "当前会话无法切换模型。",
+  "Loading models…": "正在加载模型…"
 };

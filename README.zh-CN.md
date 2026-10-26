@@ -55,7 +55,7 @@ Claude 的 check 包含模板回归与远程工作区兼容测试。离线测试
 
 ## 安装插件
 
-远程智能体 **0.2.4** 在 DSH 原生模型选择器中按 Claude、Codex 等 CLI 提供方分组，直接使用主对话；侧栏的“远程会话”统一管理历史、续聊与待审批请求，分派工具继续可用。运行 `pnpm --filter dsh-remote-agents pack:plugin` 构建 `dist/dsh-remote-agents-0.2.4.tgz`。安装方法及与 0.1.x 的区别见[安装与升级](packages/remote-agents/README.zh-CN.md#安装与升级)。
+远程智能体 **0.2.5** 在 DSH 原生模型选择器中按 Claude、Codex 等 CLI 提供方分组，支持点击标题折叠并记住状态，直接使用主对话；侧栏的“远程会话”统一管理历史、续聊与待审批请求，分派工具继续可用。运行 `pnpm --filter dsh-remote-agents pack:plugin` 构建 `dist/dsh-remote-agents-0.2.5.tgz`。安装方法及与 0.1.x 的区别见[安装与升级](packages/remote-agents/README.zh-CN.md#安装与升级)。
 
 构建后按插件安装到目标 DSH profile：
 
