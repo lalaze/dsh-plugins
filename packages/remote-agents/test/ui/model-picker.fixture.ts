@@ -1,4 +1,9 @@
-import type { ModelDirectoryState, ModelSelection, SelectionResult } from '../../src/client/model-picker.js';
+export interface ModelSelection { provider: string; model: string; reasoningEffort?: string }
+interface ModelDirectoryState {
+  status: string; error: string | null; pending: ModelSelection | null; failures: unknown[]; current: ModelSelection;
+  groups: { id: string; name: string; models: { id: string; name: string; reasoning?: { efforts: { id: string; name: string }[]; defaultEffort?: string } }[] }[];
+}
+type SelectionResult = { ok: true } | { ok: false; error: { code: string; message: string } };
 
 const listeners = new Set<() => void>();
 let value: ModelDirectoryState = {

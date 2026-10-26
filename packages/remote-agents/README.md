@@ -13,7 +13,7 @@ Each CLI appears as a separate provider in DSH's ordinary model picker:
 
 Change the CLI checkboxes on a machine card and click **Apply selection**. Disabled CLIs are neither probed nor shown in the model picker; existing agents keep running. New machines start with no CLIs selected, while older saved machines retain their existing provider scope.
 
-**Collapsible model groups:** click a provider heading, such as **CodeBuddy Code**, to expand or collapse its models. The current model’s group starts expanded; other groups start collapsed. Manual choices are remembered in this browser. Searching expands matching groups, and clearing the search restores your choices. Model selection and thinking levels use DSH’s shared model directory through its public composer slot.
+**Collapsible model groups:** click a provider heading, such as **CodeBuddy Code**, to expand or collapse its models. The current model’s group starts expanded; other groups start collapsed. Manual choices are remembered in this browser. Searching expands matching groups, and clearing the search restores your choices. The plugin adds folding to the provider headings inside the native model list. DSH retains the outer menu, model labels, reasoning controls and any additional selection options.
 
 Model catalogs are saved per machine on the DSH server and shared between clients. The same model entry works across workspaces without per-project duplicates. Opening the picker reads cached data; use **Refresh models** beside the machine after CLI/account changes or to discover an existing host after upgrading. Discovery uses the remote account's home directory; execution uses the conversation's workspace directory, and project-specific model availability is validated at startup.
 
@@ -84,10 +84,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.5.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.6.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.5:** Fixes provider folding failing to activate on the real DSH client because the previous version redeclared an existing child slot. The native model seat is now preserved. Restart DSH and refresh the client; saved folding preferences still apply.
 
 **Upgrading from 0.2.4:** Provider headings in the composer model menu now expand and collapse. Refresh the client after upgrading; no machine or session migration is needed.
 
@@ -122,4 +124,4 @@ pnpm --filter dsh-remote-agents preview:ui
 
 Tests cover the native protocols with simulated CLIs over a fake SSH transport, including interrupt-on-send and resume, plus the service and delegation tools with a simulated DSH host. Native-chat tests also load the installed DSH LLM registry and session implementation, exercise durable retry/cancellation/approvals, and connect all six model routes through the real backend to simulated SSH CLIs. The Antigravity forwarder test uses a real child process. Real remote CLIs over SSH have not been exercised by these tests.
 
-Browser tests render the public model slot with DSH UI primitives and a simulated shared directory. They verify folding persistence, search, keyboard navigation, reasoning selection, failure recovery and narrow layouts. The Desktop app itself is not launched by these tests.
+Browser tests load the unmodified official DSH 0.2.1-rc.3 model menu bundle and the real slot registry, with a simulated directory transport. They verify native registration, folding persistence, search, hidden-option keyboard protection, reasoning selection, failure recovery, narrow layouts and plugin disposal. The Desktop app itself is not launched by these tests. Run `pnpm --filter dsh-remote-agents test:models` for this focused regression. Folding uses the native MenuGroup and documented model-label DOM attributes; unrecognized future markup is left unchanged.
