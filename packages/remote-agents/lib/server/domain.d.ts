@@ -48,6 +48,7 @@ export declare function permissionModes(provider: string, modes: Choice[]): Choi
 export interface Model extends Choice {
     thinkingOptions?: Choice[];
     defaultThinkingOptionId?: string;
+    inputModalities?: ('text' | 'image')[];
 }
 export interface Provider {
     id: string;
@@ -144,7 +145,21 @@ export interface TaskInput {
     modeId?: string;
     thinkingOptionId?: string;
     prompt: string;
+    attachments?: Attachment[];
 }
+/** Staged, content-addressed bytes. No host filesystem paths or base64 enter the registry. */
+export interface Attachment {
+    sha256: string;
+    name: string;
+    bytes: number;
+    kind: 'image' | 'file';
+    mediaType?: string;
+}
+export interface NativeAttachment extends Attachment {
+    path: string;
+    data?: string;
+}
+export declare const inputModalitiesOf: (provider: string, model: Model) => ("text" | "image")[];
 /** Durable agent record. `id` is the client request ID, so retried creation is idempotent. */
 export interface Task extends TaskInput {
     /** Native DSH conversation binding, independent of background delegation. */
@@ -229,6 +244,7 @@ export declare function field(value: unknown, label: string, max?: number): stri
 export declare function identifier(value: unknown): string;
 export declare function remotePath(value: unknown): string;
 export declare function taskInput(value: unknown): TaskInput;
+export declare function attachmentInput(value: unknown): Attachment[];
 export declare function cursorInput(value: unknown): Cursor | undefined;
 export interface Question {
     header: string;

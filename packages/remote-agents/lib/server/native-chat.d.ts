@@ -1,5 +1,6 @@
-import { LlmAdapter, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
+import { LlmAdapter, type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
+import { type AttachmentAccess } from './attachments.js';
 import { ChatProjects } from './chat-projects.js';
 import { type ToolHost } from './tools.js';
 import type { WorkspacePlacement } from './workspace-access.js';
@@ -16,6 +17,8 @@ export interface ChatHost extends Partial<ToolHost> {
         turn: number;
         step: number;
     } | undefined;
+    userContent?(sessionId: NonNullable<GenerateOptions['sessionId']>, messageId: string): readonly ContentBlock[] | undefined;
+    attachments?: AttachmentAccess;
 }
 export declare const chatModelId: (projectId: string, provider: string, model: string) => string;
 export declare class RemoteCliAdapter extends LlmAdapter {

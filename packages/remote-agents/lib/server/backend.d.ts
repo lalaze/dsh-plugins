@@ -1,4 +1,4 @@
-import type { Agent, Cursor, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
+import type { Agent, Attachment, Cursor, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
 import { type SshTransport } from './ssh.js';
 import type { Store } from './store.js';
 export { connectionInput } from './ssh.js';
@@ -8,14 +8,14 @@ export interface Backend {
     close(): Promise<void>;
     homeDirectory(): Promise<string>;
     providers(cwd: string, refresh: boolean): Promise<Provider[]>;
-    create(task: Task): Promise<Agent>;
-    recover(task: Task): Promise<Agent>;
+    create(task: Task, signal?: AbortSignal): Promise<Agent>;
+    recover(task: Task, signal?: AbortSignal): Promise<Agent>;
     agent(id: string): Promise<Agent | null>;
     timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage>;
     messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<MessageTimeline>;
     reply(id: string): Promise<string>;
     /** Interrupts a running turn first and reattaches a detached session. */
-    send(id: string, text: string, messageId: string): Promise<void>;
+    send(id: string, text: string, messageId: string, attachments?: Attachment[], signal?: AbortSignal): Promise<void>;
     stop(id: string): Promise<void>;
     respond(id: string, requestId: string, answer: PermissionAnswer, input?: Record<string, unknown>): Promise<void>;
     /** Stop and release the CLI process; output and the native session ID are kept. */
@@ -72,8 +72,8 @@ export declare class SshBackend implements Backend {
     providers(cwd: string, refresh: boolean): Promise<Provider[]>;
     private task;
     private lease;
-    create(task: Task): Promise<Agent>;
-    recover(task: Task): Promise<Agent>;
+    create(task: Task, signal?: AbortSignal): Promise<Agent>;
+    recover(task: Task, signal?: AbortSignal): Promise<Agent>;
     private start;
     private open;
     agent(id: string): Promise<Agent | null>;
@@ -82,7 +82,7 @@ export declare class SshBackend implements Backend {
     reply(id: string): Promise<string>;
     /** The live session, resuming the saved native session when the process is gone. */
     private attached;
-    send(id: string, text: string, messageId: string): Promise<void>;
+    send(id: string, text: string, messageId: string, attachments?: Attachment[], signal?: AbortSignal): Promise<void>;
     stop(id: string): Promise<void>;
     respond(id: string, requestId: string, answer: PermissionAnswer): Promise<void>;
     detach(task: Task): Promise<void>;

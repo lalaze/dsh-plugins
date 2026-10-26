@@ -1,4 +1,4 @@
-import { type Agent, type NativeProtocol, type PermissionAnswer, type Task } from './domain.js';
+import { type Agent, type NativeAttachment, type NativeProtocol, type PermissionAnswer, type Task } from './domain.js';
 import { JsonlPeer } from './ssh.js';
 import { TaskHistory } from './history.js';
 import type { Store } from './store.js';
@@ -20,6 +20,7 @@ export declare class CliSession {
     private admitting;
     private interrupting;
     private stopping;
+    private imageInput;
     private permissions;
     private tools;
     private stopWaiters;
@@ -32,7 +33,7 @@ export declare class CliSession {
     private append;
     initialize(protocol: NativeProtocol, argv: string[], resume?: boolean): Promise<void>;
     private protocol;
-    send(text: string, messageId: string): Promise<void>;
+    send(text: string, messageId: string, attachments?: readonly NativeAttachment[]): Promise<void>;
     private confirm;
     private complete;
     private fail;

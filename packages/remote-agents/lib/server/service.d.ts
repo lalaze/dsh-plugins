@@ -6,10 +6,12 @@ export interface CreateOptions {
     title?: string;
     origin?: Task['origin'];
     chat?: Task['chat'];
+    signal?: AbortSignal;
 }
 export interface SendOptions {
     /** Interrupt a running turn. When false, a working agent rejects the message. */
     interrupt?: boolean;
+    signal?: AbortSignal;
 }
 export declare class RemoteAgentsService {
     readonly store: Store;
@@ -49,7 +51,7 @@ export declare class RemoteAgentsService {
     private updateTask;
     create(input: unknown, options?: CreateOptions): Promise<AgentSummary>;
     /** Retry an interrupted start, or reattach a stopped session without replaying anything. */
-    retry(id: string): Promise<AgentSummary>;
+    retry(id: string, signal?: AbortSignal): Promise<AgentSummary>;
     private launch;
     private assertAgent;
     state(id: string): Promise<AgentState>;

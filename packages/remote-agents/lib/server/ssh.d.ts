@@ -11,6 +11,7 @@ export interface Child {
 export interface SshTransport {
     exec(script: string, timeout?: number): Promise<string>;
     start(cwd: string, argv: string[]): Child;
+    upload?(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
 }
 export declare class OpenSshTransport implements SshTransport {
     private readonly binary;
@@ -18,6 +19,8 @@ export declare class OpenSshTransport implements SshTransport {
     constructor(connection: string, binary?: string);
     private spawn;
     exec(script: string, timeout?: number): Promise<string>;
+    /** Binary stdin with backpressure; atomic, private, digest-verified remote copies. */
+    upload(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
     start(cwd: string, argv: string[]): Child;
 }
 export type WireMessage = Record<string, any>;

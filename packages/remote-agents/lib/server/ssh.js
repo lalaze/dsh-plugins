@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
-import { field, RemoteError } from './domain.js';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { field, remotePath, RemoteError } from './domain.js';
 export const quote = (value) => `'${value.replace(/'/g, "'\\''")}'`;
 /** Keep a compatible configured Node; otherwise use the newest installed runtime >=22. */
 export const REMOTE_PATH = `
@@ -114,6 +116,67 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
             child.stdin.end();
         });
     }
+    /** Binary stdin with backpressure; atomic, private, digest-verified remote copies. */
+    async upload(cwd, relativePath, data, bytes, sha256, signal) {
+        signal?.throwIfAborted();
+        remotePath(cwd);
+        const parts = relativePath.split('/');
+        if (!relativePath.startsWith('.dsh-remote-agents/attachments/') || parts.some(p => !p || p === '.' || p === '..') || /[\\\0\r\n]/.test(relativePath) || !/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(bytes) || bytes < 0)
+            throw new RemoteError('Invalid attachment destination');
+        const dirs = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
+        const script = `set -e
+cd ${quote(cwd)}
+umask 077
+for dsh_upload_dir in ${dirs.map(quote).join(' ')}; do
+  [ ! -L "$dsh_upload_dir" ] || { printf '%s\\n' 'Attachment destination is a symbolic link' >&2; exit 1; }
+  mkdir -p -- "$dsh_upload_dir"
+  chmod 700 "$dsh_upload_dir"
+done
+[ ! -L ${quote(relativePath)} ] && { [ ! -e ${quote(relativePath)} ] || [ -f ${quote(relativePath)} ]; } || { printf '%s\\n' 'Invalid attachment destination' >&2; exit 1; }
+dsh_upload_tmp="$(mktemp ${quote(`${dirs.at(-1)}/.upload.XXXXXXXXXX`)})"
+trap 'rm -f -- "$dsh_upload_tmp"' 0
+trap 'exit 1' 1 2 15
+cat > "$dsh_upload_tmp"
+[ "$(wc -c < "$dsh_upload_tmp" | tr -d ' ')" = ${quote(String(bytes))} ] || { printf '%s\\n' 'Attachment byte count mismatch' >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then dsh_upload_digest="$(sha256sum "$dsh_upload_tmp")"; else dsh_upload_digest="$(shasum -a 256 "$dsh_upload_tmp")"; fi
+case "$dsh_upload_digest" in ${sha256}' '*) ;; *) printf '%s\\n' 'Attachment checksum mismatch' >&2; exit 1;; esac
+chmod 400 "$dsh_upload_tmp"
+mv -f -- "$dsh_upload_tmp" ${quote(relativePath)}
+printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
+`;
+        const child = this.spawn(script);
+        let stdout = '', stderr = '', ended = false;
+        const abort = () => child.kill('SIGTERM');
+        const timer = setTimeout(abort, 300_000);
+        signal?.addEventListener('abort', abort, { once: true });
+        child.stdout.on('data', chunk => { stdout = (stdout + chunk).slice(-16_000); });
+        child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
+        const completion = new Promise((resolve, reject) => {
+            child.on('error', reject);
+            child.on('close', code => { ended = true; if (code === 0)
+                resolve();
+            else
+                reject(new Error(stderr.trim() || `SSH attachment upload failed (${code})`)); });
+        });
+        try {
+            await Promise.all([pipeline(Readable.from(data), child.stdin, { signal }), completion]);
+            signal?.throwIfAborted();
+            return remotePath(stdout.trim());
+        }
+        catch (error) {
+            if (!ended && !['EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(String(error.code)))
+                child.kill('SIGTERM');
+            await completion.catch(() => { });
+            signal?.throwIfAborted();
+            throw stderr.trim() ? new Error(stderr.trim()) : error;
+        }
+        finally {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
+            if (!ended)
+                child.kill('SIGTERM');
+        }
+    }
     start(cwd, argv) {
         const process = this.spawn(`cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
         let stderr = '', exited;
@@ -151,7 +214,7 @@ export class JsonlPeer {
         let buffer = '';
         child.onData(data => {
             buffer += decoder.write(data);
-            if (buffer.length > 8_000_000) {
+            if (buffer.length > 64_000_000) {
                 this.finish(new Error('Remote CLI frame exceeded output limit'));
                 child.stop();
                 return;

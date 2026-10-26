@@ -29,6 +29,7 @@ export class CliSession {
     admitting = false;
     interrupting = false;
     stopping = false;
+    imageInput = false;
     permissions = new Map();
     tools = new Map();
     stopWaiters = new Set();
@@ -80,6 +81,7 @@ export class CliSession {
         }
         else if (protocol === 'acp') {
             const capabilities = await initializeAcp(this.peer);
+            this.imageInput = capabilities.agentCapabilities?.promptCapabilities?.image === true;
             const resumeMethod = capabilities.agentCapabilities?.loadSession ? 'session/load'
                 : capabilities.agentCapabilities?.sessionCapabilities?.resume ? 'session/resume' : undefined;
             this.agent.resumable = !!resumeMethod;
@@ -112,7 +114,7 @@ export class CliSession {
         this.suspended = false;
     }
     protocol() { return this.store.task(t => t.id === this.task.id).native.protocol; }
-    async send(text, messageId) {
+    async send(text, messageId, attachments = []) {
         // A failed turn leaves a live process able to take the next message.
         if (this.admitting || !this.alive || (this.agent.status !== 'idle' && this.agent.status !== 'error') || this.agent.activeTurn)
             throw new Error('Remote CLI is not idle');
@@ -120,7 +122,10 @@ export class CliSession {
         try {
             if (await this.history.hasMessage(messageId))
                 return; // Durable at-most-once admission.
-            await this.history.append({ type: 'user_message', text, clientMessageId: messageId, delivery: 'pending' });
+            const protocol = this.protocol(), images = attachments.filter(a => a.kind === 'image');
+            if (images.length && (protocol === 'antigravity' || (protocol === 'acp' && !this.imageInput)))
+                throw new Error('This remote CLI does not support image input');
+            await this.history.append({ type: 'user_message', text, clientMessageId: messageId, delivery: 'pending', ...(attachments.length ? { attachments: attachments.map(({ data, ...file }) => file) } : {}) });
             if (messageId === this.task.id)
                 await this.store.update(state => { state.tasks.find(t => t.id === this.task.id).native.initialSent = true; });
             this.activeMessage = messageId;
@@ -129,22 +134,21 @@ export class CliSession {
             this.agent.lastError = undefined;
             this.agent.status = 'running';
             this.agent.activeTurn = { turnId: randomUUID(), startedAt: new Date().toISOString() };
-            const protocol = this.protocol();
             if (protocol === 'codex') {
-                void this.peer.request('turn/start', { threadId: this.nativeId, cwd: this.agent.cwd, model: this.task.model, input: [{ type: 'text', text }], ...(this.task.thinkingOptionId ? { effort: this.task.thinkingOptionId } : {}) }).then(result => { if (this.activeMessage !== messageId)
+                void this.peer.request('turn/start', { threadId: this.nativeId, cwd: this.agent.cwd, model: this.task.model, input: [{ type: 'text', text }, ...images.map(a => ({ type: 'localImage', path: a.path }))], ...(this.task.thinkingOptionId ? { effort: this.task.thinkingOptionId } : {}) }).then(result => { if (this.activeMessage !== messageId)
                     return; if (result?.turn?.id && this.agent.activeTurn)
                     this.agent.activeTurn.turnId = result.turn.id; this.confirm(); }).catch(error => { if (this.activeMessage === messageId)
                     this.fail(error); });
             }
             else if (protocol === 'acp') {
-                void this.peer.request('session/prompt', { sessionId: this.nativeId, prompt: [{ type: 'text', text }] }, 0).then(() => { if (this.activeMessage !== messageId)
+                void this.peer.request('session/prompt', { sessionId: this.nativeId, prompt: [{ type: 'text', text }, ...images.map(a => ({ type: 'image', mimeType: a.mediaType, data: a.data }))] }, 0).then(() => { if (this.activeMessage !== messageId)
                     return; this.confirm(); this.complete(); }).catch(error => { if (this.activeMessage === messageId)
                     this.fail(error); });
             }
             else if (protocol === 'antigravity')
                 this.peer.send({ event: 'user', message: { content: text } });
             else
-                this.peer.send({ type: 'user', session_id: this.nativeId, uuid: randomUUID(), parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text }] } });
+                this.peer.send({ type: 'user', session_id: this.nativeId, uuid: randomUUID(), parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text }, ...images.map(a => ({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.data } }))] } });
         }
         finally {
             this.admitting = false;
