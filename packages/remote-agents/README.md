@@ -25,7 +25,7 @@ Model catalogs are saved per machine on the DSH server and shared between client
 
 ## Unified remote sessions
 
-Open **Sidebar → Remote sessions**, or **Settings → Remote agents → Open sessions**. The list includes main-chat bindings and delegated agents, with search by title, CLI, host or path, and filters for pending requests and archived sessions.
+Open **Settings → Remote agents → Open sessions**. There is no remote sessions entry in the sidebar. The list includes main-chat bindings and delegated agents, with search by title, CLI, host or path, and filters for pending requests and archived sessions.
 
 - **Create:** choose a saved machine, CLI and model, then describe the task. The current DSH workspace path is used on that machine.
 - **History and follow-ups:** read streaming output, expandable reasoning and tool details, and load earlier history. Send follow-ups to background agents here; use **Open in main chat** for bound conversations so their native DSH history stays consistent.
@@ -84,10 +84,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.7.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.8.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.7:** Remote sessions now open only through settings; the sidebar entry has been removed. Update the plugin and refresh the client.
 
 **Upgrading from 0.2.6:** Main-chat models are filtered by the workspace machine and verified again before sending. Existing conversations can continue only when their machine and directory match. Update the server plugin and refresh the client; machines and model caches need no migration.
 

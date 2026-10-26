@@ -36,10 +36,10 @@ try {
   browser('set', 'viewport', '1440', '1000');
 
   if (!process.argv.includes('--models-only')) {
-  // Settings remain available alongside the sidebar session entry.
+  // Remote sessions are available only from settings.
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 2 && window.fixture.slots[0] === "settings.section:remote-agents"');
-  expect('!document.querySelector(".ra-launch,.ra-workspace,dialog")');
+  expect('window.fixture.slots.length === 1 && window.fixture.slots[0] === "settings.section:remote-agents"');
+  expect('!document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   expect('!document.querySelector(".ra-chat-projects,[aria-label=项目名称],[aria-label=远程项目路径]")');
   wait('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://build-box\\"]")');
   browser('click', '.ra-ssh-trigger'); wait('document.querySelector(".ra-ssh-menu:popover-open")');
@@ -76,7 +76,7 @@ try {
   wait('document.querySelector(".ra-hosts .ra-host-row")?.textContent.includes("DSH 模型选择器中有 1 个模型")');
   browser('click', 'button:text-is("刷新模型")');
   wait('document.querySelector(".ra-hosts .ra-badge")?.textContent === "已连接"');
-  console.log('PASS: settings and session slots, SSH alias keyboard selection, config refresh, host creation and connection');
+  console.log('PASS: settings-only session entry, SSH alias keyboard selection, config refresh, host creation and connection');
 
   const groups = state().modelGroups;
   if (groups.map(g => g.name).join(',') !== 'Codex') throw new Error('CLI providers were not exposed as separate model picker groups');
@@ -121,13 +121,12 @@ try {
   wait('document.querySelector(".ra-settings [role=alert]")?.textContent.includes("模拟连接中断")');
   fixture({ failReads: false }); browser('click', 'button:text-is("重试")');
   wait('document.querySelector(".ra-hosts input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 2 && !document.querySelector(".ra-launch,.ra-workspace,dialog")');
+  expect('window.fixture.slots.length === 1 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
-  console.log('PASS: settings load failure and retry; session entry available without opening a panel or adding a composer launcher');
+  console.log('PASS: settings load failure and retry; session entry remains in settings without a sidebar or composer launcher');
 
   fixture({ seedSessions: true });
-  wait('document.querySelector(".ra-attention-count")?.textContent === "1"');
-  browser('click', '.ra-session-launch'); wait('document.querySelector("dialog[open] .ra-session-item")');
+  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
   expect('document.querySelectorAll(".ra-session-item").length === 3');
   browser('fill', '[aria-label="搜索会话"]', 'no-such-session');
   expect('document.querySelectorAll(".ra-session-item").length === 0');
@@ -139,9 +138,9 @@ try {
   expect('document.querySelector("dialog").scrollWidth <= innerWidth');
   image('sessions-mobile-approval');
   browser('press', 'Escape'); wait('!document.querySelector("dialog[open]")');
-  expect('document.activeElement.classList.contains("ra-session-launch")');
+  expect('document.activeElement === document.querySelector(".ra-settings-heading button")');
   if (state().answers.length || state().stops) throw new Error('Closing the panel resolved or stopped a pending approval');
-  browser('click', '.ra-session-launch'); wait('document.querySelector("dialog[open] .ra-session-item")');
+  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
   browser('click', '.ra-session-item:has-text("审查构建脚本")'); wait('document.querySelector(".ra-permission")');
   browser('click', 'button:text-is("允许本次会话")');
   wait('!document.querySelector(".ra-permission") && document.querySelector(".ra-output")?.textContent.includes("审批已通过")');
@@ -171,7 +170,7 @@ try {
   expect('!document.querySelector("[aria-label=给智能体发消息]")');
   browser('click', 'button:text-is("在主对话打开")'); wait('!document.querySelector("dialog[open]")');
   expect('window.fixture.navigation.at(-1) === "fixture-main-chat"');
-  browser('click', '.ra-session-launch'); wait('document.querySelector("dialog[open] .ra-list-heading")');
+  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-list-heading")');
   browser('click', '.ra-list-heading button'); wait('document.querySelector("[aria-label=会话机器] option")');
   browser('fill', '[aria-label="任务"]', '检查 API 的分页实现');
   browser('click', 'button:text-is("开始会话")'); wait('document.querySelector(".ra-detail-heading h2")?.textContent === "检查 API 的分页实现"');
@@ -193,7 +192,7 @@ try {
   const visible = '[data-ra-model-option]:not([data-ra-model-hidden])';
   browser('set', 'viewport', '1440', '1000');
   wait('document.querySelector("[data-native-picker] button")');
-  expect('window.fixture.slots.length === 2');
+  expect('window.fixture.slots.length === 1');
   browser('click', trigger); wait('document.querySelector("[data-menu-material] > button")');
   image('model-groups-native-root');
   browser('click', rootModel); wait('document.querySelector("[data-ra-model-provider]")');

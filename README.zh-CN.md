@@ -50,13 +50,13 @@ pnpm --filter dsh-remote-agents pack:plugin
 
 ## 安装插件
 
-远程智能体 **0.2.7** 在 DSH 原生模型选择器中仅显示当前工作区对应机器的模型，并按 Claude、Codex 等 CLI 提供方分组，支持点击标题折叠并记住状态，直接使用主对话；侧栏的“远程会话”统一管理历史、续聊与待审批请求，分派工具继续可用。运行 `pnpm --filter dsh-remote-agents pack:plugin` 构建 `dist/dsh-remote-agents-0.2.7.tgz`。安装方法及与 0.1.x 的区别见[安装与升级](packages/remote-agents/README.zh-CN.md#安装与升级)。
+远程智能体 **0.2.8** 在 DSH 原生模型选择器中仅显示当前工作区对应机器的模型，并按 Claude、Codex 等 CLI 提供方分组，支持点击标题折叠并记住状态，直接使用主对话；设置中的“打开会话”统一管理历史、续聊与待审批请求，分派工具继续可用。运行 `pnpm --filter dsh-remote-agents pack:plugin` 构建 `dist/dsh-remote-agents-0.2.8.tgz`。安装方法及与 0.1.x 的区别见[安装与升级](packages/remote-agents/README.zh-CN.md#安装与升级)。
 
 构建后按插件安装到目标 DSH profile：
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.7.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.8.tgz"
 ```
 
 桌面端请完全退出 DSH，使用桌面应用自带的 `dsh` 命令，将参数改为 `--profile desktop` 后安装并重新打开；npm 版 CLI 不能管理这个保留 profile。Web 端请重启更新的 profile 并刷新浏览器。插件目前未发布到 npm。仓库根目录是私有工作区，安装时应使用各插件的压缩包。

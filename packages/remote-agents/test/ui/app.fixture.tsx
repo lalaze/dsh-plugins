@@ -48,6 +48,5 @@ theme.textContent = ':root{--dsw-alias-label-primary:var(--dsh-text);--dsw-alias
 document.head.append(theme);
 const root = document.createElement('div'); document.body.append(root);
 const Settings = slots.get('settings.section:remote-agents')!;
-const Launcher = slots.get('sidebar.footer.action:remote-agents-sessions')!;
 const Picker = native.Picker;
-createRoot(root).render(<><nav aria-label="Fixture sidebar" style={{ padding: '8px 24px', maxWidth: 300 }}><Launcher /></nav><Settings /><div data-native-picker style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1 }}><Picker /></div></>);
+createRoot(root).render(<><Settings /><div data-native-picker style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1 }}><Picker /></div></>);
