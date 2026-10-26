@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-session-models
+      name: dsh-session-models
+      config: {}
