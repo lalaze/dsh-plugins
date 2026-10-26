@@ -2,10 +2,11 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
 import {
   createToolResultMessage, createUserMessage, LlmAdapter, LlmError, MessageId, ReasoningEffortId, ToolCallId,
-  type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk,
+  type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk,
 } from '@deepseek-ai/dsh-llm';
 import type { Session, SessionSeq } from '@deepseek-ai/dsh-session';
-import { busy, remotePath, type Cursor, type TimelineEntry } from './domain.js';
+import { busy, inputModalitiesOf, remotePath, type Cursor, type TimelineEntry } from './domain.js';
+import { restoreFiles, stageAttachments, type AttachmentAccess } from './attachments.js';
 import { ChatProjects } from './chat-projects.js';
 import { decidePermission, type ToolHost } from './tools.js';
 import type { WorkspacePlacement } from './workspace-access.js';
@@ -20,6 +21,8 @@ export interface ChatHost extends Partial<ToolHost> {
   cwd?(sessionId: NonNullable<GenerateOptions['sessionId']>): string | undefined;
   workspace?(cwd: string, signal?: AbortSignal): Promise<WorkspacePlacement>;
   step(sessionId: NonNullable<GenerateOptions['sessionId']>): { session: Session; turn: number; step: number } | undefined;
+  userContent?(sessionId: NonNullable<GenerateOptions['sessionId']>, messageId: string): readonly ContentBlock[] | undefined;
+  attachments?: AttachmentAccess;
 }
 const hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 const blockText = (content: readonly { type: string; text?: string }[]) => content.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n');
@@ -81,7 +84,7 @@ export class RemoteCliAdapter extends LlmAdapter {
       const host = this.projects.service.hosts().find(h => h.id === project.hostId);
       return project.providers.filter(p => p.status === 'ready' && chatProviderId(p.id) === provider).flatMap(p => p.models.map(m => ({
         provider, id: chatModelId(project.id, p.id, m.id), name: `${m.label} · ${host?.label ?? project.label}`,
-        description: `${host?.label ?? project.label} · ${p.label}`, inputModalities: ['text' as const],
+        description: `${host?.label ?? project.label} · ${p.label}`, inputModalities: inputModalitiesOf(p.id, m),
       })));
     });
   }
@@ -98,7 +101,7 @@ export class RemoteCliAdapter extends LlmAdapter {
   override async resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
     signal?.throwIfAborted(); const route = this.route(provider, model);
     const advertised = (await this.listModels(provider)).find(m => m.id === model);
-    return { provider, id: model, name: advertised?.name ?? route.model.label, inputModalities: ['text'],
+    return { provider, id: model, name: advertised?.name ?? route.model.label, inputModalities: inputModalitiesOf(route.provider.id, route.model),
       ...(route.model.thinkingOptions?.length ? { reasoning: { efforts: route.model.thinkingOptions.map(o => ({ id: ReasoningEffortId(o.id), name: o.label })),
         ...(route.model.defaultThinkingOptionId ? { defaultEffort: ReasoningEffortId(route.model.defaultThinkingOptionId) } : {}) } } : {}) };
   }
@@ -129,8 +132,11 @@ export class RemoteCliAdapter extends LlmAdapter {
     const { project, provider, model } = this.route(options.provider, options.model), service = this.projects.service;
     const lastUser = options.messages.findLast(m => m.role === 'user' && (!m.source || m.source.kind === 'user'));
     if (!lastUser || lastUser.role !== 'user') throw new LlmError('A user message is required for the remote CLI.', 'INVALID_REQUEST');
-    if (lastUser.content.some(b => b.type !== 'text')) throw new LlmError('Remote CLI chat accepts text. Put files on the remote machine and reference their remote paths.', 'UNSUPPORTED_INPUT');
-    const currentPrompt = blockText(lastUser.content).trim();
+    const contentOf = (message: typeof lastUser) => restoreFiles(message.content, message.id ? this.host.userContent?.(sessionId, message.id) : undefined);
+    const content = contentOf(lastUser);
+    if (content.some(b => !['text', 'image', 'file'].includes(b.type))) throw new LlmError('This remote CLI input type is unsupported', 'UNSUPPORTED_INPUT');
+    if (content.some(b => b.type === 'image' && !b.offloaded) && !inputModalitiesOf(provider.id, model).includes('image')) throw new LlmError('This remote CLI does not support image input', 'UNSUPPORTED_INPUT');
+    const currentPrompt = blockText(content).trim() || (content.some(b => b.type === 'image' || b.type === 'file') ? 'Inspect the attached images and files.' : '');
     if (!currentPrompt) throw new LlmError('Enter a message for the remote CLI.', 'INVALID_REQUEST');
     const effort = options.reasoningEffort ?? model.defaultThinkingOptionId;
     if (effort && !model.thinkingOptions?.some(o => o.id === effort)) throw new LlmError('This remote model does not support that thinking level.', 'INVALID_REQUEST');
@@ -153,7 +159,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     const previousIndex = task?.chat?.lastUserId ? options.messages.findIndex(m => m.id === task.chat?.lastUserId) : -1;
     const contextStart = previousIndex >= 0 ? previousIndex + 1 : 0;
     const previous = options.messages.slice(contextStart, currentIndex).filter(m => m.role === 'assistant' || (m.role === 'user' && (!m.source || m.source.kind === 'user')))
-      .map(m => `${m.role}: ${blockText(m.content)}`).filter(t => t.trim() !== 'user:' && t.trim() !== 'assistant:').join('\n\n');
+      .map(m => `${m.role}: ${blockText(m.role === 'user' ? contentOf(m) : m.content)}`).filter(t => t.trim() !== 'user:' && t.trim() !== 'assistant:').join('\n\n');
     const prompt = previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt;
     const taskId = task?.id ?? messageId;
     let admitted = false, settled = false, interrupted = false, index = 0, cursor: Cursor | undefined;
@@ -172,21 +178,24 @@ export class RemoteCliAdapter extends LlmAdapter {
     if (this.active.has(sessionId)) throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
     this.active.add(sessionId); this.controllers.add(controller);
     try {
+      const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
       if (!task) {
+        const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
         // A newly selected route receives prior human/assistant context, never local DSH tool schemas or its system prompt.
         admitted = true;
-        const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt,
-          // Old cached Claude catalogs advertised `default`; do not let that override remote settings.
+        const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt, ...(attachments.length ? { attachments } : {}),
+          // Old cached Claude catalogs must not override remote permissions.
           ...(provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}) },
-        { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId } });
+        { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, signal });
         if (!agent.started) throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
       } else {
         // A receipt left by a failed HTTP/model response is replayed, never delivered again.
-        if (!task.agentId) await service.retry(task.id);
+        if (!task.agentId) await service.retry(task.id, signal);
         const page = await service.messageTimeline(task.id, messageId);
         if (!page.found) {
+          const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
           await service.setModel(task.id, model.id, effort, options.model);
-          admitted = true; await service.send(task.id, { id: messageId, text: prompt }, { interrupt: false });
+          admitted = true; await service.send(task.id, { id: messageId, text: prompt, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
         } else admitted = true;
       }
       const receipt = await service.messageTimeline(taskId, messageId);

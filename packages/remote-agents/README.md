@@ -21,7 +21,7 @@ Model catalogs are saved per machine on the DSH server and shared between client
 - Replies and thinking stream into the main conversation. Remote tool calls appear as native DSH tool cards; they execute on the remote machine. They are recorded as completed external work, so DSH never executes them again. Approvals and questions use DSH's native prompts.
 - The DSH thinking selector uses the CLI's discovered reasoning levels. The CLI's default permission mode applies. **Stop** or cancelling the response interrupts the remote CLI turn.
 - Lost responses can replay the saved output by message identity without sending the task again. Unconfirmed delivery or an unfinished response after disconnection is reported explicitly. Send a new message to continue the saved session.
-- Main chat currently accepts **text**. Local attachments and local workspace files are not uploaded; put files on the remote machine and refer to their remote paths. The CLI uses its own credentials, tools, instructions and context management. DSH summarization runs in a disposable CLI session, separate from the coding conversation.
+- Main chat accepts **text, uploaded images and files**. Claude and Codex receive images through their native protocols; ACP CLIs expose image input only when their initialization reports support. Files are streamed over SSH into the verified remote workspace and supplied as read-only paths for the CLI’s file tools. Only attachments from the conversation are transferred. The CLI uses its own credentials, tools, instructions and context management. DSH summarization runs in a disposable CLI session, separate from the coding conversation.
 
 ## Unified remote sessions
 
@@ -84,16 +84,24 @@ The DSH server needs noninteractive key or agent access and verified host keys (
 
 Before running discovery or a CLI, SSH loads the remote user’s interactive login environment for Bash, Zsh and Fish. This includes proxy, authentication and configuration-directory variables that may be set only in interactive startup files. Startup output is separated from CLI protocol output, and startup scripts cannot consume CLI input. Other login shells keep the POSIX launch path. The plugin retains an already configured Node.js ≥22. If the current runtime is too old, the plugin selects a compatible installed nvm or Homebrew runtime. Without one, it keeps the existing environment and reports CLI errors; it never installs or upgrades Node automatically.
 
+### Uploaded attachments
+
+Paste or upload images and files in DSH’s normal composer. An attachment-only message is supported. Each message’s copies live under `.dsh-remote-agents/attachments/<task>/<message>/` in the remote workspace, with private directories, read-only files and SHA-256 verification. The files remain available for follow-ups and resumed CLI sessions; you can remove the remote attachment directory when it is no longer needed. Deleting a plugin session clears its local staging copies.
+
+Files are streamed without buffering the entire upload in memory. Images use DSH’s normalized request versions (up to a 1568-pixel edge and a 4 MiB target); each must fit the CLI’s 5 MB limit, with at most 20 images and 32 MiB of image data per request. A failed upload does not start a CLI turn, and retrying an already recorded message does not upload or send it again.
+
 ## Install and upgrade
 
 Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the archive into a DSH profile:
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.12.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.13.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.12:** Adds image and file transfer from the main composer. Restart DSH and refresh the client after updating; refresh host models to pick up each CLI’s declared image capabilities.
 
 **Upgrading from 0.2.11:** Claude now inherits remote permission settings by default. Permission modes and matching session/project approvals are available in **Open sessions**. Existing sessions keep their explicit mode; stop an active session and select **Remote CLI settings** to inherit the remote default.
 

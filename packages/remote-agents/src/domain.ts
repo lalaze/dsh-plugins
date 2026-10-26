@@ -21,7 +21,7 @@ export interface Choice { id: string; label: string; isDefault?: boolean }
 export function permissionModes(provider: string, modes: Choice[]): Choice[] {
   return provider === 'claude' && !modes.some(m => m.id === 'inherit') ? [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes] : modes;
 }
-export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string }
+export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string; inputModalities?: ('text' | 'image')[] }
 export interface Provider {
   id: string;
   label: string;
@@ -99,7 +99,12 @@ export interface TaskInput {
   modeId?: string;
   thinkingOptionId?: string;
   prompt: string;
+  attachments?: Attachment[];
 }
+/** Staged, content-addressed bytes. No host filesystem paths or base64 enter the registry. */
+export interface Attachment { sha256: string; name: string; bytes: number; kind: 'image' | 'file'; mediaType?: string }
+export interface NativeAttachment extends Attachment { path: string; data?: string }
+export const inputModalitiesOf = (provider: string, model: Model): ('text' | 'image')[] => model.inputModalities ?? (['claude', 'codex'].includes(provider) ? ['text', 'image'] : ['text']);
 /** Durable agent record. `id` is the client request ID, so retried creation is idempotent. */
 export interface Task extends TaskInput {
   /** Native DSH conversation binding, independent of background delegation. */
@@ -187,9 +192,20 @@ export function taskInput(value: unknown): TaskInput {
     id: identifier(v.id), hostId: identifier(v.hostId), cwd: remotePath(v.cwd),
     provider: field(v.provider, 'provider', 200), model: field(v.model, 'model', 500),
     prompt: field(v.prompt, 'prompt', 100_000),
+    ...(v.attachments !== undefined ? { attachments: attachmentInput(v.attachments) } : {}),
     ...(v.modeId ? { modeId: field(v.modeId, 'mode', 200) } : {}),
     ...(v.thinkingOptionId ? { thinkingOptionId: field(v.thinkingOptionId, 'thinking level', 200) } : {}),
   };
+}
+export function attachmentInput(value: unknown): Attachment[] {
+  if (!Array.isArray(value) || value.length > 100) throw new RemoteError('Up to 100 attachments can be sent at once');
+  return value.map(raw => {
+    const a = record(raw);
+    if (typeof a.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(a.sha256) || !Number.isSafeInteger(a.bytes) || Number(a.bytes) < 0 || !['image', 'file'].includes(String(a.kind))) throw new RemoteError('Invalid attachment');
+    if (a.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(String(a.mediaType))) throw new RemoteError('Unsupported image format');
+    if (a.kind === 'image' && Number(a.bytes) > 5_000_000) throw new RemoteError('An image exceeds the 5 MB CLI input limit');
+    return { sha256: a.sha256, name: field(a.name, 'attachment name', 255), bytes: Number(a.bytes), kind: a.kind as Attachment['kind'], ...(a.kind === 'image' ? { mediaType: String(a.mediaType) } : {}) };
+  });
 }
 export function cursorInput(value: unknown): Cursor | undefined {
   if (value === undefined || value === null) return;

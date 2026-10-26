@@ -33,7 +33,7 @@ test('machine catalogs persist and advertise models without project registration
   let changes = 0; projects.onChange(() => changes++);
   const [model] = await adapter.listModels(CODEX_PROVIDER);
   assert.equal(model.provider, CODEX_PROVIDER); assert.equal(model.name, 'Remote model · Build server');
-  assert.equal(model.description, 'Build server · Codex'); assert.deepEqual(model.inputModalities, ['text']);
+  assert.equal(model.description, 'Build server · Codex'); assert.deepEqual(model.inputModalities, ['text', 'image']);
   const reopened = new Store(path); await reopened.open(); assert.deepEqual(reopened.chatProjects(), []);
   assert.deepEqual(reopened.hosts()[0].catalog?.providers, project.providers);
   const probes = remote.discoveries;

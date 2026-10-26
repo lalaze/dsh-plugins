@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Agent, Cursor, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
+import type { Agent, Attachment, Cursor, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
 import { enabledProvidersOf, PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from './ssh.js';
 import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
@@ -7,6 +7,9 @@ import { TaskHistory } from './history.js';
 import type { Store } from './store.js';
 import { discoverAcpCatalog } from './acp.js';
 import { antigravityArguments, ANTIGRAVITY_NOTICE, ANTIGRAVITY_RUNNER, decodeAntigravityModels } from './antigravity.js';
+import { attachmentPrompt, transferAttachments } from './attachments.js';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 export { connectionInput } from './ssh.js';
 
 /** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
@@ -15,14 +18,14 @@ export interface Backend {
   close(): Promise<void>;
   homeDirectory(): Promise<string>;
   providers(cwd: string, refresh: boolean): Promise<Provider[]>;
-  create(task: Task): Promise<Agent>;
-  recover(task: Task): Promise<Agent>;
+  create(task: Task, signal?: AbortSignal): Promise<Agent>;
+  recover(task: Task, signal?: AbortSignal): Promise<Agent>;
   agent(id: string): Promise<Agent | null>;
   timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage>;
   messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<MessageTimeline>;
   reply(id: string): Promise<string>;
   /** Interrupts a running turn first and reattaches a detached session. */
-  send(id: string, text: string, messageId: string): Promise<void>;
+  send(id: string, text: string, messageId: string, attachments?: Attachment[], signal?: AbortSignal): Promise<void>;
   stop(id: string): Promise<void>;
   respond(id: string, requestId: string, answer: PermissionAnswer, input?: Record<string, unknown>): Promise<void>;
   /** Stop and release the CLI process; output and the native session ID are kept. */
@@ -46,6 +49,7 @@ const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 export function claudeModels(result: unknown): Model[] {
   return list((result as Record<string, unknown> | undefined)?.models).filter(m => typeof m?.value === 'string').map(m => ({
     id: m.value, label: typeof m.displayName === 'string' ? m.displayName : m.value,
+    inputModalities: ['text', 'image'],
     thinkingOptions: list(m.supportedEffortLevels ?? m.efforts).filter((e): e is string => typeof e === 'string').map(id => ({ id, label: id })),
   }));
 }
@@ -122,7 +126,7 @@ export class SshBackend implements Backend {
           let cursor: string | undefined;
           for (let page = 0; page < 20; page++) {
             const result = await peer.request('model/list', { limit: 100, ...(cursor ? { cursor } : {}) });
-            models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })) })));
+            models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']) as Model['inputModalities'], isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })) })));
             cursor = result?.nextCursor; if (!cursor) break;
           }
           modes = [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]; defaultModeId = 'workspace-write';
@@ -134,6 +138,7 @@ export class SshBackend implements Backend {
           const capabilities = await initializeAcp(peer);
           const session = await peer.request('session/new', { cwd: canonical, mcpServers: [] });
           ({ models, modes, defaultModeId } = await discoverAcpCatalog(peer, session));
+          for (const model of models) model.inputModalities = capabilities.agentCapabilities?.promptCapabilities?.image === true ? ['text', 'image'] : ['text'];
           if (capabilities.agentCapabilities?.sessionCapabilities?.close) await peer.request('session/close', { sessionId: session.sessionId });
         }
         models = [...new Map(models.filter(m => m.id && m.id !== 'undefined').map(m => [m.id, m])).values()];
@@ -159,17 +164,17 @@ export class SshBackend implements Backend {
       if (count) this.leases.set(id, count); else this.leases.delete(id);
     };
   }
-  async create(task: Task): Promise<Agent> { return this.start(task, false); }
-  async recover(task: Task): Promise<Agent> { return this.start(task, true); }
-  private async start(task: Task, resume: boolean): Promise<Agent> {
+  async create(task: Task, signal?: AbortSignal): Promise<Agent> { return this.start(task, false, signal); }
+  async recover(task: Task, signal?: AbortSignal): Promise<Agent> { return this.start(task, true, signal); }
+  private async start(task: Task, resume: boolean, signal?: AbortSignal): Promise<Agent> {
     this.assertOpen();
     const existing = this.sessions.get(task.id);
     if (existing?.alive && existing.agent.status !== 'closed') return structuredClone(existing.agent);
     const pending = this.starting.get(task.id); if (pending) return pending;
-    const operation = this.open(task, resume); this.starting.set(task.id, operation);
+    const operation = this.open(task, resume, signal); this.starting.set(task.id, operation);
     try { return await operation; } finally { this.starting.delete(task.id); }
   }
-  private async open(task: Task, resume: boolean): Promise<Agent> {
+  private async open(task: Task, resume: boolean, signal?: AbortSignal): Promise<Agent> {
     if (!CLI_PROVIDERS.some(provider => provider.id === task.provider)) throw new Error('This CLI provider is no longer supported. Saved output remains available.');
     this.sessions.get(task.id)?.close();
     let profile: Profile;
@@ -185,6 +190,9 @@ export class SshBackend implements Backend {
     if (profile.protocol === 'antigravity') argv = antigravityArguments(argv[0], task, resume);
     if (profile.protocol === 'claude') argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native!.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : [])];
     const history = await this.history(task.id);
+    // Upload before creating a native session, so a failed upload can be retried safely.
+    const attachments = !resume ? await transferAttachments(this.transport, this.store.directory, task.id, task.id, profile.cwd, task.attachments ?? [], signal) : [];
+    signal?.throwIfAborted();
     this.assertOpen();
     if ([...this.sessions.values()].filter(s => s.alive).length >= SESSION_LIMIT) {
       const idle = [...this.sessions].find(([id, session]) => !this.starting.has(id) && !this.leases.has(id) && session.evictable);
@@ -197,7 +205,7 @@ export class SshBackend implements Backend {
     try {
       await session.initialize(profile.protocol, argv, resume);
       this.assertOpen();
-      if (!resume) await session.send(task.prompt, task.id);
+      if (!resume) await session.send(attachmentPrompt(task.prompt, attachments), task.id, attachments);
       return structuredClone(session.agent);
     } catch (error) { session.close(); throw error; }
   }
@@ -217,13 +225,14 @@ export class SshBackend implements Backend {
     await this.start(task, true);
     return this.sessions.get(task.id)!;
   }
-  async send(id: string, text: string, messageId: string): Promise<void> {
+  async send(id: string, text: string, messageId: string, attachments: Attachment[] = [], signal?: AbortSignal): Promise<void> {
     const task = this.task(id), release = this.lease(task.id);
     try {
       if (await (await this.history(task.id)).hasMessage(messageId)) return; // Durable at-most-once admission.
       let session = await this.attached(task);
       if (session.busy) { await session.stop(); session = await this.attached(task); }
-      await session.send(text, messageId);
+      const files = await transferAttachments(this.transport, this.store.directory, task.id, messageId, task.executionCwd ?? task.cwd, attachments, signal);
+      await session.send(attachmentPrompt(text, files), messageId, files);
     } finally { release(); }
   }
   async stop(id: string): Promise<void> {
@@ -246,6 +255,7 @@ export class SshBackend implements Backend {
     const history = this.histories.get(task.id) ?? this.history(task.id);
     this.histories.delete(task.id);
     await (await history.catch(() => new TaskHistory(this.store.directory, task.id))).remove();
+    await rm(join(this.store.directory, 'attachments', task.id), { recursive: true, force: true });
   }
   async close(): Promise<void> {
     this.closed = true;

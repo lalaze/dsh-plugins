@@ -2,13 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend, type Backend, type BackendFactory } from './backend.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
+import { attachmentInput, inputModalitiesOf } from './domain.js';
 import { busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task } from './domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
-export interface CreateOptions { title?: string; origin?: Task['origin']; chat?: Task['chat'] }
+export interface CreateOptions { title?: string; origin?: Task['origin']; chat?: Task['chat']; signal?: AbortSignal }
 export interface SendOptions {
   /** Interrupt a running turn. When false, a working agent rejects the message. */
   interrupt?: boolean;
+  signal?: AbortSignal;
 }
 export class RemoteAgentsService {
   private readonly connections = new Map<string, Connection>();
@@ -210,7 +212,7 @@ export class RemoteAgentsService {
       const existing = this.store.task(t => t.id === request.id);
       if (existing) {
         if (JSON.stringify(taskInput(existing)) !== JSON.stringify(request)) throw new RemoteError('This request ID belongs to a different agent', 409);
-        return existing.agentId ? this.summary(existing.id) : this.launch(existing);
+        return existing.agentId ? this.summary(existing.id) : this.launch(existing, options.signal);
       }
       return this.use(request.hostId, async (backend, host) => {
         if (!enabledProvidersOf(host).includes(request.provider)) throw new RemoteError('This CLI is disabled on this machine. Enable it in Settings → Remote agents.', 409);
@@ -219,6 +221,7 @@ export class RemoteAgentsService {
         if (!provider || provider.status !== 'ready') throw new RemoteError('The selected CLI is not ready in this remote project', 409);
         const model = provider.models.find(m => m.id === request.model);
         if (!model) throw new RemoteError('The selected model is unavailable on this host', 409);
+        if (request.attachments?.some(a => a.kind === 'image') && !inputModalitiesOf(provider.id, model).includes('image')) throw new RemoteError('This remote CLI does not support image input');
         if (request.modeId && !provider.modes.some(m => m.id === request.modeId)) throw new RemoteError('The selected mode is unavailable', 409);
         if (request.thinkingOptionId && !model.thinkingOptions?.some(m => m.id === request.thinkingOptionId)) throw new RemoteError('The selected thinking level is unavailable', 409);
         const now = new Date().toISOString();
@@ -229,25 +232,25 @@ export class RemoteAgentsService {
           if (state.tasks.length >= 1000) throw new RemoteError('The remote agent registry is full. Delete archived agents first.');
           state.tasks.push(task);
         });
-        return this.launch(task);
+        return this.launch(task, options.signal);
       });
     });
   }
   /** Retry an interrupted start, or reattach a stopped session without replaying anything. */
-  async retry(id: string): Promise<AgentSummary> {
+  async retry(id: string, signal?: AbortSignal): Promise<AgentSummary> {
     const task = this.task(id);
-    if (!task.agentId) return this.create(taskInput(task));
+    if (!task.agentId) return this.create(taskInput(task), { signal });
     return this.serial(id, () => this.use(task.hostId, async backend => {
-      const agent = await backend.recover(this.task(id));
+      const agent = await backend.recover(this.task(id), signal);
       this.assertAgent(task, agent);
       await this.updateTask(id, next => { next.state = 'ready'; delete next.error; });
       return this.summary(id);
     }, task.serverId));
   }
-  private async launch(task: Task): Promise<AgentSummary> {
+  private async launch(task: Task, signal?: AbortSignal): Promise<AgentSummary> {
     try {
       await this.use(task.hostId, async backend => {
-        const agent = await backend.create(task);
+        const agent = await backend.create(task, signal);
         if (agent.provider !== task.provider) throw new Error('Created agent provider does not match the request');
         await this.updateTask(task.id, next => { next.agentId = agent.id; next.executionCwd = agent.cwd; next.state = 'ready'; delete next.error; });
       }, task.serverId);
@@ -319,6 +322,7 @@ export class RemoteAgentsService {
   }
   async send(id: string, input: unknown, options: SendOptions = {}): Promise<AgentSummary> {
     const value = record(input), messageId = identifier(value.id), text = field(value.text, 'message', 100_000);
+    const attachments = value.attachments === undefined ? undefined : attachmentInput(value.attachments);
     return this.serial(id, async () => {
       const task = this.task(id);
       if (!task.agentId) throw new RemoteError('Retry starting this agent before sending a message', 409);
@@ -329,7 +333,7 @@ export class RemoteAgentsService {
         if (live.status === 'closed' && (live.resumable ?? task.native?.resumable) === false) throw new RemoteError('This CLI session has ended and cannot be resumed. Its output is kept.', 409);
         // Messaging an archived agent brings it back, as in Paseo.
         await this.updateTask(id, next => { next.updatedAt = new Date().toISOString(); delete next.archived; });
-        await backend.send(task.agentId!, text, messageId);
+        await backend.send(task.agentId!, text, messageId, attachments, options.signal);
         return this.summary(id);
       }, task.serverId);
     });
