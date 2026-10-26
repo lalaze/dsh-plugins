@@ -27,12 +27,18 @@ export function installTranslationDom(): () => void {
   return () => { unsubscribe(); disposed = true; request++; document.removeEventListener('mouseup', onSelection); document.removeEventListener('pointerdown', onPointer); document.removeEventListener('keydown', onKey); document.removeEventListener('scroll', hide, true); window.removeEventListener('resize', hide); hide(); };
 }
 
-export async function translateDraft(editor: HTMLElement): Promise<void> { const original = composerText(editor).trim(); if (!original || original.length > 5000) return; const button = document.querySelector<HTMLButtonElement>('[data-dsh-translate-draft]'); if (button) { button.dataset.dshTranslateBusy = ''; delete button.dataset.dshTranslateError; button.disabled = true; button.textContent = ui('Translating…'); } try { const result = await translate(original, 'auto', loadSettings()); if (composerText(editor).trim() === original) replaceComposer(editor, result.translation); if (button) { delete button.dataset.dshTranslateBusy; button.disabled = false; button.textContent = ui('Undo'); button.dataset.dshTranslateUndo = original; } } catch (error) { if (button) { delete button.dataset.dshTranslateBusy; button.dataset.dshTranslateError = error instanceof Error ? error.message : String(error); button.disabled = false; button.textContent = localizeError(error); setTimeout(() => { if (button.isConnected) { delete button.dataset.dshTranslateError; refreshDraftButton(); } }, 3000); } } }
+export async function translateDraft(editor: HTMLElement): Promise<void> { const original = composerText(editor).trim(); if (!original || original.length > 5000) return; const button = document.querySelector<HTMLButtonElement>('[data-dsh-translate-draft]'); if (button) { button.dataset.dshTranslateBusy = ''; delete button.dataset.dshTranslateError; button.disabled = true; setDraftLabel(button, ui('Translating…')); } try { const result = await translate(original, 'auto', loadSettings()); if (composerText(editor).trim() === original) replaceComposer(editor, result.translation); if (button) { delete button.dataset.dshTranslateBusy; button.disabled = false; setDraftLabel(button, ui('Undo')); button.dataset.dshTranslateUndo = original; } } catch (error) { if (button) { delete button.dataset.dshTranslateBusy; button.dataset.dshTranslateError = error instanceof Error ? error.message : String(error); button.disabled = false; setDraftLabel(button, localizeError(error)); setTimeout(() => { if (button.isConnected) { delete button.dataset.dshTranslateError; refreshDraftButton(); } }, 3000); } } }
+
+/** The draft button keeps its icon; only the label tracks its state. */
+export function setDraftLabel(button: HTMLButtonElement, text: string): void {
+  const label = button.querySelector<HTMLElement>('[data-dsh-translate-label]');
+  if (label) label.textContent = text; else button.textContent = text;
+}
 
 /** DOM translation actions keep their current state when the host language changes. */
 export function refreshDraftButton(): void {
   const button = document.querySelector<HTMLButtonElement>('[data-dsh-translate-draft]');
   if (!button) return;
-  button.textContent = button.dataset.dshTranslateBusy !== undefined ? ui('Translating…') : button.dataset.dshTranslateError ? localizeError(button.dataset.dshTranslateError) : button.dataset.dshTranslateUndo !== undefined ? ui('Undo') : ui('Translate');
+  setDraftLabel(button, button.dataset.dshTranslateBusy !== undefined ? ui('Translating…') : button.dataset.dshTranslateError ? localizeError(button.dataset.dshTranslateError) : button.dataset.dshTranslateUndo !== undefined ? ui('Undo') : ui('Translate'));
   button.title = ui('Translate draft (Alt/Option+T)');
 }
