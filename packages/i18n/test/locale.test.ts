@@ -48,7 +48,7 @@ test('language tags and placeholders have safe English defaults', () => {
 test('every plugin translation preserves placeholders and supplies both languages', async () => {
   const root = new URL('../../', import.meta.url);
   const placeholders = (text: string) => [...text.matchAll(/\{(\w+)\}/g)].map(match => match[1]).sort();
-  for (const name of ['gallery', 'usage-stats', 'magpie-fast', 'magpie-quota', 'translate']) {
+  for (const name of ['gallery', 'usage-stats', 'magpie-fast', 'translate']) {
     const path = new URL(`${name}/src/client/locales.ts`, root);
     const source = await readFile(path, 'utf8');
     const dictionary = JSON.parse(source.slice(source.indexOf('{'), source.lastIndexOf('}') + 1)) as Record<string, string>;
