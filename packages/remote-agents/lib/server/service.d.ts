@@ -41,7 +41,9 @@ export declare class RemoteAgentsService {
     addHost(input: unknown, options?: {
         discoverModels?: boolean;
     }): Promise<Dashboard>;
-    removeHost(id: string): Promise<Dashboard>;
+    removeHost(id: string, options?: {
+        deleteAgents?: boolean;
+    }): Promise<Dashboard>;
     connect(hostId: string): Promise<Dashboard>;
     providers(hostId: string, cwd: string, refresh?: boolean): Promise<import("./domain.js").Provider[]>;
     private updateTask;

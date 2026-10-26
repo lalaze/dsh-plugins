@@ -72,6 +72,8 @@ DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要�
 
 ## 远程机器
 
+机器离线或 SSH 报错后仍可点击 **移除**。若有关联会话，会先显示确认；选择 **移除机器并删除会话** 后会停止已连接的 CLI 进程，永久删除该机器的插件会话（包括已归档会话）、输出记录和模型缓存，无需重新连接 SSH。
+
 在 **设置 → 远程智能体** 中添加。可以从运行 DSH 的机器的 `~/.ssh/config`（含 `Include` 文件）中选择 `Host` 别名，也可以手动输入 `build-box`、`user@build-box` 或 `ssh://user@build-box:2222`。保存的是原始别名，连接时由 OpenSSH 解析 `HostName`、`User`、`Port`、`IdentityFile` 和 `ProxyJump`。选择列表不会展开通配符、执行 `Match exec` 或建立连接。
 
 运行 DSH 的机器需要能以密钥或 SSH agent 非交互登录，且主机密钥已验证（`BatchMode=yes`、`StrictHostKeyChecking=yes`），不保存密码。远程机器只需要 SSH 和已登录的 CLI，无需安装本插件。每台机器都会锁定 SSH 机器身份；身份变化时请重新添加。
@@ -84,10 +86,12 @@ DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要�
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.9.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.10.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.9 升级：** 修复 SSH 报错后机器因关联会话而无法移除的问题。现在可确认一并删除插件会话与输出，无需连接远程机器。
 
 **从 0.2.8 升级：** 远程 CLI 会加载交互式登录 shell 环境，修复因缺少环境配置导致“终端正常、SSH 调用 Claude 报认证错误”的情况。更新并重启 DSH，刷新该机器的模型后重试对话。
 

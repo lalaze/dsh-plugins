@@ -57,7 +57,7 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     result = await service.addHost(input.host, { discoverModels: true });
                     break;
                 case 'removeHost':
-                    result = await service.removeHost(hostId());
+                    result = await service.removeHost(hostId(), { deleteAgents: input.deleteAgents === true });
                     break;
                 case 'connect':
                     result = await service.connect(hostId());
