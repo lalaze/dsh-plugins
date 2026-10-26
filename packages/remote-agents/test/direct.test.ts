@@ -555,7 +555,8 @@ test('a missing workspace path is reported without executing in the discovery di
   const { SessionId } = await import('@deepseek-ai/dsh-session');
   const { service, ssh, hostId, request, store } = await fixture(t);
   await service.discoverHost(hostId); ssh.missingPath = '/srv/not-on-this-machine';
-  const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined, cwd: () => ssh.missingPath }, 2);
+  const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined, cwd: () => ssh.missingPath,
+    workspace: async cwd => ({ hostIds: [hostId], cwd }) }, 2);
   const run = async () => { for await (const _chunk of adapter.stream({ provider: chatProviderId('codex'), model: chatModelId(hostId, 'codex', request.model), sessionId: SessionId('missing-workspace'), messages: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Run here' }] })] })) {} };
   await assert.rejects(run(), /Remote directory does not exist: \/srv\/not-on-this-machine/);
   assert.equal(ssh.admissions.length, 0); assert.equal(store.snapshot().tasks.length, 0);
@@ -568,7 +569,8 @@ for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigrav
   const { SessionId } = await import('@deepseek-ai/dsh-session');
   const { service, ssh, hostId, request, store, directory } = await fixture(t, provider);
   const projects = new ChatProjects(service); await service.discoverHost(hostId); const [project] = projects.hosts();
-  const adapter = new RemoteCliAdapter(projects, { agent: () => undefined, step: () => undefined, cwd: () => '/srv/project' }, 2); t.after(() => adapter.close());
+  const chatHost = { agent: () => undefined, step: () => undefined, cwd: () => '/srv/project', workspace: async (cwd: string) => ({ hostIds: [hostId], cwd }) };
+  const adapter = new RemoteCliAdapter(projects, chatHost, 2); t.after(() => adapter.close());
   const input = (text: string) => ({ provider: chatProviderId(provider), model: chatModelId(project.id, provider, request.model), sessionId: SessionId(`native-${provider}`),
     messages: [createUserMessage({ source: { kind: 'user' as const }, content: [{ type: 'text' as const, text }] })] });
   const run = async (options: ReturnType<typeof input>) => {
@@ -588,7 +590,7 @@ for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigrav
   await service.close();
   const reopened = new Store(join(directory, 'state.json')); await reopened.open();
   const restarted = new RemoteAgentsService(reopened, host => new SshBackend(host, reopened, ssh)); t.after(() => restarted.close());
-  const resumed = new RemoteCliAdapter(new ChatProjects(restarted), { agent: () => undefined, step: () => undefined }, 2);
+  const resumed = new RemoteCliAdapter(new ChatProjects(restarted), chatHost, 2);
   const replay: string[] = [];
   for await (const chunk of resumed.stream(follow)) if (chunk.type === 'text-delta') replay.push(chunk.text);
   assert.equal(replay.join(''), '远程结果 🌏'); assert.equal(ssh.admissions.length, 2, 'completed output replays after restart without a new prompt');

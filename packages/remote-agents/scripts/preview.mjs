@@ -23,6 +23,7 @@ remote.catalog.push({ id: 'antigravity', label: 'Antigravity', status: 'ready', 
 for (const [id, label] of [['grok', 'Grok'], ['codebuddy', 'CodeBuddy']]) remote.catalog.push({ id, label, status: 'ready', models: [{ id: `${id}-remote`, label: `${label} remote model`, thinkingOptions: [{ id: 'high', label: 'High' }], defaultThinkingOptionId: 'high' }], modes: [] });
 const sshConfig = { hosts: ['build-box', 'code', 'code-233', 'code-home', 'code-home-233', 'docker', 'macmini', 'mihomo', 'pve', 'ubuntu-dev', 'unraid', 'window'].map(alias => ({ alias, connection: `ssh://${alias}` })), warnings: [] };
 const timers = new Set();
+let workspaceHostIds = ['macmini'];
 const later = (fn, ms) => { const timer = setTimeout(() => { timers.delete(timer); fn(); }, ms); timers.add(timer); };
 remote.onCreate = agent => { remote.append(agent.id, { type: 'assistant_message', text: '远程会话已准备好，可以继续描述任务。' }); };
 remote.onSend = (agent, text) => {
@@ -37,7 +38,7 @@ const service = new RemoteAgentsService(store, host => {
     const agent = remote.agents.get(id);
     if (!agent.pendingPermissions.length) { remote.append(id, { type: 'assistant_message', text: answer.behavior === 'allow' ? '审批已通过，检查完成。' : '已拒绝该操作。' }); agent.status = 'idle'; }
   } };
-}, async () => sshConfig), handler = createHandler(service);
+}, async () => sshConfig), handler = createHandler(service, undefined, async () => ({ hostIds: workspaceHostIds }));
 const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined });
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = await build({ absWorkingDir: root, entryPoints: ['test/ui/app.fixture.tsx'], bundle: true, write: false, outfile: 'preview.js', loader: { '.woff2': 'dataurl', '.woff': 'dataurl', '.ttf': 'dataurl' }, platform: 'browser', format: 'esm', target: 'es2022' });
@@ -53,6 +54,7 @@ const server = createServer(async (request, response) => {
     if (request.url === '/__fixture') {
       if (request.method === 'POST') {
         const input = JSON.parse(body.toString());
+        if (Array.isArray(input.workspaceHostIds)) workspaceHostIds = input.workspaceHostIds;
         if (input.failReads !== undefined) failReads = input.failReads === true;
         if (input.sshConfig) { sshConfig.hosts = input.sshConfig.hosts; sshConfig.warnings = input.sshConfig.warnings ?? []; }
         if (input.loseSend) remote.loseSend = true;

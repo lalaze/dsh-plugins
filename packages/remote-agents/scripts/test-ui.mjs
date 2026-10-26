@@ -213,7 +213,7 @@ try {
   expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-codebuddy] [data-ra-model-option]:not([data-ra-model-hidden])").length === 0');
   browser('fill', `${menu} input`, 'Balanced'); browser('press', 'Enter');
   wait('!document.querySelector("[data-menu-material]") && document.querySelector("[data-native-picker] button").textContent.includes("Balanced")');
-  expect('window.fixture.picker.selections.at(-1).provider === "remote-cli-codebuddy" && window.fixture.picker.selections.at(-1).model === "buddy-2"');
+  expect('window.fixture.picker.selections.at(-1).provider === "remote-cli-codebuddy" && window.fixture.picker.selections.at(-1).model === "macmini/codebuddy/buddy-2"');
   expect('document.activeElement.closest("[data-native-picker]") !== null');
   browser('click', trigger); browser('click', rootModel); wait('document.querySelector("[data-ra-model-provider]")');
   expect('document.querySelectorAll("[data-ra-model-option]:not([data-ra-model-hidden])").length === 0');
@@ -226,7 +226,7 @@ try {
   expect('document.activeElement.querySelector("[data-provider-id=deepseek-account]") !== null');
   browser('press', 'Enter'); wait('!document.querySelector("[data-menu-material]")');
   expect('window.fixture.picker.selections.at(-1).provider === "deepseek-account"');
-  evaluate('window.fixture.picker.current({provider:"remote-cli-codex",model:"codex-model",reasoningEffort:"medium"})');
+  evaluate('window.fixture.picker.current({provider:"remote-cli-codex",model:"macmini/codex/codex-model",reasoningEffort:"medium"})');
   browser('click', trigger); wait('document.querySelectorAll("[data-menu-material] > button").length === 2');
   browser('click', `${menu} > button:nth-of-type(2)`);
   browser('click', `${menu} button:has-text("High")`); wait('!document.querySelector("[data-menu-material]")');
@@ -239,7 +239,7 @@ try {
   browser('fill', `${menu} input`, 'Codex Fast');
   evaluate('window.fixture.picker.rejectNext = true'); browser('press', 'Enter');
   wait('window.fixture.picker.snapshot().error === "Selection rejected by host"');
-  expect('window.fixture.picker.snapshot().current.model === "codex-model"');
+  expect('window.fixture.picker.snapshot().current.model === "macmini/codex/codex-model"');
   browser('press', 'Escape'); browser('press', 'Escape');
   browser('click', trigger); browser('click', rootModel);
   evaluate('window.fixture.picker.addModel()');
@@ -253,6 +253,31 @@ try {
   wait('document.querySelector("[data-native-picker] button")'); browser('click', trigger); browser('click', rootModel);
   wait('document.querySelector("[data-ra-model-provider]")');
   expect('document.querySelector("[data-ra-model-provider=remote-cli-codebuddy] [data-menu-group-heading]").getAttribute("aria-expanded") === "false"');
+  // The real native menu and shared selection API must both follow workspace admission.
+  evaluate('window.fixture.picker.addOtherMachine()');
+  expect('!document.querySelector("[data-menu-material]").textContent.includes("ubuntu")');
+  evaluate('window.fixture.workspace("ubuntu")');
+  wait('document.querySelectorAll("[data-ra-model-provider]").length === 2');
+  expect('!document.querySelector("[data-native-picker] button").textContent.includes("macmini")');
+  expect('!document.querySelector("[data-menu-material]").textContent.includes("macmini")');
+  browser('click', heading('remote-cli-claude'));
+  expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-claude] [data-ra-model-option]:not([data-ra-model-hidden])").length === 1');
+  browser('click', `${menu} button:has-text("Claude model · ubuntu")`); wait('!document.querySelector("[data-menu-material]")');
+  wait('document.querySelector("[data-native-picker] button").textContent.includes("ubuntu")');
+  const rejected = evaluate('window.fixture.selectModel({provider:"remote-cli-codex",model:"macmini/codex/codex-model"})');
+  if (rejected.ok !== false) throw new Error('Cross-machine selection was accepted');
+  evaluate('window.fixture.workspace("local")');
+  wait('!document.querySelector("[data-native-picker] button").textContent.includes("ubuntu")');
+  // With no current choice, the native trigger opens the model list directly.
+  browser('click', trigger);
+  wait('document.querySelectorAll("[data-ra-model-provider]").length === 1');
+  expect('document.querySelector("[data-ra-model-provider]").dataset.raModelProvider === "deepseek-account"');
+  console.log('PASS: native menu filters machines, clears stale captions, rejects cross-machine selection and hides remote models in local workspaces');
+  browser('press', 'Escape'); browser('press', 'Escape');
+  evaluate('window.fixture.workspace("macmini")');
+  browser('open', `${base}?workspace-reset`);
+  wait('document.querySelector("[data-native-picker] button").textContent.includes("macmini")');
+  browser('click', trigger); browser('click', rootModel); wait('document.querySelectorAll("[data-ra-model-provider]").length === 4');
   evaluate('window.fixture.disablePlugin()');
   expect('!document.querySelector("[data-ra-model-provider],[data-ra-model-hidden]")');
   expect('document.querySelectorAll("[data-menu-group] button[role=menuitemradio]").length === 28');

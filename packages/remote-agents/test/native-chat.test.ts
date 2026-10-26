@@ -20,6 +20,7 @@ async function setup(t: TestContext, overrides: Partial<ChatHost> = {}) {
   const base = await fixture(t), projects = new ChatProjects(base.service);
   await base.service.discoverHost(base.hostId); const [project] = projects.hosts();
   const host: ChatHost = { agent: () => ({ id: 'dsh-agent' }), step: () => undefined, cwd: () => '/srv/project',
+    workspace: async cwd => ({ hostIds: base.store.hosts().map(h => h.id), cwd }),
     approval: { request: async () => 'allowed-once' }, userQuestions: { ask: async () => ({ answers: [] }) }, ...overrides };
   const adapter = new RemoteCliAdapter(projects, host, 5); t.after(() => adapter.close());
   const options = (prompt = 'Fix the tests', extra: Partial<GenerateOptions> = {}): GenerateOptions => ({ provider: CODEX_PROVIDER,
@@ -123,7 +124,8 @@ test('native bindings survive restart and a lost follow-up receipt', async t => 
   await assert.rejects(collect(adapter.stream(follow)), /receipt lost/);
   await service.close(); const store = new Store(path); await store.open();
   const next = new RemoteAgentsService(store, remote.backend); t.after(() => next.close());
-  const resumed = new RemoteCliAdapter(new ChatProjects(next), { agent: () => undefined, step: () => undefined }, 5);
+  const resumed = new RemoteCliAdapter(new ChatProjects(next), { agent: () => undefined, step: () => undefined,
+    cwd: () => '/srv/project', workspace: async cwd => ({ hostIds: store.hosts().map(h => h.id), cwd }) }, 5);
   assert.equal(text(await collect(resumed.stream(follow))), 'Follow-up completed.');
   assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
 });
@@ -139,11 +141,40 @@ test('the same machine model works from different DSH workspace paths without re
   assert.equal(store.snapshot().tasks.at(-1)?.cwd, cwd); assert.equal(store.chatProjects().length, 0);
 });
 
-test('machine models stay visible without a selected workspace, but never run in the remote home by accident', async t => {
+test('the shared catalog remains intact without a workspace, but execution requires workspace admission', async t => {
   const { adapter, options, remote } = await setup(t, { cwd: () => undefined });
   assert.equal((await adapter.listModels(CODEX_PROVIDER)).length, 1);
   await assert.rejects(collect(adapter.stream(options())), /Choose a DSH workspace/);
   assert.equal(remote.creates, 0);
+});
+
+test('a model from another workspace machine is rejected before remote execution', async t => {
+  const { adapter, options, remote } = await setup(t, { workspace: async () => ({ hostIds: ['another-machine'], cwd: '/srv/project' }) });
+  await assert.rejects(collect(adapter.stream(options())), /does not belong/);
+  assert.equal(remote.creates, 0);
+});
+
+test('switching workspaces revokes a previously bound remote conversation', async t => {
+  let allowed = true;
+  const base = await setup(t, { workspace: async () => ({ hostIds: allowed ? [base.hostId] : [], cwd: '/srv/project' }) });
+  const first = base.options();
+  await collect(base.adapter.stream(first));
+  allowed = false;
+  await assert.rejects(collect(base.adapter.stream({ ...first, messages: [...first.messages, user('Continue')] })), /does not belong/);
+  assert.equal(base.remote.sends, 0);
+});
+
+test('main chat executes at the verified remote directory, never at its local placeholder', async t => {
+  const base = await setup(t, { cwd: () => '/local/placeholder', workspace: async () => ({ hostIds: [base.hostId], cwd: '/srv/real-project' }) });
+  await collect(base.adapter.stream(base.options()));
+  assert.equal(base.remote.created?.cwd, '/srv/real-project');
+});
+
+test('a workspace change while server verification is pending cannot start a remote CLI', async t => {
+  let cwd = '/workspace-one';
+  const base = await setup(t, { cwd: () => cwd, workspace: async () => { cwd = '/workspace-two'; return { hostIds: [base.hostId], cwd: '/srv/project' }; } });
+  await assert.rejects(collect(base.adapter.stream(base.options())), /workspace changed/);
+  assert.equal(base.remote.creates, 0);
 });
 
 test('adding only a machine through HTTP discovers its models and preserves them across an offline refresh', async t => {
@@ -175,10 +206,14 @@ test('an unsuccessful first discovery keeps the machine saved and a later refres
 });
 
 test('saved project routes remain usable but are hidden from the machine model menu', async t => {
-  const { adapter, options, projects, hostId, remote } = await setup(t, { cwd: () => '/different/workspace' });
+  let cwd = '/different/workspace';
+  const { adapter, options, projects, hostId, remote } = await setup(t, { cwd: () => cwd });
   const [legacy] = await projects.add({ hostId, label: 'Old project', cwd: '/srv/legacy' });
   const model = chatModelId(legacy.id, 'codex', 'remote-model');
   assert.ok(!(await adapter.listModels(CODEX_PROVIDER)).some(m => m.id === model));
+  await assert.rejects(collect(adapter.stream(options('Wrong workspace', { model }))), /different workspace directory/);
+  assert.equal(remote.creates, 0);
+  cwd = '/srv/legacy';
   await collect(adapter.stream(options('Continue old chat', { model })));
   assert.equal(remote.created?.cwd, '/srv/legacy');
 });

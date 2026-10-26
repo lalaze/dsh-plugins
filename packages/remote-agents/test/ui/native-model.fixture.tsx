@@ -15,7 +15,7 @@ type Props = {
 };
 type NativePlugin = { apply(ctx: unknown): void };
 /** Load the unmodified official rc.3 client bundle through its actual ModuleLoader boundary. */
-export async function nativeModelFixture() {
+export async function nativeModelFixture(modelDirectories = { directoryFor: (_id: string) => modelDirectory }) {
   let plugin: NativePlugin | undefined;
   const modules: Record<string, unknown> = { react: React, 'react-dom': ReactDom, 'react/jsx-runtime': jsx, '@deepseek-ai/cordis': cordis, '@deepseek-ai/dsh-client-ui-primitives': primitives, '@deepseek-ai/dsh-client-store': store };
   const target = window as unknown as { __ModuleLoader__?: unknown };
@@ -40,13 +40,15 @@ export async function nativeModelFixture() {
     // The native directory remains shared; its remote transport is simulated for deterministic tests.
     plugin() {},
     inject: (services: string[], factory: (context: unknown) => void) => { if (services.includes('slots')) factory(ctx); },
-    modelDirectories: { directoryFor: () => modelDirectory }, sessions: { subagentAddress: () => undefined },
+    modelDirectories, sessions: { subagentAddress: () => undefined },
     slots: { inject: (_name: string, factory: () => unknown) => factory(), register: core.register.bind(core) },
   };
   if (!plugin) throw new Error('Native client bundle did not register');
   plugin.apply(ctx);
   const entry = core.entriesOfSlot('conversation.input.model')[0];
   const Picker = entry.component as React.FC<Props>;
-  const props = (entry.inject as (id: string) => Omit<Props, 't' | 'renderSlot'>)('fixture-conversation');
-  return { core, Picker: () => <Picker {...props} t={t} renderSlot={(_name, _owner, options) => options.fallback} /> };
+  return { core, Picker: () => {
+    const props = (entry.inject as (id: string) => Omit<Props, 't' | 'renderSlot'>)('fixture-conversation');
+    return <Picker {...props} t={t} renderSlot={(_name, _owner, options) => options.fallback} />;
+  } };
 }

@@ -8,6 +8,7 @@ import { HostManager } from './hosts.js';
 import { styles } from './styles.js';
 import { Sessions, useDashboard } from './sessions.js';
 import { installModelGroups } from './model-groups.js';
+import { installWorkspaceModels, type WorkspaceClient } from './workspace-models.js';
 
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -27,7 +28,7 @@ function Settings({ openSessions }: { openSessions: () => void }) {
   return <section className="dsh-ra ra-settings" aria-label={ui('Remote agents')}><style>{styles}</style>
     <div className="ra-settings-heading"><h2>{ui('Remote agents')}</h2><button onClick={openSessions}>{ui('Open sessions')}</button></div>
     <p className="ra-muted ra-intro">{ui('Select remote CLIs in the DSH model picker and chat in the main conversation.')}</p>
-    <p className="ra-muted ra-intro">{ui('Enable the CLIs you want on each machine. Conversations use the current DSH workspace path on that machine.')}</p>
+    <p className="ra-muted ra-intro">{ui('Remote models are only available in workspaces belonging to the same machine.')}</p>
     {dashboard ? <HostManager dashboard={dashboard} update={setDashboard} />
       : error ? <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}<button type="button" onClick={() => setRevision(value => value + 1)}>{ui('Retry')}</button></div>
       : <div className="ra-empty" role="status">{ui('Loading settings…')}</div>}
@@ -75,4 +76,5 @@ export function apply(ctx: Client): void {
   ctx.slots.inject('settings.section', () => { ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, () => <Surface settings />); });
   ctx.slots.inject('sidebar.footer.action', () => { ctx.slots.register({ name: 'sidebar.footer.action', id: 'remote-agents-sessions', order: 74 }, Surface); });
   ctx.effect(installModelGroups);
+  ctx.inject?.(['modelDirectories', 'sessions', 'workspaces'], scoped => installWorkspaceModels(scoped as unknown as WorkspaceClient));
 }

@@ -1,4 +1,8 @@
 export const zh: Record<string, string> = {
+  "This remote model does not belong to the current workspace machine. Select a matching workspace and model.": "此模型不属于当前工作区的机器，请选择匹配的工作区和模型。",
+  "The workspace changed during verification. Select the model again.": "验证期间工作区已切换，请重新选择模型。",
+  "The remote conversation belongs to a different workspace directory. Start a new conversation.": "此远程会话属于其他工作区目录，请新建对话。",
+  "Remote models are only available in workspaces belonging to the same machine.": "远程模型仅在属于同一台机器的工作区中可用。",
   "Message delivery is not confirmed.": "消息送达情况尚未确认。",
   "Continue this session in the DSH main chat.": "请在 DSH 主对话中继续此会话。",
   "Allow for this session": "允许本次会话",

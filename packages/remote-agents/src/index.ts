@@ -10,6 +10,7 @@ import { delegationTools, type ToolDefinition, type ToolHost } from './tools.js'
 import { ChatProjects } from './chat-projects.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import type { Session } from '@deepseek-ai/dsh-session';
+import { WorkspaceAccess, type WorkspaceRuntime } from './workspace-access.js';
 
 export const name = 'dsh-remote-agents';
 export const inject = ['connection'];
@@ -20,8 +21,22 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   await store.open();
   const service = new RemoteAgentsService(store);
   const projects = new ChatProjects(service);
+  const workspace = new WorkspaceAccess(() => store.hosts(), { runtime: () => ctx.get('subprocess') as WorkspaceRuntime | undefined });
+  const sessionCwd = async (sessionId: string): Promise<string | undefined> => {
+    const sessions = ctx.get('sessions') as { get?(id: string): { header: { cwd?: string } } | undefined } | undefined;
+    const live = () => sessions?.get?.(sessionId);
+    const attached = live();
+    if (attached) return attached.header.cwd;
+    const persistence = ctx.get('sessionPersistence') as { list(): Promise<({ id: string; cwd?: string } | { header: { id: string; cwd?: string } })[]> } | undefined;
+    const stored = (await persistence?.list() ?? []).map(row => 'header' in row ? row.header : row).find(row => row.id === sessionId);
+    const activated = live();
+    return activated ? activated.header.cwd : stored?.cwd;
+  };
   ctx.effect(() => () => service.close());
-  ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects) });
+  ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, async (id, signal) => {
+    const cwd = await sessionCwd(id), placement = await workspace.resolve(cwd, signal);
+    return cwd === await sessionCwd(id) ? placement : { hostIds: [] };
+  }) });
   ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { agents: { get(id: string): unknown } };
     const steps = new Map<string, { session: Session; turn: number; step: number }>();
@@ -30,7 +45,8 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
       else if (event.type === 'step/end' || event.type === 'turn/end') steps.delete(session.id);
     }, { global: true });
     const adapter = new RemoteCliAdapter(projects, { approval: host.approval, userQuestions: host.userQuestions,
-      agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => steps.get(id)?.session.header.cwd ?? scoped.sessions.get(id)?.header.cwd });
+      agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => steps.get(id)?.session.header.cwd ?? scoped.sessions.get(id)?.header.cwd,
+      workspace: (cwd, signal) => workspace.resolve(cwd, signal) });
     const registration = scoped.llm.registerAdapter(CHAT_PROVIDERS, adapter);
     scoped.effect(() => projects.onChange(() => registration.replace(CHAT_PROVIDERS)));
     scoped.effect(() => () => adapter.close());

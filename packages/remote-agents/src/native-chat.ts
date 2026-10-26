@@ -8,6 +8,7 @@ import type { Session, SessionSeq } from '@deepseek-ai/dsh-session';
 import { busy, remotePath, type Cursor, type TimelineEntry } from './domain.js';
 import { ChatProjects } from './chat-projects.js';
 import { decidePermission, type ToolHost } from './tools.js';
+import type { WorkspacePlacement } from './workspace-access.js';
 
 export const CHAT_PROVIDER = 'remote-cli';
 const CLI_NAMES: Readonly<Record<string, string>> = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
@@ -17,6 +18,7 @@ export const CHAT_PROVIDERS = [CHAT_PROVIDER, ...Object.keys(CLI_NAMES).map(chat
 export interface ChatHost extends Partial<ToolHost> {
   agent(sessionId: NonNullable<GenerateOptions['sessionId']>): unknown;
   cwd?(sessionId: NonNullable<GenerateOptions['sessionId']>): string | undefined;
+  workspace?(cwd: string, signal?: AbortSignal): Promise<WorkspacePlacement>;
   step(sessionId: NonNullable<GenerateOptions['sessionId']>): { session: Session; turn: number; step: number } | undefined;
 }
 const hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -110,8 +112,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     if (options.purpose === 'compaction') {
       // Harness maintenance gets a disposable session, never an instruction injected into the live coding turn.
       const sessionId = `remote-compaction-${randomUUID()}` as NonNullable<GenerateOptions['sessionId']>;
-      const source = this.projects.service.store.task(t => !!t.chat && t.chat.sessionId === options.sessionId && t.chat.route === options.model);
-      const cwd = source?.cwd ?? (options.sessionId ? this.host.cwd?.(options.sessionId) : undefined);
+      const cwd = options.sessionId ? this.host.cwd?.(options.sessionId) : undefined;
       if (cwd) this.auxiliaryDirectories.set(sessionId, cwd);
       const prompt = [options.system, ...options.messages.map(m => `${m.role}: ${blockText(m.content)}`)].filter(Boolean).join('\n\n');
       try { yield* this.stream({ ...options, purpose: undefined, sessionId, messages: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: `This is a conversation summarization request. Produce only the requested summary. Do not run commands, modify files, or use tools.\n\n${prompt}` }] })] }); }
@@ -135,10 +136,14 @@ export class RemoteCliAdapter extends LlmAdapter {
     if (effort && !model.thinkingOptions?.some(o => o.id === effort)) throw new LlmError('This remote model does not support that thinking level.', 'INVALID_REQUEST');
     const task = service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route === options.model)
       ?? service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route.startsWith(`${project.id}/${encodeURIComponent(provider.id)}/`));
-    // Machine model routes do not carry placement. Take it from the active DSH session exactly once.
-    const selectedCwd = task?.cwd ?? (project.id === project.hostId ? this.auxiliaryDirectories.get(sessionId) ?? this.host.cwd?.(sessionId) : project.cwd);
+    // Recheck even saved routes: a previous model choice cannot authorize another workspace's machine.
+    const selectedCwd = this.auxiliaryDirectories.get(sessionId) ?? this.host.cwd?.(sessionId);
     if (!selectedCwd) throw new LlmError('Choose a DSH workspace before starting a remote CLI conversation.', 'WORKSPACE_REQUIRED');
-    const cwd = remotePath(selectedCwd);
+    const placement = await this.host.workspace?.(selectedCwd, options.signal);
+    if (!placement?.cwd || !placement.hostIds.includes(project.hostId)) throw new LlmError('This remote model does not belong to the current workspace machine. Select a matching workspace and model.', 'WORKSPACE_MISMATCH');
+    if (selectedCwd !== (this.auxiliaryDirectories.get(sessionId) ?? this.host.cwd?.(sessionId))) throw new LlmError('The workspace changed during verification. Select the model again.', 'WORKSPACE_MISMATCH');
+    const cwd = remotePath(placement.cwd);
+    if (task && task.cwd !== cwd || project.id !== project.hostId && project.cwd !== cwd) throw new LlmError('The remote conversation belongs to a different workspace directory. Start a new conversation.', 'WORKSPACE_MISMATCH');
     const binding = hash(sessionId, task?.chat?.receiptRoute ?? task?.chat?.route ?? options.model);
     const userId = lastUser.id ?? hash(JSON.stringify(options.messages));
     const messageId = hash(binding, userId);
@@ -164,6 +169,7 @@ export class RemoteCliAdapter extends LlmAdapter {
       open!.text += text;
       yield type === 'text' ? { type: 'text-delta', index: open!.index, text } : { type: 'reasoning-delta', index: open!.index, text };
     };
+    if (this.active.has(sessionId)) throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
     this.active.add(sessionId); this.controllers.add(controller);
     try {
       if (!task) {

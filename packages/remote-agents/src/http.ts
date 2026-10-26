@@ -1,8 +1,9 @@
 import { cursorInput, field, identifier, record, remotePath, RemoteError } from './domain.js';
 import type { RemoteAgentsService } from './service.js';
 import { ChatProjects } from './chat-projects.js';
+import type { WorkspacePlacement } from './workspace-access.js';
 
-export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service)) {
+export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
     try {
@@ -18,6 +19,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
       const hostId = () => identifier(input.hostId), agentId = () => identifier(input.agentId);
       let result: unknown;
       switch (action) {
+        case 'workspaceModels': result = workspace ? await workspace(field(input.sessionId, 'session ID', 256), request.signal) : { hostIds: [] }; break;
         case 'hostCatalogs': result = projects.hosts(); break;
         case 'discoverHost': result = await service.discoverHost(hostId()); break;
         case 'setHostProviders': result = await service.setHostProviders(hostId(), input.providers); break;

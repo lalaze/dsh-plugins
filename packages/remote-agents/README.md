@@ -8,14 +8,14 @@ Use remote Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity directly in 
 Each CLI appears as a separate provider in DSH's ordinary model picker:
 
 1. Open **Settings → Remote agents** and add an SSH host and select the CLIs you want to enable. Saving discovers only their models; you can also save a machine first and choose its CLIs later. **No project name or project path is required.**
-2. Select a workspace in DSH, then choose a model labelled with its host under **Claude**, **Codex** or another CLI provider in the ordinary model picker.
-3. Send messages in the normal composer. A new conversation executes at **the current DSH workspace's same path on the selected remote host**. A missing remote directory fails explicitly; it never falls back to the remote home directory.
+2. Select a remote workspace in DSH, then choose a model labelled with its host under **Claude**, **Codex** or another CLI provider. The native picker and `/model` only show models belonging to that workspace’s machine. Local, missing or unverified workspaces hide remote models.
+3. Send messages in the normal composer. Conversations execute in **the current workspace’s verified remote directory**, translating dsh-remote mirrors and Claude SSH placeholders. Every send and follow-up checks machine and directory placement again, so an old model selection cannot send to another machine after a workspace switch. Missing remote directories fail explicitly.
 
 Change the CLI checkboxes on a machine card and click **Apply selection**. Disabled CLIs are neither probed nor shown in the model picker; existing agents keep running. New machines start with no CLIs selected, while older saved machines retain their existing provider scope.
 
 **Collapsible model groups:** click a provider heading, such as **CodeBuddy Code**, to expand or collapse its models. The current model’s group starts expanded; other groups start collapsed. Manual choices are remembered in this browser. Searching expands matching groups, and clearing the search restores your choices. The plugin adds folding to the provider headings inside the native model list. DSH retains the outer menu, model labels, reasoning controls and any additional selection options.
 
-Model catalogs are saved per machine on the DSH server and shared between clients. The same model entry works across workspaces without per-project duplicates. Opening the picker reads cached data; use **Refresh models** beside the machine after CLI/account changes or to discover an existing host after upgrading. Discovery uses the remote account's home directory; execution uses the conversation's workspace directory, and project-specific model availability is validated at startup.
+Model catalogs are saved per machine on the DSH server and shared between clients. The same model entry works across workspaces on that machine without per-project duplicates. The picker reads cached models and filters by the workspace’s SSH host, user and port; process-routed workspaces verify the actual machine identity. Use **Refresh models** beside the machine after CLI/account changes or to discover an existing host after upgrading. Discovery uses the remote account's home directory; execution uses the conversation's workspace directory, and project-specific model availability is validated at startup.
 
 - Each DSH conversation and selected machine / CLI has an independent native CLI session, with its working directory bound on the first message. Follow-ups reuse it, including after a DSH restart when that CLI supports resume. Switching models within a CLI resumes that same session; a non-resumable CLI asks you to start a new conversation. Previously separate model sessions remain accessible. Switching machines or CLIs supplies available conversation text as context; DSH's local system prompt, injected workspace instructions and local tool schemas are excluded.
 - Replies and thinking stream into the main conversation. Remote tool calls appear as native DSH tool cards; they execute on the remote machine. They are recorded as completed external work, so DSH never executes them again. Approvals and questions use DSH's native prompts.
@@ -84,10 +84,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.6.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.7.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.6:** Main-chat models are filtered by the workspace machine and verified again before sending. Existing conversations can continue only when their machine and directory match. Update the server plugin and refresh the client; machines and model caches need no migration.
 
 **Upgrading from 0.2.5:** Fixes provider folding failing to activate on the real DSH client because the previous version redeclared an existing child slot. The native model seat is now preserved. Restart DSH and refresh the client; saved folding preferences still apply.
 
