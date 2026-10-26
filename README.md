@@ -12,7 +12,6 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Complete Claude SSH integration plus direct SSH tasks for Claude, Codex, DSH, Antigravity, Grok and CodeBuddy, with approvals and recovery |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
-| `dsh-magpie-fast` | [packages/magpie-fast](packages/magpie-fast/README.md) | GPT-only lightning toggle for priority processing on existing providers, including remote Magpie |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | In-page element, Console and network debugger for DSH Sidebar Browser |
 | `dsh-translate` | [packages/translate](packages/translate/README.md) | Translate selected chat text and composer drafts through an OpenAI-compatible API |
 
@@ -74,7 +73,6 @@ packages/
   claude-ssh/           # dsh-claude-ssh: source, tests, manifest, docs
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds
-  magpie-fast/          # GPT Fast composer toggle for existing providers
   browser-devtools/     # In-page debugger for Sidebar Browser tabs
   translate/            # Chat selection and composer translation
 scripts/

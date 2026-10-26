@@ -1,5 +1,0 @@
-- insert:
-    - id: dsh-magpie-fast
-      name: dsh-magpie-fast
-      config:
-        defaultEnabled: false
