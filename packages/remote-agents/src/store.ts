@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { identifier, record, remotePath, field, taskInput, type ChatProject, type HostConfig, type Task } from './domain.js';
+import { identifier, record, remotePath, field, taskInput, providerSelection, type ChatProject, type HostConfig, type Task } from './domain.js';
 
 export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[] }
 export class Store {
@@ -21,6 +21,7 @@ export class Store {
       identifier(host.id);
       if (typeof host.connection !== 'string' || typeof host.label !== 'string' || (host.password !== undefined && typeof host.password !== 'string') || (host.serverId !== undefined && typeof host.serverId !== 'string')) throw new Error('Invalid saved remote host');
       if (host.modelError !== undefined && typeof host.modelError !== 'string') throw new Error('Invalid saved host discovery error');
+      if (host.enabledProviders !== undefined) host.enabledProviders = providerSelection(host.enabledProviders);
       if (host.catalog !== undefined) {
         const catalog = record(host.catalog); remotePath(catalog.cwd);
         if (typeof catalog.checkedAt !== 'string' || !Array.isArray(catalog.providers) || !catalog.providers.every(p => p && typeof p.id === 'string' && Array.isArray(p.models) && Array.isArray(p.modes))) throw new Error('Invalid saved host model catalog');

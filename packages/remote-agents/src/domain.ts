@@ -10,9 +10,10 @@ export interface Host {
   modelError?: string;
   modelsCheckedAt?: string;
   providerErrors?: { label: string; error: string }[];
+  enabledProviders?: string[];
 }
 export interface HostCatalog { cwd: string; providers: Provider[]; checkedAt: string }
-export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string; catalog?: HostCatalog; modelError?: string }
+export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string; catalog?: HostCatalog; modelError?: string; enabledProviders?: string[] }
 export interface SshConfigHost { alias: string; connection: string }
 export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
@@ -116,6 +117,12 @@ export interface Task extends TaskInput {
 }
 export type NativeProtocol = 'codex' | 'claude' | 'acp' | 'antigravity';
 export const PROVIDER_LABELS: Readonly<Record<string, string>> = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };
+/** Older machines retain their providers until the user explicitly changes the selection. */
+export const enabledProvidersOf = (host: Pick<HostConfig, 'enabledProviders'>): string[] => host.enabledProviders ?? Object.keys(PROVIDER_LABELS);
+export function providerSelection(value: unknown): string[] {
+  if (!Array.isArray(value) || value.some(id => typeof id !== 'string' || !Object.hasOwn(PROVIDER_LABELS, id))) throw new RemoteError('Invalid CLI selection');
+  return [...new Set(value)];
+}
 /** `attention` means a permission request or question is waiting for the user. */
 export type AgentStatus = 'starting' | 'running' | 'attention' | 'idle' | 'error' | 'closed';
 export interface AgentSummary {

@@ -7,9 +7,11 @@ Use remote Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity directly in 
 
 Each CLI appears as a separate provider in DSH's ordinary model picker:
 
-1. Open **Settings → Remote agents** and add an SSH host. Saving it automatically discovers that machine's CLIs and models. **No project name or project path is required.**
+1. Open **Settings → Remote agents** and add an SSH host and select the CLIs you want to enable. Saving discovers only their models; you can also save a machine first and choose its CLIs later. **No project name or project path is required.**
 2. Select a workspace in DSH, then choose a model labelled with its host under **Claude**, **Codex** or another CLI provider in the ordinary model picker.
 3. Send messages in the normal composer. A new conversation executes at **the current DSH workspace's same path on the selected remote host**. A missing remote directory fails explicitly; it never falls back to the remote home directory.
+
+Change the CLI checkboxes on a machine card and click **Apply selection**. Disabled CLIs are neither probed nor shown in the model picker; existing agents keep running. New machines start with no CLIs selected, while older saved machines retain their existing provider scope.
 
 Model catalogs are saved per machine on the DSH server and shared between clients. The same model entry works across workspaces without per-project duplicates. Opening the picker reads cached data; use **Refresh models** beside the machine after CLI/account changes or to discover an existing host after upgrading. Discovery uses the remote account's home directory; execution uses the conversation's workspace directory, and project-specific model availability is validated at startup.
 
@@ -72,16 +74,20 @@ Add machines under **Settings → Remote agents**. Pick a `Host` alias from the 
 
 The DSH server needs noninteractive key or agent access and verified host keys (`BatchMode=yes`, `StrictHostKeyChecking=yes`). Passwords are not stored. Remote machines need only SSH and the signed-in CLIs, not this plugin. Each host pins its SSH machine identity; if it changes, add the machine again.
 
+Noninteractive SSH commands retain an already configured Node.js ≥22. If the current runtime is too old, the plugin selects a compatible installed nvm or Homebrew runtime. Without one, it keeps the existing environment and reports CLI errors; it never installs or upgrades Node automatically.
+
 ## Install and upgrade
 
 Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the archive into a DSH profile:
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.3.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.4.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.3:** Per-machine CLI selection is now available, and SSH no longer selects an old nvm runtime ahead of a compatible installed Node. Adjust the checkboxes and click **Apply selection**.
 
 **Upgrading from 0.2.2:** Click **Refresh models** beside each machine to populate the machine-wide model menu. Existing project-bound conversations keep their saved working directories; legacy project routes remain resolvable but are hidden from the new picker.
 

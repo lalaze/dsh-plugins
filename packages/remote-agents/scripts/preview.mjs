@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-preview-'));
 const store = new Store(join(directory, 'state.json')); await store.open();
 const remote = new FakeRemote();
+remote.store = store;
 remote.catalog[0].models[0].label = 'Remote model';
 remote.catalog.push({ id: 'dsh', label: 'DSH', status: 'ready', models: [{ id: 'dsh-remote', label: 'DSH remote model' }], modes: [] });
 remote.catalog.push({ id: 'antigravity', label: 'Antigravity', status: 'ready', notice: ANTIGRAVITY_NOTICE, models: [{ id: 'agy-remote', label: 'Antigravity remote model' }], modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }], defaultModeId: 'default' });

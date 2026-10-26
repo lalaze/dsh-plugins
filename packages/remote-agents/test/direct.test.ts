@@ -127,6 +127,22 @@ const tick = () => new Promise(resolve => setImmediate(resolve));
 const native = (store: Store, id: string) => store.snapshot().tasks.find(t => t.id === id)!.native!;
 const types = (entries: { item: { type: string } }[]) => entries.map(e => e.item.type);
 
+test('disabled CLI executables are never probed and changing selection invalidates the catalog cache', async t => {
+  const { service, ssh, hostId, store } = await fixture(t);
+  ssh.installed.push('codebuddy', 'antigravity');
+  await store.update(s => { s.hosts[0].enabledProviders = ['codex']; });
+  const first = await service.providers(hostId, '/srv/project');
+  assert.deepEqual(first.map(p => p.id), ['codex']);
+  assert.ok(ssh.children.every(c => c.provider === 'codex'));
+  assert.ok(ssh.scripts.every(s => !s.includes("command -v 'agy'") && !s.includes("command -v 'codebuddy'")));
+  const before = ssh.children.length;
+  await store.update(s => { s.hosts[0].enabledProviders = ['codebuddy']; });
+  const next = await service.providers(hostId, '/srv/project');
+  assert.deepEqual(next.map(p => p.id), ['codebuddy']);
+  assert.ok(ssh.children.slice(before).every(c => c.provider === 'codebuddy'));
+  assert.equal(ssh.admissions.length, 0);
+});
+
 test('changing a model resumes the same native thread and preserves earlier output', async t => {
   const { service, ssh, request, store, hostId } = await fixture(t);
   const agent = await service.create(request); await tick(); ssh.live.finish(); await tick();

@@ -3,7 +3,38 @@ import { StringDecoder } from 'node:string_decoder';
 import { field, RemoteError } from './domain.js';
 
 export const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
-export const REMOTE_PATH = 'PATH="$HOME/.local/bin:$HOME/.gemini/bin:$HOME/.grok/bin:$HOME/.codebuddy/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"; for dsh_node_bin in "$HOME"/.nvm/versions/node/*/bin; do if [ -d "$dsh_node_bin" ]; then PATH="$PATH:$dsh_node_bin"; fi; done; export PATH; ';
+/** Keep a compatible configured Node; otherwise use the newest installed runtime >=22. */
+export const REMOTE_PATH = `
+dsh_initial_node="$(command -v node 2>/dev/null || true)"
+PATH="$HOME/.local/bin:$HOME/.gemini/bin:$HOME/.grok/bin:$HOME/.codebuddy/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+dsh_nvm_root="\${NVM_DIR:-$HOME/.nvm}"
+for dsh_node_bin in "$dsh_nvm_root"/versions/node/*/bin; do
+  if [ -d "$dsh_node_bin" ]; then PATH="$PATH:$dsh_node_bin"; fi
+done
+dsh_best_node=; dsh_best_major=0; dsh_best_minor=0; dsh_best_patch=0
+dsh_consider_node() {
+  [ -x "$1" ] && [ ! -d "$1" ] || return 0
+  dsh_version="$("$1" --version 2>/dev/null)" || return 0
+  dsh_version="\${dsh_version#v}"
+  dsh_major="\${dsh_version%%.*}"; dsh_remainder="\${dsh_version#*.}"
+  dsh_minor="\${dsh_remainder%%.*}"; dsh_patch="\${dsh_remainder#*.}"; dsh_patch="\${dsh_patch%%-*}"
+  case "$dsh_major:$dsh_minor:$dsh_patch" in *[!0-9:]*|*::*|:*|*:) return 0;; esac
+  [ "$dsh_major" -ge 22 ] || return 0
+  if [ "$dsh_major" -gt "$dsh_best_major" ] ||
+    { [ "$dsh_major" -eq "$dsh_best_major" ] && [ "$dsh_minor" -gt "$dsh_best_minor" ]; } ||
+    { [ "$dsh_major" -eq "$dsh_best_major" ] && [ "$dsh_minor" -eq "$dsh_best_minor" ] && [ "$dsh_patch" -gt "$dsh_best_patch" ]; }; then
+    dsh_best_node="$1"; dsh_best_major="$dsh_major"; dsh_best_minor="$dsh_minor"; dsh_best_patch="$dsh_patch"
+  fi
+}
+dsh_consider_node "$dsh_initial_node"
+if [ -z "$dsh_best_node" ]; then
+  for dsh_node_candidate in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node /opt/homebrew/opt/node@22/bin/node /opt/homebrew/opt/node@24/bin/node /usr/local/opt/node@22/bin/node /usr/local/opt/node@24/bin/node "$dsh_nvm_root"/versions/node/*/bin/node; do
+    dsh_consider_node "$dsh_node_candidate"
+  done
+fi
+if [ -n "$dsh_best_node" ]; then PATH="\${dsh_best_node%/*}:$PATH"; fi
+export PATH
+`;
 export function connectionInput(value: unknown): string {
   let connection = field(value, 'SSH connection', 2048);
   if (!connection.includes('://')) connection = `ssh://${connection}`;
@@ -33,7 +64,8 @@ export class OpenSshTransport implements SshTransport {
     this.args = ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', ...(url.port ? ['-p', url.port] : []), '--', `${decodeURIComponent(url.username) ? `${decodeURIComponent(url.username)}@` : ''}${url.hostname}`];
   }
   private spawn(script: string): ChildProcessWithoutNullStreams {
-    return spawn(this.binary, [...this.args, REMOTE_PATH + script], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    // SSH may use zsh/fish; execute our POSIX bootstrap in sh (unmatched nvm globs are harmless).
+    return spawn(this.binary, [...this.args, `sh -c ${quote(REMOTE_PATH + script)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   }
   exec(script: string, timeout = 20_000): Promise<string> {
     return new Promise((resolve, reject) => {

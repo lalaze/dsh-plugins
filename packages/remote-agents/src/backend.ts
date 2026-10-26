@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Agent, Cursor, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
-import { PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
+import { enabledProvidersOf, PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from './ssh.js';
 import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
 import { TaskHistory } from './history.js';
@@ -54,7 +54,7 @@ export class SshBackend implements Backend {
   private closed = false;
   private readonly probes = new Set<JsonlPeer>();
   private identity?: { id: string; at: number };
-  private catalogs = new Map<string, { at: number; profiles: Map<string, Profile>; providers: Provider[] }>();
+  private catalogs = new Map<string, { at: number; selection: string; profiles: Map<string, Profile>; providers: Provider[] }>();
   private sessions = new Map<string, CliSession>();
   private histories = new Map<string, Promise<TaskHistory>>();
   private starting = new Map<string, Promise<Agent>>();
@@ -86,15 +86,18 @@ export class SshBackend implements Backend {
   }
   async providers(cwd: string, refresh: boolean): Promise<Provider[]> {
     this.assertOpen();
+    const enabled = enabledProvidersOf(this.store.hosts().find(h => h.id === this.host.id) ?? this.host);
+    const selection = [...enabled].sort().join(','), definitions = CLI_PROVIDERS.filter(p => enabled.includes(p.id));
+    if (!definitions.length) return [];
     const cached = this.catalogs.get(cwd);
-    if (!refresh && cached && Date.now() - cached.at < 30_000) return structuredClone(cached.providers);
-    const output = await this.transport.exec(`cd ${quote(cwd)} && printf '%s\\0' "$(pwd -P)" && ${CLI_PROVIDERS.map(p => `printf '%s\\0%s\\0' ${quote(p.id)} "$(command -v ${quote(p.command)} 2>/dev/null || true)"`).join(' && ')}`);
+    if (!refresh && cached?.selection === selection && Date.now() - cached.at < 30_000) return structuredClone(cached.providers);
+    const output = await this.transport.exec(`cd ${quote(cwd)} && printf '%s\\0' "$(pwd -P)" && ${definitions.map(p => `printf '%s\\0%s\\0' ${quote(p.id)} "$(command -v ${quote(p.command)} 2>/dev/null || true)"`).join(' && ')}`);
     const [canonical, ...parts] = output.split('\0');
     this.assertOpen();
     if (!canonical?.startsWith('/')) throw new Error('Remote project does not exist or is not accessible');
     const installed = new Map<string, string>(); for (let i = 0; i + 1 < parts.length; i += 2) if (parts[i + 1]) installed.set(parts[i], parts[i + 1]);
     const profiles = new Map<string, Profile>();
-    const providers = await Promise.all(CLI_PROVIDERS.map(async definition => {
+    const providers = await Promise.all(definitions.map(async definition => {
       const path = installed.get(definition.id);
       const unavailable: Provider = { id: definition.id, label: definition.label, status: 'unavailable', models: [], modes: [], ...(definition.id === 'antigravity' ? { notice: ANTIGRAVITY_NOTICE } : {}) };
       if (!path) return unavailable;
@@ -141,7 +144,7 @@ export class SshBackend implements Backend {
       finally { if (peer) { this.probes.delete(peer); peer.close(); } }
     }));
     this.assertOpen();
-    this.catalogs.set(cwd, { at: Date.now(), profiles, providers }); return structuredClone(providers);
+    this.catalogs.set(cwd, { at: Date.now(), selection, profiles, providers }); return structuredClone(providers);
   }
   private task(id: string): Task {
     const task = this.store.task(t => t.agentId === id && t.hostId === this.host.id);

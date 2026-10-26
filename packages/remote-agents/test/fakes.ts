@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import type { Backend } from '../src/backend.js';
-import type { Agent, Cursor, HostConfig, PermissionAnswer, Provider, Task, TaskInput, TimelineEntry, TimelinePage } from '../src/domain.js';
+import { enabledProvidersOf, type Agent, type Cursor, type HostConfig, type PermissionAnswer, type Provider, type Task, type TaskInput, type TimelineEntry, type TimelinePage } from '../src/domain.js';
 import { RemoteAgentsService } from '../src/service.js';
 import { Store } from '../src/store.js';
 import { messageTimeline } from '../src/history.js';
@@ -23,6 +23,7 @@ export class FakeRemote {
   home = '/home/builder';
   homeError?: string;
   discoveries = 0;
+  store?: Store;
   created?: Task;
   onCreate?: (agent: Agent, task: Task) => void;
   onSend?: (agent: Agent, text: string) => void;
@@ -38,11 +39,11 @@ export class FakeRemote {
     agent.status = 'idle'; agent.activeTurn = null; agent.pendingPermissions = [];
     this.append(id, { type: 'interrupted' });
   }
-  backend = (_host: HostConfig): Backend => ({
+  backend = (host: HostConfig): Backend => ({
     connect: async () => this.serverId,
     close: async () => { this.closes++; },
     homeDirectory: async () => { if (this.homeError) throw new Error(this.homeError); return this.home; },
-    providers: async () => { this.discoveries++; return structuredClone(this.catalog); },
+    providers: async () => { this.discoveries++; const enabled = enabledProvidersOf(this.store?.hosts().find(h => h.id === host.id) ?? host); return structuredClone(this.catalog.filter(p => enabled.includes(p.id))); },
     create: async task => {
       let agent = this.receipts.get(task.id);
       if (!agent) {
@@ -114,6 +115,7 @@ export async function fixture(t: TestContext) {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-agents-'));
   const path = join(directory, 'state.json'), store = new Store(path); await store.open();
   const remote = new FakeRemote(), service = new RemoteAgentsService(store, remote.backend);
+  remote.store = store;
   t.after(async () => { await service.close(); await rm(directory, { recursive: true, force: true }); });
   const state = await service.addHost({ label: 'Build server', connection: 'ssh://builder@build-box' });
   const hostId = state.hosts[0].id;

@@ -25,7 +25,7 @@ function Settings({ openSessions }: { openSessions: () => void }) {
   return <section className="dsh-ra ra-settings" aria-label={ui('Remote agents')}><style>{styles}</style>
     <div className="ra-settings-heading"><h2>{ui('Remote agents')}</h2><button onClick={openSessions}>{ui('Open sessions')}</button></div>
     <p className="ra-muted ra-intro">{ui('Select remote CLIs in the DSH model picker and chat in the main conversation.')}</p>
-    <p className="ra-muted ra-intro">{ui('Add a machine to show all of its available CLI models. Conversations use the current DSH workspace path on that machine.')}</p>
+    <p className="ra-muted ra-intro">{ui('Enable the CLIs you want on each machine. Conversations use the current DSH workspace path on that machine.')}</p>
     {dashboard ? <HostManager dashboard={dashboard} update={setDashboard} />
       : error ? <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}<button type="button" onClick={() => setRevision(value => value + 1)}>{ui('Retry')}</button></div>
       : <div className="ra-empty" role="status">{ui('Loading settings…')}</div>}

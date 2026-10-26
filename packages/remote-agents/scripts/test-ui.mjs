@@ -67,19 +67,30 @@ try {
   chooseSsh('ssh://build-box');
   expect('document.querySelector("[aria-label=机器名称]").value === "build-box" && document.querySelector("[aria-label=连接地址]").value === "ssh://build-box"');
   if (state().state.hosts.length) throw new Error('Selecting an alias saved a host before submission');
+  expect('document.querySelectorAll(".ra-host-form .ra-cli-options input:checked").length === 0');
+  browser('check', '.ra-host-form .ra-cli-options input[value="codex"]');
   browser('click', 'button:text-is("保存机器")');
 
   wait('document.querySelector(".ra-hosts .ra-host-row strong")?.textContent === "build-box"');
-  wait('document.querySelector(".ra-hosts .ra-host-row")?.textContent.includes("DSH 模型选择器中有 5 个模型")');
+  wait('document.querySelector(".ra-hosts .ra-host-row")?.textContent.includes("DSH 模型选择器中有 1 个模型")');
   browser('click', 'button:text-is("刷新模型")');
   wait('document.querySelector(".ra-hosts .ra-badge")?.textContent === "已连接"');
   console.log('PASS: settings and session slots, SSH alias keyboard selection, config refresh, host creation and connection');
 
   const groups = state().modelGroups;
-  if (groups.map(g => g.name).join(',') !== 'Codex,DeepSeek Harness,Antigravity,Grok,CodeBuddy Code') throw new Error('CLI providers were not exposed as separate model picker groups');
+  if (groups.map(g => g.name).join(',') !== 'Codex') throw new Error('CLI providers were not exposed as separate model picker groups');
   const machine = state().state.hosts[0];
   if (groups.some(g => g.models.some(m => !m.id.startsWith(machine.id + '/') || !m.name.includes('build-box')))) throw new Error('Models were not scoped and labelled by machine');
   if (state().tasks.length) throw new Error('Model discovery launched an agent');
+  browser('check', '.ra-host-row .ra-cli-options input[value="codebuddy"]');
+  browser('click', '.ra-host-row button:text-is("应用选择")');
+  wait('document.querySelector(".ra-host-row").textContent.includes("DSH 模型选择器中有 2 个模型")');
+  if (state().modelGroups.map(g => g.name).join(',') !== 'Codex,CodeBuddy Code') throw new Error('Enabling a CLI did not add its models');
+  browser('uncheck', '.ra-host-row .ra-cli-options input[value="codebuddy"]');
+  browser('click', '.ra-host-row button:text-is("应用选择")');
+  wait('document.querySelector(".ra-host-row").textContent.includes("DSH 模型选择器中有 1 个模型")');
+  if (state().modelGroups.map(g => g.name).join(',') !== 'Codex') throw new Error('A disabled CLI remained in the model picker');
+
   browser('set', 'media', 'light'); image('settings-light');
   browser('set', 'media', 'dark'); image('settings-dark');
   browser('set', 'viewport', '390', '844');
@@ -88,12 +99,13 @@ try {
   browser('set', 'viewport', '1440', '1000');
   evaluate('window.fixture.setLocale("en")');
   wait('document.querySelector(".ra-hosts h2")?.textContent === "Hosts"');
-  expect('document.querySelector(".ra-host-row").textContent.includes("5 models in the DSH picker")');
+  expect('document.querySelector(".ra-host-row").textContent.includes("1 models in the DSH picker")');
   image('settings-en');
   evaluate('window.fixture.setLocale("zh")');
   browser('open', `${base}?reloaded`);
-  wait('document.querySelector(".ra-host-row")?.textContent.includes("DSH 模型选择器中有 5 个模型")');
+  wait('document.querySelector(".ra-host-row")?.textContent.includes("DSH 模型选择器中有 1 个模型")');
   expect('!document.querySelector(".ra-chat-projects,[aria-label=项目名称],[aria-label=远程项目路径]")');
+  expect('document.querySelectorAll(".ra-host-row .ra-cli-options input:checked").length === 1 && document.querySelector(".ra-host-row .ra-cli-options input[value=codex]").checked');
   browser('fill', '[aria-label="机器名称"]', 'Duplicate');
   browser('fill', '[aria-label="连接地址"]', 'ssh://build-box');
   browser('click', 'button:text-is("保存机器")');
@@ -102,7 +114,7 @@ try {
   browser('click', '.ra-hosts .ra-host-row button.ra-danger');
   wait('!document.querySelector(".ra-hosts .ra-host-row")');
   if (state().modelGroups.length) throw new Error('Removing a host left its models in the picker');
-  console.log('PASS: machine-only model discovery, refresh, persistence, duplicate rejection and removal; no project registration; locales and responsive themes');
+  console.log('PASS: selected-CLI discovery, enable/disable, persistence, refresh, duplicate rejection and removal; no project registration; locales and responsive themes');
 
   fixture({ failReads: true }); browser('open', `${base}?offline`);
   wait('document.querySelector(".ra-settings [role=alert]")?.textContent.includes("模拟连接中断")');

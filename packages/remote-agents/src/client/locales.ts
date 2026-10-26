@@ -186,5 +186,13 @@ export const zh: Record<string, string> = {
   "Add a machine or refresh its models in Settings → Remote agents.": "请在设置 → 远程智能体中添加机器或刷新模型。",
   "Session host": "会话机器",
   "Choose a DSH workspace before starting a remote CLI conversation.": "请先选择 DSH 工作区，再开始远程 CLI 对话。",
-  "This remote model is unavailable. Add its host or refresh models in Settings → Remote agents.": "该远程模型不可用，请在设置 → 远程智能体中添加对应机器或刷新模型。"
+  "This remote model is unavailable. Add its host or refresh models in Settings → Remote agents.": "该远程模型不可用，请在设置 → 远程智能体中添加对应机器或刷新模型。",
+  "Enabled CLIs": "启用的 CLI",
+  "Only selected CLIs are detected and shown in the model picker.": "只检测并显示勾选的 CLI。",
+  "Apply selection": "应用选择",
+  "Choose which CLIs to enable on each machine. No project registration is needed.": "为每台机器选择要启用的 CLI，无需登记项目。",
+  "No CLIs enabled. Select the ones you want to use.": "尚未启用 CLI，请勾选你要使用的工具。",
+  "Enable the CLIs you want on each machine. Conversations use the current DSH workspace path on that machine.": "为机器勾选需要的 CLI；对话使用当前 DSH 工作区在该机器上的同路径。",
+  "Invalid CLI selection": "CLI 选择无效",
+  "This CLI is disabled on this machine. Enable it in Settings → Remote agents.": "这台机器尚未启用该 CLI，请在设置 → 远程智能体中启用。"
 };

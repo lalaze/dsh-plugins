@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend, type Backend, type BackendFactory } from './backend.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
-import { busy, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task } from './domain.js';
+import { busy, enabledProvidersOf, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task } from './domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
 export interface CreateOptions { title?: string; origin?: Task['origin']; chat?: Task['chat'] }
@@ -19,16 +19,24 @@ export class RemoteAgentsService {
   constructor(readonly store: Store, factory?: BackendFactory, private readonly readSshConfig = readSshConfigHosts) { this.factory = factory ?? (host => new SshBackend(host, store)); }
   async sshConfig() { return this.readSshConfig(); }
   hosts(): Host[] {
-    return this.store.hosts().map(({ password, catalog, ...host }) => ({ ...host, status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
-      ...(catalog ? { modelsCheckedAt: catalog.checkedAt, modelCount: catalog.providers.filter(p => p.status === 'ready').reduce((n, p) => n + p.models.length, 0),
-        providerErrors: catalog.providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) }));
+    return this.store.hosts().map(({ password, catalog, ...host }) => {
+      const enabled = enabledProvidersOf(host), providers = catalog?.providers.filter(p => enabled.includes(p.id)) ?? [];
+      return { ...host, enabledProviders: enabled, status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
+        ...(!enabled.length ? { modelCount: 0 } : {}),
+        ...(catalog ? { modelsCheckedAt: catalog.checkedAt, modelCount: providers.filter(p => p.status === 'ready').reduce((n, p) => n + p.models.length, 0),
+          providerErrors: providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) };
+    });
   }
   onCatalogChange(listener: () => void): () => void { this.catalogListeners.add(listener); return () => this.catalogListeners.delete(listener); }
   private catalogChanged(): void { for (const listener of this.catalogListeners) listener(); }
   /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */
   async discoverHost(hostId: string): Promise<Dashboard> {
     await this.serial(`catalog:${hostId}`, async () => {
-      this.host(hostId);
+      const host = this.host(hostId);
+      if (!enabledProvidersOf(host).length) {
+        await this.store.update(state => { const saved = state.hosts.find(h => h.id === hostId); if (saved) delete saved.modelError; });
+        this.catalogChanged(); return;
+      }
       try {
         const catalog = await this.use(hostId, async backend => {
           const cwd = await backend.homeDirectory();
@@ -45,6 +53,19 @@ export class RemoteAgentsService {
       this.catalogChanged();
     });
     return this.snapshot();
+  }
+  async setHostProviders(hostId: string, value: unknown): Promise<Dashboard> {
+    const selection = providerSelection(value);
+    await this.serial(`catalog:${hostId}`, async () => {
+      this.host(hostId);
+      await this.store.update(state => {
+        const host = state.hosts.find(h => h.id === hostId);
+        if (!host) throw new RemoteError('Remote host was removed', 409);
+        host.enabledProviders = selection; delete host.modelError;
+      });
+      this.catalogChanged();
+    });
+    return this.discoverHost(hostId);
   }
   async snapshot(): Promise<Dashboard> {
     const tasks = this.store.snapshot().tasks;
@@ -142,6 +163,7 @@ export class RemoteAgentsService {
   async addHost(input: unknown, options: { discoverModels?: boolean } = {}): Promise<Dashboard> {
     const value = record(input);
     const host: HostConfig = { id: randomUUID(), label: field(value.label, 'host name', 100), connection: connectionInput(value.connection) };
+    if (value.enabledProviders !== undefined) host.enabledProviders = providerSelection(value.enabledProviders);
     if (value.password) throw new RemoteError('SSH uses keys or an SSH agent; password storage is not supported');
     await this.store.update(state => {
       if (state.hosts.length >= 16) throw new RemoteError('Up to 16 remote hosts can be saved');
@@ -186,6 +208,7 @@ export class RemoteAgentsService {
         return existing.agentId ? this.summary(existing.id) : this.launch(existing);
       }
       return this.use(request.hostId, async (backend, host) => {
+        if (!enabledProvidersOf(host).includes(request.provider)) throw new RemoteError('This CLI is disabled on this machine. Enable it in Settings → Remote agents.', 409);
         const providers = await backend.providers(request.cwd, false);
         const provider = providers.find(p => p.id === request.provider);
         if (!provider || provider.status !== 'ready') throw new RemoteError('The selected CLI is not ready in this remote project', 409);

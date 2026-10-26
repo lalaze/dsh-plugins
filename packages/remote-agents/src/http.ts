@@ -20,6 +20,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
       switch (action) {
         case 'hostCatalogs': result = projects.hosts(); break;
         case 'discoverHost': result = await service.discoverHost(hostId()); break;
+        case 'setHostProviders': result = await service.setHostProviders(hostId(), input.providers); break;
         case 'chatProjects': result = projects.list(); break;
         case 'addChatProject': result = await projects.add(input.project); break;
         case 'refreshChatProject': result = await projects.refresh(identifier(input.projectId)); break;

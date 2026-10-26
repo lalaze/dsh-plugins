@@ -1,8 +1,8 @@
 {
   "title": "Remote Agents",
-  "description": "Add a machine to show its remote CLI models in the native DSH picker. Conversations use the current workspace path on that host.",
+  "description": "Choose the CLIs enabled on each machine and use their models in the native DSH picker, with the current workspace path.",
   "meta": {
     "title": "Remote Agents",
-    "description": "Add a machine to show its remote CLI models in the native DSH picker. Conversations use the current workspace path on that host."
+    "description": "Choose the CLIs enabled on each machine and use their models in the native DSH picker, with the current workspace path."
   }
 }

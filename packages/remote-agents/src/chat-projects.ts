@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { field, identifier, record, remotePath, RemoteError, type ChatProject } from './domain.js';
+import { enabledProvidersOf, field, identifier, record, remotePath, RemoteError, type ChatProject } from './domain.js';
 import type { RemoteAgentsService } from './service.js';
 
 /** Saved, explicitly discovered catalogs let the native model picker work without opening SSH. */
@@ -8,7 +8,7 @@ export class ChatProjects {
   constructor(readonly service: RemoteAgentsService) {}
   list(): ChatProject[] { return this.service.store.chatProjects(); }
   /** The picker advertises one catalog per host; old project routes remain resolvable for saved chats. */
-  hosts(): ChatProject[] { return this.service.store.hosts().flatMap(host => host.catalog ? [{ id: host.id, hostId: host.id, label: host.label, cwd: host.catalog.cwd, providers: host.catalog.providers }] : []); }
+  hosts(): ChatProject[] { return this.service.store.hosts().flatMap(host => host.catalog ? [{ id: host.id, hostId: host.id, label: host.label, cwd: host.catalog.cwd, providers: host.catalog.providers.filter(p => enabledProvidersOf(host).includes(p.id)) }] : []); }
   routes(): ChatProject[] { return [...this.hosts(), ...this.list()]; }
   onChange(listener: () => void): () => void {
     this.listeners.add(listener); const off = this.service.onCatalogChange(listener);
