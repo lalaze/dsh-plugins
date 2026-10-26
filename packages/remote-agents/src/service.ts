@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend, type Backend, type BackendFactory } from './backend.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
-import { busy, enabledProvidersOf, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task } from './domain.js';
+import { busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task } from './domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
 export interface CreateOptions { title?: string; origin?: Task['origin']; chat?: Task['chat'] }
@@ -154,7 +154,7 @@ export class RemoteAgentsService {
       id: task.id, hostId: task.hostId, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model,
       ...(task.chat ? { chatSessionId: task.chat.sessionId } : {}),
       ...(task.modeId ? { modeId: task.modeId } : {}), ...(task.thinkingOptionId ? { thinkingOptionId: task.thinkingOptionId } : {}),
-      modes: task.modes ?? [], title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
+      modes: permissionModes(task.provider, task.modes ?? []), title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
       archived: task.archived === true, delegated: task.origin === 'dsh', started: !!task.agentId, attached: !!live && live.status !== 'closed', status, pendingPermissions: pending,
       ...(error ? { error } : {}), ...(resumable !== undefined ? { resumable } : {}), ...(task.native?.sessionId ? { nativeSessionId: task.native.sessionId } : {}),
     };
@@ -393,7 +393,7 @@ export class RemoteAgentsService {
   async setMode(id: string, modeId: string): Promise<AgentSummary> {
     return this.serial(id, async () => {
       const task = this.task(id);
-      if (!task.modes?.some(m => m.id === modeId)) throw new RemoteError('This mode is not available for this agent', 409);
+      if (!permissionModes(task.provider, task.modes ?? []).some(m => m.id === modeId)) throw new RemoteError('This mode is not available for this agent', 409);
       if (task.modeId === modeId) return this.summary(id);
       const live = await this.live(task);
       if (live && busy(this.summarize(task, live))) throw new RemoteError('Stop the agent before changing its mode', 409);

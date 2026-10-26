@@ -26,6 +26,7 @@ export function PermissionCard({ permission, busy, respond }: { permission: Perm
       </label>)}
       {q.freeText && <textarea aria-label={`${q.header}: ${ui(q.options.length ? 'Other answer' : 'Answer')}`} rows={2} value={typed[q.header] ?? ''} onChange={event => setTyped(previous => ({ ...previous, [q.header]: event.target.value }))} />}
     </fieldset>) : questionForm ? <p>{ui('This CLI returned an unsupported question format.')}</p> : null}
+    {actions.some(a => a.scope === 'project') && <p className="ra-muted">{ui('Project approval saves only the suggested matching rules on the remote machine. Review them in Details.')}</p>}
     {(permission.detail || permission.input) && <details><summary>{ui('Details')}</summary><pre>{JSON.stringify(permission.detail ?? permission.input, null, 2)}</pre></details>}
     <div className="ra-actions" style={{ marginTop: 12 }}>
       {actions.map(action => <button key={action.id} className={action.behavior === 'deny' ? 'ra-danger' : 'ra-primary'} disabled={busy} onClick={() => respond({ behavior: action.behavior, selectedActionId: action.id })}>{ui(action.label)}</button>)}

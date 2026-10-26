@@ -411,6 +411,62 @@ test('mode changes release the idle session, and the next message resumes it wit
   assert.equal(ssh.admissions.length, 2);
 });
 
+test('Claude inherits remote permission settings unless a mode is explicitly selected, including after resume', async t => {
+  const { service, ssh, request, hostId, store } = await fixture(t, 'claude');
+  const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'claude')!;
+  assert.equal(provider.defaultModeId, 'inherit');
+  const agent = await service.create(request), first = ssh.live;
+  assert.equal(first.argv.includes('--permission-mode'), false);
+  first.finish(); await tick();
+  await service.setMode(agent.id, 'acceptEdits');
+  await service.send(agent.id, { id: randomUUID(), text: 'Edit files' });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'acceptEdits');
+  ssh.live.finish(); await tick();
+  // A pre-upgrade task saved its choices without the inherit option.
+  await store.update(state => { const saved = state.tasks.find(task => task.id === agent.id)!; saved.modes = saved.modes!.filter(m => m.id !== 'inherit'); });
+  assert.ok((await service.summary(agent.id)).modes.some(m => m.id === 'inherit'));
+  await service.setMode(agent.id, 'inherit');
+  await service.send(agent.id, { id: randomUUID(), text: 'Use remote settings again' });
+  assert.equal(ssh.live.argv.includes('--permission-mode'), false);
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--resume') + 1], first.argv[first.argv.indexOf('--session-id') + 1]);
+});
+
+for (const destination of ['session', 'localSettings']) test(`Claude forwards explicitly selected ${destination} approval rules without broadening one-time approvals`, async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const agent = await service.create(request), cli = ssh.live;
+  const suggestion = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'pnpm test *' }], behavior: 'allow', destination };
+  const ask = (id: string) => cli.emit({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'pnpm test' }, permission_suggestions: [suggestion] } });
+  ask('once');
+  let permission = (await service.state(agent.id)).permissions[0];
+  assert.equal(permission.actions?.length, 3);
+  const remembered = permission.actions!.find(a => a.scope === (destination === 'session' ? 'session' : 'project'))!;
+  assert.ok(remembered);
+  assert.deepEqual(permission.detail, { input: { command: 'pnpm test' }, permissionSuggestions: [suggestion] });
+  await service.respond(agent.id, permission.id, { behavior: 'allow', selectedActionId: 'once' });
+  assert.deepEqual(cli.sent.find(m => m.response?.request_id === 'once')!.response.response, { behavior: 'allow', updatedInput: { command: 'pnpm test' } });
+  ask('remember'); permission = (await service.state(agent.id)).permissions[0];
+  await assert.rejects(service.respond(agent.id, permission.id, { behavior: 'allow', selectedActionId: 'not-offered' }), /Invalid permission action/);
+  await service.respond(agent.id, permission.id, { behavior: 'allow', selectedActionId: remembered.id, updatedPermissions: [{ type: 'setMode', mode: 'bypassPermissions' }] });
+  assert.deepEqual(cli.sent.find(m => m.response?.request_id === 'remember')!.response.response, { behavior: 'allow', updatedInput: { command: 'pnpm test' }, updatedPermissions: [suggestion] });
+});
+
+test('Claude does not offer persistent grants for suppressed, global, malformed or mode-changing suggestions', async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const agent = await service.create(request), cli = ssh.live;
+  const rule = { type: 'addRules', behavior: 'allow', destination: 'localSettings', rules: [{ toolName: 'Bash', ruleContent: 'pnpm test *' }] };
+  for (const [index, extra] of [
+    { suppress_always_allow_rule: true, permission_suggestions: [rule] },
+    { permission_suggestions: [{ ...rule, destination: 'userSettings' }] },
+    { permission_suggestions: [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }] },
+    { permission_suggestions: [{ ...rule, rules: [] }, { ...rule, behavior: 'deny' }, { ...rule, rules: [null] }] },
+  ].entries()) {
+    cli.emit({ type: 'control_request', request_id: `invalid-${index}`, request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'pnpm test' }, ...extra } });
+    const permission = (await service.state(agent.id)).permissions[0];
+    assert.equal(permission.actions?.some(a => a.scope !== 'once' && a.behavior === 'allow') ?? false, false);
+    await service.respond(agent.id, permission.id, { behavior: 'deny' });
+  }
+});
+
 for (const provider of ['codex', 'dsh']) test(`${provider} completed sessions are reclaimed, and messaging one resumes it without replay`, async t => {
   const { service, ssh, request, store } = await fixture(t, provider);
   const agents = [];

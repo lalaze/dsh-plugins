@@ -255,6 +255,7 @@ test('permissions and questions use native DSH services and select only a one-ti
   });
   remote.onCreate = agent => {
     agent.status = 'running'; agent.pendingPermissions = [{ id: 'permission', kind: 'tool', name: 'Bash', actions: [
+      { id: 'project-rule', label: 'Save rule', behavior: 'allow', scope: 'project' },
       { id: 'acceptForSession', label: 'Always allow', behavior: 'allow' }, { id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' }] }];
     void (async () => {
       while (!remote.answers.length) await pause(5);
@@ -265,6 +266,21 @@ test('permissions and questions use native DSH services and select only a one-ti
   };
   assert.equal(text(await collect(adapter.stream(options()))), 'Done'); assert.equal(approvals, 1); assert.equal(questions, 1);
   assert.equal(remote.answers[0].answer.selectedActionId, 'once'); assert.deepEqual(remote.answers[1].answer.answers, { Checks: 'Tests, and lint' });
+});
+
+test('new Claude chats inherit remote permissions even with an old cached default, and follow-ups preserve the selected mode', async t => {
+  const { remote, projects, project, adapter, options, service, store } = await setup(t);
+  remote.catalog[1] = { id: 'claude', label: 'Claude Code', status: 'ready', defaultModeId: 'default',
+    models: [{ id: 'claude-model', label: 'Claude model' }], modes: [{ id: 'default', label: 'Ask before tools' }, { id: 'acceptEdits', label: 'Accept edits' }] };
+  await projects.refresh(project.id);
+  const input = options('Use remote permissions', { provider: chatProviderId('claude'), model: chatModelId(project.id, 'claude', 'claude-model') });
+  await collect(adapter.stream(input));
+  assert.equal(remote.created!.modeId, undefined);
+  const task = store.snapshot().tasks[0];
+  await service.setMode(task.id, 'acceptEdits');
+  await collect(adapter.stream({ ...input, messages: [...input.messages, user('Continue editing')] }));
+  assert.equal(store.snapshot().tasks[0].modeId, 'acceptEdits');
+  assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
 });
 
 test('dismissed approvals stay pending and can be answered in the session panel without stopping the turn', async t => {

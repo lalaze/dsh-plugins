@@ -208,11 +208,29 @@ export class CliSession {
     const reply = (response: unknown) => this.peer.send({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response } });
     if (request.subtype !== 'can_use_tool') { reply({}); return; }
     const name = String(request.tool_name ?? 'Tool');
-    this.permission(`claude-${m.request_id}`, { name, kind: name === 'AskUserQuestion' ? 'question' : name === 'ExitPlanMode' ? 'plan' : 'tool', input: request.input, detail: request.input }, answer => {
+    // Only echo native allow-rule suggestions, and only after the user selects their scope.
+    // Keep updates in this closure: the client supplies an action ID, never arbitrary rules.
+    const updates = request.suppress_always_allow_rule || request.suppressAlwaysAllowRule || name === 'AskUserQuestion' || name === 'ExitPlanMode' ? []
+      : list(request.permission_suggestions).filter(s => s?.type === 'addRules' && s.behavior === 'allow'
+        && ['session', 'localSettings'].includes(s.destination) && Array.isArray(s.rules) && s.rules.length > 0
+        && s.rules.every((r: any) => r && typeof r.toolName === 'string' && r.toolName.length > 0 && (r.ruleContent === undefined || typeof r.ruleContent === 'string')));
+    const remembered = [
+      { id: 'remember-session', label: 'Allow matching requests for this session', scope: 'session' as const, updates: updates.filter(s => s.destination === 'session') },
+      { id: 'remember-project', label: 'Always allow matching requests in this project', scope: 'project' as const, updates: updates.filter(s => s.destination === 'localSettings') },
+    ].filter(action => action.updates.length);
+    const actions: Permission['actions'] = remembered.length ? [
+      { id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' },
+      ...remembered.map(({ updates: _updates, ...action }) => ({ ...action, behavior: 'allow' as const })),
+      { id: 'deny', label: 'Deny', behavior: 'deny' },
+    ] : undefined;
+    this.permission(`claude-${m.request_id}`, { name, kind: name === 'AskUserQuestion' ? 'question' : name === 'ExitPlanMode' ? 'plan' : 'tool',
+      title: request.title, description: request.description, input: request.input,
+      detail: updates.length ? { input: request.input, permissionSuggestions: updates } : request.input, ...(actions ? { actions } : {}) }, answer => {
       const answers = answer.answers && name === 'AskUserQuestion'
         ? Object.fromEntries(questionsOf(request.input).map(question => [question.question, answer.answers![question.header]]))
         : answer.answers;
-      reply(answer.behavior === 'allow' ? { behavior: 'allow', updatedInput: { ...request.input, ...(answers ? { answers } : {}) } } : { behavior: 'deny', message: answer.message ?? 'The user denied this request' });
+      const selected = remembered.find(action => action.id === answer.selectedActionId);
+      reply(answer.behavior === 'allow' ? { behavior: 'allow', updatedInput: { ...request.input, ...(answers ? { answers } : {}) }, ...(selected ? { updatedPermissions: selected.updates } : {}) } : { behavior: 'deny', message: answer.message ?? 'The user denied this request' });
     });
   }
   async stop(): Promise<void> {

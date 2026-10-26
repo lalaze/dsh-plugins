@@ -74,7 +74,7 @@ const server = createServer(async (request, response) => {
           remote.append(live.id, { type: 'assistant_message', text: '测试检查完成，等待下一步。' });
           const pending = await service.create(request('审查构建脚本'), { title: '审查构建脚本', origin: 'dsh' });
           remote.live(pending.id).status = 'running';
-          remote.live(pending.id).pendingPermissions = [{ id: 'fixture-approval', name: 'Bash', kind: 'tool', title: '运行项目测试', detail: { command: 'pnpm test', cwd: project.cwd }, actions: [{ id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' }, { id: 'session', label: 'Allow for this session', behavior: 'allow', scope: 'session' }, { id: 'deny', label: 'Deny', behavior: 'deny' }] }];
+          remote.live(pending.id).pendingPermissions = [{ id: 'fixture-approval', name: 'Bash', kind: 'tool', title: '运行项目测试', detail: { command: 'pnpm test', cwd: project.cwd }, actions: [{ id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' }, { id: 'session', label: 'Allow for this session', behavior: 'allow', scope: 'session' }, { id: 'project', label: 'Always allow matching requests in this project', behavior: 'allow', scope: 'project' }, { id: 'deny', label: 'Deny', behavior: 'deny' }] }];
           await service.create(request('实现搜索功能'), { title: '实现搜索功能', chat: { sessionId: 'fixture-main-chat', route: `${project.id}/codex/remote-model` } });
         }
       }

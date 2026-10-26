@@ -129,7 +129,7 @@ export class SshBackend implements Backend {
         } else if (definition.protocol === 'claude') {
           await peer.control({ subtype: 'initialize' });
           models = claudeModels(await peer.control({ subtype: 'list_models' }));
-          modes = [{ id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }]; defaultModeId = 'default';
+          modes = [{ id: 'inherit', label: 'Remote CLI settings' }, { id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }]; defaultModeId = 'inherit';
         } else {
           const capabilities = await initializeAcp(peer);
           const session = await peer.request('session/new', { cwd: canonical, mcpServers: [] });
@@ -183,7 +183,7 @@ export class SshBackend implements Backend {
     }
     let argv = [...profile.argv];
     if (profile.protocol === 'antigravity') argv = antigravityArguments(argv[0], task, resume);
-    if (profile.protocol === 'claude') argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native!.sessionId] : ['--session-id', randomUUID()]), '--permission-mode', task.modeId ?? 'default', ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : [])];
+    if (profile.protocol === 'claude') argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native!.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : [])];
     const history = await this.history(task.id);
     this.assertOpen();
     if ([...this.sessions.values()].filter(s => s.alive).length >= SESSION_LIMIT) {

@@ -17,6 +17,10 @@ export interface HostConfig { id: string; label: string; connection: string; pas
 export interface SshConfigHost { alias: string; connection: string }
 export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
+/** Older saved Claude catalogs also need a way to return to the remote CLI's settings. */
+export function permissionModes(provider: string, modes: Choice[]): Choice[] {
+  return provider === 'claude' && !modes.some(m => m.id === 'inherit') ? [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes] : modes;
+}
 export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string }
 export interface Provider {
   id: string;
@@ -64,7 +68,7 @@ export interface Permission {
   description?: string;
   input?: Record<string, unknown>;
   detail?: unknown;
-  actions?: { id: string; label: string; behavior: 'allow' | 'deny'; scope?: 'once' | 'session' }[];
+  actions?: { id: string; label: string; behavior: 'allow' | 'deny'; scope?: 'once' | 'session' | 'project' }[];
 }
 export interface PermissionAnswer {
   behavior: 'allow' | 'deny';

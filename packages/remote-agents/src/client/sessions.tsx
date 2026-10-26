@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { busy as isWorking, PROVIDER_LABELS, type AgentDetail, type AgentSummary, type ChatProject, type Dashboard, type Host, type PermissionAnswer, type TaskInput } from '../domain.js';
+import { busy as isWorking, permissionModes, PROVIDER_LABELS, type AgentDetail, type AgentSummary, type ChatProject, type Dashboard, type Host, type PermissionAnswer, type TaskInput } from '../domain.js';
 import { api, ApiError } from './api.js';
 import { localizeError, ui, useLocale } from './i18n.js';
 import { PermissionCard } from './permission.js';
@@ -53,14 +53,16 @@ export function Sessions({ openChat, cwd }: { openChat?: (id: string) => void; c
 }
 
 function NewSession({ cwd, created }: { cwd?: string; created: (agent: AgentSummary) => void }) {
-  const [projects, setProjects] = useState<ChatProject[]>(), [projectId, setProjectId] = useState(''), [providerId, setProviderId] = useState(''), [modelId, setModelId] = useState('');
+  const [projects, setProjects] = useState<ChatProject[]>(), [projectId, setProjectId] = useState(''), [providerId, setProviderId] = useState(''), [modelId, setModelId] = useState(''), [selectedMode, setSelectedMode] = useState('');
   const [prompt, setPrompt] = useState(''), [error, setError] = useState(''), [sending, setSending] = useState(false), [pending, setPending] = useState<TaskInput>();
   useEffect(() => { const c = new AbortController(); void api<ChatProject[]>('hostCatalogs', {}, c.signal).then(p => { if (!c.signal.aborted) { setProjects(p); setProjectId(p[0]?.id ?? ''); } }).catch(e => { if (!c.signal.aborted) setError(e instanceof Error ? e.message : String(e)); }); return () => c.abort(); }, []);
   const project = projects?.find(p => p.id === projectId), providers = project?.providers.filter(p => p.status === 'ready' && p.models.length) ?? [];
   const provider = providers.find(p => p.id === providerId) ?? providers[0], model = provider?.models.find(m => m.id === modelId) ?? provider?.models.find(m => m.isDefault) ?? provider?.models[0];
+  const modes = provider ? permissionModes(provider.id, provider.modes) : [];
+  const modeId = selectedMode || (provider?.id === 'claude' ? 'inherit' : provider?.defaultModeId ?? '');
   const submit = async () => {
     if (!project || !provider || !model || !cwd || !prompt.trim() || sending) return;
-    const request = pending ?? { id: crypto.randomUUID(), hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt: prompt.trim(), ...(provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(model.defaultThinkingOptionId ? { thinkingOptionId: model.defaultThinkingOptionId } : {}) };
+    const request = pending ?? { id: crypto.randomUUID(), hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt: prompt.trim(), ...(modeId ? { modeId } : {}), ...(model.defaultThinkingOptionId ? { thinkingOptionId: model.defaultThinkingOptionId } : {}) };
     setPending(request); setSending(true); setError('');
     try { created(await api<AgentSummary>('create', { agent: request })); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); if (e instanceof ApiError && e.status < 500) setPending(undefined); }
@@ -69,11 +71,12 @@ function NewSession({ cwd, created }: { cwd?: string; created: (agent: AgentSumm
   return <form className="ra-new-session" onSubmit={e => { e.preventDefault(); void submit(); }}><h2>{ui('New remote session')}</h2><p className="ra-muted">{ui('Choose a machine and an agent. The current DSH workspace path is used on that machine.')}</p>
     {error && <div className="ra-banner" role="alert" data-tone="error">{localizeError(error)}</div>}
     {projects?.length === 0 ? <p className="ra-banner">{ui('Add a machine or refresh its models in Settings → Remote agents.')}</p> : <>
-      <label className="ra-field">{ui('Host')}<select aria-label={ui('Session host')} value={projectId} disabled={sending || !!pending} onChange={e => { setProjectId(e.target.value); setProviderId(''); setModelId(''); }}>{projects?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
+      <label className="ra-field">{ui('Host')}<select aria-label={ui('Session host')} value={projectId} disabled={sending || !!pending} onChange={e => { setProjectId(e.target.value); setProviderId(''); setModelId(''); setSelectedMode(''); }}>{projects?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
       {cwd ? <p className="ra-mono ra-muted">{cwd}</p> : <p className="ra-banner">{ui('Choose a DSH workspace before starting a remote CLI conversation.')}</p>}
-      <div className="ra-grid"><label className="ra-field">{ui('Agent')}<select aria-label={ui('Session agent')} value={provider?.id ?? ''} disabled={sending || !!pending} onChange={e => { setProviderId(e.target.value); setModelId(''); }}>{providers.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
+      <div className="ra-grid"><label className="ra-field">{ui('Agent')}<select aria-label={ui('Session agent')} value={provider?.id ?? ''} disabled={sending || !!pending} onChange={e => { setProviderId(e.target.value); setModelId(''); setSelectedMode(''); }}>{providers.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>
         <label className="ra-field">{ui('Model')}<select aria-label={ui('Session model')} value={model?.id ?? ''} disabled={sending || !!pending} onChange={e => setModelId(e.target.value)}>{provider?.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></label></div>
       {provider?.notice && <p className="ra-banner">{ui(provider.notice)}</p>}
+      {modes.length > 0 && <label className="ra-field">{ui('Permission mode')}<select aria-label={ui('Permission mode')} value={modeId} disabled={sending || !!pending} onChange={e => setSelectedMode(e.target.value)}>{!modeId && <option value="">{ui('Remote CLI settings')}</option>}{modes.map(m => <option key={m.id} value={m.id}>{ui(m.label)}</option>)}</select><small className="ra-muted">{ui('Remote permissions are separate from DSH workspace permissions. Full access allows commands and edits without individual approval.')}</small></label>}
       <label className="ra-field">{ui('Task')}<textarea aria-label={ui('Task')} rows={5} maxLength={100_000} required value={prompt} disabled={sending || !!pending} onChange={e => setPrompt(e.target.value)} placeholder={ui('What would you like the agent to do?')} /></label>
       <button className="ra-primary" disabled={!cwd || !model || !prompt.trim() || sending}>{ui(sending ? 'Starting…' : pending ? 'Check creation' : 'Start session')}</button>
       {pending && !sending && <p className="ra-muted">{ui('Retry checks the same request. It will not create another agent.')}</p>}
@@ -136,6 +139,7 @@ function SessionDetail({ original, host, changed, openChat }: { original: AgentS
   return <section className="ra-session-detail" aria-label={agent.title}>
     <header className="ra-detail-heading"><div><h2>{agent.title}</h2><p className="ra-muted">{PROVIDER_LABELS[agent.provider] ?? agent.provider} · {agent.model} · {host?.label}</p><p className="ra-mono ra-muted">{agent.cwd}</p></div><span className="ra-badge" data-status={agent.status}>{statusLabel(agent)}</span></header>
     <div className="ra-detail-actions"><button disabled={working || !running} onClick={() => void run(async () => { await api('stop', { agentId: agent.id }); })}>{ui('Stop')}</button><button disabled={working || running} onClick={() => void run(async () => { await api('archive', { agentId: agent.id, archived: !agent.archived }); })}>{ui(agent.archived ? 'Restore' : 'Archive')}</button><button disabled={working} onClick={() => { setTitle(agent.title); setRenaming(!renaming); }}>{ui('Rename')}</button>{agent.chatSessionId && <button className="ra-primary" onClick={() => void run(async () => { if (!openChat) throw new Error('Open this conversation from the DSH sidebar.'); openChat(agent.chatSessionId!); })}>{ui('Open in main chat')}</button>}</div>
+    {agent.modes.length > 0 && <label className="ra-field">{ui('Permission mode')}<select aria-label={ui('Permission mode')} value={agent.modeId ?? (agent.provider === 'claude' ? 'inherit' : '')} disabled={working || running || agent.resumable === false} onChange={e => { const modeId = e.target.value; void run(async () => { await api('mode', { agentId: agent.id, modeId }); }); }}>{!agent.modeId && agent.provider !== 'claude' && <option value="">{ui('Remote CLI settings')}</option>}{agent.modes.map(m => <option key={m.id} value={m.id}>{ui(m.label)}</option>)}</select><small className="ra-muted">{ui(running ? 'Stop the agent before changing its mode' : 'Applies to the next message. Full access allows commands and edits without individual approval.')}</small></label>}
     {renaming && <form className="ra-rename" onSubmit={e => { e.preventDefault(); void run(async () => { await api('rename', { agentId: agent.id, title }); setRenaming(false); }); }}><input aria-label={ui('Session title')} value={title} maxLength={100} required onChange={e => setTitle(e.target.value)} /><button disabled={working || !title.trim()}>{ui('Save')}</button></form>}
     {error && <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}<button onClick={() => { setError(''); setRevision(n => n + 1); }}>{ui('Refresh')}</button></div>}
     {agent.error && <p className="ra-banner" data-tone="error">{localizeError(agent.error)}</p>}
