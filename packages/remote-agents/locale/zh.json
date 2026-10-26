@@ -1,8 +1,8 @@
 {
-  "title": "Oh My Claude",
-  "description": "把你已登录的 Claude Code CLI 作为模型提供方接入 dsh：模型、会话、技能、MCP 服务器和授权请求，都在 dsh 里使用。",
+  "title": "远程智能体",
+  "description": "添加机器即可在 DSH 原生模型菜单显示远程 CLI 模型，对话使用当前工作区在该机器上的同路径，无需登记项目。",
   "meta": {
-    "title": "Oh My Claude",
-    "description": "把你已登录的 Claude Code CLI 作为模型提供方接入 dsh：模型、会话、技能、MCP 服务器和授权请求，都在 dsh 里使用。"
+    "title": "远程智能体",
+    "description": "添加机器即可在 DSH 原生模型菜单显示远程 CLI 模型，对话使用当前工作区在该机器上的同路径，无需登记项目。"
   }
 }

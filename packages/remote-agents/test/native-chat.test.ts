@@ -1,0 +1,361 @@
+import assert from 'node:assert/strict';
+import { test, type TestContext } from 'node:test';
+import { setTimeout as pause } from 'node:timers/promises';
+import { Context } from '@deepseek-ai/cordis';
+import LlmRuntime, { createUserMessage, createAssistantMessage, createSystemMessage, MessageId, ReasoningEffortId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm';
+import { Session, SessionId } from '@deepseek-ai/dsh-session';
+import { ChatProjects } from '../src/chat-projects.js';
+import { CHAT_PROVIDER, CHAT_PROVIDERS, chatProviderId, chatModelId, RemoteCliAdapter, type ChatHost } from '../src/native-chat.js';
+import { Store } from '../src/store.js';
+import { RemoteAgentsService } from '../src/service.js';
+import { TaskHistory } from '../src/history.js';
+import { createHandler } from '../src/http.js';
+import { fixture } from './fakes.js';
+
+const CODEX_PROVIDER = chatProviderId('codex');
+const user = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } });
+const collect = async (stream: AsyncIterable<StreamChunk>) => { const chunks: StreamChunk[] = []; for await (const chunk of stream) chunks.push(chunk); return chunks; };
+const text = (chunks: StreamChunk[]) => chunks.filter(c => c.type === 'text-delta').map(c => c.text).join('');
+async function setup(t: TestContext, overrides: Partial<ChatHost> = {}) {
+  const base = await fixture(t), projects = new ChatProjects(base.service);
+  await base.service.discoverHost(base.hostId); const [project] = projects.hosts();
+  const host: ChatHost = { agent: () => ({ id: 'dsh-agent' }), step: () => undefined, cwd: () => '/srv/project',
+    approval: { request: async () => 'allowed-once' }, userQuestions: { ask: async () => ({ answers: [] }) }, ...overrides };
+  const adapter = new RemoteCliAdapter(projects, host, 5); t.after(() => adapter.close());
+  const options = (prompt = 'Fix the tests', extra: Partial<GenerateOptions> = {}): GenerateOptions => ({ provider: CODEX_PROVIDER,
+    model: chatModelId(project.id, 'codex', 'remote-model'), sessionId: SessionId('dsh-conversation'), messages: [user(prompt)], ...extra });
+  return { ...base, projects, project, adapter, options };
+}
+
+test('machine catalogs persist and advertise models without project registration or opening SSH in the picker', async t => {
+  const { adapter, projects, project, remote, path, hostId, service } = await setup(t);
+  let changes = 0; projects.onChange(() => changes++);
+  const [model] = await adapter.listModels(CODEX_PROVIDER);
+  assert.equal(model.provider, CODEX_PROVIDER); assert.equal(model.name, 'Remote model · Build server');
+  assert.equal(model.description, 'Build server · Codex'); assert.deepEqual(model.inputModalities, ['text']);
+  const reopened = new Store(path); await reopened.open(); assert.deepEqual(reopened.chatProjects(), []);
+  assert.deepEqual(reopened.hosts()[0].catalog?.providers, project.providers);
+  const probes = remote.discoveries;
+  await adapter.listModels(CODEX_PROVIDER); await adapter.listModels(CODEX_PROVIDER);
+  assert.equal(remote.discoveries, probes, 'opening the picker reads saved models without probing SSH');
+  assert.deepEqual((await adapter.resolveModel(CODEX_PROVIDER, model.id)).reasoning?.efforts.map(e => e.id), ['high']);
+  remote.catalog[0].models[0].id = 'new/model'; await projects.refresh(project.id);
+  const [changed] = await adapter.listModels(CODEX_PROVIDER); assert.match(changed.id, /new%2Fmodel$/);
+  await service.removeHost(hostId); assert.deepEqual(await adapter.listModels(CODEX_PROVIDER), []); assert.equal(changes, 2);
+  await assert.rejects(adapter.resolveModel(CODEX_PROVIDER, changed.id), /unavailable/);
+  assert.equal(remote.creates, 0);
+});
+
+test('the native picker receives separate CLI provider groups and filters models to their owning CLI', async t => {
+  const { adapter, projects, project, service, remote, hostId, options } = await setup(t);
+  remote.catalog[1] = { id: 'claude', label: 'Claude Code', status: 'ready', models: [{ id: 'claude-model', label: 'Claude model' }], modes: [] };
+  await projects.refresh(project.id);
+  assert.equal(adapter.providerInfo(chatProviderId('claude')).name, 'Claude');
+  assert.equal(adapter.providerInfo(CODEX_PROVIDER).name, 'Codex');
+  assert.equal(adapter.providerInfo(chatProviderId('dsh')).name, 'DeepSeek Harness');
+  assert.equal((await adapter.listModels(chatProviderId('claude')))[0].name, 'Claude model · Build server');
+  assert.equal((await adapter.listModels(CODEX_PROVIDER))[0].name, 'Remote model · Build server');
+  assert.deepEqual(await adapter.listModels(CHAT_PROVIDER), [], 'the old aggregate route adds no picker row');
+  await assert.rejects(adapter.resolveModel(chatProviderId('claude'), options().model), /unavailable/);
+  await assert.rejects(collect(adapter.stream(options('Wrong CLI', { provider: chatProviderId('claude') }))), /unavailable/);
+  const first = options(); await collect(adapter.stream(first));
+  await collect(adapter.stream({ ...first, provider: CHAT_PROVIDER }));
+  assert.equal(remote.creates, 1, 'existing 0.2.1 routes reuse the same session and message receipt');
+  await projects.add({ hostId, cwd: '/srv/other', label: 'Other project' });
+  assert.equal((await adapter.listModels(CODEX_PROVIDER)).length, 1, 'legacy projects do not duplicate machine models');
+  const secondHost = (await service.addHost({ label: 'Second machine', connection: 'ssh://second' }, { discoverModels: true })).hosts.at(-1)!;
+  const models = await adapter.listModels(CODEX_PROVIDER);
+  assert.equal(models.length, 2); assert.match(models[0].name, /Build server/); assert.match(models[1].name, /Second machine/);
+  assert.ok(models[1].id.startsWith(secondHost.id + '/'));
+  assert.equal(new Set(models.map(m => m.id)).size, 2);
+  assert.equal(service.store.snapshot().tasks.length, 1);
+});
+
+test('the real DSH LLM registry lists, resolves and dispatches the remote adapter', async t => {
+  const { adapter, options, remote } = await setup(t);
+  const ctx = new Context(); const runtime = ctx.plugin(LlmRuntime); await runtime.await(); t.after(() => runtime.dispose());
+  const unregister = ctx.llm.registerAdapter(CHAT_PROVIDERS, adapter); t.after(unregister);
+  assert.equal(ctx.llm.listProviders().find(p => p.id === CODEX_PROVIDER)?.name, 'Codex');
+  assert.equal((await ctx.llm.listModels(CODEX_PROVIDER)).length, 1);
+  const input = options(); remote.onCreate = agent => remote.append(agent.id, { type: 'assistant_message', text: 'Native response' });
+  const prepared = await ctx.llm.prepareCall({ provider: input.provider, model: input.model });
+  assert.equal(text(await collect(prepared.stream(input))), 'Native response');
+  assert.equal(remote.creates, 1);
+});
+
+test('the Cordis plugin mounts its native model route with standard DSH services and disposes cleanly', async t => {
+  const { directory } = await setup(t);
+  const plugin = await import('../src/index.js');
+  const ctx = new Context(), llm = ctx.plugin(LlmRuntime); await llm.await();
+  t.after(() => llm.dispose());
+  const disposers = [ctx.provide('connection', { fetch: { register: () => () => {} } }), ctx.provide('sessions', {}),
+    ctx.provide('agents', { get: () => undefined }), ctx.provide('approval', { request: async () => 'allowed-once' }),
+    ctx.provide('userQuestions', { ask: async () => ({ answers: [] }) })];
+  t.after(async () => { for (const dispose of disposers.reverse()) await dispose(); });
+  const mounted = ctx.plugin(plugin, { stateDir: directory }); await mounted.await();
+  for (let i = 0; i < 100 && !ctx.llm.listProviders().some(p => p.id === CODEX_PROVIDER); i++) await pause(2);
+  assert.equal((await ctx.llm.listModels(CODEX_PROVIDER)).length, 1);
+  await mounted.dispose(); assert.equal(ctx.llm.listProviders().some(p => p.id === CODEX_PROVIDER), false);
+});
+
+test('streaming, retry and follow-ups reuse the bound CLI without repeating a prompt or old output', async t => {
+  const { adapter, options, remote, store } = await setup(t);
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'reasoning', text: 'Thinking' });
+    remote.append(agent.id, { type: 'assistant_message', text: 'First ' });
+    remote.append(agent.id, { type: 'assistant_message', text: 'reply' });
+  };
+  const first = options(), chunks = await collect(adapter.stream(first));
+  assert.equal(text(chunks), 'First reply'); assert.equal(chunks.filter(c => c.type === 'block-start').length, 2);
+  assert.equal(chunks.at(-1)?.type, 'finish');
+  assert.equal(text(await collect(adapter.stream(first))), 'First reply'); assert.equal(remote.creates, 1); assert.equal(remote.sends, 0);
+  const follow = options('Now run the linter');
+  assert.equal(text(await collect(adapter.stream(follow))), 'Follow-up completed.'); assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
+  assert.equal(text(await collect(adapter.stream(follow))), 'Follow-up completed.'); assert.equal(remote.sends, 1);
+  assert.equal(text(await collect(adapter.stream(first))), 'First reply', 'replaying an older receipt never includes later replies');
+  assert.equal(store.snapshot().tasks[0].chat?.sessionId, first.sessionId);
+});
+
+test('native bindings survive restart and a lost follow-up receipt', async t => {
+  const { adapter, options, remote, path, service } = await setup(t);
+  const first = options(); await collect(adapter.stream(first));
+  const follow = options('Continue'); remote.loseSend = true;
+  await assert.rejects(collect(adapter.stream(follow)), /receipt lost/);
+  await service.close(); const store = new Store(path); await store.open();
+  const next = new RemoteAgentsService(store, remote.backend); t.after(() => next.close());
+  const resumed = new RemoteCliAdapter(new ChatProjects(next), { agent: () => undefined, step: () => undefined }, 5);
+  assert.equal(text(await collect(resumed.stream(follow))), 'Follow-up completed.');
+  assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
+});
+
+test('the same machine model works from different DSH workspace paths without registering projects', async t => {
+  let cwd = '/srv/project';
+  const { adapter, options, remote, store } = await setup(t, { cwd: () => cwd });
+  const first = options(); await collect(adapter.stream(first));
+  await collect(adapter.stream(options('Same project, another chat', { sessionId: SessionId('other-chat') })));
+  cwd = '/srv/other-project';
+  await collect(adapter.stream(options('Other project', { sessionId: SessionId('third-chat') })));
+  assert.equal(remote.creates, 3); assert.equal(new Set(store.snapshot().tasks.map(t => t.chat?.sessionId + ':' + t.cwd)).size, 3);
+  assert.equal(store.snapshot().tasks.at(-1)?.cwd, cwd); assert.equal(store.chatProjects().length, 0);
+});
+
+test('machine models stay visible without a selected workspace, but never run in the remote home by accident', async t => {
+  const { adapter, options, remote } = await setup(t, { cwd: () => undefined });
+  assert.equal((await adapter.listModels(CODEX_PROVIDER)).length, 1);
+  await assert.rejects(collect(adapter.stream(options())), /Choose a DSH workspace/);
+  assert.equal(remote.creates, 0);
+});
+
+test('adding only a machine through HTTP discovers its models and preserves them across an offline refresh', async t => {
+  const { service, store, remote } = await fixture(t), projects = new ChatProjects(service), handle = createHandler(service, projects);
+  const post = (body: unknown) => handle(new Request('http://dsh.test/api/remote-agents', { method: 'POST', headers: { 'content-type': 'application/json', 'X-DSH-Remote-Agents': '1' }, body: JSON.stringify(body) }));
+  const added = await post({ action: 'addHost', host: { label: 'Machine only', connection: 'ssh://machine-only' } });
+  assert.equal(added.status, 200);
+  const host = (await added.json()).hosts.find((h: { label: string }) => h.label === 'Machine only');
+  assert.equal(host.modelCount, 1); assert.equal(host.modelError, undefined);
+  const routes = await (await post({ action: 'hostCatalogs' })).json();
+  assert.equal(routes[0].id, host.id); assert.equal(routes[0].cwd, '/home/builder');
+  assert.equal(store.chatProjects().length, 0); assert.equal(remote.creates, 0);
+  remote.homeError = 'Host is offline';
+  const offline = await (await post({ action: 'discoverHost', hostId: host.id })).json();
+  const cached = offline.hosts.find((h: { id: string }) => h.id === host.id);
+  assert.equal(cached.modelCount, 1); assert.equal(cached.modelError, 'Host is offline');
+  assert.equal(projects.hosts()[0].providers[0].models[0].id, 'remote-model');
+});
+
+test('an unsuccessful first discovery keeps the machine saved and a later refresh can populate the picker', async t => {
+  const { service, remote, store } = await fixture(t);
+  remote.homeError = 'SSH unavailable';
+  const result = await service.addHost({ label: 'Offline machine', connection: 'offline-host' }, { discoverModels: true });
+  const host = result.hosts.at(-1)!;
+  assert.equal(host.modelError, 'SSH unavailable'); assert.equal(host.modelCount, undefined);
+  remote.homeError = undefined; await service.discoverHost(host.id);
+  assert.equal(service.hosts().find(h => h.id === host.id)?.modelCount, 1);
+  assert.equal(store.chatProjects().length, 0);
+});
+
+test('saved project routes remain usable but are hidden from the machine model menu', async t => {
+  const { adapter, options, projects, hostId, remote } = await setup(t, { cwd: () => '/different/workspace' });
+  const [legacy] = await projects.add({ hostId, label: 'Old project', cwd: '/srv/legacy' });
+  const model = chatModelId(legacy.id, 'codex', 'remote-model');
+  assert.ok(!(await adapter.listModels(CODEX_PROVIDER)).some(m => m.id === model));
+  await collect(adapter.stream(options('Continue old chat', { model })));
+  assert.equal(remote.created?.cwd, '/srv/legacy');
+});
+
+test('initial context contains conversation text but excludes DSH system, injected context and tool declarations', async t => {
+  const { adapter, options, remote } = await setup(t);
+  const injected = { ...user('LOCAL WORKSPACE INSTRUCTIONS'), source: { kind: 'system-prompt' as const } };
+  const input = options('Implement the change', { messages: [createSystemMessage('LOCAL SYSTEM'), user('Earlier human request'),
+    createAssistantMessage({ source: { provider: 'deepseek', model: 'chat' }, content: [{ type: 'text', text: 'Earlier reply' }] }), injected, user('Implement the change'), injected],
+    tools: [{ name: 'local_shell', description: 'LOCAL TOOL', parameters: {} }] });
+  await collect(adapter.stream(input));
+  assert.match(remote.created!.prompt, /Earlier human request/); assert.match(remote.created!.prompt, /Earlier reply/);
+  assert.match(remote.created!.prompt, /Current user request:\nImplement the change$/);
+  assert.doesNotMatch(remote.created!.prompt, /LOCAL/);
+});
+
+test('DSH Stop cancels remote work and releases the conversation for a later follow-up', async t => {
+  const { adapter, options, remote } = await setup(t);
+  remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
+  const controller = new AbortController(), input = options('Work', { signal: controller.signal }), iterator = adapter.stream(input);
+  assert.equal((await iterator.next()).value?.type, 'block-start'); controller.abort();
+  await assert.rejects(collect(iterator), /abort/i); assert.equal(remote.stops, 1);
+  await collect(adapter.stream(options('Continue safely'))); assert.equal(remote.sends, 1);
+});
+
+test('closing a stream early and disposing the adapter stop remote work', async t => {
+  const { adapter, options, remote } = await setup(t);
+  remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
+  const iterator = adapter.stream(options()); await iterator.next(); await iterator.return(undefined); assert.equal(remote.stops, 1);
+  const running = adapter.stream(options('Another conversation', { sessionId: SessionId('second') })); await running.next(); adapter.close();
+  await assert.rejects(collect(running), /abort/i); assert.equal(remote.stops, 2);
+});
+
+test('permissions and questions use native DSH services and select only a one-time CLI action', async t => {
+  let approvals = 0, questions = 0;
+  const { adapter, options, remote } = await setup(t, {
+    approval: { request: async () => { approvals++; return 'allowed-once'; } },
+    userQuestions: { ask: async () => { questions++; return { answers: [{ id: 'Checks', selected: ['Tests'], custom: 'and lint' }] }; } },
+  });
+  remote.onCreate = agent => {
+    agent.status = 'running'; agent.pendingPermissions = [{ id: 'permission', kind: 'tool', name: 'Bash', actions: [
+      { id: 'acceptForSession', label: 'Always allow', behavior: 'allow' }, { id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' }] }];
+    void (async () => {
+      while (!remote.answers.length) await pause(5);
+      agent.pendingPermissions = [{ id: 'question', kind: 'question', name: 'Question', input: { questions: [{ header: 'Checks', question: 'Which checks?', options: [{ label: 'Tests' }], allowOther: true }] } }];
+      while (remote.answers.length < 2) await pause(5);
+      remote.append(agent.id, { type: 'assistant_message', text: 'Done' }); agent.status = 'idle';
+    })();
+  };
+  assert.equal(text(await collect(adapter.stream(options()))), 'Done'); assert.equal(approvals, 1); assert.equal(questions, 1);
+  assert.equal(remote.answers[0].answer.selectedActionId, 'once'); assert.deepEqual(remote.answers[1].answer.answers, { Checks: 'Tests, and lint' });
+});
+
+test('dismissed approvals stay pending and can be answered in the session panel without stopping the turn', async t => {
+  let prompts = 0;
+  const { adapter, options, remote, service, store } = await setup(t, { approval: { request: async () => { prompts++; return 'dismissed'; } } });
+  remote.onCreate = agent => { agent.status = 'running'; agent.pendingPermissions = [{ id: 'approve', name: 'Bash', kind: 'tool' }]; };
+  const stream = adapter.stream(options());
+  assert.equal((await stream.next()).value?.type, 'block-start');
+  const task = store.snapshot().tasks[0];
+  assert.equal((await service.state(task.id)).agent.status, 'attention'); assert.equal(remote.stops, 0);
+  await service.respond(task.id, 'approve', { behavior: 'allow' });
+  remote.append(remote.live(task.id).id, { type: 'assistant_message', text: 'Approved from panel' }); remote.live(task.id).status = 'idle';
+  assert.equal(text(await collect(stream)), 'Approved from panel'); assert.equal(prompts, 1); assert.equal(remote.stops, 0);
+});
+
+test('unavailable DSH approval services fail promptly and stop the remote CLI', async t => {
+  const { adapter, options, remote } = await setup(t, { agent: () => undefined });
+  remote.onCreate = agent => { agent.status = 'running'; agent.pendingPermissions = [{ id: 'approve', name: 'Bash', kind: 'tool' }]; };
+  await assert.rejects(collect(adapter.stream(options())), /unavailable/); assert.equal(remote.stops, 1);
+});
+
+test('answering from the panel while the native approval is open does not fail or answer twice', async t => {
+  let shown!: () => void, answer!: (value: string) => void;
+  const showing = new Promise<void>(resolve => { shown = resolve; });
+  const decision = new Promise<string>(resolve => { answer = resolve; });
+  const { adapter, options, remote, service, store } = await setup(t, { approval: { request: () => { shown(); return decision; } } });
+  remote.onCreate = agent => { agent.status = 'running'; agent.pendingPermissions = [{ id: 'approve', name: 'Bash', kind: 'tool' }]; };
+  const response = collect(adapter.stream(options())); await showing;
+  const task = store.snapshot().tasks[0];
+  await service.respond(task.id, 'approve', { behavior: 'allow' }); answer('allowed-once');
+  const agent = remote.live(task.id); remote.append(agent.id, { type: 'assistant_message', text: 'Finished once' }); agent.status = 'idle';
+  assert.equal(text(await response), 'Finished once'); assert.equal(remote.answers.length, 1); assert.equal(remote.stops, 0);
+});
+
+test('the session browser cannot send outside the bound native conversation', async t => {
+  const { adapter, options, service, store, remote } = await setup(t);
+  await collect(adapter.stream(options()));
+  const response = await createHandler(service)(new Request('http://dsh.test/api/remote-agents', { method: 'POST', headers: { 'content-type': 'application/json', 'X-DSH-Remote-Agents': '1' },
+    body: JSON.stringify({ action: 'send', agentId: store.snapshot().tasks[0].id, message: { id: 'panel-message-1', text: 'Untracked prompt' } }) }));
+  assert.equal(response.status, 409); assert.equal(remote.sends, 0);
+});
+
+test('switching models within a CLI retains the conversation and its old message receipts', async t => {
+  const { adapter, options, remote, store, projects, project, service } = await setup(t);
+  remote.catalog[0].models.push({ id: 'next-model', label: 'Next model' }); await projects.refresh(project.id);
+  remote.onCreate = agent => remote.append(agent.id, { type: 'assistant_message', text: 'First model reply' });
+  const first = options(); await collect(adapter.stream(first));
+  const task = store.snapshot().tasks[0];
+  assert.equal((await service.summary(task.id)).chatSessionId, first.sessionId);
+  const second = options('Continue with next model', { model: chatModelId(project.id, 'codex', 'next-model') });
+  assert.equal(text(await collect(adapter.stream(second))), 'Follow-up completed.');
+  assert.equal(store.snapshot().tasks.length, 1); assert.equal(remote.creates, 1); assert.equal(remote.detaches, 1);
+  assert.equal(store.snapshot().tasks[0].model, 'next-model');
+  assert.equal(text(await collect(adapter.stream(first))), 'First model reply');
+  assert.equal(store.snapshot().tasks[0].model, 'next-model', 'replaying an older response never changes the live model');
+  assert.equal(text(await collect(adapter.stream(second))), 'Follow-up completed.'); assert.equal(remote.sends, 1);
+  await collect(adapter.stream(options('Back to first model'))); assert.equal(remote.creates, 1); assert.equal(remote.sends, 2);
+});
+
+test('native tool cards produce a valid DSH session lifecycle and never request DSH tool dispatch', async t => {
+  const session = Session.create(SessionId('native-cards'));
+  session.append('turn/start', { turn: 1 }); session.append('step/start', { turn: 1, step: 1 });
+  const { adapter, options, remote } = await setup(t, { step: () => ({ session, turn: 1, step: 1 }) });
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'running', detail: { command: 'pnpm test' } });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'completed', detail: '42 tests pass' });
+    remote.append(agent.id, { type: 'assistant_message', text: 'All done' });
+  };
+  const chunks = await collect(adapter.stream(options('Run tests', { sessionId: session.id })));
+  assert.equal(chunks.some(c => c.type === 'tool-call-delta'), false); assert.equal(text(chunks), 'All done');
+  session.append('step/end', { turn: 1, step: 1 });
+  session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+  const events = session.snapshotEvents();
+  assert.deepEqual(events.map(e => e.type), ['turn/start', 'step/start', 'assistant/message', 'tool/call', 'tool/result', 'step/end', 'turn/end']);
+  const restored = Session.create(session.id, events, session.header);
+  assert.equal(restored.deriveMessages().filter(m => m.role === 'tool').length, 1);
+  assert.equal(restored.deriveMessages().find(m => m.role === 'tool')?.content[0].type, 'text');
+});
+
+test('text-only input, auxiliary calls and unavailable routes never start an unintended CLI', async t => {
+  const { adapter, options, remote } = await setup(t);
+  await assert.rejects(collect(adapter.stream(options('Work', { sessionId: undefined }))), /conversation/);
+  await assert.rejects(collect(adapter.stream(options('Work', { model: 'removed/model' }))), /unavailable/);
+  await assert.rejects(collect(adapter.stream(options('Work', { reasoningEffort: ReasoningEffortId('unknown') }))), /thinking level/);
+  assert.ok(text(await collect(adapter.stream(options('Title', { purpose: 'session-title' })))));
+
+  assert.equal(remote.creates, 0);
+});
+
+test('compaction uses a disposable CLI session and preserves the live conversation binding', async t => {
+  const { adapter, options, remote, store } = await setup(t);
+  remote.onCreate = agent => remote.append(agent.id, { type: 'assistant_message', text: 'Summary result' });
+  await collect(adapter.stream(options('Implement this')));
+  const original = store.snapshot().tasks[0];
+  const compacted = await collect(adapter.stream(options('Summarize the conversation', { purpose: 'compaction' })));
+  assert.equal(text(compacted), 'Summary result'); assert.equal(remote.creates, 2); assert.equal(remote.forgets, 1);
+  assert.equal(store.snapshot().tasks.length, 1); assert.deepEqual(store.snapshot().tasks[0], original);
+});
+
+test('unconfirmed delivery stays visible as an error on retry instead of resending or returning empty success', async t => {
+  const { adapter, options, remote } = await setup(t);
+  remote.onCreate = agent => { remote.entries.get(agent.id)![0].item.delivery = 'pending'; };
+  const input = options();
+  await assert.rejects(collect(adapter.stream(input)), /delivery was not confirmed/);
+  await assert.rejects(collect(adapter.stream(input)), /delivery was not confirmed/);
+  assert.equal(remote.creates, 1); assert.equal(remote.sends, 0);
+});
+
+test('main chat HTTP actions persist a discovered project and refresh/remove it', async t => {
+  const { service, hostId } = await fixture(t), handler = createHandler(service);
+  const post = async (body: unknown) => handler(new Request('http://dsh.test/api/remote-agents', { method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-DSH-Remote-Agents': '1' }, body: JSON.stringify(body) }));
+  const added = await post({ action: 'addChatProject', project: { label: 'Native', hostId, cwd: '/srv/project' } }); assert.equal(added.status, 200);
+  const [project] = await added.json();
+  assert.equal((await post({ action: 'refreshChatProject', projectId: project.id })).status, 200);
+  assert.equal((await (await post({ action: 'chatProjects' })).json()).length, 1);
+  assert.deepEqual(await (await post({ action: 'removeChatProject', projectId: project.id })).json(), []);
+});
+
+test('durable message pages drain more than 100 events and stop at the next submitted message', async t => {
+  const { directory } = await fixture(t), history = new TaskHistory(directory, 'message-history'); await history.open();
+  await history.append({ type: 'user_message', clientMessageId: 'first', text: 'First' });
+  for (let i = 0; i < 240; i++) await history.append({ type: 'assistant_message', text: String(i) });
+  await history.append({ type: 'user_message', clientMessageId: 'second', text: 'Second' });
+  await history.append({ type: 'assistant_message', text: 'Other reply' });
+  const first = await history.messagePage('first'), second = await history.messagePage('first', first.endCursor!), third = await history.messagePage('first', second.endCursor!);
+  assert.equal(first.entries.length + second.entries.length + third.entries.length, 240); assert.equal(third.hasNewer, false);
+  assert.equal(third.entries.at(-1)?.item.text, '239'); assert.equal((await history.messagePage('missing')).found, false);
+});

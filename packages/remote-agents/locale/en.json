@@ -1,8 +1,8 @@
 {
-  "title": "Oh My Claude",
-  "description": "Runs the Claude Code CLI you are already logged into as a model provider: its models, sessions, skills, MCP servers and approvals, inside dsh.",
+  "title": "Remote Agents",
+  "description": "Add a machine to show its remote CLI models in the native DSH picker. Conversations use the current workspace path on that host.",
   "meta": {
-    "title": "Oh My Claude",
-    "description": "Runs the Claude Code CLI you are already logged into as a model provider: its models, sessions, skills, MCP servers and approvals, inside dsh."
+    "title": "Remote Agents",
+    "description": "Add a machine to show its remote CLI models in the native DSH picker. Conversations use the current workspace path on that host."
   }
 }

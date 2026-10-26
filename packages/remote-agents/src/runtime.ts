@@ -8,11 +8,11 @@ import { configureAcpSession } from './acp.js';
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 const contentText = (content: unknown): string => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
 export async function initializeCodex(peer: JsonlPeer): Promise<void> {
-  await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.4.1' }, capabilities: {} });
+  await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.1.0' }, capabilities: {} });
   peer.send({ method: 'initialized', params: {} });
 }
 export async function initializeAcp(peer: JsonlPeer): Promise<any> {
-  const result = await peer.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'dsh-remote-agents', version: '0.4.1' } });
+  const result = await peer.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'dsh-remote-agents', version: '0.1.0' } });
   if (result?.protocolVersion !== 1) throw new Error(`Unsupported ACP protocol version: ${result?.protocolVersion}. This client supports ACP v1.`);
   return result;
 }
@@ -26,8 +26,8 @@ export class CliSession {
   private intentionalClose = false;
   private diskFailed = false;
   private admitting = false;
-  private retained = 0;
   private interrupting = false;
+  private stopping = false;
   private permissions = new Map<string, (answer: PermissionAnswer) => void>();
   private tools = new Map<string, Record<string, unknown>>();
   private stopWaiters = new Set<() => void>();
@@ -37,15 +37,10 @@ export class CliSession {
     peer.onExit(error => { if (this.interrupting) this.close(); else if (!this.intentionalClose) this.fail(error); });
   }
   get alive(): boolean { return this.peer.alive; }
-  get disconnectable(): boolean { return this.alive && !this.admitting && !this.retained && ['idle', 'error'].includes(this.agent.status) && !this.agent.activeTurn && !this.agent.pendingPermissions.length; }
-  get evictable(): boolean { return this.agent.resumable === true && this.disconnectable; }
-  /** Protect service-level validation and persistence before send() starts its own admission. */
-  retain(): () => void {
-    if (!this.alive) throw new Error('Reconnect the saved CLI session before continuing');
-    this.retained++;
-    let released = false;
-    return () => { if (!released) { released = true; this.retained--; } };
-  }
+  /** A turn, approval or message admission is in progress. */
+  get busy(): boolean { return this.admitting || this.agent.status === 'running' || this.agent.status === 'initializing' || !!this.agent.activeTurn || this.agent.pendingPermissions.length > 0; }
+  /** Only sessions that can be resumed later may be closed to free a connection slot. */
+  get evictable(): boolean { return this.alive && this.agent.resumable === true && !this.busy; }
   private append(item: Record<string, unknown> & { type: string }): void {
     if (this.diskFailed) return;
     void this.history.append(item, this.agent.activeTurn?.turnId).catch(error => { this.diskFailed = true; this.agent.status = 'error'; this.agent.lastError = `Could not save task history: ${String(error)}`; this.peer.close(); });
@@ -86,13 +81,14 @@ export class CliSession {
     await this.store.update(state => {
       const task = state.tasks.find(t => t.id === this.task.id)!;
       task.agentId = this.agent.id; task.executionCwd = this.agent.cwd;
-      task.native = { protocol, sessionId: this.nativeId, argv, resumable: this.agent.resumable, initialSent: task.native?.initialSent ?? false, initialConfirmed: task.native?.initialConfirmed };
+      task.native = { protocol, sessionId: this.nativeId, argv, resumable: this.agent.resumable, initialSent: task.native?.initialSent ?? false };
     });
     this.agent.nativeSessionId = this.nativeId; this.agent.status = 'idle'; this.suspended = false;
   }
-  private protocol(): NativeProtocol { return this.store.snapshot().tasks.find(t => t.id === this.task.id)!.native!.protocol; }
+  private protocol(): NativeProtocol { return this.store.task(t => t.id === this.task.id)!.native!.protocol; }
   async send(text: string, messageId: string): Promise<void> {
-    if (this.admitting || this.agent.status !== 'idle' || this.agent.activeTurn) throw new Error('Remote CLI is not idle');
+    // A failed turn leaves a live process able to take the next message.
+    if (this.admitting || !this.alive || (this.agent.status !== 'idle' && this.agent.status !== 'error') || this.agent.activeTurn) throw new Error('Remote CLI is not idle');
     this.admitting = true;
     try {
       if (await this.history.hasMessage(messageId)) return; // Durable at-most-once admission.
@@ -112,21 +108,17 @@ export class CliSession {
   private confirm(): void {
     if (!this.activeMessage || this.confirmed) return; this.confirmed = true;
     this.append({ type: 'delivery', clientMessageId: this.activeMessage });
-    const messageId = this.activeMessage;
-    void this.store.update(state => {
-      const task = state.tasks.find(t => t.id === this.task.id)!;
-      if (messageId === task.id) task.native!.initialConfirmed = true;
-      const submission = task.submissions.find(s => s.id === messageId);
-      if (submission) { submission.state = 'accepted'; delete submission.error; }
-    }).catch(error => this.fail(error));
   }
   private complete(toolStatus = 'completed'): void {
     this.agent.status = 'idle'; this.agent.activeTurn = null; this.agent.pendingPermissions = []; this.permissions.clear();
     for (const [callId, detail] of this.tools) if (detail.status === 'running') this.append({ ...detail, type: 'tool_call', callId, status: toolStatus });
+    if (this.activeMessage) this.append({ type: 'turn_end', clientMessageId: this.activeMessage, status: toolStatus });
     this.tools.clear(); for (const done of this.stopWaiters) done(); this.stopWaiters.clear(); this.activeMessage = undefined;
   }
   private fail(error: unknown): void {
     if (this.intentionalClose) return;
+    // CLIs report a user interrupt as a failed turn; it is recorded once by stop().
+    if (this.stopping && this.peer.alive) { this.complete('canceled'); return; }
     const message = error instanceof Error ? error.message : String(error);
     this.complete('failed'); this.agent.status = 'error'; this.agent.lastError = message; this.append({ type: 'error', message });
   }
@@ -199,7 +191,7 @@ export class CliSession {
     const reply = (result: unknown) => this.peer.send({ jsonrpc: '2.0', id: m.id, result });
     if (m.method === 'session/request_permission') {
       const options = list(p.options);
-      this.permission(id, { kind: 'tool', name: String(p.toolCall?.title ?? 'Tool'), detail: p.toolCall, actions: options.map(o => ({ id: String(o.optionId), label: String(o.name), behavior: String(o.kind).startsWith('allow') ? 'allow' : 'deny' })) }, answer => reply(answer.selectedActionId ? { outcome: { outcome: 'selected', optionId: answer.selectedActionId } } : { outcome: { outcome: 'cancelled' } }));
+      this.permission(id, { kind: 'tool', name: String(p.toolCall?.title ?? 'Tool'), detail: p.toolCall, actions: options.map(o => ({ id: String(o.optionId), label: String(o.name), behavior: String(o.kind).startsWith('allow') ? 'allow' : 'deny', scope: String(o.kind).endsWith('always') ? 'session' : 'once' })) }, answer => reply(answer.selectedActionId ? { outcome: { outcome: 'selected', optionId: answer.selectedActionId } } : { outcome: { outcome: 'cancelled' } }));
     } else if (m.method === 'item/tool/requestUserInput') {
       const questions = list(p.questions);
       this.permission(id, { kind: 'question', name: 'Question', input: { questions: questions.map(q => ({ ...q, header: q.header ?? q.id, options: list(q.options), allowOther: q.isOther === true })) } }, answer => reply({ answers: Object.fromEntries(questions.map(q => [q.id, { answers: answer.behavior === 'allow' ? [answer.answers?.[q.header ?? q.id] ?? ''] : [] }])) }));
@@ -226,6 +218,7 @@ export class CliSession {
   async stop(): Promise<void> {
     if (this.agent.status !== 'running' && !this.agent.pendingPermissions.length) return;
     const settled = new Promise<void>(resolve => this.stopWaiters.add(resolve));
+    this.stopping = true;
     try {
       const protocol = this.protocol();
       if (protocol === 'codex') await this.peer.request('turn/interrupt', { threadId: this.nativeId, turnId: this.agent.activeTurn?.turnId }, 5000);
@@ -235,7 +228,9 @@ export class CliSession {
       let timer: ReturnType<typeof setTimeout>;
       try { await Promise.race([settled, new Promise<void>(resolve => { timer = setTimeout(resolve, 5000); })]); } finally { clearTimeout(timer!); }
     } finally {
-      if (this.agent.status === 'running') { this.close(); this.agent.lastError = 'The remote CLI did not confirm interruption; reconnect the saved session before continuing.'; }
+      this.stopping = false;
+      if (this.agent.status === 'running') { this.close(); this.agent.lastError = 'The remote CLI did not confirm interruption. The next message resumes its saved session.'; }
+      this.append({ type: 'interrupted' });
     }
   }
   close(): void { this.intentionalClose = true; this.peer.close(); this.complete('canceled'); this.agent.status = 'closed'; }

@@ -40,12 +40,15 @@ export function SshAliasSelect({ options, hosts, connection, disabled, loading, 
       const anchor = trigger.current, element = popup.current; if (!anchor || !element) return;
       const rect = anchor.getBoundingClientRect(), gap = 6, margin = 12;
       const width = Math.min(Math.max(rect.width, 280), window.innerWidth - margin * 2);
-      const below = window.innerHeight - rect.bottom - margin - gap, above = rect.top - margin - gap;
+      // A viewport resize can move the trigger offscreen while its top-layer menu stays open.
+      const top = Math.max(margin, Math.min(rect.top, window.innerHeight - margin));
+      const bottom = Math.max(margin, Math.min(rect.bottom, window.innerHeight - margin));
+      const below = window.innerHeight - bottom - margin - gap, above = top - margin - gap;
       const up = below < 240 && above > below;
       Object.assign(element.style, {
         width: `${width}px`, left: `${Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin))}px`,
-        top: up ? 'auto' : `${rect.bottom + gap}px`, bottom: up ? `${window.innerHeight - rect.top + gap}px` : 'auto',
-        maxHeight: `${Math.max(100, Math.min(352, up ? above : below))}px`,
+        top: up ? 'auto' : `${bottom + gap}px`, bottom: up ? `${window.innerHeight - top + gap}px` : 'auto',
+        maxHeight: `${Math.max(0, Math.min(352, up ? above : below))}px`,
       });
     };
     place(); search.current?.focus({ preventScroll: true });

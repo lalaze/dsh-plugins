@@ -9,7 +9,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | Package | Directory | Description |
 | --- | --- | --- |
 | `dsh-claude-ssh` | [packages/claude-ssh](packages/claude-ssh/README.md) | Use remote Claude Code over system OpenSSH in DSH |
-| `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Complete Claude SSH integration plus direct SSH tasks for Claude, Codex, DSH, Antigravity, Grok and CodeBuddy, with approvals and recovery |
+| `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | In-page element, Console and network debugger for DSH Sidebar Browser |
@@ -55,7 +55,7 @@ Claude's check includes the upstream regression suite and remote-workspace compa
 
 ## Installation
 
-Download the merged [Remote Agents 0.4.3 archive](https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.3/dsh-remote-agents-0.4.3.tgz) without building. See the [installation and Claude migration instructions](packages/remote-agents/README.md#install-and-migrate) for use on another machine.
+Remote Agents **0.2.3** lists remote Claude, Codex and other CLIs as separate providers in DSH's native model picker and main conversation. The sidebar’s Remote sessions view brings history, follow-ups and pending approvals together; delegation tools remain available. Build `dist/dsh-remote-agents-0.2.3.tgz` with `pnpm --filter dsh-remote-agents pack:plugin`. See [install and upgrade](packages/remote-agents/README.md#install-and-upgrade), including what changed from 0.1.x.
 
 Install an individual built archive into the desired DSH profile:
 

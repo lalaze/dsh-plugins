@@ -28,7 +28,7 @@ export function PermissionCard({ permission, busy, respond }: { permission: Perm
     </fieldset>) : questionForm ? <p>{ui('This CLI returned an unsupported question format.')}</p> : null}
     {(permission.detail || permission.input) && <details><summary>{ui('Details')}</summary><pre>{JSON.stringify(permission.detail ?? permission.input, null, 2)}</pre></details>}
     <div className="ra-actions" style={{ marginTop: 12 }}>
-      {actions.map(action => <button key={action.id} className={action.behavior === 'deny' ? 'ra-danger' : 'ra-primary'} disabled={busy} onClick={() => respond({ behavior: action.behavior, selectedActionId: action.id })}>{action.label}</button>)}
+      {actions.map(action => <button key={action.id} className={action.behavior === 'deny' ? 'ra-danger' : 'ra-primary'} disabled={busy} onClick={() => respond({ behavior: action.behavior, selectedActionId: action.id })}>{ui(action.label)}</button>)}
       {!actions.length && (!questionForm || questions.length > 0) && <button className="ra-primary" disabled={busy || (questionForm && !complete)} onClick={() => respond({ behavior: 'allow', ...(questionForm ? { answers } : {}) })}>{ui(questionForm ? 'Submit answers' : 'Allow once')}</button>}
       {!actions.some(a => a.behavior === 'deny') && <button className="ra-danger" disabled={busy} onClick={() => respond({ behavior: 'deny' })}>{ui('Deny')}</button>}
     </div>

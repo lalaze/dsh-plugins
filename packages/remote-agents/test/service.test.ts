@@ -8,13 +8,15 @@ import { connectionInput } from '../src/backend.js';
 import { createHandler } from '../src/http.js';
 import { FakeRemote, fixture } from './fakes.js';
 
+const message = (text: string) => ({ id: randomUUID(), text });
+
 test('host configuration is durable, passwords stay out of the dashboard, and writes are private', async t => {
   const { service, store, path, hostId } = await fixture(t);
   await service.connect(hostId);
-  const snapshot = service.snapshot();
+  const snapshot = await service.snapshot();
   assert.equal(snapshot.hosts[0].serverId, 'remote-box-1');
   await assert.rejects(service.addHost({ label: 'Password host', connection: 'ssh://other-box', password: 'secret' }), /password storage/);
-  assert.equal(JSON.stringify(snapshot).includes('private-daemon-password'), false);
+  assert.equal(JSON.stringify(snapshot).includes('password'), false);
   assert.equal((await stat(path)).mode & 0o777, 0o600);
   const reopened = new Store(path); await reopened.open();
   assert.equal(reopened.snapshot().hosts[0].serverId, 'remote-box-1');
@@ -56,57 +58,115 @@ test('two hosts discover independent CLI catalogs and route work to the selected
   const second = dashboard.hosts.at(-1)!.id;
   assert.equal((await service.providers(second, '/srv/beta'))[0].models[0].id, 'beta-model');
   const request = { id: randomUUID(), hostId: second, cwd: '/srv/beta', provider: 'codex', model: 'beta-model', prompt: 'Work on the second machine' };
-  const task = await service.create(request);
-  assert.equal(task.serverId, 'remote-box-2'); assert.equal(beta.creates, 1); assert.equal(alpha.creates, 0);
+  const agent = await service.create(request);
+  assert.equal(agent.status, 'idle'); assert.equal(beta.creates, 1); assert.equal(alpha.creates, 0);
+  assert.equal(store.snapshot().tasks.find(t => t.id === agent.id)!.serverId, 'remote-box-2');
   await assert.rejects(service.create({ ...request, id: randomUUID(), model: 'remote-model' }), /unavailable on this host/);
 });
 
-test('simultaneous duplicate creates and retries after a lost response execute one remote task', async t => {
+test('simultaneous duplicate creates and retries after a lost response execute one remote agent', async t => {
   const { service, remote, request, path } = await fixture(t);
   const input = request(); remote.loseCreate = true;
-  const first = await service.create(input); assert.equal(first.state, 'uncertain');
+  const first = await service.create(input);
+  assert.equal(first.status, 'error'); assert.match(first.error!, /Connection lost/);
   assert.equal(remote.creates, 1);
   const store = new Store(path); await store.open();
   const resumed = new RemoteAgentsService(store, remote.backend); t.after(() => resumed.close());
   const [a, b] = await Promise.all([resumed.create(input), resumed.create(input)]);
-  assert.equal(a.state, 'ready'); assert.equal(a.agentId, b.agentId); assert.equal(remote.creates, 1);
-  await assert.rejects(resumed.create({ ...input, cwd: '/other/project' }), /different task/);
+  assert.equal(a.status, 'idle'); assert.equal(b.status, 'idle'); assert.equal(remote.creates, 1);
+  assert.equal(store.snapshot().tasks[0].agentId, `native-${input.id}`);
+  await assert.rejects(resumed.create({ ...input, cwd: '/other/project' }), /different agent/);
 });
 
-test('follow-ups have durable at-most-once submission and reconcile through message IDs', async t => {
+test('creation saves titles, discovered modes and the delegation origin', async t => {
+  const { service, store, request } = await fixture(t);
+  const panel = await service.create(request({ prompt: 'Fix   the\nflaky  checkout test' }));
+  assert.equal(panel.title, 'Fix the flaky checkout test'); assert.equal(panel.delegated, false);
+  assert.deepEqual(panel.modes.map(m => m.id), ['ask', 'full-access']);
+  const delegated = await service.create(request(), { title: 'Checkout tests', origin: 'dsh' });
+  assert.equal(delegated.title, 'Checkout tests'); assert.equal(delegated.delegated, true);
+  assert.equal(store.snapshot().tasks[1].origin, 'dsh');
+});
+
+test('sending to a working agent interrupts its turn, like Paseo; delegated sends can refuse instead', async t => {
   const { service, remote, request } = await fixture(t);
-  const task = await service.create(request()), message = { id: randomUUID(), text: 'Run the test suite' };
-  remote.loseSend = true;
-  const uncertain = await service.send(task.id, message); assert.equal(uncertain.submissions[0].state, 'uncertain');
-  await service.send(task.id, message); assert.equal(remote.sends, 1);
-  const detail = await service.detail(task.id); assert.equal(detail.task.submissions[0].state, 'accepted');
-  await assert.rejects(service.send(task.id, { ...message, text: 'Different instructions' }), /another message/);
-  remote.agents.get(task.agentId!)!.status = 'running';
-  await assert.rejects(service.send(task.id, { id: randomUUID(), text: 'Do not implicitly interrupt' }), /finish or stop/);
-  assert.equal(remote.sends, 1);
+  const agent = await service.create(request()), live = remote.live(agent.id);
+  live.status = 'running'; live.activeTurn = { turnId: 'turn-1', startedAt: null };
+  assert.equal((await service.summary(agent.id)).status, 'running');
+  await assert.rejects(service.send(agent.id, message('Only when idle'), { interrupt: false }), /still working/);
+  assert.equal(remote.sends, 0);
+  const instructions = message('Change of plan: run the linter first');
+  await service.send(agent.id, instructions);
+  assert.equal(remote.interrupts, 1); assert.equal(remote.sends, 1);
+  const detail = await service.detail(agent.id);
+  assert.deepEqual(detail.timeline!.entries.slice(-3).map(e => e.item.type), ['interrupted', 'user_message', 'assistant_message']);
+  await service.send(agent.id, instructions);
+  assert.equal(remote.sends, 1, 'a repeated message ID is never delivered twice');
+  assert.equal(await service.reply(agent.id), 'Follow-up completed.');
+});
+
+test('dashboard statuses reflect live sessions: attention, running, idle and failed starts', async t => {
+  const { service, remote, request } = await fixture(t);
+  const waiting = await service.create(request()), working = await service.create(request()), idle = await service.create(request());
+  remote.live(waiting.id).pendingPermissions = [{ id: 'approval-1', name: 'Bash', kind: 'tool' }];
+  remote.live(working.id).status = 'running';
+  remote.loseCreate = true; const failed = await service.create(request());
+  const statuses = Object.fromEntries((await service.snapshot()).agents.map(a => [a.id, [a.status, a.pendingPermissions]]));
+  assert.deepEqual(statuses[waiting.id], ['attention', 1]);
+  assert.deepEqual(statuses[working.id], ['running', 0]);
+  assert.deepEqual(statuses[idle.id], ['idle', 0]);
+  assert.equal(statuses[failed.id][0], 'error');
+  assert.equal((await service.state(waiting.id)).permissions[0].id, 'approval-1');
+});
+
+test('archive releases the CLI and hides the agent; messaging restores it; delete removes it and its output', async t => {
+  const { service, remote, request, store, hostId } = await fixture(t);
+  const agent = await service.create(request());
+  remote.live(agent.id).status = 'running';
+  const archived = await service.archive(agent.id);
+  assert.equal(archived.archived, true); assert.equal(remote.detaches, 1);
+  assert.equal(archived.status, 'idle', 'a resumable archived agent can continue later');
+  const restored = await service.send(agent.id, message('Pick this back up'));
+  assert.equal(restored.archived, false);
+  await assert.rejects(service.removeHost(hostId), /Delete this host’s agents/);
+  await service.delete(agent.id);
+  assert.equal(remote.forgets, 1); assert.equal(store.snapshot().tasks.length, 0);
+  await assert.rejects(service.detail(agent.id), /not found/);
+  assert.equal((await service.removeHost(hostId)).hosts.length, 0);
+});
+
+test('mode changes use discovered modes, wait for idle, and apply by resuming the session', async t => {
+  const { service, remote, request, store } = await fixture(t);
+  const agent = await service.create(request());
+  await assert.rejects(service.setMode(agent.id, 'yolo'), /not available/);
+  remote.live(agent.id).status = 'running';
+  await assert.rejects(service.setMode(agent.id, 'full-access'), /Stop the agent/);
+  await service.stop(agent.id); assert.equal(remote.stops, 1);
+  const changed = await service.setMode(agent.id, 'full-access');
+  assert.equal(changed.modeId, 'full-access'); assert.equal(remote.detaches, 1);
+  assert.equal(store.snapshot().tasks[0].modeId, 'full-access');
+  await service.stop(agent.id); assert.equal(remote.stops, 1, 'stopping an idle agent is a no-op');
 });
 
 test('permission choices retain native IDs and questions return structured answers', async t => {
   const { service, remote, request } = await fixture(t);
-  const task = await service.create(request()), agent = remote.agents.get(task.agentId!)!;
+  const created = await service.create(request()), agent = remote.live(created.id);
   agent.pendingPermissions = [{ id: 'approval-42', name: 'Bash', kind: 'tool', actions: [{ id: 'allow-specific-command', label: 'Run once', behavior: 'allow' }] }];
-  await assert.rejects(service.respond(task.id, 'approval-42', { behavior: 'allow' }), /Select one/);
-  await assert.rejects(service.respond(task.id, 'approval-42', { behavior: 'allow', selectedActionId: 'wrong-id' }), /Invalid permission/);
-  await service.respond(task.id, 'approval-42', { behavior: 'allow', selectedActionId: 'allow-specific-command' });
+  await assert.rejects(service.respond(created.id, 'approval-42', { behavior: 'allow' }), /Select one/);
+  await assert.rejects(service.respond(created.id, 'approval-42', { behavior: 'allow', selectedActionId: 'wrong-id' }), /Invalid permission/);
+  await service.respond(created.id, 'approval-42', { behavior: 'allow', selectedActionId: 'allow-specific-command' });
   assert.equal(remote.answers[0].answer.selectedActionId, 'allow-specific-command');
-  await assert.rejects(service.respond(task.id, 'approval-42', { behavior: 'deny' }), /no longer pending/);
+  await assert.rejects(service.respond(created.id, 'approval-42', { behavior: 'deny' }), /no longer pending/);
   agent.pendingPermissions = [{ id: 'question-43', name: 'AskUserQuestion', kind: 'question', input: { questions: [{ header: 'Framework', question: 'Which framework?', options: [{ label: 'React' }] }] } }];
-  await assert.rejects(service.respond(task.id, 'question-43', { behavior: 'allow', answers: {} }), /every required/);
-  await service.respond(task.id, 'question-43', { behavior: 'allow', answers: { Framework: 'React' } });
+  await assert.rejects(service.respond(created.id, 'question-43', { behavior: 'allow', answers: {} }), /every required/);
+  await service.respond(created.id, 'question-43', { behavior: 'allow', answers: { Framework: 'React' } });
   assert.deepEqual(remote.answers[1].answer.answers, { Framework: 'React' });
 });
 
-test('stop invokes native cancellation and backend lifecycle cleanup is separate', async t => {
+test('unloading the plugin leaves remote work running rather than stopping it', async t => {
   const { service, remote, request } = await fixture(t);
-  const task = await service.create(request()); remote.agents.get(task.agentId!)!.status = 'running';
-  await service.stop(task.id); assert.equal(remote.stops, 1);
-  remote.agents.get(task.agentId!)!.status = 'running';
-  await service.close(); assert.equal(remote.stops, 1); assert.equal(remote.agents.get(task.agentId!)!.status, 'running');
+  const agent = await service.create(request()); remote.live(agent.id).status = 'running';
+  await service.close(); assert.equal(remote.stops, 0); assert.equal(remote.live(agent.id).status, 'running');
 });
 
 test('unloading waits for in-flight creation to save its recovery state', async t => {
@@ -126,12 +186,33 @@ test('unloading waits for in-flight creation to save its recovery state', async 
   assert.equal(reopened.snapshot().tasks[0].state, 'uncertain');
 });
 
+test('a creation record without an in-flight request is reported as interrupted', async t => {
+  const { service, store, request } = await fixture(t);
+  const agent = await service.create(request());
+  await store.update(state => { const task = state.tasks[0]; task.state = 'creating'; delete task.agentId; });
+  const summary = await service.summary(agent.id);
+  assert.equal(summary.status, 'error'); assert.match(summary.error!, /interrupted/);
+});
+
 test('a changed remote agent binding cannot receive instructions', async t => {
   const { service, remote, request } = await fixture(t);
-  const task = await service.create(request()); remote.agents.get(task.agentId!)!.cwd = '/unrelated/project';
-  await assert.rejects(service.send(task.id, { id: randomUUID(), text: 'Edit files' }), /identity or project changed/);
-  await assert.rejects(service.stop(task.id), /identity or project changed/);
+  const agent = await service.create(request()); remote.live(agent.id).cwd = '/unrelated/project';
+  await assert.rejects(service.send(agent.id, message('Edit files')), /identity or project changed/);
+  await assert.rejects(service.stop(agent.id), /identity or project changed/);
   assert.equal(remote.sends, 0); assert.equal(remote.stops, 0);
+});
+
+test('registries from earlier builds load, and the next write drops main-chat bindings', async t => {
+  const { path, store: original, service, request } = await fixture(t);
+  await service.create(request()); await service.close(); await original.flush();
+  const legacy = JSON.parse(await readFile(path, 'utf8'));
+  legacy.chatProjects = [{ id: randomUUID(), hostId: legacy.hosts[0].id, cwd: '/srv/project', providers: [] }];
+  legacy.tasks[0].submissions = [{ id: randomUUID(), text: 'old', state: 'accepted' }];
+  await writeFile(path, JSON.stringify(legacy));
+  const store = new Store(path); await store.open();
+  assert.equal(store.snapshot().tasks.length, 1);
+  await store.update(() => {});
+  assert.equal('chatProjects' in JSON.parse(await readFile(path, 'utf8')), false);
 });
 
 test('corrupt registries fail without overwriting existing data', async t => {
@@ -141,13 +222,17 @@ test('corrupt registries fail without overwriting existing data', async t => {
 });
 
 test('HTTP boundary rejects malformed input, form submissions, oversized bodies and unknown actions', async t => {
-  const { service } = await fixture(t), handle = createHandler(service);
+  const { service, request } = await fixture(t), handle = createHandler(service);
   const post = (body: string, headers: Record<string, string> = { 'content-type': 'application/json', 'X-DSH-Remote-Agents': '1' }) => handle(new Request('http://dsh.test/api/remote-agents', { method: 'POST', headers, body }));
   assert.equal((await post('{')).status, 400);
   assert.equal((await post('{}', { 'content-type': 'application/x-www-form-urlencoded' })).status, 403);
   assert.equal((await post(JSON.stringify({ action: 'unknown' }))).status, 400);
   assert.equal((await post(' '.repeat(256_001))).status, 413);
+  const created = await (await post(JSON.stringify({ action: 'create', agent: request() }))).json();
+  assert.equal(created.status, 'idle');
+  assert.equal((await post(JSON.stringify({ action: 'agent', agentId: created.id }))).status, 200);
+  assert.equal((await post(JSON.stringify({ action: 'agent', agentId: randomUUID() }))).status, 404);
   const response = await handle(new Request('http://dsh.test/api/remote-agents'));
   assert.equal(response.headers.get('cache-control'), 'no-store');
-  assert.equal((await response.text()).includes('private-daemon-password'), false);
+  assert.equal((await response.json()).agents[0].id, created.id);
 });

@@ -1,4 +1,4 @@
-/** Browser-safe types. SDK and connection credentials stay on the DSH server. */
+/** Browser-safe types. SSH configuration and native CLI argv stay on the DSH server. */
 export interface Host {
   id: string;
   label: string;
@@ -6,8 +6,13 @@ export interface Host {
   serverId?: string;
   status: 'disconnected' | 'connecting' | 'connected' | 'error';
   error?: string;
+  modelCount?: number;
+  modelError?: string;
+  modelsCheckedAt?: string;
+  providerErrors?: { label: string; error: string }[];
 }
-export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string }
+export interface HostCatalog { cwd: string; providers: Provider[]; checkedAt: string }
+export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string; catalog?: HostCatalog; modelError?: string }
 export interface SshConfigHost { alias: string; connection: string }
 export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
@@ -22,7 +27,6 @@ export interface Provider {
   modes: Choice[];
   defaultModeId?: string | null;
 }
-export interface Workspace { id: string; name: string; path: string }
 export interface Cursor { epoch: string; seq: number }
 export interface TimelineEntry {
   seqStart: number;
@@ -42,6 +46,15 @@ export interface TimelinePage {
   hasOlder: boolean;
   hasNewer: boolean;
 }
+/** A single submitted message's output, bounded by the next user message. */
+export interface MessageTimeline extends TimelinePage { found: boolean; deliveryConfirmed: boolean; hasFollowingMessage: boolean; terminalStatus?: string }
+export interface ChatProject {
+  id: string;
+  label: string;
+  hostId: string;
+  cwd: string;
+  providers: Provider[];
+}
 export interface Permission {
   id: string;
   name: string;
@@ -50,7 +63,7 @@ export interface Permission {
   description?: string;
   input?: Record<string, unknown>;
   detail?: unknown;
-  actions?: { id: string; label: string; behavior: 'allow' | 'deny' }[];
+  actions?: { id: string; label: string; behavior: 'allow' | 'deny'; scope?: 'once' | 'session' }[];
 }
 export interface PermissionAnswer {
   behavior: 'allow' | 'deny';
@@ -58,6 +71,7 @@ export interface PermissionAnswer {
   answers?: Record<string, string>;
   message?: string;
 }
+/** Live state of one attached (or detached) native CLI session. */
 export interface Agent {
   id: string;
   cwd: string;
@@ -81,21 +95,60 @@ export interface TaskInput {
   thinkingOptionId?: string;
   prompt: string;
 }
-export interface Submission { id: string; text: string; state: 'pending' | 'accepted' | 'uncertain'; error?: string }
+/** Durable agent record. `id` is the client request ID, so retried creation is idempotent. */
 export interface Task extends TaskInput {
+  /** Native DSH conversation binding, independent of background delegation. */
+  chat?: { sessionId: string; route: string; receiptRoute?: string; lastUserId?: string };
   serverId: string;
   title: string;
   createdAt: string;
+  updatedAt?: string;
+  /** Mode choices discovered when the agent was created; mode changes are validated against them. */
+  modes?: Choice[];
+  archived?: boolean;
+  /** Started by the DSH agent through a delegation tool. */
+  origin?: 'dsh';
   agentId?: string;
   executionCwd?: string;
-  native?: { protocol: NativeProtocol; sessionId: string; argv: string[]; resumable?: boolean; initialSent: boolean; initialConfirmed?: boolean };
+  native?: { protocol: NativeProtocol; sessionId: string; argv: string[]; resumable?: boolean; initialSent: boolean };
   state: 'creating' | 'ready' | 'uncertain';
   error?: string;
-  submissions: Submission[];
 }
 export type NativeProtocol = 'codex' | 'claude' | 'acp' | 'antigravity';
-export interface TaskDetail { task: Task; agent: Agent | null; timeline: TimelinePage | null }
-export interface Dashboard { hosts: Host[]; tasks: Task[] }
+export const PROVIDER_LABELS: Readonly<Record<string, string>> = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };
+/** `attention` means a permission request or question is waiting for the user. */
+export type AgentStatus = 'starting' | 'running' | 'attention' | 'idle' | 'error' | 'closed';
+export interface AgentSummary {
+  id: string;
+  /** Open bound conversations in the native DSH UI; never submit a second conversation here. */
+  chatSessionId?: string;
+  hostId: string;
+  cwd: string;
+  provider: string;
+  model: string;
+  modeId?: string;
+  thinkingOptionId?: string;
+  modes: Choice[];
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  archived: boolean;
+  delegated: boolean;
+  /** The native CLI session was created; messages can be sent (resuming it when needed). */
+  started: boolean;
+  /** Whether the CLI process is currently attached; an idle resumable agent can be detached. */
+  attached: boolean;
+  status: AgentStatus;
+  pendingPermissions: number;
+  error?: string;
+  resumable?: boolean;
+  nativeSessionId?: string;
+}
+export interface AgentState { agent: AgentSummary; permissions: Permission[] }
+export interface AgentDetail extends AgentState { timeline: TimelinePage | null }
+export interface Dashboard { hosts: Host[]; agents: AgentSummary[] }
+export const busy = (agent: Pick<AgentSummary, 'status'>) => agent.status === 'starting' || agent.status === 'running' || agent.status === 'attention';
+
 export class RemoteError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
 }

@@ -99,7 +99,7 @@ test('SSH config API uses server configuration and saving preserves the alias fo
   await write(config, 'Host build-box\nHostName 100.64.80.78\nUser ubuntu\nPort 2222\nProxyJump bastion\n');
   const store = new Store(join(home, 'state.json')); await store.open();
   let backendCalls = 0;
-  const service = new RemoteAgentsService(store, () => { backendCalls++; throw new Error('Enumeration must not connect'); }, read);
+  const service = new RemoteAgentsService(store, () => { backendCalls++; throw new Error('Simulated SSH failure'); }, read);
   t.after(() => service.close());
   const handler = createHandler(service);
   const post = (data: unknown, authorized = true) => handler(new Request('http://dsh.test/api/remote-agents', {
@@ -112,8 +112,9 @@ test('SSH config API uses server configuration and saving preserves the alias fo
   const result = await response.json();
   assert.deepEqual(result, { hosts: [{ alias: 'build-box', connection: 'ssh://build-box' }], warnings: [] });
   assert.equal(backendCalls, 0);
-  assert.deepEqual(service.snapshot(), { hosts: [], tasks: [] });
+  assert.deepEqual(await service.snapshot(), { hosts: [], agents: [] });
   assert.equal((await post({ action: 'addHost', host: { label: result.hosts[0].alias, connection: result.hosts[0].connection } })).status, 200);
-  assert.equal(service.snapshot().hosts[0].connection, 'ssh://build-box');
-  assert.equal(backendCalls, 0);
+  assert.equal((await service.snapshot()).hosts[0].connection, 'ssh://build-box');
+  assert.equal(backendCalls, 1, 'saving the selected machine starts model discovery');
+  assert.equal((await service.snapshot()).hosts[0].modelError, 'Simulated SSH failure');
 });

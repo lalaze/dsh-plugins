@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { decodeCliModels } from 'dsh-claude-ssh/process';
-import type { Agent, Cursor, HostConfig, Model, NativeProtocol, PermissionAnswer, Provider, Task, TimelinePage, Workspace } from './domain.js';
-import { RemoteError } from './domain.js';
+import type { Agent, Cursor, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
+import { PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from './ssh.js';
 import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
 import { TaskHistory } from './history.js';
@@ -10,37 +9,47 @@ import { discoverAcpCatalog } from './acp.js';
 import { antigravityArguments, ANTIGRAVITY_NOTICE, ANTIGRAVITY_RUNNER, decodeAntigravityModels } from './antigravity.js';
 export { connectionInput } from './ssh.js';
 
+/** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
 export interface Backend {
-  /** Agent state and timeline can be read without contacting the execution host. */
-  readonly localReads?: boolean;
   connect(): Promise<string>;
   close(): Promise<void>;
+  homeDirectory(): Promise<string>;
   providers(cwd: string, refresh: boolean): Promise<Provider[]>;
-  workspaces(): Promise<Workspace[]>;
   create(task: Task): Promise<Agent>;
-  recover?(task: Task): Promise<Agent>;
+  recover(task: Task): Promise<Agent>;
   agent(id: string): Promise<Agent | null>;
   timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage>;
-  /** Synchronous lease for backends that can recycle an attached session. */
-  retain?(id: string): () => void;
-  disconnect?(id: string): Promise<void>;
+  messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<MessageTimeline>;
+  reply(id: string): Promise<string>;
+  /** Interrupts a running turn first and reattaches a detached session. */
   send(id: string, text: string, messageId: string): Promise<void>;
   stop(id: string): Promise<void>;
   respond(id: string, requestId: string, answer: PermissionAnswer, input?: Record<string, unknown>): Promise<void>;
+  /** Stop and release the CLI process; output and the native session ID are kept. */
+  detach(task: Task): Promise<void>;
+  /** Detach and delete saved output. */
+  forget(task: Task): Promise<void>;
 }
 export type BackendFactory = (host: HostConfig) => Backend;
 export const CLI_PROVIDERS = [
-  { id: 'claude', label: 'Claude Code', command: 'claude', protocol: 'claude' as const, args: [] },
-  { id: 'codex', label: 'Codex', command: 'codex', protocol: 'codex' as const, args: ['app-server'] },
-  { id: 'dsh', label: 'DSH', command: 'dsh', protocol: 'acp' as const, args: ['--profile', 'acp'] },
-  { id: 'antigravity', label: 'Antigravity', command: 'agy', protocol: 'antigravity' as const, args: [] },
-  { id: 'grok', label: 'Grok', command: 'grok', protocol: 'acp' as const, args: ['agent', '--no-leader', 'stdio'] },
-  { id: 'codebuddy', label: 'CodeBuddy', command: 'codebuddy', protocol: 'acp' as const, args: ['--acp'] },
+  { id: 'claude', label: PROVIDER_LABELS.claude, command: 'claude', protocol: 'claude' as const, args: [] },
+  { id: 'codex', label: PROVIDER_LABELS.codex, command: 'codex', protocol: 'codex' as const, args: ['app-server'] },
+  { id: 'dsh', label: PROVIDER_LABELS.dsh, command: 'dsh', protocol: 'acp' as const, args: ['--profile', 'acp'] },
+  { id: 'antigravity', label: PROVIDER_LABELS.antigravity, command: 'agy', protocol: 'antigravity' as const, args: [] },
+  { id: 'grok', label: PROVIDER_LABELS.grok, command: 'grok', protocol: 'acp' as const, args: ['agent', '--no-leader', 'stdio'] },
+  { id: 'codebuddy', label: PROVIDER_LABELS.codebuddy, command: 'codebuddy', protocol: 'acp' as const, args: ['--acp'] },
 ];
+const SESSION_LIMIT = 8;
 type Profile = { protocol: NativeProtocol; argv: string[]; cwd: string; provider: Provider };
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
+/** Claude's `list_models` control response: `supportedEffortLevels` holds per-model reasoning choices. */
+export function claudeModels(result: unknown): Model[] {
+  return list((result as Record<string, unknown> | undefined)?.models).filter(m => typeof m?.value === 'string').map(m => ({
+    id: m.value, label: typeof m.displayName === 'string' ? m.displayName : m.value,
+    thinkingOptions: list(m.supportedEffortLevels ?? m.efforts).filter((e): e is string => typeof e === 'string').map(id => ({ id, label: id })),
+  }));
+}
 export class SshBackend implements Backend {
-  readonly localReads = true;
   private readonly transport: SshTransport;
   private closed = false;
   private readonly probes = new Set<JsonlPeer>();
@@ -49,14 +58,22 @@ export class SshBackend implements Backend {
   private sessions = new Map<string, CliSession>();
   private histories = new Map<string, Promise<TaskHistory>>();
   private starting = new Map<string, Promise<Agent>>();
+  /** Tasks with an operation in flight; their sessions are never evicted. */
+  private leases = new Map<string, number>();
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport) {
     this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection));
   }
-  private assertOpen(): void { if (this.closed) throw new Error('SSH task backend has stopped'); }
+  private assertOpen(): void { if (this.closed) throw new Error('SSH agent backend has stopped'); }
+  async homeDirectory(): Promise<string> {
+    this.assertOpen();
+    const path = await this.transport.exec('printf \'%s\' "$HOME"');
+    this.assertOpen(); return remotePath(path);
+  }
   async connect(): Promise<string> {
     this.assertOpen();
     if (this.identity && Date.now() - this.identity.at < 15_000) return this.identity.id;
-    const identity = await this.transport.exec(`printf '%s\\0%s\\0%s\\0' "$(uname -n)" "$(id -un)" "$(cat /etc/machine-id 2>/dev/null || uname -s)"`);
+    // Empty machine-id files are readable, so fall back on empty content as well as read failure.
+    const identity = await this.transport.exec(`dsh_machine_id="$(cat /etc/machine-id 2>/dev/null)"; if [ -z "$dsh_machine_id" ]; then dsh_machine_id="$(uname -s)"; fi; printf '%s\\0%s\\0%s\\0' "$(uname -n)" "$(id -un)" "$dsh_machine_id"`);
     const [machine, user, unique] = identity.split('\0');
     if (!machine || !user || !unique) throw new Error('SSH did not report a valid machine identity');
     const id = `ssh-${createHash('sha256').update(JSON.stringify([machine, user, unique])).digest('hex')}`;
@@ -108,8 +125,7 @@ export class SshBackend implements Backend {
           modes = [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]; defaultModeId = 'workspace-write';
         } else if (definition.protocol === 'claude') {
           await peer.control({ subtype: 'initialize' });
-          const result = await peer.control({ subtype: 'list_models' });
-          models = decodeCliModels(result).map(m => ({ id: m.value, label: m.displayName, thinkingOptions: m.efforts.map(id => ({ id, label: id })) }));
+          models = claudeModels(await peer.control({ subtype: 'list_models' }));
           modes = [{ id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }]; defaultModeId = 'default';
         } else {
           const capabilities = await initializeAcp(peer);
@@ -127,20 +143,25 @@ export class SshBackend implements Backend {
     this.assertOpen();
     this.catalogs.set(cwd, { at: Date.now(), profiles, providers }); return structuredClone(providers);
   }
-  async workspaces(): Promise<Workspace[]> {
-    const paths = new Set(this.store.snapshot().tasks.filter(t => t.hostId === this.host.id).map(t => t.executionCwd ?? t.cwd));
-    return [...paths].map(path => ({ id: createHash('sha256').update(path).digest('hex').slice(0, 16), name: path.split('/').filter(Boolean).at(-1) ?? path, path }));
-  }
   private task(id: string): Task {
-    const task = this.store.snapshot().tasks.find(t => t.agentId === id && t.hostId === this.host.id);
-    if (!task) throw new RemoteError('Remote task not found', 404); return task;
+    const task = this.store.task(t => t.agentId === id && t.hostId === this.host.id);
+    if (!task) throw new RemoteError('Remote agent not found', 404); return task;
+  }
+  private lease(id: string): () => void {
+    this.leases.set(id, (this.leases.get(id) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return; released = true;
+      const count = this.leases.get(id)! - 1;
+      if (count) this.leases.set(id, count); else this.leases.delete(id);
+    };
   }
   async create(task: Task): Promise<Agent> { return this.start(task, false); }
   async recover(task: Task): Promise<Agent> { return this.start(task, true); }
   private async start(task: Task, resume: boolean): Promise<Agent> {
     this.assertOpen();
     const existing = this.sessions.get(task.id);
-    if (existing?.alive && existing.agent.status !== 'error' && existing.agent.status !== 'closed') return structuredClone(existing.agent);
+    if (existing?.alive && existing.agent.status !== 'closed') return structuredClone(existing.agent);
     const pending = this.starting.get(task.id); if (pending) return pending;
     const operation = this.open(task, resume); this.starting.set(task.id, operation);
     try { return await operation; } finally { this.starting.delete(task.id); }
@@ -162,9 +183,9 @@ export class SshBackend implements Backend {
     if (profile.protocol === 'claude') argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native!.sessionId] : ['--session-id', randomUUID()]), '--permission-mode', task.modeId ?? 'default', ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : [])];
     const history = await this.history(task.id);
     this.assertOpen();
-    if ([...this.sessions.values()].filter(s => s.alive).length >= 8) {
-      const idle = [...this.sessions].find(([id, session]) => !this.starting.has(id) && session.evictable);
-      if (!idle) throw new Error('This SSH host already has eight open CLI sessions. Disconnect an idle session or wait for a resumable task to finish.');
+    if ([...this.sessions.values()].filter(s => s.alive).length >= SESSION_LIMIT) {
+      const idle = [...this.sessions].find(([id, session]) => !this.starting.has(id) && !this.leases.has(id) && session.evictable);
+      if (!idle) throw new Error(`This SSH host already has ${SESSION_LIMIT} working CLI sessions. Wait for one to finish, or archive an idle agent.`);
       idle[1].close(); this.sessions.delete(idle[0]);
     }
     const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : argv;
@@ -180,31 +201,55 @@ export class SshBackend implements Backend {
   async agent(id: string): Promise<Agent | null> {
     const task = this.task(id), session = this.sessions.get(task.id);
     if (session) return structuredClone(session.agent);
-    return { id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'closed', pendingPermissions: [], nativeSessionId: task.native?.sessionId, resumable: task.native?.resumable, lastError: 'The CLI process is not attached. Reconnect the saved session to continue; the previous prompt will not be replayed.' };
+    return { id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'closed', pendingPermissions: [], nativeSessionId: task.native?.sessionId, resumable: task.native?.resumable };
   }
   async timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage> { return (await this.history(this.task(id).id)).page(cursor, direction); }
-  private session(id: string): CliSession {
-    const taskId = this.task(id).id, session = this.sessions.get(taskId);
-    if (!session?.alive) throw new Error('Reconnect the saved CLI session before continuing');
-    this.sessions.delete(taskId); this.sessions.set(taskId, session);
-    return session;
+  async messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<MessageTimeline> { return (await this.history(this.task(id).id)).messagePage(messageId, cursor); }
+  async reply(id: string): Promise<string> { return (await this.history(this.task(id).id)).lastReply(); }
+  /** The live session, resuming the saved native session when the process is gone. */
+  private async attached(task: Task): Promise<CliSession> {
+    const session = this.sessions.get(task.id);
+    if (session?.alive) return session;
+    if (task.native?.resumable === false) throw new RemoteError('This CLI session has ended and cannot be resumed. Its output is kept.', 409);
+    await this.start(task, true);
+    return this.sessions.get(task.id)!;
   }
-  async send(id: string, text: string, messageId: string): Promise<void> { await this.session(id).send(text, messageId); }
-  retain(id: string): () => void { return this.session(id).retain(); }
-  async disconnect(id: string): Promise<void> {
+  async send(id: string, text: string, messageId: string): Promise<void> {
+    const task = this.task(id), release = this.lease(task.id);
+    try {
+      if (await (await this.history(task.id)).hasMessage(messageId)) return; // Durable at-most-once admission.
+      let session = await this.attached(task);
+      if (session.busy) { await session.stop(); session = await this.attached(task); }
+      await session.send(text, messageId);
+    } finally { release(); }
+  }
+  async stop(id: string): Promise<void> {
     const session = this.sessions.get(this.task(id).id);
-    if (!session?.alive) return;
-    if (!session.disconnectable) throw new RemoteError('Wait for this task to finish or stop it before disconnecting', 409);
-    session.close();
+    if (session?.alive) await session.stop();
   }
-  async stop(id: string): Promise<void> { await this.session(id).stop(); }
-  async respond(id: string, requestId: string, answer: PermissionAnswer): Promise<void> { await this.session(id).respond(requestId, answer); }
+  async respond(id: string, requestId: string, answer: PermissionAnswer): Promise<void> {
+    const session = this.sessions.get(this.task(id).id);
+    if (!session?.alive) throw new RemoteError('This permission request is no longer pending', 409);
+    await session.respond(requestId, answer);
+  }
+  async detach(task: Task): Promise<void> {
+    const session = this.sessions.get(task.id);
+    if (!session) return;
+    if (session.alive && session.busy) await session.stop();
+    session.close(); this.sessions.delete(task.id);
+  }
+  async forget(task: Task): Promise<void> {
+    await this.detach(task);
+    const history = this.histories.get(task.id) ?? this.history(task.id);
+    this.histories.delete(task.id);
+    await (await history.catch(() => new TaskHistory(this.store.directory, task.id))).remove();
+  }
   async close(): Promise<void> {
     this.closed = true;
     for (const probe of this.probes) probe.close();
     for (const session of this.sessions.values()) session.close();
     await Promise.allSettled([...this.starting.values()]);
     this.probes.clear(); this.sessions.clear();
-    for (const history of this.histories.values()) await (await history).flush();
+    for (const history of this.histories.values()) await (await history.catch(() => undefined))?.flush();
   }
 }

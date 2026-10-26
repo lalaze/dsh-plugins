@@ -1,4 +1,6 @@
 > 实现更新：0.4.0 按用户要求采用 DSH 直接 SSH + 原生 CLI 协议，已移除 Paseo SDK/daemon 依赖，并将原 Claude SSH 完整接入合并。当前供应商为 Claude、Codex、DSH、Antigravity、Grok、CodeBuddy；不再适配 Gemini CLI、Kimi 和 OpenCode。下文保留早期调研背景，当前行为以 [插件说明](../packages/remote-agents/README.zh-CN.md)为准。
+>
+> 当前 0.2.3 提供 DSH 原生主对话、统一会话列表和分派工具。模型按机器发现，无需登记项目；新会话使用当前 DSH 工作区在远端的同路径。内置 Claude SSH 引擎已由统一 CLI 后端替代。
 
 # 远程 CLI 供应商与任务执行调研
 

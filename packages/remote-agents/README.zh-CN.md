@@ -2,83 +2,112 @@
 
 [English](README.md) | **简体中文**
 
-一个安装包同时提供原 `dsh-claude-ssh` 的完整 Claude 接入，以及多 CLI 远程任务面板。DSH 使用系统 OpenSSH 直接启动远程机器上的 CLI，负责发现供应商、读取模型、管理任务、保存输出、审批和恢复会话。**不需要安装 Paseo，也没有 Paseo SDK 或 daemon 依赖。**
+在 DSH 原生模型选择器和主对话中直接使用远程 Claude Code、Codex、DSH、Grok、CodeBuddy 和反重力。DSH 通过系统 OpenSSH 直连每个 CLI 的原生协议，**不需要 Paseo daemon、SDK 或任何远端服务**。
+## 在 DSH 主对话中使用
+
+每种远程 CLI 都作为独立提供方出现在 DSH 原生模型选择器中：
+
+1. 打开 **设置 → 远程智能体**，添加 SSH 机器。保存后自动检测这台机器上的 CLI 和模型，**无需填写项目名称或项目路径**。
+2. 在 DSH 中选择工作区，回到普通对话的模型菜单，选择 **Claude**、**Codex** 等分组下带机器名的模型。
+3. 直接使用原来的输入框发消息。新会话在所选远程机器上使用 **当前 DSH 工作区的同路径**；远端目录不存在时明确报错，不会改用远程用户目录。
+
+模型目录按机器保存在 DSH 服务端，多个客户端共享。同一个机器模型入口可以用于不同工作区，不按项目重复生成。模型选择器只读取缓存；CLI 或账号变化后点击机器旁的 **刷新模型**。已有机器升级后也通过这个按钮完成首次机器级检测。发现模型在远程账号主目录中进行，实际执行使用会话的工作区目录；项目配置造成的模型差异会在启动时校验。
+
+- 每个 DSH 对话及其选择的机器、CLI 使用独立的原生 CLI 会话，工作目录在首次发送时绑定，后续消息继续该会话。同一 CLI 内切换模型时，支持恢复的 CLI 会保留原生会话和历史；不支持时明确提示新建对话。已有的多个模型独立会话保持可用。切换机器或 CLI 时，会把可用的对话文本作为上下文带过去，不会传入 DSH 本地的系统提示、注入的工作区指令或工具定义。CLI 支持恢复时，DSH 重启后也能继续。
+- 回复和思考过程直接流入主对话。远程工具调用显示为原生 DSH 工具卡片，操作在远程机器执行；记录时不会让 DSH 再执行一次。授权和问题通过 DSH 原生提示处理。
+- DSH 的思考强度选择器使用 CLI 检测到的选项。权限模式使用 CLI 默认值。点击 DSH **停止**或取消响应，会中断远程 CLI 的当前回合。
+- 响应丢失时，按消息身份重放已保存输出，不重复投递任务。未确认送达或断线前未完成的响应会明确报错；发送新消息可以继续已保存的会话。
+- 主对话目前支持**文本**。本地附件和工作区文件不会上传，请先放到远程机器，再引用远程路径。CLI 使用自己的凭据、工具、指令和上下文管理。DSH 的对话摘要使用临时 CLI 会话，与编程会话隔离。
+
+## 统一远程会话
+
+打开 **侧栏 → 远程会话**，或 **设置 → 远程智能体 → 打开会话**。同一个列表展示主对话绑定的会话和后台分派任务，支持按标题、CLI、机器或路径搜索，并筛选待处理和已归档会话。
+
+- **新建会话**：选择已保存的机器、CLI 和模型，使用当前 DSH 工作区的同路径，输入任务后启动。
+- **历史与续聊**：打开会话查看流式输出、思考过程和工具详情，按需加载更早的历史。后台会话可以直接续聊；主对话会话通过 **在主对话打开** 继续，避免产生两份不同步的对话。
+- **审批**：侧栏显示待处理会话数量；会话内展示 CLI 提供的授权选项和提问。关闭 DSH 原生审批提示后，请求仍保持待处理，可在此处回答。只有明确点击 **停止** 才中断当前回合。面板中的授权范围按 CLI 原生选项执行。
+- **管理**：可以重命名远程记录、归档和恢复。归档保留历史并释放远程进程；这些操作针对远程记录，不改变 DSH 主对话自身的标题或归档状态。
+- **发送**：运行中需等待或先停止再发送。响应丢失后通过 **检查送达情况** 检查同一条消息，不重复投递；该浏览器标签页保存待确认消息，刷新或重新打开会话后仍可检查。
+
+关闭会话面板不会停止后台任务。DSH 退出或 SSH 中断时的恢复边界见下文。
+
+## 由 DSH 分派任务
+
+DSH 自己的智能体会获得 6 个工具，用来把任务交给远程 CLI，对应 Paseo 的 `create_agent` 和 `send_agent_prompt`：
+
+| 工具 | 作用 |
+| --- | --- |
+| `remote_agent_list` | 列出机器、最近的项目及智能体状态 |
+| `remote_agent_providers` | 查看远程项目中可用的 CLI、模型、模式和思考强度 |
+| `remote_agent_create` | 用自包含的任务启动智能体，默认等待它回复 |
+| `remote_agent_send` | 给智能体（ID 或前缀）发后续消息；智能体运行中时默认拒绝，`interrupt: true` 才会中断 |
+| `remote_agent_wait` | 等待一个或多个智能体完成并返回回复；超时不会停止它们 |
+| `remote_agent_stop` | 中断智能体当前回合 |
+
+可以直接对 DSH 说：“让 build-box 上的 Codex 修好 /srv/app 里失败的测试，同时让 Claude 审查 /srv/web”。通过 `remote_agent_list` 查看状态，通过 `remote_agent_send` 在对话中发送后续指令。
+
+- 工具等待期间，远程智能体的授权请求和问题会以 **DSH 原生提示** 显示在对话中。DSH 的“允许一次”绝不会选成 CLI 的整个会话授权。如果你关闭提示，请求会保持待处理并由工具报告；再次调用 `remote_agent_wait` 可以重新显示提示。
+- 以不先询问的模式（完全访问、跳过权限）启动智能体，需要你明确批准。
+- 停止 DSH 的回复只会停止等待，**不会**停止远程智能体，与 Paseo 中智能体彼此独立一致。可以用 `remote_agent_stop` 停止它们。
+- 这些工具在 DSH 提供智能体工具和授权服务时加载；没有分派工具注册器时，原生模型入口和设置照常可用。
 
 ## 支持的 CLI
 
-| CLI | 直接执行协议 | 模型与权限 |
-| --- | --- | --- |
-| Claude Code | 原生 stream-json 与 control 通道 | CLI 模型列表、权限确认、结构化问题、原生 UUID 恢复 |
-| Codex | 原生 `codex app-server` stdio | 模型与思考强度、沙箱模式、命令/编辑审批、原生 thread 恢复 |
-| DSH | ACP v1 `dsh --profile acp` | acp profile 的模型与思考强度、原生审批与 `session/resume` 恢复 |
-| Antigravity（反重力） | `agy` 原生 stream-json | CLI 模型列表、流式输出、原生会话恢复、信号中断；不支持逐次交互审批 |
-| Grok | ACP v1 `grok agent --no-leader stdio` | CLI 公布的模型、思考强度与权限选项 |
-| CodeBuddy | ACP v1 `codebuddy --acp` | CLI 公布的模型、思考强度、模式与权限选项 |
+| CLI | 直连协议 |
+| --- | --- |
+| Claude Code | 原生 stream-json / 控制通道 |
+| Codex | 原生 `codex app-server`（stdio） |
+| DSH | ACP v1 `dsh --profile acp` |
+| 反重力 | 原生 `agy` stream-json |
+| Grok | ACP v1 `grok agent --no-leader stdio` |
+| CodeBuddy | ACP v1 `codebuddy --acp` |
 
-发现过程只初始化协议、读取目录和模型，不发送任务指令。ACP 同时支持旧模型/模式字段和新版 `configOptions`，按模型分别读取可用思考强度。CLI 未公布模型时使用「CLI 默认」，会话恢复要求它支持 `loadSession` 或声明 `session/resume`；不支持时保留任务输出并显示错误。远端需要预先安装并登录对应 CLI，模型列表不保证账户具有额度或访问权限。
+检测会初始化各 CLI 的协议并读取模型和模式列表，不会发送提示。ACP 同时支持旧的模型/模式字段和 `configOptions`，包括随模型变化的思考强度。列出的模型不代表账号一定有权限或额度。请先在远程机器上安装并登录各 CLI。
 
-DSH 使用远端 `acp` profile 的供应商、模型和凭据配置，不会自动继承 `web` profile 的插件与模型设置。恢复调用原生 `session/resume`，输出历史由本插件保留。参见 [DSH ACP 协议说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md)。
+DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要远程机器上有 Node.js 22+，用于一个内联的进程转发器；**它的无头模式会拒绝需要交互授权的操作**，请先在 `agy` 中配置权限。Grok 以关闭 leader 模式的方式运行。参考：[DSH ACP](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md)、[反重力无头模式](https://antigravity.google/docs/cli/headless/)、[Grok Build](https://docs.x.ai/build/overview)、[CodeBuddy ACP](https://www.codebuddy.cn/docs/cli/acp)、[ACP 配置项](https://agentclientprotocol.com/protocol/v1/session-config-options)。
 
-反重力直接调用 `agy`，不使用 Hub 桥接或远程控制服务。`agy models` 提供模型列表，`--conversation` 恢复原生会话。远端还需 Node.js 22+：插件通过一个临时进程转发器向自己启动的 agy 发送中断信号，无需单独安装服务。**原生无头模式会拒绝需要交互审批的操作**，不会在本面板弹出逐次授权；运行前请在 agy 中配置所需权限。插件不会自动添加跳过权限检查的参数。参见 [Antigravity 无头模式](https://antigravity.google/docs/cli/headless/)。
+## 远程机器
 
-Grok 使用官方 Grok Build CLI，显式关闭 leader 模式；CodeBuddy 使用其原生 ACP 模式，不要求另外部署服务。协议参考：[Grok Build](https://docs.x.ai/build/overview)、[CodeBuddy ACP](https://www.codebuddy.cn/docs/cli/acp)、[ACP 配置项](https://agentclientprotocol.com/protocol/v1/session-config-options)。
+在 **设置 → 远程智能体** 中添加。可以从运行 DSH 的机器的 `~/.ssh/config`（含 `Include` 文件）中选择 `Host` 别名，也可以手动输入 `build-box`、`user@build-box` 或 `ssh://user@build-box:2222`。保存的是原始别名，连接时由 OpenSSH 解析 `HostName`、`User`、`Port`、`IdentityFile` 和 `ProxyJump`。选择列表不会展开通配符、执行 `Match exec` 或建立连接。
 
-## 安装与原 Claude 插件迁移
+运行 DSH 的机器需要能以密钥或 SSH agent 非交互登录，且主机密钥已验证（`BatchMode=yes`、`StrictHostKeyChecking=yes`），不保存密码。远程机器只需要 SSH 和已登录的 CLI，无需安装本插件。每台机器都会锁定 SSH 机器身份；身份变化时请重新添加。
 
-需要 Node.js ≥22.15.0、DSH ≥0.2.1-rc.2 且 <0.3.0。
+## 安装与升级
 
-在**运行 DSH 的机器**下载安装包，无需克隆或构建仓库。下载见 [Remote Agents 0.4.3 Release](https://github.com/lalaze/dsh-plugins/releases/tag/remote-agents-v0.4.3)。Web profile 安装命令：
-
-```sh
-curl -fL -o dsh-remote-agents-0.4.3.tgz \
-  https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.3/dsh-remote-agents-0.4.3.tgz
-dsh plugin --profile web add "$PWD/dsh-remote-agents-0.4.3.tgz"
-```
-
-安装后重启对应的 DSH profile 并刷新浏览器，在「设置 → 远程任务」进入。使用自定义 profile 时将 `web` 替换为其名称。桌面端请先完全退出应用，使用**桌面应用自带的 `dsh` 命令**，将安装参数改为 `--profile desktop`，然后重新打开应用；npm 版 CLI 不能管理这个保留 profile。若宿主提供上传安装入口，也可上传下载的 tgz。
-
-远端执行机器只需 SSH 和已安装、已登录的目标 CLI；使用反重力时还需 Node.js 22+。不必在每台执行机器上再安装本插件。插件尚未发布到 npm，请使用 Release 安装包，不要直接安装仓库根目录。
-
-已经启用 `dsh-claude-ssh` 时，先在 DSH 中停用旧插件，再启用合并包并重启 DSH。不要让两个插件同时注册 Claude。**无需删除旧数据**：合并包沿用 `DSH_OMC_STATE_DIR` 或 `~/.local/state/dsh-oh-my-claude`，保留 `claude-code` / SSH 主机供应商 ID、登录状态、会话和远程工作区路由。旧版自定义插件参数放到合并包的 `claude` 配置对象下。
-
-合并包将旧引擎、后台 keeper、客户端功能与许可声明打入安装包，不要求额外安装旧插件。原有对话中的 Claude 控件、模型目录、Memory、Rewind、Changes、主机与会话管理继续使用原实现。设置中的「远程任务 → Claude SSH」是旧管理界面的入口。
-
-## 使用
-
-1. 在运行 DSH 的机器上，确认可用密钥或 SSH agent 非交互连接远端，且已验证并保存 SSH 主机密钥。插件使用 `BatchMode=yes` 和 `StrictHostKeyChecking=yes`，支持 `~/.ssh/config` 别名与 ProxyJump。
-2. 在「设置 → 远程任务 → CLI 任务 → 添加机器」的「已有 SSH 配置」选择别名，确认自动填入的名称和连接地址后保存。列表读取运行 DSH 的机器上的 `~/.ssh/config`、系统 SSH 配置及其 `Include`；可随时「刷新 SSH 配置」。也可以手动填写 `build-box`、`user@build-box` 或 `ssh://user@build-box:2222`。
-3. 输入远端项目的绝对目录，点击「发现 CLI」，选择可用供应商、模型、权限模式和思考强度。
-4. 输入任务并开始；在面板中处理原生审批、问题、工具输出、后续指令和停止操作。输入框旁也有远程任务入口。
-
-任务在所选远程机器的项目目录运行。已有工作区列表展示此面板曾使用的目录，也可以直接输入任意可访问的绝对路径。不自动同步当前本地项目，不自动创建 worktree。
-
-SSH 配置选择器只列出具体的 `Host` 别名，不展开通配主机，也不执行 `Match exec` 或建立连接。保存时保留别名，由系统 SSH 在连接时解析 `HostName`、`User`、`Port`、`IdentityFile` 和 `ProxyJump`。条件 Include 中声明的别名也可能出现在列表里，是否生效由 SSH 连接时决定；依赖目标主机才能展开的 Include 路径需手动填写别名。没有配置或读取失败时仍可手动输入。
-
-下拉列表跟随 DSH 主题，支持搜索别名、方向键切换和 Enter 选择；长列表在面板内滚动，已添加的连接显示标记。Escape 只关闭当前下拉列表，并把焦点返回选择按钮。
-
-## 生命周期与数据
-
-关闭面板或刷新浏览器不终止任务。DSH 进程退出、插件卸载或 SSH 中断会断开直接 CLI 进程；不保证远端执行跨这些中断存活。远端离线时仍可查看已保存的输出。重新连接使用保存的原生会话 ID，保留所选权限模式，不自动重放上一条指令。执行结果不明时先查看记录，再决定是否人工补发。
-
-新任务先保存唯一请求 ID，再创建原生会话，最后发送指令；每次发送先落盘消息 ID。重复 HTTP 请求不会重复发送任务或后续消息。只有 CLI 原生回执或输出会确认送达；未确认的消息不会自动重试。原生会话创建响应丢失时，重试可能创建空会话，但尚未发送任务指令。
-
-每台机器最多保留 8 个 CLI 连接；满额时仅自动回收已声明恢复能力的空闲会话，优先回收最久未使用的连接，保留其输出和原生会话 ID。执行中、等待审批或正在提交指令的会话不会被回收；从 Store 保存后续消息之前到提交结束，全程保留连接。保存失败也会释放这层保护。
-
-未声明 `loadSession` 或 `session/resume` 的 ACP 会话保持连接，避免丢失继续对话的能力。需要释放名额时，可在任务完成后手动「断开会话」；界面会提示该 CLI 未声明恢复能力。断开会话仍可查看保存的输出，但不保证能够继续原对话。执行中和等待审批时不能断开。
-
-创建任务或后续消息被明确拒绝时，页面解除对应的本地待提交状态并保留内容供修改；两个输入框均限制为 100,000 字符。超时或响应丢失时保留原请求 ID；也可以「清除此提交记录」或「清除此消息记录」解除本地锁定。这些清除操作不会停止任务或撤回已发送的消息，再次提交前应先查看任务列表与输出。
-
-主机固定绑定 SSH 机器身份，任务绑定主机、规范化项目路径、CLI 和原生会话。状态保存在 `$DSH_HOME/storages/dsh-remote-agents/state.json`（默认 `~/.dsh`），输出在同目录 `events/*.jsonl`，文件权限 `0600`。可通过 `stateDir` 改位置。CLI 凭据留在远端；插件不保存 SSH 密码。保留这些文件以保留任务记录。
-
-0.1.x 的 Paseo 主机和任务记录不会自动转换成 SSH 任务。旧地址或身份不匹配时会拒绝继续执行，原数据保留；需要新增直接 SSH 主机并创建新任务。
-
-## 开发与验证
+需要 Node.js ≥22.15.0，DSH ≥0.2.1-rc.2 且 <0.3.0。构建并安装到 DSH profile：
 
 ```sh
-pnpm --filter dsh-remote-agents check
-pnpm --filter dsh-remote-agents test:ui
-pnpm --filter dsh-claude-ssh check
 pnpm --filter dsh-remote-agents pack:plugin
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.3.tgz"
 ```
 
-46 项协议与服务测试、原 Claude 的 76 个测试文件，以及桌面/手机浏览器回归已通过。协议回归使用隔离的 CLI 测试传输，反重力进程转发器使用真实子进程检查信号中断，浏览器回归使用模拟远程机器。另已用本机真实 Codex、Claude、Grok、CodeBuddy 验证初始化与模型发现，用真实 DSH/agy 验证空会话启动和恢复；这些检查不发送推理任务。真实供应商任务与远程 SSH 环境仍需部署时验证。
+重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.2 升级：** 在机器旁点击 **刷新模型**，即可获得不依赖项目的模型入口。原有项目绑定的会话仍按其保存的目录续聊，旧路由不再显示在新模型菜单中。
+
+**从 0.2.1 升级：** 远程模型直接按 CLI 提供方分组，输入框保持原生。侧栏新增统一的“远程会话”入口。已保存的机器、项目、会话和输出均保留；旧的汇总模型路由仍可供已有对话使用，但不会在模型选择器中展示。
+
+**从 0.2.0 升级：** 现在可以通过各 CLI 提供方直接使用主对话。添加机器或刷新其模型即可，现有独立智能体及输出会保留。
+
+**从 0.1.x 升级：** 内置 Claude SSH 引擎仍已移除；本插件通过统一的原生 CLI 后端接入 Claude Code。独立 `dsh-claude-ssh` 插件及其数据不受影响。旧主聊天项目和绑定不会自动导入，请在设置入口刷新机器的模型。机器、独立智能体及其输出会保留。
+
+## 持久化与恢复
+
+状态保存在 `$DSH_HOME/storages/dsh-remote-agents/state.json`（默认 `~/.dsh`），输出保存在同目录的 `events/*.jsonl`。文件权限为 `0600`，可用 `stateDir` 修改目录。机器离线时仍可查看已保存的输出。
+
+- 创建时先保存请求 ID，再进行远程操作；发送提示前先保存原生会话 ID。因此响应丢失后重试不会启动第二个智能体。被 DSH 重启打断的启动仍会保存，重试响应时可继续完成启动。
+- 每条消息在发送前按 ID 记录，绝不会自动重发。只有 CLI 自己的确认才会标记为已送达，否则显示 **未确认送达**。
+- DSH 关闭、插件重载或 SSH 中断会结束 CLI 进程。下一条消息会重新接上已保存的原生会话，不会重放任何内容。无法恢复会话的 CLI（不支持 `loadSession` 或 `session/resume` 的 ACP）会显示 **已结束**，输出保留。
+- 每台机器最多保持 8 个 CLI 进程。满了之后会释放最久未用、且能恢复的空闲智能体；运行中的智能体、待处理的授权和发送中的消息绝不会被释放。
+
+早期基于 Paseo 的任务记录仍可查看，但不会转换。
+
+## 开发
+
+```sh
+pnpm --filter dsh-remote-agents check     # 类型检查、协议与集成测试、构建
+pnpm --filter dsh-remote-agents test:ui   # 会话、审批、设置与 SSH 选择器浏览器回归
+pnpm --filter dsh-remote-agents preview:ui
+```
+
+测试通过伪造的 SSH 传输和模拟 CLI 覆盖各原生协议（包括发送时中断与恢复），以及服务层、使用模拟 DSH 宿主的分派工具。主对话测试还会加载本地安装的 DSH LLM 注册器和会话实现，验证重试、停止、原生审批，并让六种模型入口通过真实后端连接模拟 SSH CLI。反重力转发器测试使用真实子进程。这些测试没有在真实 SSH 机器上运行远程 CLI。

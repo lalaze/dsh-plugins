@@ -9,7 +9,7 @@
 | 插件 | 目录 | 功能 |
 | --- | --- | --- |
 | `dsh-claude-ssh` | [packages/claude-ssh](packages/claude-ssh/README.zh-CN.md) | 在 DSH 中通过系统 OpenSSH 使用远端 Claude Code |
-| `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | 合并完整 Claude SSH 接入；DSH 直接通过 SSH 选择远程机器、CLI 和模型，管理任务、审批与恢复 |
+| `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Sidebar Browser 网页内的元素、Console 和网络调试浮窗 |
@@ -55,7 +55,7 @@ Claude 的 check 包含模板回归与远程工作区兼容测试。离线测试
 
 ## 安装插件
 
-远程任务合并插件可直接下载 [Remote Agents 0.4.3 安装包](https://github.com/lalaze/dsh-plugins/releases/download/remote-agents-v0.4.3/dsh-remote-agents-0.4.3.tgz)，无需构建。跨机器安装命令与原 Claude 插件迁移步骤见[安装说明](packages/remote-agents/README.zh-CN.md#安装与原-claude-插件迁移)。
+远程智能体 **0.2.3** 在 DSH 原生模型选择器中按 Claude、Codex 等 CLI 提供方分组，直接使用主对话；侧栏的“远程会话”统一管理历史、续聊与待审批请求，分派工具继续可用。运行 `pnpm --filter dsh-remote-agents pack:plugin` 构建 `dist/dsh-remote-agents-0.2.3.tgz`。安装方法及与 0.1.x 的区别见[安装与升级](packages/remote-agents/README.zh-CN.md#安装与升级)。
 
 构建后按插件安装到目标 DSH profile：
 

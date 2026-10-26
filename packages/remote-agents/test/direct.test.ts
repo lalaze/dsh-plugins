@@ -9,7 +9,6 @@ import { JsonlPeer, quote, type Child, type SshTransport, type WireMessage } fro
 import { Store } from '../src/store.js';
 import { TaskHistory } from '../src/history.js';
 import { RemoteAgentsService } from '../src/service.js';
-import { claimClaudeRuntime } from '../../claude-ssh/src/runtime-owner.js';
 import { decodeAntigravityModels } from '../src/antigravity.js';
 
 class FakeCli implements Child {
@@ -35,7 +34,7 @@ class FakeCli implements Child {
     if (this.stopped) return;
     if (m.event === 'dsh_interrupt') { this.emit({ event: 'result', result: { status: 'ERROR', error: 'cancelled' } }); this.exit(new Error('Antigravity interrupted')); return; }
     if (m.type === 'control_request') {
-      if (m.request.subtype === 'interrupt') this.finish();
+      if (m.request.subtype === 'interrupt') { if (this.transport.claudeInterruptError) this.emit({ type: 'result', subtype: 'error_during_execution', is_error: true }); else this.finish(); }
       this.control(m, m.request.subtype === 'list_models' ? { models: [{ value: 'claude-remote', displayName: 'Claude remote', supportedEffortLevels: ['high'] }] } : {});
       return;
     }
@@ -93,12 +92,15 @@ class FakeSsh implements SshTransport {
   children: FakeCli[] = [];
   scripts: string[] = [];
   admissions: { provider: string; binding: unknown }[] = [];
-  model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; dropPrompt = false;
+  model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; dropPrompt = false; claudeInterruptError = false;
   configOptions?: any[];
   store?: Store;
+  missingPath?: string;
   constructor(readonly installed = ['codex']) {}
   async exec(script: string) {
     this.scripts.push(script);
+    if (this.missingPath && script.startsWith(`cd ${quote(this.missingPath)} &&`)) throw new Error(`Remote directory does not exist: ${this.missingPath}`);
+    if (script === 'printf \'%s\' "$HOME"') return '/home/builder';
     if (script.includes('uname -n')) return 'machine\0builder\0machine-id-1\0';
     if (script === 'node --version') return 'v22.23.2\n';
     if (script.endsWith("' models")) return 'Fetching available models...\nagy-remote\tAntigravity remote\n';
@@ -122,6 +124,34 @@ async function fixture(t: TestContext, provider = 'codex') {
   return { directory, store, ssh, service, hostId, request, backend: () => backend };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
+const native = (store: Store, id: string) => store.snapshot().tasks.find(t => t.id === id)!.native!;
+const types = (entries: { item: { type: string } }[]) => entries.map(e => e.item.type);
+
+test('changing a model resumes the same native thread and preserves earlier output', async t => {
+  const { service, ssh, request, store, hostId } = await fixture(t);
+  const agent = await service.create(request); await tick(); ssh.live.finish(); await tick();
+  const thread = native(store, agent.id).sessionId;
+  ssh.model = 'codex-next'; await service.providers(hostId, request.cwd, true);
+  await service.setModel(agent.id, 'codex-next', 'high');
+  await service.send(agent.id, { id: randomUUID(), text: 'Continue with the new model' }, { interrupt: false }); await tick();
+  assert.equal(native(store, agent.id).sessionId, thread);
+  const resume = ssh.live.sent.find(m => m.method === 'thread/resume');
+  assert.equal(resume?.params.threadId, thread); assert.equal(resume?.params.model, 'codex-next');
+  assert.equal(ssh.live.sent.find(m => m.method === 'turn/start')?.params.effort, 'high');
+  const timeline = (await service.detail(agent.id)).timeline!;
+  assert.equal(timeline.entries.filter(e => e.item.type === 'user_message').length, 2);
+  assert.ok(timeline.entries.some(e => e.item.text === '远程结果 🌏'));
+});
+
+test('a non-resumable CLI refuses a model change without closing its live session', async t => {
+  const { service, ssh, request } = await fixture(t, 'grok'); ssh.loadSession = false;
+  const agent = await service.create(request); await tick(); ssh.live.finish(); await tick();
+  const before = ssh.live;
+  await assert.rejects(service.setModel(agent.id, 'different-model'), /cannot resume/);
+  assert.equal(before.stopped, false);
+  await service.send(agent.id, { id: randomUUID(), text: 'Keep working' });
+  assert.equal(ssh.live, before);
+});
 
 test('SSH discovery asks each installed native CLI for models without sending a prompt', async t => {
   const { ssh, service, hostId } = await fixture(t);
@@ -137,9 +167,10 @@ test('SSH discovery asks each installed native CLI for models without sending a 
   assert.ok(ssh.scripts.some(s => s.includes(quote("/srv/project's $(touch ignored)"))));
 });
 
+
 test('Codex binding is durable before inference; permissions, output, follow-ups and cancel use app-server', async t => {
   const { service, ssh, request, store } = await fixture(t);
-  const task = await service.create({ ...request, modeId: 'workspace-write', thinkingOptionId: 'high' });
+  const agent = await service.create({ ...request, modeId: 'workspace-write', thinkingOptionId: 'high' });
   const cli = ssh.live;
   assert.equal(ssh.admissions.length, 1);
   assert.deepEqual((ssh.admissions[0].binding as any).sessionId, 'thread-remote');
@@ -147,48 +178,76 @@ test('Codex binding is durable before inference; permissions, output, follow-ups
   assert.equal(cli.argv[1], 'app-server');
   assert.equal(cli.sent.find(m => m.method === 'turn/start')!.params.effort, 'high');
   cli.emit({ id: 42, method: 'item/commandExecution/requestApproval', params: { command: 'pnpm test', availableDecisions: ['accept', 'decline'] } });
-  let detail = await service.detail(task.id); assert.equal(detail.agent!.pendingPermissions[0].id, 'rpc-42');
-  await service.respond(task.id, 'rpc-42', { behavior: 'allow', selectedActionId: 'accept' });
+  let detail = await service.detail(agent.id);
+  assert.equal(detail.agent.status, 'attention'); assert.equal(detail.permissions[0].id, 'rpc-42');
+  await service.respond(agent.id, 'rpc-42', { behavior: 'allow', selectedActionId: 'accept' });
   assert.deepEqual(cli.sent.find(m => m.id === 42)!.result, { decision: 'accept' });
   cli.finish(); await tick();
-  detail = await service.detail(task.id);
-  assert.equal(detail.agent!.status, 'idle');
+  detail = await service.detail(agent.id);
+  assert.equal(detail.agent.status, 'idle');
   assert.equal(detail.timeline!.entries.filter(e => e.item.type === 'assistant_message').length, 1);
+  assert.ok(detail.timeline!.entries.some(e => e.item.type === 'delivery' && e.item.clientMessageId === agent.id));
+  assert.equal(await service.reply(agent.id), '远程结果 🌏');
   const message = { id: randomUUID(), text: 'Review again' };
-  await service.send(task.id, message); await service.send(task.id, message);
+  await service.send(agent.id, message); await service.send(agent.id, message);
   assert.equal(ssh.admissions.length, 2);
-  await service.stop(task.id); assert.ok(cli.sent.some(m => m.method === 'turn/interrupt'));
-  assert.equal(store.snapshot().tasks[0].native!.initialConfirmed, true);
+  await service.stop(agent.id); assert.ok(cli.sent.some(m => m.method === 'turn/interrupt'));
+  assert.equal(native(store, agent.id).sessionId, 'thread-remote');
+});
+
+test('a message to a running Codex agent interrupts its turn natively before starting the next one', async t => {
+  const { service, ssh, request } = await fixture(t);
+  const agent = await service.create(request), cli = ssh.live;
+  assert.equal((await service.summary(agent.id)).status, 'running');
+  await service.send(agent.id, { id: randomUUID(), text: 'Stop that and run the linter' });
+  const methods = cli.sent.map(m => m.method);
+  assert.ok(methods.indexOf('turn/interrupt') > 0 && methods.indexOf('turn/interrupt') < methods.lastIndexOf('turn/start'));
+  assert.equal(cli.sent.filter(m => m.method === 'turn/start').at(-1)!.params.input[0].text, 'Stop that and run the linter');
+  const entries = types((await service.detail(agent.id)).timeline!.entries);
+  assert.ok(entries.includes('interrupted')); assert.ok(!entries.includes('error'));
+  assert.equal(ssh.admissions.length, 2); assert.equal(ssh.children.filter(c => !c.stopped).length, 1);
+});
+
+test('Claude reports a user interrupt as interrupted, not as a failed turn, and keeps its process', async t => {
+  const { service, ssh, request } = await fixture(t, 'claude'); ssh.claudeInterruptError = true;
+  const agent = await service.create(request), cli = ssh.live;
+  await service.stop(agent.id);
+  const detail = await service.detail(agent.id);
+  assert.equal(detail.agent.status, 'idle'); assert.equal(cli.stopped, false);
+  assert.deepEqual(types(detail.timeline!.entries).filter(t => t === 'error' || t === 'interrupted'), ['interrupted']);
 });
 
 test('restart resumes the saved native thread without replaying an uncertain prompt', async t => {
   const { ssh, service, request, store } = await fixture(t); ssh.dropPrompt = true;
-  const task = await service.create({ ...request, modeId: 'read-only' }); await tick();
+  const agent = await service.create({ ...request, modeId: 'read-only' }); await tick();
   assert.equal(ssh.admissions.length, 1); await service.close();
   const reopened = new Store(join(store.directory, 'state.json')); await reopened.open(); ssh.dropPrompt = false;
   const resumed = new RemoteAgentsService(reopened, host => new SshBackend(host, reopened, ssh)); t.after(() => resumed.close());
-  assert.equal((await resumed.detail(task.id)).agent!.status, 'closed');
-  await resumed.retry(task.id);
+  assert.equal((await resumed.detail(agent.id)).agent.status, 'idle', 'a detached resumable session is idle');
+  await resumed.retry(agent.id);
   assert.equal(ssh.admissions.length, 1);
   const resumedParams = ssh.live.sent.find(m => m.method === 'thread/resume')!.params;
   assert.equal(resumedParams.threadId, 'thread-remote');
   assert.equal(resumedParams.sandbox, 'read-only');
   assert.equal(resumedParams.approvalPolicy, 'on-request');
-  assert.equal((await resumed.detail(task.id)).agent!.status, 'idle');
-  assert.equal(reopened.snapshot().tasks[0].native!.initialConfirmed, undefined);
-  assert.ok((await resumed.detail(task.id)).timeline!.entries.some(e => e.item.type === 'user_message'));
+  const detail = await resumed.detail(agent.id);
+  assert.equal(detail.agent.status, 'idle');
+  assert.ok(detail.timeline!.entries.some(e => e.item.type === 'user_message' && e.item.delivery === 'pending'));
+  assert.ok(!detail.timeline!.entries.some(e => e.item.type === 'delivery'), 'the dropped prompt stays unconfirmed');
 });
 
-test('saved task output remains readable when its SSH host is unavailable', async t => {
+test('saved agent output remains readable when its SSH host is unavailable', async t => {
   const { ssh, service, request, store } = await fixture(t);
-  const task = await service.create(request); ssh.live.finish(); await tick(); await service.close();
+  const agent = await service.create(request); ssh.live.finish(); await tick(); await service.close();
   const reopened = new Store(join(store.directory, 'state.json')); await reopened.open();
   ssh.exec = async () => { throw new Error('SSH host is offline'); };
   const resumed = new RemoteAgentsService(reopened, host => new SshBackend(host, reopened, ssh)); t.after(() => resumed.close());
-  const detail = await resumed.detail(task.id);
-  assert.equal(detail.agent!.status, 'closed');
+  const detail = await resumed.detail(agent.id);
+  assert.equal(detail.agent.status, 'idle');
   assert.ok(detail.timeline!.entries.some(e => e.item.text === '远程结果 🌏'));
-  await assert.rejects(resumed.retry(task.id), /SSH host is offline/);
+  assert.equal(await resumed.reply(agent.id), '远程结果 🌏');
+  await assert.rejects(resumed.retry(agent.id), /SSH host is offline/);
+  await assert.rejects(resumed.send(agent.id, { id: randomUUID(), text: 'Continue' }), /SSH host is offline/);
   assert.equal(ssh.admissions.length, 1);
 });
 
@@ -208,19 +267,19 @@ test('unloading during discovery cannot start a CLI after the backend has closed
 
 for (const provider of ['grok', 'codebuddy']) test(`${provider} uses native ACP permission option IDs, model/mode configuration, cancellation and session recovery`, async t => {
   const { service, ssh, request } = await fixture(t, provider);
-  const task = await service.create({ ...request, modeId: 'ask' }); const cli = ssh.live;
+  const agent = await service.create({ ...request, modeId: 'ask' }); const cli = ssh.live;
   cli.emit({ jsonrpc: '2.0', id: 77, method: 'session/request_permission', params: { sessionId: 'acp-session', toolCall: { title: 'Run checks' }, options: [{ optionId: 'remote-allow-once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'remote-reject', name: 'Reject', kind: 'reject_once' }] } });
-  await service.respond(task.id, 'rpc-77', { behavior: 'allow', selectedActionId: 'remote-allow-once' });
+  await service.respond(agent.id, 'rpc-77', { behavior: 'allow', selectedActionId: 'remote-allow-once' });
   assert.deepEqual(cli.sent.find(m => m.id === 77)!.result, { outcome: { outcome: 'selected', optionId: 'remote-allow-once' } });
   assert.ok(cli.sent.some(m => m.method === 'session/set_mode' && m.params.modeId === 'ask'));
-  await service.stop(task.id); assert.equal((await service.detail(task.id)).agent!.status, 'idle');
-  cli.exit(new Error('SSH dropped')); await service.retry(task.id);
+  await service.stop(agent.id); assert.equal((await service.detail(agent.id)).agent.status, 'idle');
+  cli.exit(new Error('SSH dropped')); await service.retry(agent.id);
   assert.ok(ssh.live.sent.some(m => m.method === 'session/load' && m.params.sessionId === 'acp-session'));
   assert.equal(ssh.admissions.length, 1);
 });
 
 test('DSH discovers opaque ACP model routes, applies reasoning and resumes through session/resume without replay', async t => {
-  const { service, ssh, request, hostId } = await fixture(t, 'dsh');
+  const { service, ssh, request, hostId, store } = await fixture(t, 'dsh');
   ssh.acpModels = false; ssh.acpModes = false;
   ssh.configOptions = [
     { id: 'model', category: 'model', type: 'select', currentValue: 'route-a', options: [{ value: 'route-a', name: 'Remote provider A' }, { value: 'route-b', name: 'Remote provider B' }] },
@@ -229,13 +288,13 @@ test('DSH discovers opaque ACP model routes, applies reasoning and resumes throu
   const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'dsh')!;
   assert.deepEqual(provider.models.map(m => m.id), ['route-a', 'route-b']); assert.deepEqual(provider.modes, []);
   assert.ok(ssh.children[0].sent.some(m => m.method === 'session/close'));
-  const task = await service.create({ ...request, model: 'route-b', thinkingOptionId: 'low' });
-  assert.equal(task.state, 'ready');
+  const agent = await service.create({ ...request, model: 'route-b', thinkingOptionId: 'low' });
+  assert.notEqual(agent.status, 'error', agent.error);
   assert.ok(ssh.live.sent.some(m => m.method === 'session/set_config_option' && m.params.configId === 'reasoning_effort' && m.params.value === 'low'));
   assert.ok(!ssh.live.sent.some(m => m.method === 'session/set_mode' || m.method === 'session/set_model'));
-  await service.stop(task.id);
-  ssh.live.exit(new Error('SSH disconnected')); await service.retry(task.id);
-  assert.ok(ssh.live.sent.some(m => m.method === 'session/resume' && m.params.sessionId === task.native!.sessionId));
+  await service.stop(agent.id);
+  ssh.live.exit(new Error('SSH disconnected')); await service.retry(agent.id);
+  assert.ok(ssh.live.sent.some(m => m.method === 'session/resume' && m.params.sessionId === native(store, agent.id).sessionId));
   assert.ok(!ssh.live.sent.some(m => m.method === 'session/load'));
   assert.equal(ssh.admissions.length, 1);
 });
@@ -252,13 +311,13 @@ test('ACP configOptions discover grouped models and per-model reasoning, and res
   assert.deepEqual(provider.models[1].thinkingOptions!.map(o => o.id), ['low', 'max']);
   assert.equal(provider.models[1].defaultThinkingOptionId, 'max');
   assert.equal(ssh.admissions.length, 0);
-  const task = await service.create({ ...request, model: 'acp-next', modeId: 'plan', thinkingOptionId: 'low' });
-  assert.equal(task.state, 'ready');
+  const agent = await service.create({ ...request, model: 'acp-next', modeId: 'plan', thinkingOptionId: 'low' });
+  assert.notEqual(agent.status, 'error', agent.error);
   const settings = () => ssh.live.sent.filter(m => m.method === 'session/set_config_option').map(m => [m.params.configId, m.params.value]);
   assert.deepEqual(settings(), [['native-model', 'acp-next'], ['native-mode', 'plan'], ['native-effort', 'low']]);
   assert.ok(!ssh.live.sent.some(m => m.method === 'session/set_model' || m.method === 'session/set_mode'));
   ssh.live.finish(); await tick(); ssh.live.exit(new Error('SSH dropped'));
-  await service.retry(task.id);
+  await service.retry(agent.id);
   assert.deepEqual(settings(), [['native-model', 'acp-next'], ['native-mode', 'plan'], ['native-effort', 'low']]);
   assert.equal(ssh.admissions.length, 1);
 });
@@ -266,38 +325,38 @@ test('ACP configOptions discover grouped models and per-model reasoning, and res
 test('ACP agents without model discovery use CLI default, and unsupported resume never resubmits', async t => {
   const { service, ssh, request, hostId } = await fixture(t, 'grok'); ssh.acpModels = false; ssh.loadSession = false;
   assert.equal((await service.providers(hostId, request.cwd)).find(p => p.id === 'grok')!.models[0].id, 'default');
-  const task = await service.create({ ...request, model: 'default' }); ssh.live.finish(); await tick();
+  const agent = await service.create({ ...request, model: 'default' }); ssh.live.finish(); await tick();
   ssh.live.exit(new Error('closed'));
-  await assert.rejects(service.retry(task.id), /cannot resume/);
+  await assert.rejects(service.retry(agent.id), /cannot resume/);
   assert.equal(ssh.admissions.length, 1);
 });
 
 test('Antigravity uses its native JSONL, persists the conversation before prompting, and interrupts through the SSH runner', async t => {
-  const { service, ssh, request, hostId } = await fixture(t, 'antigravity');
+  const { service, ssh, request, hostId, store } = await fixture(t, 'antigravity');
   const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'antigravity')!;
   assert.equal(provider.status, 'ready'); assert.match(provider.notice!, /interactive approval/);
   assert.deepEqual(decodeAntigravityModels('Fetching available models...\ngemini-model\tGemini model\nclaude-model\tClaude model\n').map(m => m.id), ['gemini-model', 'claude-model']);
-  const task = await service.create({ ...request, modeId: 'plan' }), cli = ssh.live;
-  assert.equal(task.state, 'ready');
-  assert.equal(task.native!.sessionId, cli.conversationId);
+  const agent = await service.create({ ...request, modeId: 'plan' }), cli = ssh.live;
+  assert.notEqual(agent.status, 'error', agent.error);
+  assert.equal(native(store, agent.id).sessionId, cli.conversationId);
   assert.equal((ssh.admissions[0].binding as any).sessionId, cli.conversationId);
   assert.equal((ssh.admissions[0].binding as any).initialSent, true);
   assert.deepEqual(cli.sent[0], { event: 'user', message: { content: request.prompt } });
   assert.equal(cli.argv[0], 'node'); assert.ok(cli.argv.includes('stream-json'));
-  assert.equal(task.native!.argv[0], '/usr/bin/agy');
+  assert.equal(native(store, agent.id).argv[0], '/usr/bin/agy');
   cli.finish(); await tick();
-  assert.equal((await service.detail(task.id)).timeline!.entries.filter(e => e.item.type === 'assistant_message').length, 1);
-  await service.send(task.id, { id: randomUUID(), text: 'Continue the native conversation' });
-  await service.stop(task.id);
+  assert.equal((await service.detail(agent.id)).timeline!.entries.filter(e => e.item.type === 'assistant_message').length, 1);
+  await service.send(agent.id, { id: randomUUID(), text: 'Continue the native conversation' });
+  await service.stop(agent.id);
   assert.ok(cli.sent.some(m => m.event === 'dsh_interrupt')); assert.ok(cli.stopped);
-  assert.equal((await service.detail(task.id)).agent!.status, 'closed');
-  await service.retry(task.id);
-  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--conversation') + 1], task.native!.sessionId);
-  assert.equal(ssh.admissions.length, 2);
+  assert.equal((await service.detail(agent.id)).agent.status, 'idle');
+  await service.send(agent.id, { id: randomUUID(), text: 'Resume after the runner stopped' });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--conversation') + 1], native(store, agent.id).sessionId);
+  assert.equal(ssh.admissions.length, 3);
   assert.ok(!ssh.live.sent.some(m => m.type === 'control_request' || m.method));
 });
 
-test('Antigravity reports a missing remote Node runtime without starting a task', async t => {
+test('Antigravity reports a missing remote Node runtime without starting an agent', async t => {
   const { service, ssh, request, hostId } = await fixture(t, 'antigravity');
   const exec = ssh.exec.bind(ssh); ssh.exec = async script => script === 'node --version' ? 'v20.0.0\n' : exec(script);
   const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'antigravity')!;
@@ -308,54 +367,64 @@ test('Antigravity reports a missing remote Node runtime without starting a task'
 
 test('Claude streams once, returns structured questions and resumes its UUID over the same SSH transport', async t => {
   const { service, ssh, request } = await fixture(t, 'claude');
-  const task = await service.create(request), cli = ssh.live;
+  const agent = await service.create(request), cli = ssh.live;
   const sessionId = cli.argv[cli.argv.indexOf('--session-id') + 1]; assert.match(sessionId, /^[0-9a-f-]{36}$/);
   const questions = [{ header: 'Checks', question: 'Which checks should run?', options: [{ label: 'Tests' }] }, { header: 'Scope', question: 'Where should changes apply?', options: [{ label: 'Remote project' }] }];
   cli.emit({ type: 'control_request', request_id: 'question', request: { subtype: 'can_use_tool', tool_name: 'AskUserQuestion', input: { questions } } });
-  await service.respond(task.id, 'claude-question', { behavior: 'allow', answers: { Checks: 'Tests', Scope: 'Remote project' } });
+  await service.respond(agent.id, 'claude-question', { behavior: 'allow', answers: { Checks: 'Tests', Scope: 'Remote project' } });
   const updated = cli.sent.find(m => m.type === 'control_response')!.response.response.updatedInput;
   assert.deepEqual(updated.answers, { 'Which checks should run?': 'Tests', 'Where should changes apply?': 'Remote project' });
   assert.deepEqual(updated.questions, questions);
   cli.finish(); await tick();
-  assert.equal((await service.detail(task.id)).timeline!.entries.filter(e => e.item.type === 'assistant_message').length, 1);
-  cli.exit(new Error('disconnected')); await service.retry(task.id);
+  assert.equal((await service.detail(agent.id)).timeline!.entries.filter(e => e.item.type === 'assistant_message').length, 1);
+  cli.exit(new Error('disconnected')); await service.retry(agent.id);
   assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--resume') + 1], sessionId);
   assert.equal(ssh.admissions.length, 1);
 });
 
-for (const provider of ['codex', 'dsh']) test(`${provider} completed sessions are reclaimed and resume without replay after more than eight tasks`, async t => {
-  const { service, ssh, request } = await fixture(t, provider);
-  const tasks = [];
-  for (let index = 0; index < 12; index++) {
-    const task = await service.create({ ...request, id: randomUUID() });
-    assert.equal(task.state, 'ready', task.error);
-    tasks.push(task); ssh.live.finish(); await tick();
-  }
-  assert.equal(ssh.children.filter(c => !c.stopped).length, 8);
-  assert.equal((await service.detail(tasks[0].id)).agent!.status, 'closed');
-  const nativeId = tasks[0].native!.sessionId;
-  await service.retry(tasks[0].id);
-  const resumed = ssh.live.sent.find(m => m.method === (provider === 'dsh' ? 'session/resume' : 'thread/resume'))!;
-  assert.equal(provider === 'dsh' ? resumed.params.sessionId : resumed.params.threadId, nativeId);
-  assert.equal(ssh.admissions.length, 12);
-  await service.send(tasks[0].id, { id: randomUUID(), text: 'Continue the first task' });
-  assert.equal(ssh.admissions.length, 13);
+test('mode changes release the idle session, and the next message resumes it with the new mode', async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const agent = await service.create(request), cli = ssh.live;
+  cli.finish(); await tick();
+  await service.setMode(agent.id, 'plan');
+  assert.equal(cli.stopped, true);
+  await service.send(agent.id, { id: randomUUID(), text: 'Plan the migration' });
+  const argv = ssh.live.argv;
+  assert.equal(argv[argv.indexOf('--permission-mode') + 1], 'plan');
+  assert.equal(argv[argv.indexOf('--resume') + 1], cli.argv[cli.argv.indexOf('--session-id') + 1]);
+  assert.equal(ssh.admissions.length, 2);
 });
 
-test('session recycling never interrupts running tasks or pending approvals', async t => {
+for (const provider of ['codex', 'dsh']) test(`${provider} completed sessions are reclaimed, and messaging one resumes it without replay`, async t => {
+  const { service, ssh, request, store } = await fixture(t, provider);
+  const agents = [];
+  for (let index = 0; index < 12; index++) {
+    const agent = await service.create({ ...request, id: randomUUID() });
+    assert.notEqual(agent.status, 'error', agent.error);
+    agents.push(agent); ssh.live.finish(); await tick();
+  }
+  assert.equal(ssh.children.filter(c => !c.stopped).length, 8);
+  const nativeId = native(store, agents[0].id).sessionId;
+  await service.send(agents[0].id, { id: randomUUID(), text: 'Continue the first agent' });
+  const resumed = ssh.live.sent.find(m => m.method === (provider === 'dsh' ? 'session/resume' : 'thread/resume'))!;
+  assert.equal(provider === 'dsh' ? resumed.params.sessionId : resumed.params.threadId, nativeId);
+  assert.equal(ssh.admissions.length, 13);
+  assert.equal(ssh.children.filter(c => !c.stopped).length, 8);
+});
+
+test('session recycling never interrupts running agents or pending approvals', async t => {
   const { service, ssh, request } = await fixture(t);
-  const tasks = [];
-  for (let index = 0; index < 8; index++) tasks.push(await service.create({ ...request, id: randomUUID() }));
+  const agents = [];
+  for (let index = 0; index < 8; index++) agents.push(await service.create({ ...request, id: randomUUID() }));
   const live = ssh.children.filter(c => !c.stopped);
   live[0].emit({ id: 42, method: 'item/commandExecution/requestApproval', params: { command: 'pnpm test' } });
-  await assert.rejects(service.disconnect(tasks[0].id), /finish or stop/);
   const ninth = await service.create({ ...request, id: randomUUID() });
-  assert.equal(ninth.state, 'uncertain');
-  assert.match(ninth.error!, /eight open CLI sessions/);
+  assert.equal(ninth.status, 'error');
+  assert.match(ninth.error!, /8 working CLI sessions/);
   assert.ok(live.every(c => !c.stopped));
-  assert.equal((await service.detail(tasks[0].id)).agent!.pendingPermissions.length, 1);
+  assert.equal((await service.detail(agents[0].id)).permissions.length, 1);
   live[1].finish(); await tick();
-  assert.equal((await service.retry(ninth.id)).state, 'ready');
+  assert.notEqual((await service.retry(ninth.id)).status, 'error');
   assert.ok(live[1].stopped);
   assert.equal(live[0].stopped, false);
   assert.equal(ssh.admissions.length, 9);
@@ -363,8 +432,8 @@ test('session recycling never interrupts running tasks or pending approvals', as
 
 test('session recycling protects a follow-up while its delivery record is being saved', async t => {
   const { service, ssh, request } = await fixture(t);
-  const tasks = [];
-  for (let index = 0; index < 8; index++) tasks.push(await service.create({ ...request, id: randomUUID() }));
+  const agents = [];
+  for (let index = 0; index < 8; index++) agents.push(await service.create({ ...request, id: randomUUID() }));
   const first = ssh.children.find(c => !c.stopped)!, messageId = randomUUID();
   first.finish(); await tick();
   let entered!: () => void, release!: () => void;
@@ -375,82 +444,68 @@ test('session recycling protects a follow-up while its delivery record is being 
     if (id === messageId) { entered(); await blocked; }
     return original.call(this, id);
   });
-  const send = service.send(tasks[0].id, { id: messageId, text: 'Continue while another task starts' });
+  const send = service.send(agents[0].id, { id: messageId, text: 'Continue while another agent starts' });
   try {
     await waiting;
-    assert.equal((await service.create({ ...request, id: randomUUID() })).state, 'uncertain');
+    assert.equal((await service.create({ ...request, id: randomUUID() })).status, 'error');
     assert.equal(first.stopped, false);
   } finally { release(); await send; }
   assert.equal(ssh.admissions.length, 9);
 });
 
-test('session recycling protects the service-level Store admission before the backend sees a follow-up', async t => {
+test('a failed registry write rejects a follow-up before sending and leaks no session lease', async t => {
   const { service, ssh, request, store } = await fixture(t);
-  const tasks = [];
-  for (let index = 0; index < 8; index++) tasks.push(await service.create({ ...request, id: randomUUID() }));
-  const first = ssh.children.find(c => !c.stopped)!, messageId = randomUUID();
+  const agents = [];
+  for (let index = 0; index < 8; index++) agents.push(await service.create({ ...request, id: randomUUID() }));
+  const first = ssh.children.find(c => !c.stopped)!;
   first.finish(); await tick();
-  let entered!: () => void, release!: () => void;
-  const waiting = new Promise<void>(resolve => { entered = resolve; });
-  const blocked = new Promise<void>(resolve => { release = resolve; });
   const update = store.update.bind(store);
-  t.mock.method(store, 'update', async (change: Parameters<Store['update']>[0]) => {
+  const mocked = t.mock.method(store, 'update', async (change: Parameters<Store['update']>[0]) => {
     const before = store.snapshot(), next = structuredClone(before); change(next);
-    const admitting = !before.tasks[0].submissions.some(s => s.id === messageId) && next.tasks[0].submissions.some(s => s.id === messageId);
+    if (next.tasks[0]?.updatedAt !== before.tasks[0]?.updatedAt) throw new Error('simulated registry write failure');
     await update(change);
-    if (admitting) { entered(); await blocked; }
   });
-  const send = service.send(tasks[0].id, { id: messageId, text: 'Do not evict during Store admission' });
-  try {
-    await waiting;
-    assert.equal(store.snapshot().tasks[0].submissions[0].state, 'pending');
-    assert.equal((await service.create({ ...request, id: randomUUID() })).state, 'uncertain');
-    assert.equal(first.stopped, false);
-  } finally { release(); await send; }
+  await assert.rejects(service.send(agents[0].id, { id: randomUUID(), text: 'Do not send without a durable record' }), /registry write failure/);
+  assert.equal(ssh.admissions.length, 8);
+  mocked.mock.restore();
+  assert.notEqual((await service.create({ ...request, id: randomUUID() })).status, 'error');
+  assert.equal(first.stopped, true);
   assert.equal(ssh.admissions.length, 9);
-  assert.notEqual(store.snapshot().tasks[0].submissions[0].state, 'uncertain');
 });
 
-test('idle ACP sessions without either resume capability remain connected and accept follow-ups', async t => {
+test('idle ACP sessions without either resume capability stay connected until archived', async t => {
   const { service, ssh, request } = await fixture(t, 'grok'); ssh.loadSession = false;
-  const tasks = [];
+  const agents = [];
   for (let index = 0; index < 8; index++) {
-    tasks.push(await service.create({ ...request, id: randomUUID() })); ssh.live.finish(); await tick();
+    agents.push(await service.create({ ...request, id: randomUUID() })); ssh.live.finish(); await tick();
   }
   const first = ssh.children.find(c => !c.stopped)!;
   const ninth = await service.create({ ...request, id: randomUUID() });
-  assert.equal(ninth.state, 'uncertain');
+  assert.equal(ninth.status, 'error');
   assert.equal(first.stopped, false);
-  assert.equal((await service.detail(tasks[0].id)).agent!.resumable, false);
-  await service.send(tasks[0].id, { id: randomUUID(), text: 'Continue the non-resumable session' });
+  assert.equal((await service.detail(agents[0].id)).agent.resumable, false);
+  await service.send(agents[0].id, { id: randomUUID(), text: 'Continue the non-resumable session' });
   assert.equal(ssh.admissions.length, 9);
   first.finish(); await tick();
-  await service.disconnect(tasks[0].id);
-  const detail = await service.detail(tasks[0].id);
-  assert.equal(first.stopped, true); assert.equal(detail.agent!.status, 'closed');
+  await service.archive(agents[0].id);
+  const detail = await service.detail(agents[0].id);
+  assert.equal(first.stopped, true); assert.equal(detail.agent.status, 'closed');
   assert.ok(detail.timeline!.entries.some(e => e.item.text === 'Continue the non-resumable session'));
-  await assert.rejects(service.retry(tasks[0].id), /cannot resume/);
-  assert.equal((await service.retry(ninth.id)).state, 'ready');
+  await assert.rejects(service.send(agents[0].id, { id: randomUUID(), text: 'Too late' }), /cannot be resumed/);
+  assert.equal((await service.summary(agents[0].id)).archived, true, 'a failed message must not restore an ended agent');
+  await assert.rejects(service.retry(agents[0].id), /cannot resume/);
+  assert.notEqual((await service.retry(ninth.id)).status, 'error');
   assert.equal(ssh.admissions.length, 10);
 });
 
-test('a failed Store write releases the session lease without sending the follow-up', async t => {
-  const { service, ssh, request, store } = await fixture(t);
-  const tasks = [];
-  for (let index = 0; index < 8; index++) tasks.push(await service.create({ ...request, id: randomUUID() }));
-  const first = ssh.children.find(c => !c.stopped)!, messageId = randomUUID();
-  first.finish(); await tick();
-  const update = store.update.bind(store);
-  t.mock.method(store, 'update', async (change: Parameters<Store['update']>[0]) => {
-    const next = store.snapshot(); change(next);
-    if (next.tasks[0].submissions.some(s => s.id === messageId)) throw new Error('simulated registry write failure');
-    await update(change);
-  });
-  await assert.rejects(service.send(tasks[0].id, { id: messageId, text: 'Do not send without a durable record' }), /registry write failure/);
-  assert.equal(ssh.admissions.length, 8);
-  assert.equal((await service.create({ ...request, id: randomUUID() })).state, 'ready');
-  assert.equal(first.stopped, true);
-  assert.equal(ssh.admissions.length, 9);
+test('deleting an agent removes its saved output', async t => {
+  const { service, ssh, request, directory } = await fixture(t);
+  const agent = await service.create(request); ssh.live.finish(); await tick();
+  const path = join(directory, 'events', `${agent.id}.jsonl`);
+  assert.ok((await stat(path)).size > 0);
+  await service.delete(agent.id);
+  await assert.rejects(stat(path), /ENOENT/);
+  assert.ok(ssh.children.every(c => c.stopped));
 });
 
 test('JSONL preserves split UTF-8 and correlates replies; closing rejects in-flight requests', async () => {
@@ -472,14 +527,53 @@ test('history is durable, private, paginated and rejects truncated logs before a
   const reset = await history.page({ epoch: 'old', seq: 1 }); assert.equal(reset.reset, true);
   const path = join(directory, 'events', `${id}.jsonl`); assert.equal((await stat(path)).mode & 0o777, 0o600);
   const reopened = new TaskHistory(directory, id); await reopened.open(); assert.equal((await reopened.page()).endCursor!.seq, 205);
+  assert.equal((await reopened.lastReply()).length, Array.from({ length: 205 }, (_, i) => String(i)).join('').length);
   const data = await readFile(path, 'utf8'); await writeFile(path, data.slice(0, -1));
   await assert.rejects(new TaskHistory(directory, id).open(), /incomplete record/);
 });
 
-test('standalone and embedded Claude engines share one provider ownership guard', () => {
-  const provider = `test-${randomUUID()}`, first = {}, second = {};
-  const release = claimClaudeRuntime(first, provider);
-  assert.throws(() => claimClaudeRuntime(second, provider), /already enabled/);
-  release(); const next = claimClaudeRuntime(second, provider); release();
-  assert.throws(() => claimClaudeRuntime(first, provider), /already enabled/); next();
+test('a missing workspace path is reported without executing in the discovery directory', async t => {
+  const { ChatProjects } = await import('../src/chat-projects.js');
+  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/native-chat.js');
+  const { createUserMessage } = await import('@deepseek-ai/dsh-llm');
+  const { SessionId } = await import('@deepseek-ai/dsh-session');
+  const { service, ssh, hostId, request, store } = await fixture(t);
+  await service.discoverHost(hostId); ssh.missingPath = '/srv/not-on-this-machine';
+  const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined, cwd: () => ssh.missingPath }, 2);
+  const run = async () => { for await (const _chunk of adapter.stream({ provider: chatProviderId('codex'), model: chatModelId(hostId, 'codex', request.model), sessionId: SessionId('missing-workspace'), messages: [createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'Run here' }] })] })) {} };
+  await assert.rejects(run(), /Remote directory does not exist: \/srv\/not-on-this-machine/);
+  assert.equal(ssh.admissions.length, 0); assert.equal(store.snapshot().tasks.length, 0);
+});
+
+for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigravity']) test(`${provider}: DSH native model streams through the real SSH backend and resumes the same conversation`, async t => {
+  const { ChatProjects } = await import('../src/chat-projects.js');
+  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/native-chat.js');
+  const { createUserMessage } = await import('@deepseek-ai/dsh-llm');
+  const { SessionId } = await import('@deepseek-ai/dsh-session');
+  const { service, ssh, hostId, request, store, directory } = await fixture(t, provider);
+  const projects = new ChatProjects(service); await service.discoverHost(hostId); const [project] = projects.hosts();
+  const adapter = new RemoteCliAdapter(projects, { agent: () => undefined, step: () => undefined, cwd: () => '/srv/project' }, 2); t.after(() => adapter.close());
+  const input = (text: string) => ({ provider: chatProviderId(provider), model: chatModelId(project.id, provider, request.model), sessionId: SessionId(`native-${provider}`),
+    messages: [createUserMessage({ source: { kind: 'user' as const }, content: [{ type: 'text' as const, text }] })] });
+  const run = async (options: ReturnType<typeof input>) => {
+    const reply: string[] = [];
+    const done = (async () => { for await (const chunk of adapter.stream(options)) if (chunk.type === 'text-delta') reply.push(chunk.text); })();
+    const count = ssh.admissions.length;
+    for (let i = 0; i < 1000 && ssh.admissions.length === count; i++) await tick();
+    assert.equal(ssh.admissions.length, count + 1, 'one native prompt was admitted');
+    ssh.live.finish(); await done;
+    assert.equal(reply.join(''), '远程结果 🌏');
+  };
+  await run(input('First task'));
+  const first = store.snapshot().tasks[0].native!.sessionId;
+  const follow = input('Follow-up'); await run(follow);
+  assert.equal(store.snapshot().tasks.length, 1); assert.equal(store.snapshot().tasks[0].native!.sessionId, first);
+  assert.equal(ssh.admissions.length, 2);
+  await service.close();
+  const reopened = new Store(join(directory, 'state.json')); await reopened.open();
+  const restarted = new RemoteAgentsService(reopened, host => new SshBackend(host, reopened, ssh)); t.after(() => restarted.close());
+  const resumed = new RemoteCliAdapter(new ChatProjects(restarted), { agent: () => undefined, step: () => undefined }, 2);
+  const replay: string[] = [];
+  for await (const chunk of resumed.stream(follow)) if (chunk.type === 'text-delta') replay.push(chunk.text);
+  assert.equal(replay.join(''), '远程结果 🌏'); assert.equal(ssh.admissions.length, 2, 'completed output replays after restart without a new prompt');
 });
