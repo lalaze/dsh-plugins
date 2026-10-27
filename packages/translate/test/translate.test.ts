@@ -39,3 +39,8 @@ test('drafts for Claude models lock to English by default, and the keywords are 
   assert.equal(parseTranslationSettings({}).englishLockModels, 'claude, anthropic');
   assert.equal(parseTranslationSettings({ englishLockModels: '' }).englishLockModels, '');
 });
+test('the paragraph translate button is on by default and only a boolean turns it off', () => {
+  assert.equal(parseTranslationSettings({}).paragraphTranslate, true);
+  assert.equal(parseTranslationSettings({ paragraphTranslate: false }).paragraphTranslate, false);
+  assert.equal(parseTranslationSettings({ paragraphTranslate: 'false' }).paragraphTranslate, true);
+});

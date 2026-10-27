@@ -1,7 +1,7 @@
 import { loadSettings, translate } from './api.js';
 import { i18n, localizeError, ui } from './i18n.js';
 
-const messageSelector = '[data-testid="assistant-message"], [data-testid="user-message"], [data-message-role="assistant"], [data-message-role="user"]';
+export const messageSelector = '[data-testid="assistant-message"], [data-testid="user-message"], [data-message-role="assistant"], [data-message-role="user"]';
 const overlaySelector = '[data-dsh-translate-overlay]';
 
 function selectedMessage(selection: Selection): Element | null {

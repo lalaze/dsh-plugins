@@ -4,7 +4,7 @@
 
 Supports English and Simplified Chinese, following DSH’s language setting with live updates. English is the fallback when the host has no locale service.
 
-`dsh-translate` adds translation controls to DeepSeek Harness. It provides a translation API settings page, a composer button (also available with `Alt/Option+T`), and a selection action for text in chat messages. The server calls any OpenAI-compatible Chat Completions endpoint, supports an optional fallback endpoint, and records token usage locally without storing source or translated text.
+`dsh-translate` adds translation controls to DeepSeek Harness. It provides a translation API settings page, a composer button (also available with `Alt/Option+T`), a selection action for text in chat messages, and a translate button beside each message paragraph. Hover over a paragraph, list item, heading or quote and click the icon in its left margin; the translation appears in a card that follows the paragraph as you scroll. Click the icon again, the card’s ×, or press Esc to close it, and turn the button off in **Settings → Translation**. The server calls any OpenAI-compatible Chat Completions endpoint, supports an optional fallback endpoint, and records token usage locally without storing source or translated text.
 
 Build and install:
 
