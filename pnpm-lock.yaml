@@ -31,6 +31,9 @@ importers:
       '@dsh-plugins/i18n':
         specifier: workspace:*
         version: link:../i18n
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
 
   packages/gallery:
     devDependencies:

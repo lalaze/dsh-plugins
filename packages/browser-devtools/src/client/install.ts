@@ -1,12 +1,13 @@
 import { controlDevTools, type Inspectable, type State } from './control.js';
+import { DebuggerPanel, type PanelView } from './panel.js';
 import { i18n, ui } from './i18n.js';
 
 const selector = 'webview[data-sidebar-browser-frame="webview"]';
 const messages = {
-    open: 'Open page debugger', close: 'Close page debugger', loading: 'Opening page debugger…',
+    open: 'Open page debugger', close: 'Close page debugger', closeNative: 'Close DevTools', loading: 'Opening page debugger…',
     waiting: 'The page debugger will be available after the page loads', dismiss: 'Dismiss message',
-    unavailable: 'The page is not ready for the debugger. Reload the page and try again.',
-    failed: 'Could not open the in-page debugger. Reload the page and try again.',
+    unavailable: 'The debugger cannot dock in this browser view. Update the plugin or DSH and try again.',
+    failed: 'Could not open the page debugger. Reload the page and try again.',
 };
 const css = `
 .dsh-bdt-button{width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm,5px);background:transparent;color:var(--dsw-alias-label-secondary,#aaa);display:inline-flex;flex:none;align-items:center;justify-content:center;cursor:pointer}
@@ -31,7 +32,7 @@ function toolbarFor(view: Element): HTMLFormElement | undefined {
 export function installDevTools(doc: Document): () => void {
   const win = doc.defaultView;
   if (!win) return () => {};
-  const entries = new Map<Element, { toolbar: HTMLFormElement; button: HTMLButtonElement; notice: HTMLDivElement; render(): void; dispose(): void }>();
+  const entries = new Map<Element, { toolbar: HTMLFormElement; button: HTMLButtonElement; notice: HTMLDivElement; render(): void; localize(): void; dispose(): void }>();
   const style = doc.createElement('style');
   style.dataset.dshBrowserDevtools = '';
   style.textContent = css;
@@ -76,24 +77,29 @@ export function installDevTools(doc: Document): () => void {
       const render = (state = latest) => {
         latest = state;
         dismiss.setAttribute('aria-label', ui(messages.dismiss));
-        button.disabled = !state.ready || state.busy;
-        button.setAttribute('aria-pressed', String(state.opened));
+        const label = state.native ? messages.closeNative : state.opened ? messages.close : messages.open;
+        // An open debugger can always be closed, even while its page navigates.
+        button.disabled = state.busy || (!state.ready && !state.opened && !state.native);
+        button.setAttribute('aria-pressed', String(state.opened || state.native));
         button.setAttribute('aria-busy', String(state.busy));
-        button.setAttribute('aria-label', ui(state.opened ? messages.close : messages.open));
-        button.title = ui(!state.ready ? messages.waiting : state.busy ? messages.loading : state.opened ? messages.close : messages.open);
+        button.setAttribute('aria-label', ui(label));
+        button.title = ui(state.busy ? messages.loading : state.opened || state.native ? label : !state.ready ? messages.waiting : label);
         notice.hidden = !state.error;
         const message = state.error ? ui(messages[state.error]) : '';
         if (description.textContent !== message) description.textContent = message;
       };
-      const control = controlDevTools(view as HTMLElement & Inspectable, render);
-      const click = (event: Event) => { event.preventDefault(); event.stopPropagation(); control.toggle(); };
-      const dismissClick = () => { control.dismiss(); button.focus(); };
+      let control: ReturnType<typeof controlDevTools> | undefined;
+      const panel = new DebuggerPanel(doc, view as unknown as PanelView, () => control?.sync());
+      control = controlDevTools(view as HTMLElement & Inspectable, panel, render);
+      const click = (event: Event) => { event.preventDefault(); event.stopPropagation(); void control?.toggle(); };
+      const dismissClick = () => { control?.dismiss(); button.focus(); };
       button.addEventListener('click', click);
       dismiss.addEventListener('click', dismissClick);
       toolbar.append(button);
       toolbar.after(notice);
-      entries.set(element, { toolbar, button, notice, render, dispose() {
-        control.dispose();
+      entries.set(element, { toolbar, button, notice, render, localize: () => { render(); panel.localize(); }, dispose() {
+        panel.dispose();
+        control?.dispose();
         button.removeEventListener('click', click);
         dismiss.removeEventListener('click', dismissClick);
         button.remove(); notice.remove();
@@ -106,7 +112,7 @@ export function installDevTools(doc: Document): () => void {
     win.queueMicrotask(scan);
   });
   observer.observe(doc.body, { childList: true, subtree: true });
-  const unsubscribe = i18n.subscribe(() => { for (const entry of entries.values()) entry.render(); });
+  const unsubscribe = i18n.subscribe(() => { for (const entry of entries.values()) entry.localize(); });
   scan();
   return () => {
     stopped = true;

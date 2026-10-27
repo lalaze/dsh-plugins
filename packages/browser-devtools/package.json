@@ -1,7 +1,7 @@
 {
   "name": "dsh-browser-devtools",
   "version": "0.1.0",
-  "description": "An in-page debugger for DSH Desktop sidebar browser tabs",
+  "description": "A Chrome-style debugger docked under DSH Desktop sidebar browser tabs",
   "type": "module",
   "main": "lib/server/index.js",
   "types": "lib/server/index.d.ts",
@@ -55,5 +55,8 @@
       ]
     }
   },
-  "devDependencies": { "@dsh-plugins/i18n": "workspace:*" }
+  "devDependencies": {
+    "@dsh-plugins/i18n": "workspace:*",
+    "jsdom": "^26.1.0"
+  }
 }

@@ -4,13 +4,18 @@
 
 Supports English and Simplified Chinese, following DSH’s language setting with live updates. English is the fallback when the host has no locale service.
 
-`dsh-browser-devtools` adds a small debugger to DSH Desktop's Sidebar Browser. It runs inside the selected page, so it does not require Electron's native DevTools to be enabled.
+`dsh-browser-devtools` adds a Chrome-style debugger to DSH Desktop's Sidebar Browser. Click the debugger button beside the address bar:
 
-The floating panel provides:
+- **DSH development builds** (run from source) allow DevTools for browser pages, so the button opens Chromium's own DevTools.
+- **Released DSH** turns DevTools off for browser pages in its main process (`devTools: !app.isPackaged`), which a plugin cannot change. The button docks the plugin's debugger under the page instead.
 
-- element picking with a box and HTML/style summary;
-- captured `console` output and page errors;
-- Fetch, XMLHttpRequest, and resource timing entries.
+The docked debugger lives in DSH's own window, not in the page, so page CSS cannot restyle it and it never covers the page. Drag its top edge to resize it; the height is remembered. It follows DSH's light or dark theme and language. A small agent injected into the page collects data for it:
+
+- **Elements**: the DOM tree with Chrome's syntax colours, keyboard navigation, hover highlighting in the page (margin, border, padding and content boxes), and an inspect button to pick an element in the page. The sidebar shows inline styles and matched CSS rules (Styles) and a box model with every computed property (Computed).
+- **Console**: page `console` output and uncaught errors, with level filters, text filter and repeat counts; a prompt evaluates JavaScript in the page with `$0` bound to the selected element.
+- **Network**: Fetch, XMLHttpRequest and resource timing entries in a table (name, status, type, size, time) with Chrome's type filters.
+
+DSH Desktop cannot open separate pop-up windows for plugins or pages: page pop-ups open as Sidebar Browser tabs, and a plugin's UI stays inside the DSH window.
 
 Build and install the plugin package:
 
@@ -19,6 +24,6 @@ pnpm --filter dsh-browser-devtools check
 pnpm --filter dsh-browser-devtools pack:plugin
 ```
 
-Install the generated `.tgz` in DSH Desktop, restart DSH, open a Sidebar Browser tab, and click the debugger button beside the address bar. The panel is injected into the current page and is removed with the close button or when the page is reloaded.
+Install the generated `.tgz` in DSH Desktop, restart DSH, open a Sidebar Browser tab, and click the debugger button beside the address bar. The debugger stays open across navigations and reconnects to each new page; close it with its × button or the toolbar button.
 
-This is a page debugger rather than a full Chromium DevTools replacement. It cannot inspect browser process internals, extension frames, or requests made before it was opened.
+This is a page debugger rather than a full Chromium DevTools replacement. It reads what page scripts can read: no request headers or bodies, no cross-origin stylesheet rules, no breakpoints, and console messages only from the moment it connects to the page. Fetch and XHR started before it connected appear from resource timing, without method or status.

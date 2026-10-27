@@ -1,245 +1,335 @@
-export type GuestCommand = 'open' | 'close' | 'state';
-export interface GuestState { opened: boolean; available?: boolean }
+/** Global the page agent installs itself under, inside the inspected page. */
+export const AGENT_KEY = '__DSH_BROWSER_DEVTOOLS__';
+/** Bump when the agent's protocol changes, so a page keeps no stale agent. */
+export const AGENT_VERSION = 2;
+
+export interface LogEntry { seq: number; level: 'log' | 'info' | 'warn' | 'error' | 'debug'; text: string; time: number }
+export interface NetworkEntry {
+  seq: number; url: string; method: string; type: string;
+  /** HTTP status, or 0 when unknown (cross-origin resource timing) or failed. */
+  status: number; failed: boolean;
+  /** Bytes over the network; -1 when unknown, 0 with `cached`. */
+  size: number; cached: boolean;
+  start: number; duration: number;
+}
+export interface NodeSummary {
+  id: number; type: number; name: string;
+  attrs: Array<[string, string]>;
+  /** Text and comment content, or an element's single short text child. */
+  text?: string;
+  /** Children shown in the tree (whitespace-only text is skipped). */
+  childCount: number;
+}
+export interface Declaration { name: string; value: string; important: boolean }
+export interface MatchedRule { selector: string; source: string; media?: string; declarations: Declaration[] }
+export interface Box { margin: number[]; border: number[]; padding: number[]; width: number; height: number }
+export interface Styles { inline: Declaration[]; rules: MatchedRule[]; blockedSheets: number; computed: Array<[string, string]>; box: Box }
+export interface Preview { text: string; kind: string }
+export interface Poll { logs: LogEntry[]; network: NetworkEntry[]; picking: boolean; picked?: { id: number; path: number[] } }
 
 /**
- * This function is serialized and evaluated inside the selected Electron
- * webview. Keep all helpers inside it: the guest has no access to this
- * extension's JavaScript realm or module loader.
+ * Installs the page agent. Serialized and evaluated inside the Electron webview, so every
+ * helper lives in this function: the page cannot reach this plugin's module realm.
+ * The agent only collects data and answers the docked panel; it draws nothing but the
+ * element highlight, which lives in a closed shadow root so page styles cannot reach it.
  */
-export function guestController(command: GuestCommand, language: 'en' | 'zh' = 'en'): GuestState {
-  const key = '__DSH_BROWSER_DEVTOOLS__';
-  // `any` is intentional here. The function is compiled into a string and
-  // evaluated in a different realm, where Electron's webview owns the types.
+export function guestAgent(key: string, version: number): boolean {
+  // `any` is intentional: this runs in the page's realm, where its own globals apply.
   const page = globalThis as any;
+  if (page[key]?.version === version) return true;
+  page[key]?.detach?.();
   const document = page.document;
-  if (!document || !document.documentElement) return { opened: false, available: false };
+  if (!document?.documentElement) return false;
 
-  const existing = page[key];
-  existing?.setLocale?.(language);
-  if (command === 'state') return { opened: Boolean(existing?.opened), available: true };
-  if (command === 'close') {
-    existing?.close();
-    return { opened: false, available: true };
-  }
-  if (existing) {
-    existing.open();
-    return { opened: existing.opened, available: true };
-  }
-  if (!document.body) return { opened: false, available: false };
+  const logs: any[] = [], network: any[] = [];
+  let logSeq = 0, netSeq = 0;
+  const ids = new WeakMap<object, number>(), nodes = new Map<number, any>();
+  let nextId = 1;
+  let selected: any = null, picking = false, picked: { id: number; path: number[] } | undefined;
+  const restore: Array<() => void> = [];
 
-  const logs: Array<{ level: string; time: number; values: unknown[] }> = [];
-  const network: Array<{ kind: string; method: string; url: string; status: string; time: number; duration: number }> = [];
-  const originalConsole: Record<string, (...args: unknown[]) => void> = {};
-  const originalFetch = page.fetch;
-  const OriginalXHR = page.XMLHttpRequest;
-  const originalXHROpen = OriginalXHR?.prototype.open;
-  const originalXHRSend = OriginalXHR?.prototype.send;
-  const xhrMeta = new WeakMap<object, { method: string; url: string; entry?: any }>();
-  const listeners: Array<[string, EventListener]> = [];
-  const pageWindow = document.defaultView;
-  const root = document.createElement('aside');
-  const style = document.createElement('style');
-  const pickOverlay = document.createElement('div');
-  let selected: Element | null = null;
-  let highlighted: Element | null = null;
-  let picking = false;
-  let activeTab = 'elements';
-  let closed = false;
-  let locale = language;
-  const ui = (en: string, zh: string) => locale === 'zh' ? zh : en;
+  const idOf = (node: any): number => {
+    let id = ids.get(node);
+    if (!id) { id = nextId++; ids.set(node, id); nodes.set(id, new page.WeakRef(node)); }
+    return id;
+  };
+  const nodeOf = (id: number): any => id === 0 ? document : nodes.get(id)?.deref();
 
-  const text = (value: unknown): string => {
-    if (value instanceof Error) return `${value.name}: ${value.message}`;
-    if (typeof value === 'string') return value;
-    if (typeof value === 'undefined') return 'undefined';
-    if (typeof value === 'bigint') return `${String(value)}n`;
+  // Chrome-like one-line previews of console arguments and evaluation results.
+  const preview = (value: any, depth = 0): Preview => {
+    const t = typeof value;
+    if (value === null) return { text: 'null', kind: 'null' };
+    if (t === 'undefined') return { text: 'undefined', kind: 'null' };
+    if (t === 'string') return depth ? { text: JSON.stringify(value.length > 200 ? `${value.slice(0, 200)}…` : value), kind: 'string' } : { text: value, kind: 'string' };
+    if (t === 'number' || t === 'boolean') return { text: String(value), kind: 'number' };
+    if (t === 'bigint') return { text: `${value}n`, kind: 'number' };
+    if (t === 'symbol') return { text: String(value), kind: 'string' };
+    if (t === 'function') return { text: `ƒ ${value.name || 'anonymous'}()`, kind: 'function' };
     try {
-      const seen = new WeakSet<object>();
-      return JSON.stringify(value, (_key, item: unknown) => {
-        if (typeof item === 'object' && item !== null) {
-          if (seen.has(item)) return '[Circular]';
-          seen.add(item);
-        }
-        if (typeof item === 'bigint') return `${String(item)}n`;
-        return item;
-      }, 2) ?? String(value);
-    } catch { return String(value); }
-  };
-  const schedule = (() => { let pending = false; return (render: () => void) => {
-    if (pending) return; pending = true;
-    pageWindow?.requestAnimationFrame(() => { pending = false; if (root.isConnected) render(); });
-  }; })();
-  const el = (tag: string, className?: string): HTMLElement => {
-    const node = document.createElement(tag); if (className) node.className = className; return node;
-  };
-  const clear = (node: Element) => { while (node.firstChild) node.removeChild(node.firstChild); };
-  const formatElement = (node: Element): string => {
-    const tag = node.tagName.toLowerCase();
-    const id = node.id ? `#${node.id}` : '';
-    const classes = typeof node.className === 'string' && node.className.trim()
-      ? `.${node.className.trim().split(/\s+/).slice(0, 4).join('.')}` : '';
-    return `${tag}${id}${classes}`;
-  };
-  const describe = (node: Element | null): string => {
-    if (!node) return ui('No element selected', '未选择元素');
-    const attrs = Array.from(node.attributes).map(attribute => `${attribute.name}="${attribute.value}"`).join(' ');
-    const html = node.outerHTML.length > 1600 ? `${node.outerHTML.slice(0, 1600)}…` : node.outerHTML;
-    const computed = pageWindow?.getComputedStyle(node);
-    const box = node.getBoundingClientRect();
-    return `${formatElement(node)}\n${attrs || ui('(no attributes)', '（无属性）')}\n\n${html}\n\n${ui('size', '尺寸')}: ${Math.round(box.width)} × ${Math.round(box.height)}\ndisplay: ${computed?.display ?? ui('unknown', '未知')}\ncolor: ${computed?.color ?? ui('unknown', '未知')}`;
-  };
-  const recordLog = (level: string, values: unknown[]) => {
-    logs.push({ level, values, time: Date.now() }); if (logs.length > 200) logs.shift();
-    schedule(renderConsole);
-  };
-  const addNetwork = (entry: any) => {
-    network.push(entry); if (network.length > 200) network.shift(); schedule(renderNetwork);
-  };
-  const urlOf = (input: unknown): string => {
-    try { return new page.URL(typeof input === 'string' ? input : String((input as any)?.url ?? input), page.location.href).href; }
-    catch { return String(input); }
-  };
-  const renderConsole = () => {
-    const list = root.querySelector('[data-dsh-list="console"]'); if (!list) return; clear(list);
-    for (const entry of logs) {
-      const row = el('div', `dsh-bdt-log dsh-bdt-log-${entry.level}`);
-      const stamp = el('time', 'dsh-bdt-time'); stamp.textContent = new Date(entry.time).toLocaleTimeString(locale === 'zh' ? 'zh-CN' : 'en-US');
-      const value = el('pre'); value.textContent = entry.values.map(text).join(' '); row.append(stamp, value); list.append(row);
-    }
-    if (logs.length === 0) { const empty = el('p', 'dsh-bdt-empty'); empty.textContent = ui('Console is empty', '控制台暂无日志'); list.append(empty); }
-    (list as HTMLElement).scrollTop = list.scrollHeight;
-  };
-  const renderNetwork = () => {
-    const list = root.querySelector('[data-dsh-list="network"]'); if (!list) return; clear(list);
-    for (const entry of network) {
-      const row = el('div', 'dsh-bdt-network');
-      const heading = el('strong'); heading.textContent = `${entry.method}  ${entry.status || '…'}`;
-      const url = el('span'); url.textContent = entry.url;
-      const meta = el('small'); meta.textContent = `${entry.kind} · ${Math.round(entry.duration)} ms`;
-      row.append(heading, url, meta); list.append(row);
-    }
-    if (network.length === 0) { const empty = el('p', 'dsh-bdt-empty'); empty.textContent = ui('No requests recorded', '暂无网络请求'); list.append(empty); }
-    (list as HTMLElement).scrollTop = list.scrollHeight;
-  };
-  const renderElements = () => {
-    const detail = root.querySelector('[data-dsh-element-detail]'); if (detail) detail.textContent = describe(selected);
-  };
-  const render = () => { renderConsole(); renderNetwork(); renderElements(); };
-  const renderTabs = () => {
-    Array.from(root.querySelectorAll('[data-dsh-tab]')).forEach((tab: any) => {
-      const active = tab.dataset.dshTab === activeTab; tab.setAttribute('aria-selected', String(active));
-    });
-    Array.from(root.querySelectorAll('[data-dsh-pane]')).forEach((pane: any) => { pane.hidden = pane.dataset.dshPane !== activeTab; });
-  };
-  const setHighlight = (node: Element | null) => {
-    highlighted = node;
-    if (!node) { pickOverlay.hidden = true; return; }
-    const box = node.getBoundingClientRect();
-    Object.assign(pickOverlay.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
-    pickOverlay.hidden = false;
-  };
-  const stopPicking = () => { picking = false; setHighlight(null); root.querySelector('[data-dsh-pick]')?.classList.remove('dsh-bdt-active'); };
-  const pickMove: EventListener = event => {
-    if (!picking) return;
-    const target = event.target as Element | null;
-    if (!(target instanceof page.Element) || root.contains(target)) return;
-    setHighlight(target);
-  };
-  const pickClick: EventListener = event => {
-    if (!picking) return;
-    const target = event.target as Element | null;
-    if (!(target instanceof page.Element) || root.contains(target)) return;
-    event.preventDefault(); event.stopPropagation();
-    selected = target; stopPicking(); activeTab = 'elements'; renderElements(); renderTabs();
-  };
-  const keydown: EventListener = event => { if ((event as KeyboardEvent).key === 'Escape') stopPicking(); };
-  document.addEventListener('pointermove', pickMove, true);
-  document.addEventListener('click', pickClick, true);
-  document.addEventListener('keydown', keydown, true);
-  listeners.push(['pointermove', pickMove], ['click', pickClick], ['keydown', keydown]);
-
-  const finishNetwork = (entry: any, status: string) => { entry.status = status; entry.duration = page.performance.now() - entry.time; addNetwork(entry); };
-  if (typeof originalFetch === 'function') {
-    page.fetch = function(input: unknown, init?: any) {
-      const entry = { kind: 'fetch', method: String(init?.method ?? 'GET').toUpperCase(), url: urlOf(input), status: '', time: page.performance.now(), duration: 0 };
-      return originalFetch.call(page, input, init).then((response: Response) => { finishNetwork(entry, `${response.status} ${response.statusText}`); return response; }, (error: unknown) => { finishNetwork(entry, 'failed'); throw error; });
-    };
-  }
-  if (OriginalXHR && originalXHROpen && originalXHRSend) {
-    OriginalXHR.prototype.open = function(method: string, url: string | URL, ...rest: unknown[]) {
-      xhrMeta.set(this, { method: method.toUpperCase(), url: urlOf(url) });
-      return originalXHROpen.call(this, method, url, ...rest);
-    };
-    OriginalXHR.prototype.send = function(...args: unknown[]) {
-      const meta = xhrMeta.get(this);
-      if (meta) {
-        const entry = { kind: 'xhr', method: meta.method, url: meta.url, status: '', time: page.performance.now(), duration: 0 };
-        meta.entry = entry; this.addEventListener('loadend', () => finishNetwork(entry, `${this.status} ${this.statusText}`), { once: true });
+      if (value instanceof page.Error) return { text: depth ? `${value.name}: ${value.message}` : (value.stack || `${value.name}: ${value.message}`), kind: 'error' };
+      if (value instanceof page.Element) {
+        const cls = typeof value.className === 'string' && value.className.trim() ? `.${value.className.trim().split(/\s+/).join('.')}` : '';
+        return { text: `${value.tagName.toLowerCase()}${value.id ? `#${value.id}` : ''}${cls}`, kind: 'node' };
       }
-      return originalXHRSend.call(this, ...args);
-    };
-  }
-  const PerformanceObserver = page.PerformanceObserver;
-  const performanceObserver = PerformanceObserver ? new PerformanceObserver((list: PerformanceObserverEntryList) => {
-    for (const resource of list.getEntries()) addNetwork({ kind: 'resource', method: 'GET', url: resource.name, status: '', time: resource.startTime, duration: resource.duration });
-  }) : undefined;
-  try { performanceObserver?.observe({ type: 'resource', buffered: true }); } catch { /* older Chromium */ }
-  for (const resource of page.performance?.getEntriesByType('resource').slice(-50) ?? []) addNetwork({ kind: 'resource', method: 'GET', url: resource.name, status: '', time: resource.startTime, duration: resource.duration });
+      if (value instanceof page.Node) return { text: value.nodeName, kind: 'node' };
+      if (depth > 1) return { text: Array.isArray(value) ? `Array(${value.length})` : '{…}', kind: 'object' };
+      if (Array.isArray(value)) {
+        const items = value.slice(0, 20).map(item => preview(item, depth + 1).text);
+        return { text: `(${value.length}) [${items.join(', ')}${value.length > 20 ? ', …' : ''}]`, kind: 'object' };
+      }
+      if (value instanceof page.Map) return { text: `Map(${value.size})`, kind: 'object' };
+      if (value instanceof page.Set) return { text: `Set(${value.size})`, kind: 'object' };
+      if (value instanceof page.Date) return { text: value.toString(), kind: 'object' };
+      if (value instanceof page.RegExp) return { text: String(value), kind: 'string' };
+      if (typeof value.then === 'function') return { text: 'Promise {<pending>}', kind: 'object' };
+      const keys = Object.keys(value);
+      const name = value.constructor && value.constructor !== page.Object ? `${value.constructor.name} ` : '';
+      const fields = keys.slice(0, 12).map(k => `${k}: ${preview(value[k], depth + 1).text}`);
+      return { text: `${name}{${fields.join(', ')}${keys.length > 12 ? ', …' : ''}}`, kind: 'object' };
+    } catch { return { text: Object.prototype.toString.call(value), kind: 'object' }; }
+  };
+  /** `console.log` arguments with %s, %d, %i, %f, %o, %O and %c applied (styles are dropped). */
+  const consoleText = (args: any[]): string => {
+    const rest = [...args], parts: string[] = [];
+    if (typeof rest[0] === 'string' && rest[0].includes('%')) {
+      const format = rest.shift() as string;
+      parts.push(format.replace(/%([sdifoOc%])/g, (match, spec) => {
+        if (spec === '%') return '%';
+        if (!rest.length) return match;
+        const arg = rest.shift();
+        if (spec === 'c') return '';
+        if (spec === 'd' || spec === 'i') return String(parseInt(arg, 10));
+        if (spec === 'f') return String(parseFloat(arg));
+        return preview(arg, spec === 's' ? 0 : 1).text;
+      }));
+    }
+    for (const arg of rest) parts.push(preview(arg).text);
+    return parts.join(' ').slice(0, 20000);
+  };
+  const log = (level: string, text: string) => {
+    logs.push({ seq: ++logSeq, level, text, time: Date.now() });
+    if (logs.length > 1000) logs.shift();
+  };
   for (const level of ['log', 'info', 'warn', 'error', 'debug']) {
     const original = page.console?.[level];
     if (typeof original !== 'function') continue;
-    originalConsole[level] = original.bind(page.console);
-    page.console[level] = (...args: unknown[]) => { recordLog(level, args); originalConsole[level](...args); };
+    page.console[level] = function (this: unknown, ...args: any[]) { log(level, consoleText(args)); return original.apply(this, args); };
+    restore.push(() => { page.console[level] = original; });
   }
-  const addListener = (name: string, listener: EventListener) => { pageWindow?.addEventListener(name, listener); listeners.push([name, listener]); };
-  addListener('error', ((event: ErrorEvent) => recordLog('error', [event.error ?? event.message])) as EventListener);
-  addListener('unhandledrejection', ((event: PromiseRejectionEvent) => recordLog('error', [event.reason])) as EventListener);
+  const onError = (event: any) => log('error', `Uncaught ${preview(event.error ?? event.message).text}`);
+  const onRejection = (event: any) => log('error', `Uncaught (in promise) ${preview(event.reason).text}`);
+  page.addEventListener('error', onError); page.addEventListener('unhandledrejection', onRejection);
+  restore.push(() => { page.removeEventListener('error', onError); page.removeEventListener('unhandledrejection', onRejection); });
 
-  style.textContent = `#dsh-browser-devtools{position:fixed;z-index:2147483647;top:0;right:0;width:min(390px,92vw);height:min(620px,100vh);display:flex;flex-direction:column;background:#18181b;color:#f4f4f5;border:1px solid #3f3f46;box-shadow:0 12px 40px #0008;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}#dsh-browser-devtools *{box-sizing:border-box}#dsh-browser-devtools button{color:inherit;background:#27272a;border:1px solid #52525b;border-radius:4px;padding:4px 8px;cursor:pointer}#dsh-browser-devtools button:hover{background:#3f3f46}#dsh-browser-devtools .dsh-bdt-head{display:flex;align-items:center;gap:6px;padding:7px 8px;background:#27272a;border-bottom:1px solid #3f3f46}#dsh-browser-devtools .dsh-bdt-title{font-weight:600;flex:1}#dsh-browser-devtools .dsh-bdt-tabs{display:flex;gap:3px;padding:6px 8px;border-bottom:1px solid #3f3f46}#dsh-browser-devtools .dsh-bdt-tabs button{flex:1;padding:4px;font-size:11px}#dsh-browser-devtools .dsh-bdt-tabs button[aria-selected=true]{background:#2563eb;border-color:#60a5fa}#dsh-browser-devtools .dsh-bdt-body{min-height:0;flex:1;overflow:auto;padding:8px}.dsh-bdt-list{min-height:100%;overflow:auto}.dsh-bdt-log,.dsh-bdt-network{padding:6px 4px;border-bottom:1px solid #3f3f46;overflow-wrap:anywhere}.dsh-bdt-log pre{white-space:pre-wrap;margin:3px 0}.dsh-bdt-log-warn{color:#facc15}.dsh-bdt-log-error{color:#f87171}.dsh-bdt-time{color:#a1a1aa;margin-right:8px;font-size:10px}.dsh-bdt-network{display:flex;flex-direction:column;gap:3px}.dsh-bdt-network span{color:#d4d4d8}.dsh-bdt-network small{color:#a1a1aa}.dsh-bdt-empty{color:#a1a1aa;text-align:center}.dsh-bdt-element{white-space:pre-wrap;overflow-wrap:anywhere}.dsh-bdt-active{background:#2563eb!important}.dsh-bdt-pick-overlay{position:fixed;pointer-events:none;border:2px solid #38bdf8;background:#38bdf833;z-index:2147483646}`;
-  root.id = 'dsh-browser-devtools';
-  root.innerHTML = '<header class="dsh-bdt-head"><span class="dsh-bdt-title">Page debugger</span><button type="button" data-dsh-close aria-label="Close">×</button></header><nav class="dsh-bdt-tabs" role="tablist"><button type="button" data-dsh-tab="elements" aria-selected="true">Elements</button><button type="button" data-dsh-tab="console" aria-selected="false">Console</button><button type="button" data-dsh-tab="network" aria-selected="false">Network</button></nav><main class="dsh-bdt-body"><section data-dsh-pane="elements"><button type="button" data-dsh-pick>Pick element</button><pre class="dsh-bdt-element" data-dsh-element-detail>No element selected</pre></section><section data-dsh-pane="console" hidden><button type="button" data-dsh-clear="console">Clear</button><div class="dsh-bdt-list" data-dsh-list="console"></div></section><section data-dsh-pane="network" hidden><button type="button" data-dsh-clear="network">Clear</button><div class="dsh-bdt-list" data-dsh-list="network"></div></section></main>';
-  root.querySelector('[data-dsh-close]')?.addEventListener('click', () => page[key]?.close());
-  Array.from(root.querySelectorAll('[data-dsh-tab]')).forEach((tab: any) => tab.addEventListener('click', () => { activeTab = tab.dataset.dshTab ?? 'elements'; renderTabs(); }));
-  root.querySelector('[data-dsh-pick]')?.addEventListener('click', () => { picking = !picking; root.querySelector('[data-dsh-pick]')?.classList.toggle('dsh-bdt-active', picking); if (!picking) setHighlight(null); });
-  Array.from(root.querySelectorAll('[data-dsh-clear]')).forEach((button: any) => button.addEventListener('click', () => { if (button.dataset.dshClear === 'console') logs.length = 0; else network.length = 0; render(); }));
-  (document.head ?? document.documentElement).append(style); document.body.append(root); document.body.append(pickOverlay); pickOverlay.className = 'dsh-bdt-pick-overlay'; pickOverlay.hidden = true;
-  const close = () => {
-    if (closed) return;
-    closed = true;
-    stopPicking(); performanceObserver?.disconnect(); root.remove(); pickOverlay.remove(); style.remove();
-    for (const [name, listener] of listeners) {
-      if (name === 'pointermove' || name === 'click' || name === 'keydown') document.removeEventListener(name, listener, true);
-      else pageWindow?.removeEventListener(name, listener);
+  const now = () => page.performance?.now?.() ?? Date.now();
+  const absolute = (input: unknown): string => {
+    try { return new page.URL(typeof input === 'string' ? input : String((input as any)?.url ?? input), page.location.href).href; } catch { return String(input); }
+  };
+  const request = (entry: Omit<NetworkEntry, 'seq'>) => {
+    network.push({ ...entry, seq: ++netSeq });
+    if (network.length > 1000) network.shift();
+  };
+  const originalFetch = page.fetch;
+  if (typeof originalFetch === 'function') {
+    page.fetch = function (input: unknown, init?: any) {
+      const start = now(), method = String(init?.method ?? (input as any)?.method ?? 'GET').toUpperCase(), url = absolute(input);
+      return originalFetch.call(page, input, init).then((response: any) => {
+        const length = Number(response.headers?.get?.('content-length'));
+        request({ url, method, type: 'fetch', status: response.status, failed: false, size: Number.isFinite(length) && length >= 0 ? length : -1, cached: false, start, duration: now() - start });
+        return response;
+      }, (error: unknown) => {
+        request({ url, method, type: 'fetch', status: 0, failed: true, size: -1, cached: false, start, duration: now() - start });
+        throw error;
+      });
+    };
+    restore.push(() => { page.fetch = originalFetch; });
+  }
+  const XHR = page.XMLHttpRequest?.prototype, xhrOpen = XHR?.open, xhrSend = XHR?.send;
+  if (xhrOpen && xhrSend) {
+    const meta = new WeakMap<object, { method: string; url: string }>();
+    XHR.open = function (this: any, method: string, url: unknown, ...rest: unknown[]) {
+      meta.set(this, { method: String(method).toUpperCase(), url: absolute(url) });
+      return xhrOpen.call(this, method, url, ...rest);
+    };
+    XHR.send = function (this: any, ...args: unknown[]) {
+      const info = meta.get(this), start = now();
+      if (info) this.addEventListener('loadend', () => {
+        const length = Number(this.getResponseHeader?.('content-length'));
+        request({ ...info, type: 'xhr', status: this.status, failed: this.status === 0, size: Number.isFinite(length) && this.getResponseHeader?.('content-length') !== null ? length : -1, cached: false, start, duration: now() - start });
+      }, { once: true });
+      return xhrSend.apply(this, args);
+    };
+    restore.push(() => { XHR.open = xhrOpen; XHR.send = xhrSend; });
+  }
+  const resource = (timing: any) => request({
+    url: timing.name, method: 'GET', type: timing.initiatorType || 'other', status: timing.responseStatus ?? 0, failed: false,
+    size: timing.transferSize > 0 ? timing.transferSize : timing.decodedBodySize > 0 ? 0 : -1, cached: timing.transferSize === 0 && timing.decodedBodySize > 0,
+    start: timing.startTime, duration: timing.duration,
+  });
+  // Requests made before the panel opened are only known from resource timing.
+  for (const timing of page.performance?.getEntriesByType?.('resource') ?? []) resource(timing);
+  if (page.PerformanceObserver) {
+    const observer = new page.PerformanceObserver((list: any) => {
+      // Fetch and XHR are recorded with their method and status by the wrappers above.
+      for (const timing of list.getEntries()) if (timing.initiatorType !== 'fetch' && timing.initiatorType !== 'xmlhttprequest') resource(timing);
+    });
+    try { observer.observe({ type: 'resource' }); restore.push(() => observer.disconnect()); } catch { /* No resource timing. */ }
+  }
+
+  // Element highlight in Chrome's box-model colours, isolated from page CSS.
+  const overlayHost = document.createElement('dsh-browser-devtools-overlay');
+  const shadow = overlayHost.attachShadow({ mode: 'closed' });
+  shadow.innerHTML = '<style>:host{all:initial}div{position:fixed;box-sizing:border-box}.m{border-style:solid;border-color:rgba(246,178,107,.66)}.b{border-style:solid;border-color:rgba(255,229,153,.66)}.p{border-style:solid;border-color:rgba(147,196,125,.55)}.c{background:rgba(111,168,220,.66)}.t{font:11px/1.4 system-ui,sans-serif;background:#fff;color:#333;padding:3px 6px;border-radius:3px;box-shadow:0 1px 4px #0005;white-space:nowrap}.t b{color:#881280;font-weight:normal}.t i{color:#1a1aa6;font-style:normal}.t span{color:#888;margin-left:8px}</style><div class="m"></div><div class="b"></div><div class="p"></div><div class="c"></div><div class="t"></div>';
+  overlayHost.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;display:none';
+  const show = (on: boolean) => { overlayHost.style.display = on ? 'block' : 'none'; };
+  const [marginBox, borderBox, paddingBox, contentBox, tip] = Array.from(shadow.querySelectorAll('div')) as any[];
+  const px = (value: string) => parseFloat(value) || 0;
+  const highlight = (node: any) => {
+    if (!node || node.nodeType !== 1 || !node.isConnected) { show(false); return; }
+    if (!overlayHost.isConnected) document.documentElement.append(overlayHost);
+    const rect = node.getBoundingClientRect(), style = page.getComputedStyle(node);
+    const sides = (prefix: string, suffix = '') => ['top', 'right', 'bottom', 'left'].map(side => px(style.getPropertyValue(`${prefix}-${side}${suffix}`)));
+    const [mt, mr, mb, ml] = sides('margin'), [bt, br, bb, bl] = sides('border', '-width'), [pt, pr, pb, pl] = sides('padding');
+    const place = (box: any, left: number, top: number, width: number, height: number, widths?: number[]) => {
+      Object.assign(box.style, { left: `${left}px`, top: `${top}px`, width: `${Math.max(0, width)}px`, height: `${Math.max(0, height)}px` });
+      if (widths) box.style.borderWidth = widths.map(w => `${Math.max(0, w)}px`).join(' ');
+    };
+    place(marginBox, rect.left - ml, rect.top - mt, rect.width + ml + mr, rect.height + mt + mb, [mt, mr, mb, ml]);
+    place(borderBox, rect.left, rect.top, rect.width, rect.height, [bt, br, bb, bl]);
+    place(paddingBox, rect.left + bl, rect.top + bt, rect.width - bl - br, rect.height - bt - bb, [pt, pr, pb, pl]);
+    place(contentBox, rect.left + bl + pl, rect.top + bt + pt, rect.width - bl - br - pl - pr, rect.height - bt - bb - pt - pb);
+    const cls = typeof node.className === 'string' && node.className.trim() ? `.${node.className.trim().split(/\s+/).slice(0, 3).join('.')}` : '';
+    tip.textContent = '';
+    const name = document.createElement('b'); name.textContent = node.tagName.toLowerCase();
+    const extra = document.createElement('i'); extra.textContent = `${node.id ? `#${node.id}` : ''}${cls}`;
+    const size = document.createElement('span'); size.textContent = `${Math.round(rect.width * 100) / 100} × ${Math.round(rect.height * 100) / 100}`;
+    tip.append(name, extra, size);
+    const below = rect.bottom + mb + 30 < page.innerHeight || rect.top - mt < 30;
+    Object.assign(tip.style, { left: `${Math.max(2, Math.min(rect.left, page.innerWidth - 260))}px`, top: `${below ? Math.min(rect.bottom + mb + 6, page.innerHeight - 26) : rect.top - mt - 28}px` });
+    show(true);
+  };
+  restore.push(() => overlayHost.remove());
+
+  const pathOf = (node: any): number[] => {
+    const path: number[] = [];
+    for (let current = node; current && current !== document; current = current.parentNode) path.unshift(idOf(current));
+    return path;
+  };
+  const target = (event: any) => event.composedPath?.()[0] ?? event.target;
+  const pickMove = (event: any) => { if (picking) { const node = target(event); if (node?.nodeType === 1 && node !== overlayHost) highlight(node); } };
+  const pickClick = (event: any) => {
+    if (!picking) return;
+    const node = target(event);
+    if (node?.nodeType !== 1 || node === overlayHost) return;
+    event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+    picking = false; selected = node; highlight(null);
+    picked = { id: idOf(node), path: pathOf(node) };
+  };
+  // Swallow the press that ends a pick, so the page does not also react to it.
+  const pickBlock = (event: any) => { if (picking) { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); } };
+  const pickKey = (event: any) => { if (picking && event.key === 'Escape') { picking = false; highlight(null); } };
+  const capture = [['pointermove', pickMove], ['click', pickClick], ['pointerdown', pickBlock], ['mousedown', pickBlock], ['pointerup', pickBlock], ['mouseup', pickBlock], ['keydown', pickKey]] as const;
+  for (const [name, listener] of capture) page.addEventListener(name, listener, true);
+  restore.push(() => { for (const [name, listener] of capture) page.removeEventListener(name, listener, true); });
+
+  const summary = (node: any): NodeSummary => {
+    const id = idOf(node), type = node.nodeType;
+    if (type === 3 || type === 8) return { id, type, name: node.nodeName, attrs: [], text: String(node.nodeValue).trim().slice(0, 500), childCount: 0 };
+    if (type === 10) return { id, type, name: node.name || 'html', attrs: [], childCount: 0 };
+    const children = shown(node);
+    const only = children.length === 1 && children[0].nodeType === 3 ? String(children[0].nodeValue).trim() : undefined;
+    const inline = only !== undefined && only.length <= 80 && !only.includes('\n');
+    return {
+      id, type, name: String(node.localName ?? node.nodeName).toLowerCase(),
+      attrs: Array.from(node.attributes ?? []).slice(0, 50).map((a: any) => [a.name, a.value.length > 300 ? `${a.value.slice(0, 300)}…` : a.value] as [string, string]),
+      ...(inline ? { text: only } : {}), childCount: inline ? 0 : children.length,
+    };
+  };
+  const shown = (node: any): any[] => {
+    const list = node.nodeType === 1 && node.shadowRoot ? [...Array.from(node.shadowRoot.childNodes), ...Array.from(node.childNodes)] : Array.from(node.childNodes ?? []);
+    return list.filter((child: any) => child !== overlayHost && (child.nodeType !== 3 || String(child.nodeValue).trim()) && [1, 3, 8, 10].includes(child.nodeType));
+  };
+
+  const declarations = (style: any): Declaration[] => {
+    const list: Declaration[] = [];
+    for (let i = 0; i < style.length; i++) {
+      const name = style[i];
+      list.push({ name, value: style.getPropertyValue(name), important: style.getPropertyPriority(name) === 'important' });
     }
-    for (const [level, original] of Object.entries(originalConsole)) page.console[level] = original;
-    if (originalFetch) page.fetch = originalFetch;
-    if (OriginalXHR && originalXHROpen && originalXHRSend) { OriginalXHR.prototype.open = originalXHROpen; OriginalXHR.prototype.send = originalXHRSend; }
-    delete page[key];
+    return list;
   };
-  const localize = () => {
-    root.lang = locale;
-    const labels: Array<[string, string]> = [
-      ['.dsh-bdt-title', ui('Page debugger', '网页调试器')],
-      ['[data-dsh-tab="elements"]', ui('Elements', '元素')],
-      ['[data-dsh-tab="console"]', ui('Console', '控制台')],
-      ['[data-dsh-tab="network"]', ui('Network', '网络')],
-      ['[data-dsh-pick]', ui('Pick element', '选择元素')],
-    ];
-    for (const [selector, label] of labels) {
-      const node = root.querySelector(selector); if (node) node.textContent = label;
+  const styles = (node: any): Styles | null => {
+    if (node?.nodeType !== 1) return null;
+    const rules: MatchedRule[] = [];
+    let blockedSheets = 0;
+    const walk = (list: any, source: string, media?: string) => {
+      for (const rule of Array.from(list) as any[]) {
+        if (rules.length >= 300) return;
+        if (rule.selectorText !== undefined && rule.style) {
+          let matches = false;
+          try { matches = node.matches(rule.selectorText); } catch { /* Selector this engine cannot match. */ }
+          if (matches) rules.push({ selector: rule.selectorText, source, ...(media ? { media } : {}), declarations: declarations(rule.style) });
+        } else if (rule.cssRules) {
+          const condition = rule.media?.mediaText ?? rule.conditionText;
+          if (rule.media && condition && typeof page.matchMedia === 'function' && !page.matchMedia(condition).matches) continue;
+          walk(rule.cssRules, source, condition ? `${rule.media ? '@media' : '@supports'} ${condition}` : media);
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets) as any[]) {
+      if (sheet.disabled) continue;
+      const source = sheet.href ? (String(sheet.href).split(/[?#]/)[0].split('/').pop() || sheet.href) : '<style>';
+      let list;
+      try { list = sheet.cssRules; } catch { blockedSheets++; continue; }
+      if (list) walk(list, source);
     }
-    root.querySelector('[data-dsh-close]')?.setAttribute('aria-label', ui('Close', '关闭'));
-    root.querySelectorAll('[data-dsh-clear]').forEach((node: Element) => { node.textContent = ui('Clear', '清空'); });
-    render();
+    const computed = page.getComputedStyle(node), all: Array<[string, string]> = [];
+    for (let i = 0; i < computed.length; i++) all.push([computed[i], computed.getPropertyValue(computed[i])]);
+    all.sort((a, b) => a[0].localeCompare(b[0]));
+    const four = (prefix: string, suffix = '') => ['top', 'right', 'bottom', 'left'].map(side => px(computed.getPropertyValue(`${prefix}-${side}${suffix}`)));
+    const rect = node.getBoundingClientRect(), border = four('border', '-width'), padding = four('padding');
+    return {
+      inline: declarations(node.style ?? { length: 0 }), rules: rules.reverse(), blockedSheets, computed: all,
+      box: { margin: four('margin'), border, padding, width: rect.width - border[1] - border[3] - padding[1] - padding[3], height: rect.height - border[0] - border[2] - padding[0] - padding[2] },
+    };
   };
-  page[key] = { opened: true, open: () => { root.hidden = false; page[key].opened = true; }, close,
-    setLocale: (next: 'en' | 'zh') => { if (locale !== next) { locale = next; localize(); } },
+
+  page[key] = {
+    version,
+    selected: () => selected,
+    preview: (value: unknown) => preview(value),
+    detach() { for (const undo of restore.splice(0).reverse()) { try { undo(); } catch { /* Page replaced it. */ } } if (page[key]?.version === version) delete page[key]; },
+    run(command: string, arg: any): unknown {
+      if (command === 'poll') {
+        const result: Poll = { logs: logs.filter(e => e.seq > (arg?.log ?? 0)), network: network.filter(e => e.seq > (arg?.network ?? 0)), picking, ...(picked ? { picked } : {}) };
+        picked = undefined;
+        return result;
+      }
+      if (command === 'node') { const node = nodeOf(arg?.id ?? 0); return node ? shown(node).map(summary) : null; }
+      if (command === 'styles') return styles(nodeOf(arg?.id));
+      if (command === 'highlight') { highlight(arg?.id ? nodeOf(arg.id) : null); return true; }
+      if (command === 'select') { selected = arg?.id ? nodeOf(arg.id) ?? null : null; return true; }
+      if (command === 'pick') { picking = Boolean(arg?.on); if (!picking) highlight(null); return picking; }
+      if (command === 'clear') { if (arg === 'console') logs.length = 0; else network.length = 0; return true; }
+      return null;
+    },
   };
-  localize();
-  render(); renderTabs();
-  return { opened: true, available: true };
+  return true;
 }
 
-export function guestScript(command: GuestCommand, language: 'en' | 'zh' = 'en'): string {
-  return `(${guestController.toString()})(${JSON.stringify(command)},${JSON.stringify(language)})`;
-}
+/**
+ * The full agent, installed on first use and after each navigation. Bundlers that keep function
+ * names wrap them in a `__name` helper the page does not have, so a no-op one is supplied.
+ */
+export const agentScript = () => `(()=>{const __name=f=>f;return(${guestAgent.toString()})(${JSON.stringify(AGENT_KEY)},${AGENT_VERSION})})()`;
+/** A short command for an installed agent; `null` means the page has no current agent. */
+export const commandScript = (command: string, arg?: unknown) =>
+  `(()=>{const a=window[${JSON.stringify(AGENT_KEY)}];return a&&a.version===${AGENT_VERSION}?a.run(${JSON.stringify(command)},${JSON.stringify(arg ?? null)}):null})()`;
+/** Removes the agent and restores what it wrapped. */
+export const detachScript = () => `(()=>{const a=window[${JSON.stringify(AGENT_KEY)}];if(a&&a.detach)a.detach();return true})()`;
+/**
+ * Evaluates console input in the page as an expression, with `$0` bound to the selected element.
+ * Compiling it as part of the injected script (not `eval`) keeps it working under a strict CSP.
+ */
+export const evaluateScript = (expression: string) =>
+  `(async()=>{const __dshAgent=window[${JSON.stringify(AGENT_KEY)}];const $0=__dshAgent&&__dshAgent.selected?__dshAgent.selected():undefined;const __dshPreview=v=>__dshAgent&&__dshAgent.preview?__dshAgent.preview(v):{text:String(v),kind:typeof v};try{return{result:__dshPreview(await (\n${expression}\n))}}catch(__dshError){return{error:__dshPreview(__dshError)}}})()`;

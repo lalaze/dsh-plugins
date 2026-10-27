@@ -1,128 +1,83 @@
-import { guestScript, type GuestCommand, type GuestState } from './guest.js';
-import { activeLocale } from './i18n.js';
-
 /** The small subset of Electron's webview tag used by the client plugin. */
 export interface Inspectable extends EventTarget {
   getURL(): string;
   executeJavaScript(code: string, userGesture?: boolean): Promise<unknown>;
+  openDevTools?(): void;
+  closeDevTools?(): void;
+  isDevToolsOpened?(): boolean;
 }
 
 export interface State {
   ready: boolean;
+  /** The docked debugger panel is open. */
   opened: boolean;
+  /** Chromium's own DevTools window is open for this page. */
+  native: boolean;
   busy: boolean;
   error?: 'unavailable' | 'failed';
 }
 
-interface GuestResult extends GuestState {
-  available?: boolean;
-}
-
-function isGuestResult(value: unknown): value is GuestResult {
-  return typeof value === 'object' && value !== null
-    && typeof (value as { opened?: unknown }).opened === 'boolean';
+/** The docked panel as the controller sees it. */
+export interface Panel {
+  readonly opened: boolean;
+  open(): Promise<void>;
+  close(): void;
 }
 
 /**
- * Controls the in-page debugger without asking Electron to expose its native
- * DevTools window. Each command is evaluated in the selected webview guest,
- * so a tab can never affect another tab.
+ * Opens Chromium's DevTools for the page where DSH allows it (development builds), otherwise
+ * the docked debugger. Packaged DSH turns DevTools off for Sidebar Browser guests in its main
+ * process, so `openDevTools()` does nothing there and the panel takes over.
  */
-export function controlDevTools(view: Inspectable, changed: (state: State) => void, timeoutMs = 3000) {
+export function controlDevTools(view: Inspectable, panel: Panel, changed: (state: State) => void, nativeWaitMs = 300) {
   let disposed = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  let poller: ReturnType<typeof setInterval> | undefined;
-  let state: State = { ready: false, opened: false, busy: false };
+  let state: State = { ready: false, opened: false, native: false, busy: false };
   const emit = () => { if (!disposed) changed({ ...state }); };
-  const cancel = () => { clearTimeout(timer); timer = undefined; };
-
-  const ready = (): boolean => {
-    try { return /^https?:\/\//i.test(view.getURL()); } catch { return false; }
-  };
-
-  const refresh = () => {
-    if (disposed) return;
-    state.ready = ready();
-    if (!state.ready) state.opened = false;
-    emit();
-  };
-
-  const query = async () => {
-    if (disposed || !ready() || state.busy) return;
-    try {
-      const value = await view.executeJavaScript(guestScript('state', activeLocale()), false);
-      if (isGuestResult(value)) {
-        state.opened = value.opened;
-        state.error = undefined;
-        emit();
-      }
-    } catch {
-      // A guest can disappear between getURL and executeJavaScript during a
-      // navigation. The next dom-ready event will establish the new state.
-    }
-  };
-
-  const settled = (result: unknown, opening: boolean) => {
-    cancel();
-    state.busy = false;
-    if (!isGuestResult(result) || result.available === false) {
-      state.error = 'unavailable';
-      state.opened = false;
-    } else {
-      state.opened = result.opened;
-      state.error = result.opened === opening ? undefined : 'failed';
-    }
-    emit();
-  };
-
-  const gone = () => {
-    cancel();
-    state = { ready: false, opened: false, busy: false };
-    emit();
-  };
+  const ready = (): boolean => { try { return /^https?:\/\//i.test(view.getURL()); } catch { return false; } };
+  const nativeOpen = (): boolean => { try { return view.isDevToolsOpened?.() === true; } catch { return false; } };
+  const refresh = () => { state.ready = ready(); state.opened = panel.opened; state.native = nativeOpen(); emit(); };
 
   const listeners: Record<string, EventListener> = {
-    'dom-ready': () => { refresh(); void query(); },
-    'did-navigate': gone,
-    'did-stop-loading': () => { refresh(); void query(); },
-    'render-process-gone': gone,
-    destroyed: gone,
+    'dom-ready': refresh,
+    'did-navigate': refresh,
+    'did-stop-loading': refresh,
+    'devtools-opened': refresh,
+    'devtools-closed': refresh,
+    'render-process-gone': () => { state = { ...state, ready: false, busy: false }; emit(); },
+    destroyed: () => { state = { ...state, ready: false, busy: false }; emit(); },
   };
   for (const [event, listener] of Object.entries(listeners)) view.addEventListener(event, listener);
   refresh();
-  poller = setInterval(() => { void query(); }, 700);
 
   return {
-    toggle() {
+    async toggle(): Promise<void> {
       if (disposed || state.busy) return;
+      if (nativeOpen()) { try { view.closeDevTools?.(); } catch { /* Already closed. */ } refresh(); return; }
+      if (panel.opened) { panel.close(); refresh(); return; }
       refresh();
       if (!state.ready) return;
-      const opening = !state.opened;
-      state = { ...state, busy: true, error: undefined };
-      emit();
-      timer = setTimeout(() => {
-        timer = undefined;
+      state = { ...state, busy: true, error: undefined }; emit();
+      if (typeof view.openDevTools === 'function') {
+        try { view.openDevTools(); } catch { /* DevTools disabled for this guest. */ }
+        await new Promise(resolve => setTimeout(resolve, nativeWaitMs));
         if (disposed) return;
-        state.busy = false;
-        state.error = 'failed';
-        emit();
-      }, timeoutMs);
-      const command: GuestCommand = opening ? 'open' : 'close';
-      void Promise.resolve()
-        .then(() => view.executeJavaScript(guestScript(command, activeLocale()), true))
-        .then(result => { if (!disposed) settled(result, opening); })
-        .catch(() => {
-          if (disposed) return;
-          cancel();
-          state = { ...state, busy: false, error: 'failed' };
-          emit();
-        });
+        if (nativeOpen()) { state.busy = false; refresh(); return; }
+      }
+      try {
+        await panel.open();
+        state.error = undefined;
+      } catch (error) {
+        state.error = error instanceof Error && error.message === 'layout' ? 'unavailable' : 'failed';
+      }
+      if (disposed) return;
+      state.busy = false;
+      refresh();
     },
+    /** The panel closed itself (its close button). */
+    sync: refresh,
     dismiss() { state.error = undefined; emit(); },
     dispose() {
       disposed = true;
-      cancel();
-      if (poller !== undefined) clearInterval(poller);
       for (const [event, listener] of Object.entries(listeners)) view.removeEventListener(event, listener);
     },
   };
