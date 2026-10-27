@@ -82,7 +82,7 @@ test('creation saves titles, discovered modes and the delegation origin', async 
   const { service, store, request } = await fixture(t);
   const panel = await service.create(request({ prompt: 'Fix   the\nflaky  checkout test' }));
   assert.equal(panel.title, 'Fix the flaky checkout test'); assert.equal(panel.delegated, false);
-  assert.deepEqual(panel.modes.map(m => m.id), ['ask', 'full-access']);
+  assert.deepEqual(panel.modes.map(m => m.id), ['inherit', 'ask', 'full-access']);
   const delegated = await service.create(request(), { title: 'Checkout tests', origin: 'dsh' });
   assert.equal(delegated.title, 'Checkout tests'); assert.equal(delegated.delegated, true);
   assert.equal(store.snapshot().tasks[1].origin, 'dsh');

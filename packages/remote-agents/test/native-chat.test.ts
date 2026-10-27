@@ -288,6 +288,12 @@ for (const mode of ['acceptEdits', 'auto']) test(`new Claude chats inherit remot
   assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
 });
 
+test('new Codex chats use the remote CLI permission config instead of forcing workspace write', async t => {
+  const { remote, adapter, options } = await setup(t);
+  await collect(adapter.stream(options('Use remote permissions')));
+  assert.equal(remote.created!.modeId, 'inherit');
+});
+
 test('dismissed approvals stay pending and can be answered in the session panel without stopping the turn', async t => {
   let prompts = 0;
   const { adapter, options, remote, service, store } = await setup(t, { approval: { request: async () => { prompts++; return 'dismissed'; } } });

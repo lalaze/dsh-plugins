@@ -370,6 +370,13 @@ test('restart resumes the saved native thread without replaying an uncertain pro
   assert.ok(!detail.timeline!.entries.some(e => e.item.type === 'delivery'), 'the dropped prompt stays unconfirmed');
 });
 
+test('Codex inherit mode leaves approval policy and sandbox to the remote config', async t => {
+  const { ssh, service, request } = await fixture(t);
+  await service.create({ ...request, modeId: 'inherit' }); await tick();
+  const params = ssh.live.sent.find(m => m.method === 'thread/start')!.params;
+  assert.equal(params.approvalPolicy, undefined); assert.equal(params.sandbox, undefined);
+});
+
 test('saved agent output remains readable when its SSH host is unavailable', async t => {
   const { ssh, service, request, store } = await fixture(t);
   const agent = await service.create(request); ssh.live.finish(); await tick(); await service.close();

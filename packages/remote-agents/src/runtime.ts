@@ -101,13 +101,14 @@ export class CliSession {
       await initializeCodex(this.peer);
       const mode = this.task.modeId ?? 'workspace-write';
       // Without a selected tier, Codex applies its configured one; a resumed thread does not restore an earlier tier.
-      const params = { cwd: this.agent.cwd, model: this.task.model, ...(this.task.serviceTier ? { serviceTier: this.task.serviceTier } : {}), approvalPolicy: mode === 'full-access' ? 'never' : 'on-request', sandbox: mode === 'read-only' ? 'read-only' : mode === 'full-access' ? 'danger-full-access' : 'workspace-write' };
+      const policy = mode === 'inherit' ? {} : { approvalPolicy: mode === 'full-access' ? 'never' : 'on-request', sandbox: mode === 'read-only' ? 'read-only' : mode === 'full-access' ? 'danger-full-access' : 'workspace-write' };
+      const params = { cwd: this.agent.cwd, model: this.task.model, ...(this.task.serviceTier ? { serviceTier: this.task.serviceTier } : {}), ...policy };
       let response: any;
       const method = resume ? 'thread/resume' : 'thread/start';
       const binding = resume ? { threadId: this.task.native!.sessionId } : {};
       try { response = await this.peer.request(method, { ...params, ...binding }); }
       catch (error) {
-        if (!/unknown variant|invalid.*(?:sandbox|approval)/i.test(String(error))) throw error;
+        if (mode === 'inherit' || !/unknown variant|invalid.*(?:sandbox|approval)/i.test(String(error))) throw error;
         response = await this.peer.request(method, { ...params, ...binding, approvalPolicy: mode === 'full-access' ? 'never' : 'onRequest', sandbox: mode === 'read-only' ? 'readOnly' : mode === 'full-access' ? 'dangerFullAccess' : 'workspaceWrite' });
       }
       this.nativeId = response?.thread?.id;

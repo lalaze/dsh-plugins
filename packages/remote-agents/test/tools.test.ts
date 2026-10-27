@@ -60,9 +60,9 @@ test('create resolves names and defaults, waits for the turn, and returns the re
   assert.equal(result.timedOut, false);
   const [agent] = result.agents;
   assert.equal(agent.status, 'idle'); assert.equal(agent.reply, 'All 42 tests pass.');
-  assert.equal(agent.host, 'Build server'); assert.equal(agent.model, 'remote-model'); assert.equal(agent.mode, 'Ask before commands');
+  assert.equal(agent.host, 'Build server'); assert.equal(agent.model, 'remote-model'); assert.equal(agent.mode, 'Remote CLI settings');
   const summary = await service.summary(agent.id);
-  assert.equal(summary.delegated, true); assert.equal(summary.title, 'Test run'); assert.equal(summary.modeId, 'ask');
+  assert.equal(summary.delegated, true); assert.equal(summary.title, 'Test run'); assert.equal(summary.modeId, 'inherit');
   const text = tool('remote_agent_create').output.render({}, result)[0].text;
   assert.match(text, new RegExp(`Agent ${agent.id}`)); assert.match(text, /All 42 tests pass/);
   await assert.rejects(run('remote_agent_create', { host: 'nowhere', cwd: '/srv/project', provider: 'codex', prompt: 'x' }), /Unknown remote host "nowhere". Saved hosts: Build server/);
@@ -182,5 +182,5 @@ test('list reports hosts, recent projects and active agents; providers reports m
   assert.match(tool('remote_agent_list').output.render({}, list)[0].text, /Build server \(ssh:\/\/builder@build-box/);
   const providers = await tool('remote_agent_providers').execute({ host: 'builder@build-box', cwd: '/srv/project' }, call());
   const text = tool('remote_agent_providers').output.render({}, providers)[0].text;
-  assert.match(text, /codex \(Codex\): ready/); assert.match(text, /remote-model \[thinking: high\]/); assert.match(text, /ask \(default\)/); assert.match(text, /claude \(Claude Code\): unavailable/);
+  assert.match(text, /codex \(Codex\): ready/); assert.match(text, /remote-model \[thinking: high\]/); assert.match(text, /inherit \(default\), ask, full-access/); assert.match(text, /claude \(Claude Code\): unavailable/);
 });

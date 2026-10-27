@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
-import { busy, questionsOf, remotePath, type AgentState, type AgentSummary, type Choice, type Permission, type PermissionAnswer } from './domain.js';
+import { busy, permissionModes, questionsOf, remotePath, type AgentState, type AgentSummary, type Choice, type Permission, type PermissionAnswer } from './domain.js';
 import type { RemoteAgentsService } from './service.js';
 
 /** The narrow DSH host surface used by the delegation tools. */
@@ -193,9 +193,10 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
       async execute(raw) {
         const args = input(raw), target = findHost(required(args.host, 'host'));
         const providers = await service.providers(target.id, remotePath(args.cwd), args.refresh === true);
-        return { providers: providers.map(p => ({ id: p.id, label: p.label, status: p.status, ...(p.error ? { error: p.error } : {}), ...(p.notice ? { notice: p.notice } : {}),
-          models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { default: true } : {}), thinking: (m.thinkingOptions ?? []).map(o => o.id), ...(m.serviceTiers?.length ? { speeds: m.serviceTiers.map(o => o.label) } : {}) })),
-          modes: p.modes.map(m => ({ id: m.id, label: m.label })), ...(p.defaultModeId ? { defaultMode: p.defaultModeId } : {}) })) };
+        return { providers: providers.map(p => { const modes = permissionModes(p.id, p.modes), defaultMode = modes.some(m => m.id === 'inherit') ? 'inherit' : p.defaultModeId;
+          return { id: p.id, label: p.label, status: p.status, ...(p.error ? { error: p.error } : {}), ...(p.notice ? { notice: p.notice } : {}),
+            models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { default: true } : {}), thinking: (m.thinkingOptions ?? []).map(o => o.id), ...(m.serviceTiers?.length ? { speeds: m.serviceTiers.map(o => o.label) } : {}) })),
+            modes: modes.map(m => ({ id: m.id, label: m.label })), ...(defaultMode ? { defaultMode } : {}) }; }) };
       },
     },
     {
@@ -204,7 +205,7 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
       parameters: params({
         host: string('Saved host name, SSH alias or host ID.'), cwd: string('Absolute project directory on the remote host.'),
         provider: string('CLI provider ID: claude, codex, dsh, grok, codebuddy or antigravity.'), prompt: string('Complete, self-contained task for the agent.'),
-        model: string('Model ID or name. Defaults to the CLI default model.'), mode: string('Permission mode ID. Defaults to the CLI default, which asks before risky actions.'),
+        model: string('Model ID or name. Defaults to the CLI default model.'), mode: string('Permission mode ID. Defaults to the remote CLI\'s own permission settings.'),
         thinking: string('Thinking level ID, when the model supports it.'), speed: string('Speed tier, such as Fast for Codex, when the model offers one. Faster tiers use more of the remote account\'s quota. Defaults to the CLI setting.'),
         title: string('Short title (at most 100 characters).'),
         wait: waitParam, timeoutSeconds: timeoutParam,
@@ -217,7 +218,9 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
         const provider = pick(providers, required(args.provider, 'provider'), 'provider')!;
         if (provider.status !== 'ready') throw new Error(`${provider.label} is ${provider.status} on ${target.label}${provider.error ? `: ${provider.error}` : ''}`);
         const model = pick(provider.models, optional(args.model, 'model'), 'model') ?? provider.models.find(m => m.isDefault) ?? provider.models[0];
-        const mode = pick(provider.modes, optional(args.mode, 'mode'), 'mode') ?? provider.modes.find(m => m.id === provider.defaultModeId);
+        // Without an explicit mode, Claude and Codex follow the permission config already set up on the remote machine.
+        const modes = permissionModes(provider.id, provider.modes);
+        const mode = pick(modes, optional(args.mode, 'mode'), 'mode') ?? modes.find(m => m.id === 'inherit') ?? modes.find(m => m.id === provider.defaultModeId);
         const thinking = pick(model.thinkingOptions ?? [], optional(args.thinking, 'thinking'), 'thinking level') ?? model.thinkingOptions?.find(o => o.id === model.defaultThinkingOptionId);
         const speed = pick(model.serviceTiers ?? [], optional(args.speed, 'speed'), 'speed');
         if (mode && unrestricted(mode)) {

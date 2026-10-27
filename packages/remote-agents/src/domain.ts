@@ -19,6 +19,8 @@ export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
 /** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export function permissionModes(provider: string, modes: Choice[]): Choice[] {
+  // Codex's inherit mode leaves approval policy and sandbox to the remote config.toml.
+  if (provider === 'codex') return modes.some(m => m.id === 'inherit') ? modes : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
   if (provider !== 'claude') return modes;
   const choices = modes.some(m => m.id === 'inherit') ? [...modes] : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
   if (!choices.some(m => m.id === 'auto')) choices.splice(choices.findIndex(m => m.id === 'inherit') + 1, 0, { id: 'auto', label: 'Auto · safety checks' });

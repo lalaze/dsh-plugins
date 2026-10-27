@@ -257,8 +257,8 @@ export class RemoteCliAdapter extends LlmAdapter {
         // A newly selected route receives prior human/assistant context, never local DSH tool schemas or its system prompt.
         admitted = true;
         const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt, ...(attachments.length ? { attachments } : {}),
-          // Old cached Claude catalogs must not override remote permissions.
-          ...(provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) },
+          // Native chats follow the remote CLI's own permission config; old cached Claude catalogs must not override it.
+          ...(provider.id === 'codex' ? { modeId: 'inherit' } : provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) },
         { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, signal });
         if (!agent.started) throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
       } else {
