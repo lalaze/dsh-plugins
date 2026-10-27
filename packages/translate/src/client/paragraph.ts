@@ -102,15 +102,18 @@ function attach(): () => void {
     clearTimeout(hideTimer);
     if (block !== hovered) { hovered = block; label(); placeButton(); observe(); }
   };
-  const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && cards.size) { for (const card of [...cards.values()]) close(card); } };
+  const closeAll = () => { for (const card of [...cards.values()]) close(card); };
+  const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') closeAll(); };
+  // A click anywhere but a card or the paragraph button dismisses the cards; text in a card stays selectable.
+  const onDown = (event: PointerEvent) => { if (cards.size && !(event.target instanceof Element && event.target.closest('[data-dsh-translate-paragraph]'))) closeAll(); };
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => { if (!hovered) return; const card = cards.get(hovered); if (card) close(card); else open(hovered); });
-  document.addEventListener('pointerover', onOver); document.addEventListener('keydown', onKey);
+  document.addEventListener('pointerover', onOver); document.addEventListener('keydown', onKey); document.addEventListener('pointerdown', onDown, true);
   document.addEventListener('scroll', schedule, true); window.addEventListener('resize', schedule);
   const unsubscribe = i18n.subscribe(label);
   return () => {
     unsubscribe(); observer.disconnect(); clearTimeout(hideTimer); if (frame) cancelAnimationFrame(frame);
-    document.removeEventListener('pointerover', onOver); document.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointerover', onOver); document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown, true);
     document.removeEventListener('scroll', schedule, true); window.removeEventListener('resize', schedule);
     for (const card of cards.values()) card.element.remove();
     button.remove();
