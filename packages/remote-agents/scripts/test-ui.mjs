@@ -406,19 +406,36 @@ try {
   wait('document.querySelector("[data-native-picker] button").title.includes("macmini")');
   // The usage ring shows context fill; hovering opens the account's plan limits, as in Paseo.
   const hours = h => new Date(Date.now() + h * 3600e3 + 60e3).toISOString();
-  fixture({ seedUsage: { context: { used: 169000, max: 1000000 }, account: { provider: 'codex', plan: 'Plus', email: 'dev@example.com', checkedAt: new Date().toISOString(), windows: [{ id: 'codex:primary', label: 'Session', usedPercent: 18, resetsAt: hours(4) }, { id: 'codex:secondary', label: 'Weekly', usedPercent: 35, resetsAt: hours(48) }] } } });
+  const usageFixture = { context: { used: 169000, max: 1000000 }, tokenUsage: { last: { inputTokens: 40000, cachedInputTokens: 30000, outputTokens: 2000 }, total: { inputTokens: 85000, cachedInputTokens: 60000, cacheWriteInputTokens: 0, outputTokens: 5000 } }, account: { provider: 'codex', plan: 'Plus', email: 'dev@example.com', checkedAt: new Date().toISOString(), windows: [{ id: 'codex:primary', label: 'Session', usedPercent: 18, resetsAt: hours(4) }, { id: 'codex:secondary', label: 'Weekly', usedPercent: 35, resetsAt: hours(48) }] } };
+  fixture({ seedUsage: usageFixture });
   wait('document.querySelector(".ra-usage")?.getAttribute("aria-label") === "上下文窗口已使用 17%"');
   browser('hover', '.ra-usage');
   wait('document.querySelector(".ra-usage-card")?.textContent.includes("剩余 82%")');
+  browser('click', '.ra-usage'); // Keep the card open through viewport and data changes.
   expect('(()=>{const t=document.querySelector(".ra-usage-card").textContent;return t.includes("已使用 17%")&&t.includes("169k / 1m tokens")&&t.includes("Plus")&&t.includes("4h后重置")&&t.includes("剩余 65%")&&t.includes("2d后重置")&&t.includes("dev@example.com")})()');
+  expect('(()=>{const t=document.querySelector(".ra-usage-cache").textContent;return t.includes("缓存读取30k")&&t.includes("缓存写入未知")&&t.includes("缓存命中比例75%")})()');
+  browser('click', '.ra-usage-cache summary');
+  expect('document.querySelector(".ra-usage-cache details").open && document.querySelector(".ra-usage-cache details").textContent.includes("缓存读取60k")');
+  browser('click', '.ra-usage-cache summary');
   expect('(()=>{const r=document.querySelector(".ra-usage-card").getBoundingClientRect(),b=document.querySelector(".ra-usage").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=b.top})()');
   image('usage-ring-light'); browser('set', 'media', 'dark'); image('usage-ring-dark'); browser('set', 'media', 'light');
+  browser('set', 'viewport', '390', '640');
+  expect('(()=>{const r=document.querySelector(".ra-usage-card").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})()');
+  image('usage-ring-mobile'); browser('set', 'viewport', '1440', '1000');
+  fixture({ seedUsage: { ...usageFixture, tokenUsage: { last: { inputTokens: 1000, cachedInputTokens: 0, cacheWriteInputTokens: 0 } } } });
+  wait('document.querySelector(".ra-usage-cache")?.textContent.includes("缓存命中比例0%")');
+  fixture({ seedUsage: { ...usageFixture, tokenUsage: {} } });
+  wait('document.querySelector(".ra-usage-cache")?.textContent.includes("缓存读取未知")');
+  expect('!document.querySelector(".ra-usage-cache").textContent.includes("0%")');
+  evaluate('window.fixture.setLocale("en")');
+  wait('document.querySelector(".ra-usage-cache")?.textContent.includes("Cache readUnknown")');
+  evaluate('window.fixture.setLocale("zh")');
   browser('press', 'Escape'); wait('!document.querySelector(".ra-usage-card")');
   evaluate('window.fixture.picker.current({provider:"deepseek-account",model:"deepseek-model"})');
   wait('!document.querySelector(".ra-usage")');
   evaluate('window.fixture.picker.current({provider:"remote-cli-codex",model:"macmini/codex/codex-model",reasoningEffort:"medium"})');
   wait('document.querySelector(".ra-usage")');
-  console.log('PASS: usage ring reports context, opens plan limits on hover and hides for non-remote models');
+  console.log('PASS: usage ring reports context, cache reads/writes and token hit rate, distinguishes zero from unknown, opens thread totals and plan limits, fits mobile and hides for non-remote models');
   browser('click', trigger); browser('click', rootModel); wait('document.querySelectorAll("[data-ra-model-provider]").length === 4');
   evaluate('window.fixture.disablePlugin()');
   expect('!document.querySelector("[data-ra-model-provider],[data-ra-model-hidden]")');

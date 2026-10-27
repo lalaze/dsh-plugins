@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { PROVIDER_LABELS, type AccountUsage, type UsageReport } from '../domain.js';
+import { PROVIDER_LABELS, type AccountUsage, type TokenUsage, type TokenUsageBreakdown, type UsageReport } from '../domain.js';
 import { api } from './api.js';
 import { localizeError, ui, useLocale } from './i18n.js';
 
@@ -54,13 +54,16 @@ const styles = `
 .ra-usage-progress{fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;transition:stroke-dashoffset .3s ease}
 .ra-usage[data-level=warning]{color:var(--dsw-alias-state-warn-primary,#f5a524)}
 .ra-usage[data-level=error]{color:var(--dsw-alias-state-error-primary,#e5484d)}
-.ra-usage-card{position:fixed;z-index:2147483000;box-sizing:border-box;width:300px;max-width:calc(100vw - 24px);padding:16px;border-radius:14px;background:var(--dsw-alias-bg-layer-3,#26272b);color:var(--dsw-alias-label-primary,#eee);box-shadow:var(--dsw-elevation-prominent,0 0 0 1px rgba(127,127,127,.25),0 8px 24px rgba(0,0,0,.3));font-size:13px;line-height:1.45}
+.ra-usage-card{position:fixed;z-index:2147483000;box-sizing:border-box;width:300px;max-width:calc(100vw - 24px);overflow-y:auto;padding:16px;border-radius:14px;background:var(--dsw-alias-bg-layer-3,#26272b);color:var(--dsw-alias-label-primary,#eee);box-shadow:var(--dsw-elevation-prominent,0 0 0 1px rgba(127,127,127,.25),0 8px 24px rgba(0,0,0,.3));font-size:13px;line-height:1.45}
 .ra-usage-card p{margin:0}
 .ra-usage-title{font-size:15px;font-weight:500}
 .ra-usage-value{margin-top:6px;font-size:15px}
 .ra-usage-muted{color:var(--dsw-alias-label-secondary,#999)}
 .ra-usage-summary .ra-usage-muted{margin-top:4px}
 .ra-usage-account{display:grid;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.25))}
+.ra-usage-cache{display:grid;gap:6px;margin-top:14px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.25))}
+.ra-usage-cache details>summary{cursor:pointer;color:var(--dsw-alias-label-secondary,#999)}
+.ra-usage-cache details[open]>summary{margin-bottom:6px}
 .ra-usage-head{display:flex;align-items:center;gap:8px;min-width:0}
 .ra-usage-provider{font-size:15px;font-weight:500}
 .ra-usage-chip{padding:1px 8px;border-radius:999px;background:var(--dsw-alias-bg-layer-1,rgba(127,127,127,.18));color:var(--dsw-alias-label-secondary,#aaa);font-size:12px;white-space:nowrap}
@@ -110,6 +113,27 @@ function useContextReport(sessionId: string | undefined, route: string | undefin
 
 function RefreshIcon() {
   return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" /></svg>;
+}
+function TokenBreakdown({ usage }: { usage?: TokenUsageBreakdown }) {
+  const input = usage?.inputTokens, read = usage?.cachedInputTokens;
+  const ratio = input !== undefined && input > 0 && read !== undefined && read <= input ? read / input * 100 : undefined;
+  const percent = ratio === undefined ? ui('Unknown') : ratio > 0 && ratio < 0.1 ? '<0.1%' : `${Number(ratio.toFixed(1))}%`;
+  const token = (value: number | undefined) => <span title={value === undefined ? undefined : String(value)}>{value === undefined ? ui('Unknown') : formatTokens(value)}</span>;
+  return <>
+    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Input tokens')}</span>{token(input)}</div>
+    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Cache read')}</span>{token(read)}</div>
+    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Cache write')}</span>{token(usage?.cacheWriteInputTokens)}</div>
+    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Cache hit rate')}</span><span>{percent}</span></div>
+    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Output tokens')}</span>{token(usage?.outputTokens)}</div>
+  </>;
+}
+export function CacheSection({ usage }: { usage?: TokenUsage }) {
+  return <section className="ra-usage-cache" aria-label={ui('Prompt cache')}>
+    <p className="ra-usage-title">{ui('Prompt cache')}</p>
+    <p className="ra-usage-muted">{ui('Latest reported model request')}</p>
+    <TokenBreakdown usage={usage?.last} />
+    {usage?.total && <details><summary>{ui('Thread total')}</summary><TokenBreakdown usage={usage.total} /></details>}
+  </section>;
 }
 function AccountSection({ provider, account, loading, refresh }: { provider: string; account?: AccountUsage; loading: boolean; refresh: () => void }) {
   return <section className="ra-usage-account" aria-label={ui('Plan usage')}>
@@ -192,7 +216,7 @@ export function UsageRing({ sessionId }: { sessionId?: string }) {
         {percent !== null && <circle className="ra-usage-progress" cx="8" cy="8" r={radius} strokeDasharray={circumference} strokeDashoffset={circumference * (1 - percent / 100)} transform="rotate(-90 8 8)" />}
       </svg>
     </button>
-    {open && position && createPortal(<div ref={card} className="ra-usage-card" role="dialog" aria-label={ui('Context window')} style={{ left: position.left, bottom: position.bottom }} onMouseEnter={show} onMouseLeave={hide}>
+    {open && position && createPortal(<div ref={card} className="ra-usage-card" role="dialog" aria-label={ui('Context window')} style={{ left: position.left, bottom: position.bottom, maxHeight: `calc(100vh - ${position.bottom + 12}px)` }} onMouseEnter={show} onMouseLeave={hide}>
       <section className="ra-usage-summary">
         <p className="ra-usage-title">{ui('Context window')}</p>
         {context && percent !== null ? <>
@@ -200,6 +224,7 @@ export function UsageRing({ sessionId }: { sessionId?: string }) {
           <p className="ra-usage-muted">{ui('{used} / {max} tokens', { used: formatTokens(context.used), max: formatTokens(context.max) })}</p>
         </> : <p className="ra-usage-muted">{ui('Shown after the remote CLI reports it.')}</p>}
       </section>
+      {reportsAccount && <CacheSection usage={report.tokenUsage} />}
       {reportsAccount && <AccountSection provider={report.provider} account={value?.value} loading={value?.loading ?? true} refresh={() => loadAccount(true)} />}
     </div>, document.body)}
   </>;

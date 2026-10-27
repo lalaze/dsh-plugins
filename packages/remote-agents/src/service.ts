@@ -367,7 +367,9 @@ export class RemoteAgentsService {
       .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))[0];
     const target = task ? { hostId: task.hostId, provider: task.provider } : options.target;
     if (!target) return null;
-    const report: UsageReport = { provider: target.provider, context: task ? (await this.live(task))?.context ?? task.context ?? null : null };
+    const live = task ? await this.live(task) : undefined;
+    const tokenUsage = live && live.status !== 'closed' ? live.tokenUsage : live?.tokenUsage ?? task?.tokenUsage;
+    const report: UsageReport = { provider: target.provider, context: live?.context ?? task?.context ?? null, ...(tokenUsage ? { tokenUsage } : {}) };
     if (!options.account) return report;
     try {
       const account = await this.use(target.hostId, backend => backend.account(target.provider, task ? task.executionCwd ?? task.cwd : undefined, options.refresh === true), task?.serverId);

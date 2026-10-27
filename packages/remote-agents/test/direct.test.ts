@@ -219,36 +219,56 @@ test('finished turns record their token usage in the timeline and report it once
   }
 });
 
-test('Codex context comes from token reports, survives a detach and is restored on resume', async t => {
+test('Codex context and cache snapshots survive detach, restart and resume without double counting', async t => {
   const { service, ssh, request, store } = await fixture(t);
   const route = `${request.hostId}/codex/codex-remote`;
   const agent = await service.create(request, { chat: { sessionId: 'chat-usage', route } }); await tick();
-  ssh.live.emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-remote', turnId: 'turn-remote', tokenUsage: { last: { totalTokens: 42_000 }, total: { totalTokens: 90_000 }, modelContextWindow: 258_000 } } });
+  const tokenUsage = { last: { inputTokens: 40_000, cachedInputTokens: 30_000, outputTokens: 2000 }, total: { inputTokens: 85_000, cachedInputTokens: 60_000, outputTokens: 5000 } };
+  const report = { method: 'thread/tokenUsage/updated', params: { threadId: 'thread-remote', turnId: 'turn-remote', tokenUsage: { last: { ...tokenUsage.last, totalTokens: 42_000 }, total: { ...tokenUsage.total, totalTokens: 90_000 }, modelContextWindow: 258_000 } } };
+  ssh.live.emit(report); ssh.live.emit(report);
   assert.deepEqual((await service.usage('chat-usage', { route }))?.context, { used: 42_000, max: 258_000 });
-  assert.equal(store.snapshot().tasks[0].context, undefined, 'token reports are saved once per turn');
+  assert.deepEqual((await service.usage('chat-usage', { route }))?.tokenUsage, tokenUsage, 'repeated reports replace rather than accumulate');
+  await store.flush();
+  assert.deepEqual(store.snapshot().tasks[0].tokenUsage, tokenUsage, 'request usage is saved during a running turn');
   ssh.live.finish(); await tick(); await store.flush();
   assert.deepEqual(store.snapshot().tasks[0].context, { used: 42_000, max: 258_000 });
   await service.archive(agent.id);
   assert.deepEqual((await service.usage('chat-usage', { route }))?.context, { used: 42_000, max: 258_000 });
+  assert.deepEqual((await service.usage('chat-usage', { route }))?.tokenUsage, tokenUsage);
+  const reopened = new Store(join(store.directory, 'state.json')); await reopened.open();
+  assert.deepEqual(reopened.snapshot().tasks[0].tokenUsage, tokenUsage);
   await service.send(agent.id, { id: randomUUID(), text: 'Continue' }); await tick();
   ssh.live.emit({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { last: { totalTokens: 50_000 }, modelContextWindow: 258_000 } } });
   assert.deepEqual((await service.usage('chat-usage', { route }))?.context, { used: 50_000, max: 258_000 });
+  assert.equal((await service.usage('chat-usage', { route }))?.tokenUsage, undefined, 'a report without cache counters cannot show a stale hit');
+  await store.flush();
+  assert.equal(store.snapshot().tasks[0].tokenUsage, undefined);
 });
 
-test('Claude context is read after start and each turn and follows assistant messages in between', async t => {
-  const { service, ssh, request } = await fixture(t, 'claude');
+test('Claude context and cache usage follow main-agent requests and survive detach', async t => {
+  const { service, ssh, request, store } = await fixture(t, 'claude');
   const route = `${request.hostId}/claude/claude-remote`;
   ssh.claudeContext = { totalTokens: 12_000, maxTokens: 200_000 };
   const agent = await service.create(request, { chat: { sessionId: 'chat-claude', route } }); await tick();
   assert.deepEqual((await service.usage('chat-claude', { route }))?.context, { used: 12_000, max: 200_000 });
   ssh.live.emit({ type: 'assistant', parent_tool_use_id: null, message: { content: [], usage: { input_tokens: 5, cache_read_input_tokens: 20_000, cache_creation_input_tokens: 1000, output_tokens: 300 } } });
   assert.deepEqual((await service.usage('chat-claude', { route }))?.context, { used: 21_305, max: 200_000 });
+  const tokenUsage = { last: { inputTokens: 21_005, cachedInputTokens: 20_000, cacheWriteInputTokens: 1000, outputTokens: 300 } };
+  assert.deepEqual((await service.usage('chat-claude', { route }))?.tokenUsage, tokenUsage);
   ssh.live.emit({ type: 'assistant', parent_tool_use_id: 'task-1', message: { content: [], usage: { input_tokens: 90_000 } } });
   assert.equal((await service.usage('chat-claude', { route }))?.context?.used, 21_305, 'subagents have their own context window');
+  assert.deepEqual((await service.usage('chat-claude', { route }))?.tokenUsage, tokenUsage, 'subagents cannot replace the main request cache counts');
   ssh.claudeContext = { totalTokens: 22_000, maxTokens: 200_000 };
   ssh.live.finish(); await tick();
   assert.deepEqual((await service.summary(agent.id)).status, 'idle');
   assert.deepEqual((await service.usage('chat-claude', { route }))?.context, { used: 22_000, max: 200_000 });
+  await store.flush();
+  assert.deepEqual(store.snapshot().tasks[0].tokenUsage, tokenUsage);
+  await service.archive(agent.id);
+  assert.deepEqual((await service.usage('chat-claude', { route }))?.tokenUsage, tokenUsage);
+  await service.send(agent.id, { id: randomUUID(), text: 'Continue' }); await tick();
+  ssh.live.emit({ type: 'assistant', message: { content: [], usage: { input_tokens: 200, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, output_tokens: 5 } } });
+  assert.deepEqual((await service.usage('chat-claude', { route }))?.tokenUsage?.last, { inputTokens: 200, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 5 });
 });
 
 test('ACP usage updates fill the ring', async t => {

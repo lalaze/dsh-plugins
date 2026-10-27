@@ -1,11 +1,40 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeTurnUsage, codexAccountUsage, codexContext, codexTurnUsage, remoteUsageRecord } from '../src/usage.js';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTurnUsage, remoteUsageRecord } from '../src/usage.js';
 import type { HostConfig, Task } from '../src/domain.js';
-import { formatReset, formatTokens } from '../src/client/usage.js';
+import { CacheSection, formatReset, formatTokens } from '../src/client/usage.js';
 import { fixture } from './fakes.js';
 
 const checkedAt = '2026-10-26T00:00:00.000Z';
+
+test('cache counters keep provider input semantics, reported zeros and missing fields distinct', () => {
+  assert.deepEqual(codexTokenUsage({ last: { inputTokens: 1000, cachedInputTokens: 800, outputTokens: 12 }, total: { inputTokens: 2500, cachedInputTokens: 1800, cacheWriteInputTokens: 200 } }), {
+    last: { inputTokens: 1000, cachedInputTokens: 800, outputTokens: 12 }, total: { inputTokens: 2500, cachedInputTokens: 1800, cacheWriteInputTokens: 200 },
+  });
+  assert.deepEqual(codexTokenUsage({ last: { input_tokens: 1000, cached_input_tokens: 0, cache_write_input_tokens: 0 } }), { last: { inputTokens: 1000, cachedInputTokens: 0, cacheWriteInputTokens: 0 } });
+  assert.deepEqual(claudeTokenUsage({ input_tokens: 100, cache_read_input_tokens: 800, cache_creation_input_tokens: 100, output_tokens: 12 }), {
+    last: { inputTokens: 1000, cachedInputTokens: 800, cacheWriteInputTokens: 100, outputTokens: 12 },
+  });
+  assert.deepEqual(claudeTokenUsage({ input_tokens: 100, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }), { last: { inputTokens: 100, cachedInputTokens: 0, cacheWriteInputTokens: 0 } });
+  assert.deepEqual(claudeTokenUsage({ input_tokens: 100, cache_read_input_tokens: 800 }), { last: { cachedInputTokens: 800 } }, 'an incomplete Claude input breakdown cannot produce a hit rate');
+  assert.equal(claudeTokenUsage({ input_tokens: 100 }), undefined);
+  assert.equal(codexTokenUsage({ last: { inputTokens: -1, cachedInputTokens: NaN, outputTokens: Infinity, cacheWriteInputTokens: '5' } }), undefined);
+  assert.equal(codexTokenUsage({}), undefined);
+});
+
+test('cache display distinguishes unreported counts, no hits and a token hit rate', () => {
+  const render = (last?: Parameters<typeof CacheSection>[0]['usage']) => renderToStaticMarkup(createElement(CacheSection, { usage: last }));
+  assert.match(render(), /Unknown/);
+  assert.doesNotMatch(render(), /0%/);
+  assert.match(render({ last: { inputTokens: 1000, cachedInputTokens: 0 } }), /0%/);
+  assert.match(render({ last: { inputTokens: 1000, cachedInputTokens: 800 } }), /80%/);
+  assert.match(render({ last: { inputTokens: 1_000_000, cachedInputTokens: 1 } }), /&lt;0\.1%/, 'a small positive cache read must not appear as a zero hit rate');
+  assert.doesNotMatch(render({ last: { inputTokens: 0, cachedInputTokens: 0 } }), /NaN|Infinity|0%/);
+  assert.doesNotMatch(render({ last: { inputTokens: 10, cachedInputTokens: 20 } }), /200%/);
+  assert.match(render({ total: { cachedInputTokens: 1800 } }), /<details>/);
+});
 
 test('Codex token reports and account limits become the ring and its plan windows', () => {
   assert.deepEqual(codexContext({ last: { totalTokens: 169_000 }, total: { totalTokens: 900_000 }, modelContextWindow: 1_000_000 }), { used: 169_000, max: 1_000_000 });

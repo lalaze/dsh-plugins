@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AccountUsage, ContextUsage, HostConfig, NativeProtocol, QuotaWindow, Task, TurnUsage } from './domain.js';
+import type { AccountUsage, ContextUsage, HostConfig, NativeProtocol, QuotaWindow, Task, TokenUsage, TokenUsageBreakdown, TurnUsage } from './domain.js';
 import type { JsonlPeer } from './ssh.js';
 
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
@@ -64,6 +64,27 @@ export function acpTurnUsage(usage: any): TurnUsage | undefined {
 export function claudeMessageTokens(usage: any): number | undefined {
   const parts = [usage?.input_tokens, usage?.cache_creation_input_tokens, usage?.cache_read_input_tokens, usage?.output_tokens].map(count);
   return parts[0] === undefined ? undefined : parts.reduce<number>((sum, part) => sum + (part ?? 0), 0);
+}
+
+function tokenBreakdown(input: unknown, read: unknown, write: unknown, output: unknown): TokenUsageBreakdown | undefined {
+  const fields = { inputTokens: count(input), cachedInputTokens: count(read), cacheWriteInputTokens: count(write), outputTokens: count(output) };
+  const reported = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+  return Object.keys(reported).length ? reported : undefined;
+}
+/** Codex input already includes cached input; snapshots must not be added together. */
+export function codexTokenUsage(usage: any): TokenUsage | undefined {
+  const parse = (value: any) => tokenBreakdown(value?.inputTokens ?? value?.input_tokens, value?.cachedInputTokens ?? value?.cached_input_tokens,
+    value?.cacheWriteInputTokens ?? value?.cache_write_input_tokens, value?.outputTokens ?? value?.output_tokens);
+  const last = parse(usage?.last), total = parse(usage?.total);
+  return last || total ? { ...(last ? { last } : {}), ...(total ? { total } : {}) } : undefined;
+}
+/** Claude's uncached input, cache reads and cache writes are disjoint counters. */
+export function claudeTokenUsage(usage: any): TokenUsage | undefined {
+  const input = [usage?.input_tokens, usage?.cache_read_input_tokens, usage?.cache_creation_input_tokens].map(count);
+  // Without all three counters the complete input denominator is unknown.
+  const totalInput = input.every(value => value !== undefined) ? input.reduce<number>((sum, value) => sum + value!, 0) : undefined;
+  const last = tokenBreakdown(totalInput, usage?.cache_read_input_tokens, usage?.cache_creation_input_tokens, usage?.output_tokens);
+  return last ? { last } : undefined;
 }
 
 function windowLabel(minutes: number | undefined): string {

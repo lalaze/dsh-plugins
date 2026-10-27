@@ -79,6 +79,7 @@ const server = createServer(async (request, response) => {
           const task = store.snapshot().tasks.find(t => t.chat?.sessionId === 'fixture-conversation')
             ?? await service.create({ id: randomUUID(), hostId: project.hostId, cwd: '/srv/macmini', provider: 'codex', model: 'remote-model', prompt: '用量演示' }, { chat: { sessionId: 'fixture-conversation', route } });
           remote.live(task.id).context = input.seedUsage.context;
+          remote.live(task.id).tokenUsage = input.seedUsage.tokenUsage;
           remote.accountUsage = input.seedUsage.account ?? null;
         }
         if (input.seedSessions) {
