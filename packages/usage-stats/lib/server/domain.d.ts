@@ -24,8 +24,8 @@ export interface Totals {
     totalTokens: number;
 }
 export type GroupBy = 'day' | 'model' | 'session' | 'source';
-export type Source = 'dsh' | 'claude-ssh' | 'remote-agents';
-/** dsh-claude-ssh names providers `claude-ssh-<host>`; dsh-remote-agents names its CLI routes `remote-cli-<cli>`. */
+export type Source = 'dsh' | 'remote-agents';
+/** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. */
 export declare const sourceOf: (provider: string) => Source;
 export declare const SOURCE_LABELS: Record<Source, string>;
 /** dsh-remote-agents chat routes are `<machine>/<cli>/<model>[/<speed>]`; statistics keep the model and speed. */

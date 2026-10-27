@@ -1,6 +1,6 @@
-/** dsh-claude-ssh names providers `claude-ssh-<host>`; dsh-remote-agents names its CLI routes `remote-cli-<cli>`. */
-export const sourceOf = (provider) => provider.startsWith('claude-ssh-') ? 'claude-ssh' : provider.startsWith('remote-cli-') ? 'remote-agents' : 'dsh';
-export const SOURCE_LABELS = { dsh: "DSH model calls", 'claude-ssh': "Remote Claude SSH", 'remote-agents': "Remote agents" };
+/** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. */
+export const sourceOf = (provider) => provider.startsWith('remote-cli-') || provider.startsWith('claude-ssh-') ? 'remote-agents' : 'dsh';
+export const SOURCE_LABELS = { dsh: "DSH model calls", 'remote-agents': "Remote agents" };
 /** dsh-remote-agents chat routes are `<machine>/<cli>/<model>[/<speed>]`; statistics keep the model and speed. */
 export function remoteModel(route) {
     const [, cli, model, tier, ...extra] = route.split('/');
@@ -61,7 +61,7 @@ export function parseQuery(url) {
         throw new Error("Unsupported grouping");
     const rawSource = p.get('source');
     let source;
-    if (rawSource === 'dsh' || rawSource === 'claude-ssh' || rawSource === 'remote-agents')
+    if (rawSource === 'dsh' || rawSource === 'remote-agents')
         source = rawSource;
     else if (rawSource)
         throw new Error("Unsupported request source");
