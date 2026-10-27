@@ -4,6 +4,7 @@ import { apply, type Client } from '../../src/client/index.js';
 import { createLocaleFixture } from '../../../../scripts/locale-fixture.js';
 import { modelDirectory, modelFixture } from './model-picker.fixture.js';
 import { nativeModelFixture } from './native-model.fixture.js';
+import { customModelFixture } from './custom-model.fixture.js';
 const modelDirectories = { directoryFor: (_id: string) => modelDirectory };
 const native = await nativeModelFixture(modelDirectories);
 const fixtureLocale = createLocaleFixture();
@@ -36,6 +37,7 @@ const context = {
 const cleanups: (() => void)[] = [];
 apply(context);
 Object.assign(window, { fixture: { setLocale: fixtureLocale.setLocale, slots: [...slots.keys()], navigation, picker: modelFixture,
+  customModel: customModelFixture,
   workspace: async (name: string) => {
     await fetch('/__fixture', { method: 'POST', body: JSON.stringify({ workspaceHostIds: name === 'local' ? [] : [name] }) });
     modelWorkspace = name; for (const listener of placementListeners) listener();

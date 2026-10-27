@@ -43,3 +43,33 @@ test('remote model captions drop the host while list rows keep it muted', () => 
   assert.equal(html('remote-cli-codebuddy', 'Auto · Fast · macmini', 'menu'), 'Auto · Fast', 'only the last separator splits off the host');
   assert.equal(html('deepseek', 'DeepSeek · V4', 'trigger'), 'DeepSeek · V4', 'other providers keep their catalog name');
 });
+
+test('remote labels coexist with a label contribution already registered by another plugin', () => {
+  const core = new SlotCore();
+  const register = core.register.bind(core) as (options: Record<string, unknown>, component: unknown) => () => void;
+  register({ name: 'root', children: {
+    'settings.section': { kind: 'list', scope: 'root' },
+    'conversation.input.model': { kind: 'single', scope: 'session' },
+    'conversation.input.right': { kind: 'list', scope: 'session' },
+  } }, () => null);
+  const native = () => null, existing = () => null;
+  register({ name: 'conversation.input.model', children: {
+    'conversation.input.model.label': { kind: 'single', scope: 'session', inline: true },
+  } }, native);
+  register({ name: 'conversation.input.model.label', registrant: 'custom-picker' }, existing);
+  const cleanups: (() => void)[] = [];
+  const ctx: Client = {
+    effect(factory) { cleanups.push(factory()); },
+    slots: {
+      inject(_name, factory) { const dispose = factory() as unknown; if (typeof dispose === 'function') cleanups.push(dispose as () => void); },
+      register,
+    },
+  };
+  try {
+    assert.doesNotThrow(() => apply(ctx));
+    assert.equal(core.entriesOfSlot('conversation.input.model')[0].component, native);
+    assert.equal(core.entriesOfSlot('conversation.input.model.label')[0].component, existing);
+    assert.ok(core.entriesOfSlot('settings.section').some(e => e.options.id === 'remote-agents'));
+  } finally { for (const dispose of cleanups.reverse()) dispose(); }
+  assert.equal(core.entries('conversation.input.model.label').length, 1, 'unloading removes only our label contribution');
+});

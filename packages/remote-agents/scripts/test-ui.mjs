@@ -35,6 +35,7 @@ try {
   browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', base);
   browser('set', 'viewport', '1440', '1000');
 
+  if (!process.argv.includes('--custom-labels-only')) {
   if (!process.argv.includes('--models-only')) {
   // Remote sessions are available only from settings.
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")');
@@ -338,6 +339,33 @@ try {
   browser('press', 'Escape'); browser('press', 'Escape');
   const pickerErrors = browser('errors'); if (pickerErrors.errors?.length) throw new Error(JSON.stringify(pickerErrors.errors));
   console.log('PASS: official DSH rc.3 model menu, real slot registration, persisted provider folding, visible keyboard selection, search, native reasoning/errors, live catalogs, mobile and plugin disposal');
+  }
+
+  // The desktop's custom composer does not render conversation.input.model.label.
+  wait('window.fixture?.customModel');
+  evaluate('window.customModel = window.fixture.customModel()');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "Opus 5.5"');
+  expect('document.querySelector(".codexModelSelectTrigger").title === "Opus 5.5 · ubuntu-claude"');
+  expect('document.querySelector(".codexModelSelectTrigger").getAttribute("aria-label") === "Opus 5.5 · ubuntu-claude"');
+  expect('document.querySelector(".codexModelSelectEffort").textContent === "high" && document.querySelector(".codexModelSelectChevron")');
+  evaluate('window.customLabelNode = document.querySelector(".codexModelSelectLabel").firstChild');
+  browser('click', '.codexModelSelectTrigger'); expect('window.customModel.clicks() === 1');
+  evaluate('window.customModel.render("GPT-5.5 Fast · ubuntu-claude", "medium")');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "GPT-5.5 Fast"');
+  expect('document.querySelector(".codexModelSelectLabel").firstChild === window.customLabelNode');
+  expect('document.querySelector(".codexModelSelectEffort").textContent === "medium"');
+  evaluate('window.customModel.render("Other provider · variant")');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "Other provider · variant"');
+  evaluate('window.customModel.render("Auto · Fast · ubuntu-claude")');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "Auto · Fast"');
+  image('custom-model-caption');
+  evaluate('window.customModel.stop()');
+  expect('document.querySelector(".codexModelSelectLabel").textContent === "Auto · Fast · ubuntu-claude"');
+  evaluate('window.customModel.render("Opus 5.5 · ubuntu-claude")');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "Opus 5.5 · ubuntu-claude"');
+  evaluate('window.customModel.unmount()');
+  const customErrors = browser('errors'); if (customErrors.errors?.length) throw new Error(JSON.stringify(customErrors.errors));
+  console.log('PASS: captured custom composer omits known remote hosts, preserves text nodes, effort, tooltip and clicks, follows React updates and restores on unload');
 
 } finally {
   try { browser('close'); } catch {}
