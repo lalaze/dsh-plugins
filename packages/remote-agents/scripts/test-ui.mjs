@@ -12,10 +12,11 @@ function browser(...args) {
 }
 const evaluate = source => browser('eval', '-b', Buffer.from(source).toString('base64')).result;
 const wait = source => {
-  try { return browser('wait', '--fn', source); }
+  // Return a boolean: some agent-browser versions cannot serialize a matched DOM element.
+  try { return browser('wait', '--fn', `!!(${source})`); }
   catch (error) { throw new Error(`Timed out waiting for ${source}\nPage: ${String(evaluate('[...document.querySelectorAll("[data-connection]")].map(o=>o.dataset.connection).join(",") + "\\n" + (document.querySelector(".ra-main")?.innerText ?? document.body.innerText)')).slice(0, 1500)}`, { cause: error }); }
 };
-const expect = source => { if (!evaluate(source)) throw new Error(`UI assertion failed: ${source}`); };
+const expect = source => { if (!evaluate(source)) throw new Error(`UI assertion failed: ${source}${process.env.DSH_UI_DEBUG ? `\n${evaluate(process.env.DSH_UI_DEBUG)}` : ''}`); };
 const state = () => evaluate('(async()=>await (await fetch("/__fixture")).json())()');
 const fixture = data => evaluate(`(async()=>await fetch("/__fixture",{method:"POST",body:${JSON.stringify(JSON.stringify(data))}}))()`);
 const chooseSsh = connection => {
@@ -149,10 +150,15 @@ try {
   browser('click', 'button:text-is("此项目始终允许匹配的请求")');
   wait('!document.querySelector(".ra-permission") && document.querySelector(".ra-output")?.textContent.includes("审批已通过")');
   if (state().answers.at(-1)?.answer.selectedActionId !== 'project') throw new Error('Native project approval was not preserved');
+  // A persistent session that lost SSH keeps its state and says it is reconnecting.
+  fixture({ relayState: true });
+  wait('document.querySelector(".ra-detail-heading .ra-badge")?.textContent === "正在重连" && document.querySelector(".ra-detail-heading").textContent.includes("SSH 连接已断开")');
+  image('sessions-reconnecting');
   browser('click', 'button:text-is("返回会话列表")');
   expect('document.querySelector(".ra-session-list").getBoundingClientRect().width > 0');
-  browser('set', 'viewport', '1440', '1000');
   browser('click', '.ra-filters button:has-text("历史记录")');
+  wait('[...document.querySelectorAll(".ra-session-item")].some(item => item.textContent.includes("审查构建脚本") && item.textContent.includes("正在重连"))');
+  browser('set', 'viewport', '1440', '1000');
   browser('click', '.ra-session-item:has-text("整理项目测试")'); wait('document.querySelector(".ra-output button")?.textContent === "加载更早的消息"');
   browser('click', 'button[aria-label="会话选项"]');
   browser('select', '[aria-label="权限模式"]', 'full-access');

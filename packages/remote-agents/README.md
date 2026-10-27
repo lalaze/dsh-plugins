@@ -21,7 +21,7 @@ Model catalogs are saved per machine on the DSH server and shared between client
 
 - Each DSH conversation and selected machine / CLI has an independent native CLI session, with its working directory bound on the first message. Follow-ups reuse it, including after a DSH restart when that CLI supports resume. Switching models within a CLI resumes that same session; a non-resumable CLI asks you to start a new conversation. Previously separate model sessions remain accessible. Switching machines or CLIs supplies available conversation text as context; DSH's local system prompt, injected workspace instructions and local tool schemas are excluded.
 - Replies and thinking stream into the main conversation. Remote tool calls appear as native DSH tool cards; they execute on the remote machine. They are recorded as completed external work, so DSH never executes them again. Approvals and questions use DSH's native prompts.
-- The DSH thinking selector uses the CLI's discovered reasoning levels. The CLI's default permission mode applies. **Stop** or cancelling the response interrupts the remote CLI turn.
+- The DSH thinking selector uses the CLI's discovered reasoning levels. The CLI's default permission mode applies. **Stop** or cancelling the response interrupts the remote CLI turn. Quitting DSH or reloading the plugin does not; see [Persistence and recovery](#persistence-and-recovery).
 - **Codex Fast:** Codex models that offer a faster service tier also appear as a separate picker entry, such as **GPT-5.5 Fast · build-box**. Fast uses more of the remote account's quota. Switching between the normal and Fast entries keeps the same Codex thread. The normal entry uses the remote Codex configuration, including a `service_tier` set there.
 - **Usage ring:** a ring before the send button shows how full the remote session's context window is. Hover over it, or click it, to see the remote account's plan limits for Claude and Codex, such as the session and weekly windows. These come from the CLI on the SSH host, so credentials never leave it. Limits are read when the panel opens, cached for five minutes and read again after a turn finishes; use the refresh button to check now.
 - Lost responses can replay the saved output by message identity without sending the task again. Unconfirmed delivery or an unfinished response after disconnection is reported explicitly. Send a new message to continue the saved session.
@@ -40,10 +40,10 @@ Native DSH approvals remain one-time grants. When Claude supplies matching allow
 - **Create:** choose a saved machine, CLI and model, then describe the task. The current DSH workspace path is used on that machine.
 - **History and follow-ups:** read streaming output, expandable reasoning and tool details, and load earlier history. Send follow-ups to background agents here; use **Open in main chat** for bound conversations so their native DSH history stays consistent.
 - **Approvals:** the sidebar counts sessions needing attention. Dismissing a native DSH approval keeps the request pending; respond in the session panel using the CLI's actual permission choices or question form. **Stop** explicitly interrupts the turn.
-- **Manage:** rename remote records, archive and restore them. Use **Archive listed history** to archive the current search results in History. Each session is checked again before archiving so newly active sessions and pending approvals are skipped. Archiving preserves history and releases the CLI process. These actions affect the remote record, not the native DSH conversation's title or archive state.
+- **Manage:** rename remote records, archive and restore them. Use **Archive listed history** to archive the current search results in History. Each session is checked again before archiving so newly active sessions and pending approvals are skipped. Archiving preserves history and ends the CLI process. These actions affect the remote record, not the native DSH conversation's title or archive state.
 - **Delivery:** wait for the current turn or stop it before sending. After a lost response, **Check delivery** checks the same message without resending it. Pending messages survive reloads and reopening the session within the same browser tab.
 
-Closing the panel leaves background work running. See the recovery limits below for DSH shutdown and SSH disconnection.
+Closing the panel leaves background work running, and so do quitting DSH and losing SSH; see [Persistence and recovery](#persistence-and-recovery). Sessions show **Reconnecting** while DSH re-establishes their SSH connection.
 
 ## Delegation from DSH
 
@@ -102,10 +102,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.18.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.19.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.18:** Remote CLIs now keep running when DSH quits or SSH disconnects, and DSH reconnects and catches up automatically. This needs Node.js 18+ on the SSH host. Restart DSH after updating; sessions created earlier switch to a relay the next time their CLI starts.
 
 **Upgrading from 0.2.17:** Remote sessions use a two-pane reading layout with active/history views, date groups, bulk archiving, Markdown replies and collapsed tool activity. Permission mode and renaming are in the header’s Session options. Existing history and native CLI sessions remain available. Restart DSH and refresh the client after updating.
 
@@ -143,7 +145,13 @@ State lives at `$DSH_HOME/storages/dsh-remote-agents/state.json` (default `~/.ds
 
 - Creation persists the request ID before any remote action, then the native session ID before any prompt, so retrying a lost response never starts a second agent. A start interrupted by a DSH restart remains saved so retrying the response can finish it.
 - Each message is recorded by ID before it is sent and is never resent automatically. Only the CLI's own acknowledgment marks it delivered; otherwise the message shows **Delivery not confirmed**.
-- DSH shutdown, plugin reload or SSH failure ends the CLI process. The next message reattaches the saved native session without replaying anything. CLIs that cannot resume (ACP without `loadSession` or `session/resume`) show **Ended** instead, with output kept.
+- **Remote CLIs outlive DSH.** On SSH hosts with Node.js 18 or newer, each CLI runs under a small relay installed in `~/.dsh-remote-agents` on that host. The relay owns the CLI process and appends its output to a private log, so the CLI keeps working when DSH quits, crashes, reloads the plugin or loses its SSH connection. Without Node.js 18 the CLI uses a direct SSH pipe as in earlier versions and ends with DSH.
+- **Automatic recovery.** When DSH starts, it reattaches to every relay and reads the output produced while it was away, starting from the last byte it saved; nothing is lost or recorded twice. Running turns, tool calls and unanswered approvals are restored; answered approvals are never asked again. A lost SSH connection is retried automatically (backing off to every 30 seconds) and the session shows **Reconnecting**; only an actual CLI exit fails a turn.
+- **No duplicate input.** Prompts, approval answers and interrupts carry IDs that the relay delivers once, so reconnecting never repeats them. An approval answered while the host is unreachable is saved and delivered after reconnecting.
+- **Stop and termination.** **Stop** interrupts the turn and keeps the CLI process. Archiving, deleting, changing the mode or model, and releasing an idle session for a new one end the relay. When the host is unreachable, deleting and archiving still finish immediately; the relay is stopped and removed the next time DSH reaches the host.
+- **Relay limits.** Up to 32 relays per SSH account, 512 MB of output each, 128 MB per input line. A CLI with no DSH attached and no activity for 24 hours is stopped; its output is kept. Finished relays are deleted once DSH has read them, or after 14 days.
+- **Main conversation.** After a restart, the DSH conversation still shows the interrupted response. The next message first shows the output the remote CLI produced meanwhile, waiting for that turn to finish, then sends the new request; **Retry** on the interrupted response instead replays it in full. Neither resends the original prompt.
+- CLIs that cannot resume a native session (ACP without `loadSession` or `session/resume`) keep running under the relay, but show **Ended** once their process ends, with output kept. Direct (non-relay) sessions end with DSH; the next message reattaches the saved native session without replaying anything.
 - Each host keeps up to eight CLI processes. When full, the least recently used idle agent that can resume is released. Working agents, pending approvals and in-flight messages are never released.
 
 Earlier Paseo-based task records remain readable but are not converted.

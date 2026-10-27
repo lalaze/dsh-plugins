@@ -239,12 +239,17 @@ test('DSH Stop cancels remote work and releases the conversation for a later fol
   await collect(adapter.stream(options('Continue safely'))); assert.equal(remote.sends, 1);
 });
 
-test('closing a stream early and disposing the adapter stop remote work', async t => {
+test('closing a stream early stops remote work; disposing the adapter or DSH shutdown leaves it running', async t => {
   const { adapter, options, remote } = await setup(t);
   remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
   const iterator = adapter.stream(options()); await iterator.next(); await iterator.return(undefined); assert.equal(remote.stops, 1);
+  const shutdown = new AbortController();
+  const disposed = adapter.stream(options('Shut down', { sessionId: SessionId('disposed'), signal: shutdown.signal })); await disposed.next();
+  shutdown.abort({ kind: 'disposed' });
+  await assert.rejects(collect(disposed)); assert.equal(remote.stops, 1, 'a DSH disposal cause is not a user Stop');
   const running = adapter.stream(options('Another conversation', { sessionId: SessionId('second') })); await running.next(); adapter.close();
-  await assert.rejects(collect(running), /abort/i); assert.equal(remote.stops, 2);
+  await assert.rejects(collect(running), /abort/i); assert.equal(remote.stops, 1, 'plugin unload releases the stream only');
+  assert.equal([...remote.agents.values()].filter(a => a.status === 'running').length, 2);
 });
 
 test('permissions and questions use native DSH services and select only a one-time CLI action', async t => {

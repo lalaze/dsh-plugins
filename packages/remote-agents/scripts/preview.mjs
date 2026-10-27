@@ -104,6 +104,8 @@ const server = createServer(async (request, response) => {
             }
           }
         }
+        // A persistent CLI whose SSH connection is being re-established.
+        if (input.relayState) for (const task of store.snapshot().tasks) Object.assign(remote.live(task.id), { persistent: true, ...(task.title === '审查构建脚本' ? { reconnecting: true } : {}) });
       }
       response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ creates: remote.creates, stops: remote.stops, sends: remote.sends, interrupts: remote.interrupts, detaches: remote.detaches, forgets: remote.forgets, answers: remote.answers, modelGroups: (await Promise.all(CHAT_PROVIDERS.map(async id => ({ ...adapter.providerInfo(id), models: await adapter.listModels(id) })))).filter(group => group.models.length), state: await service.snapshot(), tasks: store.snapshot().tasks })); return;
     }

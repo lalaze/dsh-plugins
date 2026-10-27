@@ -299,5 +299,16 @@ export const zh: Record<string, string> = {
   "Credits": "额度",
   "Unlimited": "无限制",
   "This CLI does not report plan limits": "此 CLI 不报告套餐限额。",
-  "{label} is not installed on this SSH host": "此 SSH 主机未安装 {label}。"
+  "{label} is not installed on this SSH host": "此 SSH 主机未安装 {label}。",
+  "Reconnecting": "正在重连",
+  "The SSH connection was lost. The remote CLI keeps running; reconnecting to catch up on its output.": "SSH 连接已断开。远程 CLI 仍在运行，正在重连以补齐输出。",
+  "Runs in a relay on the SSH host and keeps working when DSH closes or SSH disconnects.": "在 SSH 主机上的中继中运行，DSH 关闭或 SSH 断开后仍会继续工作。",
+  "The remote CLI was stopped after a long idle period without DSH attached.": "远程 CLI 长时间空闲且没有 DSH 连接，已被停止。",
+  "The remote CLI was stopped because its output exceeded the relay limit.": "远程 CLI 的输出超过中继上限，已被停止。",
+  "The remote CLI was stopped.": "远程 CLI 已停止。",
+  "The remote relay stopped unexpectedly": "远程中继意外停止",
+  "The remote relay no longer exists. Its unsaved output is unavailable.": "远程中继已不存在，其未保存的输出无法获取。",
+  "This remote CLI was attached from another DSH instance": "此远程 CLI 已被另一个 DSH 实例接管",
+  "Timed out connecting to the remote relay": "连接远程中继超时",
+  "The remote relay did not confirm the command": "远程中继未确认该命令"
 };

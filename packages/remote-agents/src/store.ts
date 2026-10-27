@@ -1,18 +1,24 @@
 import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { identifier, record, remotePath, field, taskInput, providerSelection, type ChatProject, type HostConfig, type Task } from './domain.js';
+import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type Task } from './domain.js';
 
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[] }
+/** A relay to stop and delete on its SSH host once it is reachable. */
+export interface RelayCleanup { hostId: string; relayId: string }
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[] }
 export class Store {
   private state: State = { version: 1, hosts: [], tasks: [] };
   private writes = Promise.resolve();
+  /** The file content this instance last read or wrote; undefined when the file did not exist. */
+  private saved?: string;
+  private closed = false;
   constructor(private readonly path: string) {}
   get directory(): string { return dirname(this.path); }
   async open(): Promise<void> {
     let text: string;
     try { text = await readFile(this.path, 'utf8'); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; throw e; }
+    this.saved = text;
     // A damaged registry must never be replaced with an empty one, losing agent identities.
     const value = record(JSON.parse(text));
     if (value.version !== 1 || !Array.isArray(value.hosts) || !Array.isArray(value.tasks)) throw new Error('Invalid remote agent registry');
@@ -31,6 +37,11 @@ export class Store {
       taskInput(raw);
       const task = record(raw);
       if (typeof task.serverId !== 'string' || typeof task.title !== 'string' || typeof task.createdAt !== 'string' || !['creating', 'ready', 'uncertain'].includes(String(task.state))) throw new Error('Invalid saved remote agent');
+      if (task.relay !== undefined) identifier(record(task.relay).id);
+    }
+    if (value.relayCleanups !== undefined) {
+      if (!Array.isArray(value.relayCleanups)) throw new Error('Invalid saved relay cleanups');
+      for (const raw of value.relayCleanups) { const cleanup = record(raw); identifier(cleanup.hostId); identifier(cleanup.relayId); }
     }
     if (value.mainChatProjects !== undefined) {
       if (!Array.isArray(value.mainChatProjects)) throw new Error('Invalid saved chat projects');
@@ -39,29 +50,37 @@ export class Store {
         if (!Array.isArray(project.providers) || !project.providers.every(p => p && typeof p.id === 'string' && Array.isArray(p.models) && Array.isArray(p.modes))) throw new Error('Invalid saved chat project catalog');
       }
     }
-    this.state = { version: 1, hosts: value.hosts as HostConfig[], tasks: value.tasks as Task[], ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects as ChatProject[] } : {}) };
+    this.state = { version: 1, hosts: value.hosts as HostConfig[], tasks: value.tasks as Task[], ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects as ChatProject[] } : {}),
+      ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
   hosts(): HostConfig[] { return structuredClone(this.state.hosts); }
   chatProjects(): ChatProject[] { return structuredClone(this.state.mainChatProjects ?? []); }
+  relayCleanups(hostId: string): RelayCleanup[] { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }
   /** A copy of one saved agent record, without cloning the whole registry. */
   task(predicate: (task: Task) => boolean): Task | undefined { const found = this.state.tasks.find(predicate); return found && structuredClone(found); }
   tasks(predicate: (task: Task) => boolean): Task[] { return structuredClone(this.state.tasks.filter(predicate)); }
   /** Serialize read/modify/atomic-rename, including concurrent HTTP requests. */
   async update(change: (next: State) => void): Promise<void> {
+    if (this.closed) return Promise.reject(new RemoteError('Remote agent state is closed', 503));
     const write = this.writes.then(async () => {
       const next = this.snapshot(); change(next);
       await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-      const temporary = `${this.path}.${randomUUID()}.tmp`;
+      // Never replace state another DSH instance wrote, for example after a plugin reload, with a stale snapshot.
+      const current = await readFile(this.path, 'utf8').catch(e => { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw e; });
+      if (current !== this.saved) throw new RemoteError('Remote agent state was changed by another DSH instance. Reload the plugin.', 409);
+      const text = `${JSON.stringify(next, null, 2)}\n`, temporary = `${this.path}.${randomUUID()}.tmp`;
       try {
-        await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
+        await writeFile(temporary, text, { mode: 0o600, flag: 'wx' });
         await rename(temporary, this.path);
       } finally { await unlink(temporary).catch(() => {}); }
-      this.state = next;
+      this.state = next; this.saved = text;
     });
     this.writes = write.catch(() => {});
     return write;
   }
   async flush(): Promise<void> { await this.writes; }
+  /** Finish queued writes, then refuse new ones: a closed instance must not overwrite its successor's state. */
+  async close(): Promise<void> { this.closed = true; await this.writes; }
 }

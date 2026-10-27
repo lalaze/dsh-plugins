@@ -32,7 +32,10 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     const activated = live();
     return activated ? activated.header.cwd : stored?.cwd;
   };
-  ctx.effect(() => () => service.close());
+  // Close the store last: a reloaded plugin's new instance owns the state from then on.
+  ctx.effect(() => async () => { await service.close(); await store.close(); });
+  // Persistent CLIs kept running while DSH was away; reattach and catch up in the background.
+  void service.resume();
   ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, async (id, signal) => {
     const cwd = await sessionCwd(id), placement = await workspace.resolve(cwd, signal);
     return cwd === await sessionCwd(id) ? placement : { hostIds: [] };

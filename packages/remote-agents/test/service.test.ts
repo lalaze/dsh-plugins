@@ -262,3 +262,15 @@ test('HTTP boundary rejects malformed input, form submissions, oversized bodies 
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal((await response.json()).agents[0].id, created.id);
 });
+
+test('a store refuses to overwrite state written by another DSH instance, and refuses writes once closed', async t => {
+  const { path, store: stale, service } = await fixture(t);
+  const current = new Store(path); await current.open();
+  await current.update(state => { state.hosts.push({ id: randomUUID(), label: 'Added after reload', connection: 'ssh://second-host' }); });
+  await assert.rejects(stale.update(state => { state.tasks = []; }), /changed by another DSH instance/);
+  const reopened = new Store(path); await reopened.open();
+  assert.equal(reopened.hosts().length, 2, 'the newer state is kept');
+  await current.close();
+  await assert.rejects(current.update(() => {}), /closed/);
+  await service.close();
+});

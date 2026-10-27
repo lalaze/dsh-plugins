@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { StringDecoder } from 'node:string_decoder';
+import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { field, remotePath, RemoteError } from './domain.js';
@@ -50,17 +50,25 @@ export function connectionInput(value: unknown): string {
   return `ssh://${username ? `${username}@` : ''}${url.hostname}${url.port ? `:${url.port}` : ''}`;
 }
 export interface Child {
-  write(value: string): void;
+  /** `inputId` lets a relay drop a line it already delivered; direct pipes ignore it. */
+  write(value: string, inputId?: string): void;
+  /** Release this connection. A relay keeps its CLI running; a direct SSH pipe ends it. */
   stop(): void;
   onData(callback: (data: Buffer) => void): void;
   onExit(callback: (error: Error) => void): void;
+  /** Byte offset of the first output byte this child delivers. */
+  readonly offset?: number;
 }
+export interface StartOptions { stderr?(data: Buffer): void }
 export interface SshTransport {
   exec(script: string, timeout?: number): Promise<string>;
-  start(cwd: string, argv: string[]): Child;
+  start(cwd: string, argv: string[], options?: StartOptions): Child;
   upload?(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
+  /** Commands run in a POSIX shell where a detached relay can outlive the connection. */
+  readonly relays?: boolean;
 }
 export class OpenSshTransport implements SshTransport {
+  readonly relays: boolean = true;
   private readonly args: string[];
   constructor(connection: string, private readonly binary = 'ssh') {
     const url = new URL(connectionInput(connection));
@@ -93,6 +101,10 @@ case "\${dsh_login_shell##*/}" in
 esac
 exec /bin/sh -c ${quote(REMOTE_PATH + script)}
 `;
+    return this.spawnRemote(command);
+  }
+  /** Runs a POSIX shell command on the SSH host. */
+  protected spawnRemote(command: string): ChildProcessWithoutNullStreams {
     return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   }
   exec(script: string, timeout = 20_000): Promise<string> {
@@ -152,13 +164,13 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
       throw stderr.trim() ? new Error(stderr.trim()) : error;
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); if (!ended) child.kill('SIGTERM'); }
   }
-  start(cwd: string, argv: string[]): Child {
+  start(cwd: string, argv: string[], options: StartOptions = {}): Child {
     const process = this.spawn(`cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
     let stderr = '', exited: Error | undefined;
     const data = new Set<(data: Buffer) => void>(), exits = new Set<(error: Error) => void>();
     const end = (error: Error) => { if (exited) return; exited = error; for (const listener of exits) listener(error); };
     process.stdout.on('data', chunk => { for (const listener of data) listener(chunk); });
-    process.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
+    process.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); options.stderr?.(chunk); });
     process.stdin.on('error', error => end(error)); process.on('error', end);
     process.on('close', code => end(new Error(stderr.trim() || `Remote CLI exited (${code})`)));
     return {
@@ -170,40 +182,60 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
   }
 }
 export type WireMessage = Record<string, any>;
+/** Byte range of one output line in the CLI's output stream. */
+export interface Frame { start: number; end: number }
+const FRAME_LIMIT = 64_000_000;
 /** JSONL supports native Codex, ACP JSON-RPC and Claude's control frames. */
 export class JsonlPeer {
+  /** Request IDs stay unique across reconnections: a replayed response can never answer a newer request. */
+  private readonly prefix = `dsh-${randomUUID().slice(0, 8)}`;
   private nextId = 0;
   private pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer?: ReturnType<typeof setTimeout> }>();
-  private listeners = new Set<(message: WireMessage) => void>();
+  private listeners = new Set<(message: WireMessage, frame: Frame) => void>();
   private exits = new Set<(error: Error) => void>();
   private ended?: Error;
+  private processed: number;
   constructor(private readonly child: Child) {
-    const decoder = new StringDecoder('utf8'); let buffer = '';
+    // Split on bytes: a newline never occurs inside a UTF-8 sequence, so offsets stay exact.
+    this.processed = child.offset ?? 0;
+    let parts: Buffer[] = [], size = 0;
     child.onData(data => {
-      buffer += decoder.write(data);
-      if (buffer.length > 64_000_000) { this.finish(new Error('Remote CLI frame exceeded output limit')); child.stop(); return; }
-      let index: number;
-      while ((index = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, index); buffer = buffer.slice(index + 1);
-        let message: WireMessage;
-        try { message = JSON.parse(line); } catch { continue; }
-        if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
-        const key = message.type === 'control_response' ? String(message.response?.request_id) : message.id !== undefined && !message.method ? String(message.id) : undefined;
-        const request = key ? this.pending.get(key) : undefined;
-        if (request && key) {
-          this.pending.delete(key); clearTimeout(request.timer);
-          const error = message.error ?? (message.response?.subtype === 'error' ? { message: message.response.error } : null);
-          if (error) request.reject(new Error(typeof error.message === 'string' ? error.message : JSON.stringify(error)));
-          else request.resolve(message.type === 'control_response' ? message.response?.response : message.result);
-        } else for (const listener of this.listeners) {
-          try { listener(message); } catch (error) { this.finish(error instanceof Error ? error : new Error(String(error))); child.stop(); return; }
+      let index = 0;
+      while (index < data.length && !this.ended) {
+        const newline = data.indexOf(10, index);
+        if (newline < 0) {
+          parts.push(data.subarray(index)); size += data.length - index;
+          if (size > FRAME_LIMIT) { this.finish(new Error('Remote CLI frame exceeded output limit')); child.stop(); }
+          return;
         }
+        const line = parts.length ? Buffer.concat([...parts, data.subarray(index, newline)]) : data.subarray(index, newline);
+        parts = []; size = 0; index = newline + 1;
+        const frame = { start: this.processed, end: this.processed + line.length + 1 };
+        this.dispatch(line.toString('utf8'), frame);
+        this.processed = frame.end;
       }
     });
     child.onExit(error => this.finish(error));
   }
+  /** Byte offset after the last dispatched line. */
+  get position(): number { return this.processed; }
+  private dispatch(line: string, frame: Frame): void {
+    let message: WireMessage;
+    try { message = JSON.parse(line); } catch { return; }
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return;
+    const key = message.type === 'control_response' ? String(message.response?.request_id) : message.id !== undefined && !message.method ? String(message.id) : undefined;
+    const request = key ? this.pending.get(key) : undefined;
+    if (request && key) {
+      this.pending.delete(key); clearTimeout(request.timer);
+      const error = message.error ?? (message.response?.subtype === 'error' ? { message: message.response.error } : null);
+      if (error) request.reject(new Error(typeof error.message === 'string' ? error.message : JSON.stringify(error)));
+      else request.resolve(message.type === 'control_response' ? message.response?.response : message.result);
+    } else for (const listener of this.listeners) {
+      try { listener(message, frame); } catch (error) { this.finish(error instanceof Error ? error : new Error(String(error))); this.child.stop(); return; }
+    }
+  }
   get alive(): boolean { return !this.ended; }
-  onMessage(listener: (message: WireMessage) => void): void { this.listeners.add(listener); }
+  onMessage(listener: (message: WireMessage, frame: Frame) => void): void { this.listeners.add(listener); }
   onExit(listener: (error: Error) => void): void { this.exits.add(listener); if (this.ended) listener(this.ended); }
   waitForMessage(predicate: (message: WireMessage) => boolean, timeout = 20_000): Promise<WireMessage> {
     return new Promise((resolve, reject) => {
@@ -215,13 +247,13 @@ export class JsonlPeer {
       if (this.ended) failed(this.ended);
     });
   }
-  send(message: WireMessage): void { if (this.ended) throw this.ended; this.child.write(`${JSON.stringify(message)}\n`); }
+  send(message: WireMessage, inputId?: string): void { if (this.ended) throw this.ended; this.child.write(`${JSON.stringify(message)}\n`, inputId); }
   request(method: string, params: Record<string, unknown> = {}, timeout = 20_000): Promise<any> {
-    const id = `dsh-${++this.nextId}`;
+    const id = `${this.prefix}-${++this.nextId}`;
     return this.wait(id, { jsonrpc: '2.0', id, method, params }, timeout);
   }
   control(request: Record<string, unknown>, timeout = 20_000): Promise<any> {
-    const request_id = `dsh-${++this.nextId}`;
+    const request_id = `${this.prefix}-${++this.nextId}`;
     return this.wait(request_id, { type: 'control_request', request_id, request }, timeout);
   }
   private wait(id: string, message: WireMessage, timeout: number): Promise<any> {

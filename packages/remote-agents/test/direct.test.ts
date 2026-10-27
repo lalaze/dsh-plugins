@@ -778,7 +778,8 @@ for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigrav
     const reply: string[] = [];
     const done = (async () => { for await (const chunk of adapter.stream(options)) if (chunk.type === 'text-delta') reply.push(chunk.text); })();
     const count = ssh.admissions.length;
-    for (let i = 0; i < 1000 && ssh.admissions.length === count; i++) await tick();
+    // Bounded by time: a busy parallel test run can need far more than a fixed number of ticks.
+    for (const deadline = Date.now() + 10_000; Date.now() < deadline && ssh.admissions.length === count;) await tick();
     assert.equal(ssh.admissions.length, count + 1, 'one native prompt was admitted');
     ssh.live.finish(); await done;
     assert.equal(reply.join(''), '远程结果 🌏');
@@ -795,4 +796,16 @@ for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigrav
   const replay: string[] = [];
   for await (const chunk of resumed.stream(follow)) if (chunk.type === 'text-delta') replay.push(chunk.text);
   assert.equal(replay.join(''), '远程结果 🌏'); assert.equal(ssh.admissions.length, 2, 'completed output replays after restart without a new prompt');
+});
+
+test('JSONL frames report exact byte offsets for multi-byte text split anywhere', async () => {
+  const lines = ['{"text":"你好🌏"}', '{"text":"ascii"}', '{"n":3}'].map(line => Buffer.from(`${line}\n`));
+  const data = new Set<(data: Buffer) => void>();
+  const child: Child = { write() {}, stop() {}, onData: listener => { data.add(listener); }, onExit() {}, offset: 100 };
+  const peer = new JsonlPeer(child), frames: { start: number; end: number; text?: unknown }[] = [];
+  peer.onMessage((message, frame) => frames.push({ ...frame, text: message.text ?? message.n }));
+  for (const byte of Buffer.concat(lines)) for (const listener of data) listener(Buffer.from([byte]));
+  let at = 100;
+  assert.deepEqual(frames, lines.map((line, i) => ({ start: at, end: (at += line.length), text: ['你好🌏', 'ascii', 3][i] })));
+  assert.equal(peer.position, at);
 });
