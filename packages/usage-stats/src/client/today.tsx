@@ -11,7 +11,7 @@ const CSS = `.us-today{display:inline-flex;align-items:center;gap:6px;flex:none;
 .us-today[data-stale] i{background:#a1a1aa}
 .us-today sup{margin-left:-3px;font-size:10px;opacity:.75}`;
 
-/** A compact pill with today's reported token total, for the conversation header. */
+/** A compact pill with today's reported token total, at the right of the conversation header. */
 export function TodayBadge() {
   useLocale();
   const [totals, setTotals] = useState<Totals | null>(null);
