@@ -445,7 +445,9 @@ export class RemoteAgentsService {
         const target = task ? { hostId: task.hostId, provider: task.provider } : options.target;
         if (!target)
             return null;
-        const report = { provider: target.provider, context: task ? (await this.live(task))?.context ?? task.context ?? null : null };
+        const live = task ? await this.live(task) : undefined;
+        const tokenUsage = live && live.status !== 'closed' ? live.tokenUsage : live?.tokenUsage ?? task?.tokenUsage;
+        const report = { provider: target.provider, context: live?.context ?? task?.context ?? null, ...(tokenUsage ? { tokenUsage } : {}) };
         if (!options.account)
             return report;
         try {

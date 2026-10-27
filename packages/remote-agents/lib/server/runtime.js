@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { questionsOf } from './domain.js';
 import { RelayExit, RelayReleased } from './relay.js';
 import { configureAcpSession } from './acp.js';
-import { acpTurnUsage, claudeMessageTokens, claudeTurnUsage, codexContext, codexTurnUsage, contextUsage } from './usage.js';
+import { acpTurnUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTurnUsage, contextUsage } from './usage.js';
 const list = (value) => Array.isArray(value) ? value : [];
 const contentText = (content) => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
 export async function initializeCodex(peer) {
@@ -30,7 +30,7 @@ export class CliSession {
     /** Claude's signed-in account from `initialize`, used to label its plan limits. */
     account;
     nativeId = '';
-    savedContext = '';
+    savedUsage = '';
     activeMessage;
     confirmed = false;
     partialText = false;
@@ -59,8 +59,8 @@ export class CliSession {
         this.store = store;
         this.hooks = hooks;
         this.relay = relay;
-        this.agent = { id: task.agentId ?? task.id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'initializing', pendingPermissions: [], ...(task.context ? { context: { ...task.context } } : {}), ...(relay ? { persistent: true } : {}) };
-        this.savedContext = JSON.stringify(task.context ?? null);
+        this.agent = { id: task.agentId ?? task.id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'initializing', pendingPermissions: [], ...(task.context ? { context: { ...task.context } } : {}), ...(task.tokenUsage ? { tokenUsage: structuredClone(task.tokenUsage) } : {}), ...(relay ? { persistent: true } : {}) };
+        this.savedUsage = JSON.stringify([task.context, task.tokenUsage]);
         peer.onMessage((message, frame) => this.frame(message, frame));
         peer.onExit(error => {
             if (this.released)
@@ -267,7 +267,7 @@ export class CliSession {
         this.append({ type: 'delivery', clientMessageId: this.activeMessage });
     }
     complete(toolStatus = 'completed') {
-        this.saveContext();
+        this.saveUsage();
         this.hooks.turnEnded?.();
         this.agent.status = 'idle';
         this.agent.activeTurn = null;
@@ -293,21 +293,29 @@ export class CliSession {
         this.append({ type: 'usage', usage });
         this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed });
     }
-    /** Persist once per turn rather than per token report. */
-    saveContext() {
-        const context = this.agent.context, key = JSON.stringify(context ?? null);
-        if (!context || key === this.savedContext)
+    setTokenUsage(usage) { this.agent.tokenUsage = usage; this.saveUsage(); }
+    /** Save request snapshots as they arrive, including during long tool loops and resume. */
+    saveUsage() {
+        const { context, tokenUsage } = this.agent, key = JSON.stringify([context, tokenUsage]);
+        if (key === this.savedUsage)
             return;
-        this.savedContext = key;
-        void this.store.update(state => { const task = state.tasks.find(t => t.id === this.task.id); if (task)
-            task.context = { ...context }; }).catch(() => { });
+        this.savedUsage = key;
+        const snapshot = structuredClone({ context, tokenUsage });
+        void this.store.update(state => {
+            const task = state.tasks.find(t => t.id === this.task.id);
+            if (task) {
+                task.context = snapshot.context;
+                task.tokenUsage = snapshot.tokenUsage;
+            }
+        }).catch(() => { if (this.savedUsage === key)
+            this.savedUsage = ''; });
     }
     /** Claude reports its exact context breakdown on request, including after compaction. */
     async claudeContext() {
         try {
             const usage = await this.peer.control({ subtype: 'get_context_usage' });
             this.setContext(contextUsage(usage?.totalTokens, usage?.maxTokens));
-            this.saveContext();
+            this.saveUsage();
         }
         catch { /* Older Claude Code versions do not report context usage. */ }
     }
@@ -369,6 +377,7 @@ export class CliSession {
         // Codex reports the resumed thread's usage while its history replay is still suppressed.
         if (m.method === 'thread/tokenUsage/updated') {
             this.setContext(codexContext(m.params?.tokenUsage));
+            this.setTokenUsage(codexTokenUsage(m.params?.tokenUsage));
             this.codexTotal = m.params?.tokenUsage?.total ?? this.codexTotal;
         }
         if (this.suspended)
@@ -458,6 +467,8 @@ export class CliSession {
             const used = m.parent_tool_use_id ? undefined : claudeMessageTokens(m.message?.usage);
             if (used !== undefined && this.agent.context)
                 this.setContext({ used, max: this.agent.context.max });
+            if (!m.parent_tool_use_id && m.message?.usage !== undefined)
+                this.setTokenUsage(claudeTokenUsage(m.message.usage));
             for (const block of list(m.message?.content)) {
                 if (block.type === 'text' && !this.partialText)
                     this.append({ type: 'assistant_message', text: String(block.text ?? '') });

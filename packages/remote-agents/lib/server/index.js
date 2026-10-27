@@ -58,6 +58,22 @@ export async function apply(ctx, config = {}) {
         }, { global: true });
         const adapter = new RemoteCliAdapter(projects, { approval: host.approval, userQuestions: host.userQuestions,
             agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => steps.get(id)?.session.header.cwd ?? scoped.sessions.get(id)?.header.cwd,
+            permission: id => {
+                // The composer's preset, mapped through its sandbox so renamed presets still match; `custom` has no mapping.
+                const presets = scoped.get('permissionPresets');
+                const session = steps.get(id)?.session ?? scoped.sessions.get(id);
+                if (!presets || !session)
+                    return;
+                const preset = presets.current(session);
+                if (preset === 'auto')
+                    return 'auto';
+                try {
+                    return presets.resolve(preset).sandbox;
+                }
+                catch {
+                    return;
+                }
+            },
             userContent: (id, messageId) => (steps.get(id)?.session ?? scoped.sessions.get(id))?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user'))?.content,
             attachments: {
                 image: async (ref, signal) => {

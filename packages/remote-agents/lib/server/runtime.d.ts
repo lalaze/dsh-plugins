@@ -26,7 +26,7 @@ export declare class CliSession {
     /** Claude's signed-in account from `initialize`, used to label its plan limits. */
     account?: unknown;
     private nativeId;
-    private savedContext;
+    private savedUsage;
     private activeMessage?;
     private confirmed;
     private partialText;
@@ -73,8 +73,9 @@ export declare class CliSession {
     private setContext;
     /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
     private turnUsage;
-    /** Persist once per turn rather than per token report. */
-    private saveContext;
+    private setTokenUsage;
+    /** Save request snapshots as they arrive, including during long tool loops and resume. */
+    private saveUsage;
     /** Claude reports its exact context breakdown on request, including after compaction. */
     private claudeContext;
     private fail;

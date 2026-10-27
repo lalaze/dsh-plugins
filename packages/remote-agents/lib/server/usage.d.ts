@@ -1,4 +1,4 @@
-import type { AccountUsage, ContextUsage, HostConfig, NativeProtocol, Task, TurnUsage } from './domain.js';
+import type { AccountUsage, ContextUsage, HostConfig, NativeProtocol, Task, TokenUsage, TurnUsage } from './domain.js';
 import type { JsonlPeer } from './ssh.js';
 /** Context fill, or nothing until the CLI has reported a window size. */
 export declare function contextUsage(used: unknown, max: unknown): ContextUsage | undefined;
@@ -31,6 +31,10 @@ export declare function codexTurnUsage(total: any, before: any): TurnUsage | und
 export declare function acpTurnUsage(usage: any): TurnUsage | undefined;
 /** Claude API usage of one assistant message: everything sent plus what it generated. */
 export declare function claudeMessageTokens(usage: any): number | undefined;
+/** Codex input already includes cached input; snapshots must not be added together. */
+export declare function codexTokenUsage(usage: any): TokenUsage | undefined;
+/** Claude's uncached input, cache reads and cache writes are disjoint counters. */
+export declare function claudeTokenUsage(usage: any): TokenUsage | undefined;
 /** Codex `account/read` and `account/rateLimits/read`. Extra metered buckets follow the main one. */
 export declare function codexAccountUsage(account: any, limits: any, checkedAt?: string): AccountUsage;
 /** Claude `initialize` account details and the `get_usage` control response behind `/usage`. */

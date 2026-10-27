@@ -10,6 +10,16 @@ export function permissionModes(provider, modes) {
         choices.splice(choices.findIndex(m => m.id === 'inherit') + 1, 0, { id: 'auto', label: 'Auto · safety checks' });
     return choices;
 }
+const PRESET_MODES = {
+    // Claude has no read-only mode that keeps the normal workflow; asking before every tool is the closest.
+    claude: { 'read-only': 'default', 'workspace-write': 'acceptEdits', 'danger-full-access': 'bypassPermissions', auto: 'auto' },
+    codex: { 'read-only': 'read-only', 'workspace-write': 'workspace-write', 'danger-full-access': 'full-access', auto: 'workspace-write' },
+};
+/** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
+export function presetMode(provider, modes, permission) {
+    const mode = permission && PRESET_MODES[provider]?.[permission];
+    return mode && permissionModes(provider, modes).some(m => m.id === mode) ? mode : undefined;
+}
 export const inputModalitiesOf = (provider, model) => model.inputModalities ?? (['claude', 'codex'].includes(provider) ? ['text', 'image'] : ['text']);
 export const PROVIDER_LABELS = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };
 /** Older machines retain their providers until the user explicitly changes the selection. */

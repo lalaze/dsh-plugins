@@ -1,5 +1,6 @@
 import { LlmAdapter, type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
+import { type DshPermission } from './domain.js';
 import { type AttachmentAccess } from './attachments.js';
 import { ChatProjects } from './chat-projects.js';
 import { type ToolHost } from './tools.js';
@@ -18,6 +19,8 @@ export interface ChatHost extends Partial<ToolHost> {
         step: number;
     } | undefined;
     userContent?(sessionId: NonNullable<GenerateOptions['sessionId']>, messageId: string): readonly ContentBlock[] | undefined;
+    /** The conversation's permission from the DSH composer; undefined for a custom value or without permission presets. */
+    permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
     attachments?: AttachmentAccess;
 }
 /** A speed tier (Codex Fast) is a separate picker row: DSH model selections carry only a model and a reasoning effort. */

@@ -45,6 +45,10 @@ export interface Choice {
 }
 /** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export declare function permissionModes(provider: string, modes: Choice[]): Choice[];
+/** The DSH conversation's permission, as its preset's sandbox mode or `auto` for Auto review. */
+export type DshPermission = 'read-only' | 'workspace-write' | 'danger-full-access' | 'auto';
+/** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
+export declare function presetMode(provider: string, modes: Choice[], permission: DshPermission | undefined): string | undefined;
 /** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
 export interface Model extends Choice {
     thinkingOptions?: Choice[];
@@ -142,6 +146,18 @@ export interface ContextUsage {
     used: number;
     max: number;
 }
+/** Input includes cache reads and writes. Missing counters mean unreported, not zero. */
+export interface TokenUsageBreakdown {
+    inputTokens?: number;
+    cachedInputTokens?: number;
+    cacheWriteInputTokens?: number;
+    outputTokens?: number;
+}
+/** Native model-request usage. Only Codex supplies a cumulative thread total. */
+export interface TokenUsage {
+    last?: TokenUsageBreakdown;
+    total?: TokenUsageBreakdown;
+}
 /** One plan rate-limit window of a CLI account; `label` is English and localized by the client. */
 export interface QuotaWindow {
     id: string;
@@ -164,6 +180,7 @@ export interface AccountUsage {
 export interface UsageReport {
     provider: string;
     context: ContextUsage | null;
+    tokenUsage?: TokenUsage;
     account?: AccountUsage;
 }
 /** Live state of one attached (or detached) native CLI session. */
@@ -183,6 +200,7 @@ export interface Agent {
     nativeSessionId?: string | null;
     resumable?: boolean;
     context?: ContextUsage;
+    tokenUsage?: TokenUsage;
     /** The CLI runs under a relay on the SSH host and survives DSH restarts and SSH interruptions. */
     persistent?: boolean;
     /** A persistent CLI whose SSH connection is being re-established. */
@@ -253,6 +271,8 @@ export interface Task extends TaskInput {
     };
     /** Last reported context window fill, kept for a detached session. */
     context?: ContextUsage;
+    /** Latest native token counters, kept across detach and restart. */
+    tokenUsage?: TokenUsage;
     state: 'creating' | 'ready' | 'uncertain';
     error?: string;
 }
