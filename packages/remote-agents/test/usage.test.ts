@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeTurnUsage, codexAccountUsage, codexContext, codexTurnUsage } from '../src/usage.js';
+import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeTurnUsage, codexAccountUsage, codexContext, codexTurnUsage, remoteUsageRecord } from '../src/usage.js';
+import type { HostConfig, Task } from '../src/domain.js';
 import { formatReset, formatTokens } from '../src/client/usage.js';
 import { fixture } from './fakes.js';
 
@@ -96,4 +97,17 @@ test('turn usage converts each CLI report into DSH token usage', () => {
   assert.deepEqual(acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 50, totalTokens: 170 }), { inputTokens: 100, outputTokens: 20, cacheReadTokens: 50, totalTokens: 170 });
   assert.deepEqual(acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 50, totalTokens: 120, thoughtTokens: 7 }), { inputTokens: 50, outputTokens: 20, cacheReadTokens: 50, reasoningTokens: 7, totalTokens: 120 });
   assert.equal(acpTurnUsage(undefined), undefined);
+});
+
+test('usage records name the CLI, host and remote directory, and tell conversations from delegated agents', () => {
+  const hosts = [{ id: 'h1', label: 'Build box', connection: 'me@build' }] as HostConfig[];
+  const usage = { inputTokens: 1, outputTokens: 2 };
+  const chat = { id: 't1', hostId: 'h1', cwd: '/srv/app', executionCwd: '/srv/app/sub', provider: 'codex', model: 'gpt-5.5', chat: { sessionId: 'dsh-1' } } as unknown as Task;
+  const record = remoteUsageRecord(chat, hosts, usage, { startedAt: '2026-10-27T10:00:00.000Z', failed: false }, Date.parse('2026-10-27T10:00:05.000Z'));
+  assert.deepEqual({ ...record, id: undefined }, { id: undefined, startedAt: '2026-10-27T10:00:00.000Z', provider: 'remote-cli-codex', model: 'gpt-5.5', sessionId: 'dsh-1',
+    purpose: 'conversation', status: 'completed', durationMs: 5000, usage, host: 'Build box', workspace: '/srv/app/sub' });
+  const delegated = remoteUsageRecord({ ...chat, chat: undefined, executionCwd: undefined, origin: 'dsh', hostId: 'gone' } as unknown as Task, hosts, usage, { startedAt: null, failed: true }, 0);
+  assert.equal(delegated.purpose, 'delegation'); assert.equal(delegated.status, 'error'); assert.equal(delegated.sessionId, 'remote-agent:t1');
+  assert.equal(delegated.workspace, '/srv/app'); assert.equal('host' in delegated, false); assert.equal(delegated.durationMs, 0);
+  assert.equal(remoteUsageRecord({ ...chat, chat: undefined } as unknown as Task, hosts, usage, { startedAt: null, failed: false }).purpose, 'remote-session');
 });

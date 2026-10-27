@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-agents",
-  "version": "0.2.21",
+  "version": "0.2.22",
   "description": "Workspace-scoped remote CLI models in the native DSH picker and SSH task delegation",
   "type": "module",
   "main": "lib/server/index.js",

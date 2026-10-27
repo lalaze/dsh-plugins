@@ -1,4 +1,5 @@
-import type { AccountUsage, ContextUsage, NativeProtocol, QuotaWindow, TurnUsage } from './domain.js';
+import { randomUUID } from 'node:crypto';
+import type { AccountUsage, ContextUsage, HostConfig, NativeProtocol, QuotaWindow, Task, TurnUsage } from './domain.js';
 import type { JsonlPeer } from './ssh.js';
 
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
@@ -12,6 +13,23 @@ export function contextUsage(used: unknown, max: unknown): ContextUsage | undefi
 /** Codex `thread/tokenUsage/updated`: the last request's total is what the context window holds. */
 export const codexContext = (usage: any) => contextUsage(usage?.last?.totalTokens ?? usage?.last?.total_tokens, usage?.modelContextWindow ?? usage?.model_context_window);
 const optional = (key: keyof TurnUsage, value: number | undefined) => value ? { [key]: value } : {};
+/** One finished remote turn's usage, in dsh-usage-stats' record shape, with the machine and remote directory it ran in. */
+export interface RemoteUsageRecord {
+  id: string; startedAt: string; provider: string; model: string; sessionId?: string;
+  purpose: 'conversation' | 'delegation' | 'remote-session'; status: 'completed' | 'error'; durationMs: number; usage: TurnUsage;
+  host?: string; workspace?: string;
+}
+/** Providers match the `remote-cli-<cli>` chat routes; sessions are the DSH conversation, or the agent for other turns. */
+export function remoteUsageRecord(task: Task, hosts: readonly HostConfig[], usage: TurnUsage, turn: { startedAt: string | null; failed: boolean }, now = Date.now()): RemoteUsageRecord {
+  const started = turn.startedAt ? Date.parse(turn.startedAt) : NaN, host = hosts.find(h => h.id === task.hostId);
+  return {
+    id: randomUUID(), startedAt: new Date(Number.isFinite(started) ? started : now).toISOString(),
+    provider: `remote-cli-${task.provider}`, model: task.model, sessionId: task.chat?.sessionId ?? `remote-agent:${task.id}`,
+    purpose: task.chat ? 'conversation' : task.origin === 'dsh' ? 'delegation' : 'remote-session', status: turn.failed ? 'error' : 'completed',
+    durationMs: Number.isFinite(started) ? Math.max(0, now - started) : 0, usage,
+    ...(host ? { host: host.label } : {}), workspace: task.executionCwd ?? task.cwd,
+  };
+}
 /** Claude's `result.usage`: the whole turn, across every model call it made. */
 export function claudeTurnUsage(usage: any): TurnUsage | undefined {
   const input = count(usage?.input_tokens), output = count(usage?.output_tokens);
