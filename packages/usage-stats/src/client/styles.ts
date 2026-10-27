@@ -20,10 +20,9 @@ export const styles = `
 .us-button{display:inline-flex;align-items:center;justify-content:center;gap:7px;background:transparent;border:1px solid var(--us-line);padding:7px 11px;border-radius:7px;white-space:nowrap;min-height:34px}
 .us-button:hover{background:var(--us-surface)}
 .us-button.us-primary{background:var(--us-accent);color:white;border-color:var(--us-accent)}
-.us-tabs{display:flex;gap:20px;align-items:center;border-bottom:1px solid var(--us-line);min-height:41px}
+.us-tabs{display:flex;gap:20px;align-items:center;border-bottom:1px solid var(--us-line);min-height:41px;overflow-x:auto}
 .us-tab{background:transparent;border:0;border-bottom:2px solid transparent;color:var(--us-muted)!important;padding:0 1px 13px;display:flex;align-items:center;gap:7px;white-space:nowrap}
 .us-tab[aria-pressed=true]{color:inherit!important;border-bottom-color:var(--us-accent);font-weight:600}
-.us-tab .us-dot{width:6px;height:6px}
 .us-segment{display:inline-flex;padding:3px;gap:2px;background:var(--us-surface);border:1px solid var(--us-line);border-radius:8px}
 .us-segment button{border:0;background:transparent;padding:5px 10px;white-space:nowrap;border-radius:5px;color:var(--us-muted)}
 .us-segment button[aria-pressed=true]{background:color-mix(in srgb,currentColor 8%,transparent);color:inherit}
@@ -33,8 +32,8 @@ export const styles = `
 .us-filters summary{cursor:pointer;color:var(--us-muted);font-size:12px}
 .us-filter-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:14px}
 .us-field{display:grid;gap:5px;color:var(--us-muted);font-size:11px}
-.us-field input,.us-field select,.us-group-select{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--us-line);border-radius:6px;background:transparent;color:inherit;font-size:12px}
-.us-field option,.us-group-select option{background:Canvas;color:CanvasText}
+.us-field input,.us-field select{width:100%;min-width:0;padding:8px 10px;border:1px solid var(--us-line);border-radius:6px;background:transparent;color:inherit;font-size:12px}
+.us-field option{background:Canvas;color:CanvasText}
 .us-custom-dates{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .us-custom-dates input{max-width:145px}
 .us-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--us-line);border-radius:12px;background:var(--us-surface);overflow:hidden}
@@ -44,7 +43,6 @@ export const styles = `
 .us-metric strong{display:block;font-size:31px;letter-spacing:-1px;font-weight:620;line-height:1.4;margin:9px 0 4px}
 .us-metric small{font-size:11px;color:var(--us-muted)}
 .us-metric:first-child strong{color:var(--us-accent)}
-.us-charts{display:grid;grid-template-columns:minmax(0,2.1fr) minmax(255px,1fr);gap:18px}
 .us-panel{border:1px solid var(--us-line);border-radius:12px;min-width:0;overflow:hidden}
 .us-panel-head{padding:18px 20px 0;align-items:start}
 .us-chart{padding:20px 20px 14px}
@@ -62,20 +60,8 @@ export const styles = `
 .us-token-parts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:14px 20px;border-top:1px solid var(--us-line);background:var(--us-surface)}
 .us-token-parts span{display:block;color:var(--us-muted);font-size:10px}
 .us-token-parts b{font-size:13px;font-weight:550;display:block;margin-top:3px}
-.us-source-content{padding:20px;display:grid;gap:20px}
-.us-ring-wrap{display:grid;place-items:center}
-.us-ring{width:140px;height:140px;border-radius:50%;display:grid;place-items:center;position:relative}
-.us-ring:before{content:'';position:absolute;inset:13px;border-radius:50%;background:var(--color-bg-primary,Canvas)}
-.us-ring-center{position:relative;text-align:center;color:var(--us-muted);font-size:10px}
-.us-ring-center b{display:block;font-size:23px;font-weight:600;color:CanvasText;letter-spacing:-.5px}
-.us-source-list{display:grid;gap:14px}
-.us-source-item{display:grid;gap:7px}
-.us-source-title{display:flex;align-items:center;justify-content:space-between;font-size:11px;gap:8px}
-.us-source-title>span{display:flex;align-items:center;gap:6px}
 .us-breakdown{padding:20px;display:grid;gap:16px}
 .us-breakdown .us-panel-head{padding:0}
-.us-breakdown-tabs{display:flex;overflow-x:auto;max-width:100%}
-.us-breakdown-tabs button{flex:1}
 .us-breakdown-list{list-style:none;margin:0;padding:0;display:grid;gap:14px}
 .us-breakdown-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 .us-breakdown-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
@@ -89,7 +75,6 @@ export const styles = `
 .us-notice{padding:11px 14px;border:1px solid var(--us-line);background:var(--us-surface);border-radius:8px;font-size:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .us-notice.us-warning{border-color:#ca98234d;background:#ca98230a}
 .us-details-head{padding:18px 20px;border-bottom:1px solid var(--us-line)}
-.us-group-select{width:auto;min-width:100px;min-height:32px}
 .us-scroll{overflow:auto;min-width:0}
 .us-table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap;min-width:790px}
 .us-table th,.us-table td{text-align:right;padding:13px 18px;border-bottom:1px solid var(--us-line);font-variant-numeric:tabular-nums}
@@ -114,14 +99,7 @@ export const styles = `
 .us-foot summary{cursor:pointer}
 .us-foot p{margin-top:8px!important;line-height:1.8}
 .us-loading{padding:24px;color:var(--us-muted)}
-.us-ring:before{display:none}
-.us-ring svg{position:absolute;inset:0;width:100%;height:100%}
-.us-ring-center{color:inherit}
-.us-ring-center b{color:inherit}
-.us-ring-center span{color:var(--us-muted)}
-@container(max-width:760px){.us-charts{grid-template-columns:1fr}
-.us-source-content{grid-template-columns:140px 1fr;align-items:center}
-.us-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
+@container(max-width:760px){.us-summary{grid-template-columns:repeat(2,minmax(0,1fr))}
 .us-metric:nth-child(3){border-left:0;border-top:1px solid var(--us-line)}
 .us-metric:nth-child(4){border-top:1px solid var(--us-line)}
 .us-filter-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -141,11 +119,6 @@ export const styles = `
 .us-token-parts{grid-template-columns:repeat(2,minmax(0,1fr))}
 .us-panel-head,.us-details-head{padding:15px}
 .us-chart{padding:15px}
-.us-source-content{padding:15px;gap:15px;grid-template-columns:110px 1fr}
-.us-ring{width:110px;height:110px}
-.us-ring:before{inset:10px}
-.us-ring-center b{font-size:20px}
-.us-source-title{font-size:10px}
 .us-filter-grid{grid-template-columns:1fr}
 .us-chart-body{height:160px}
 .us-foot{font-size:10px}}

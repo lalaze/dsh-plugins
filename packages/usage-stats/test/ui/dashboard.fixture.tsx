@@ -7,7 +7,7 @@ import { parseQuery, report, toCsv, type UsageRecord } from '../../src/domain.js
 
 const locale = createLocaleFixture();
 installLocale({ get: () => locale });
-const fixture = { setLocale: locale.setLocale, fail: false, empty: false, demo: location.hash === '#demo', requests: [] as string[] };
+const fixture = { setLocale: locale.setLocale, fail: false, empty: false, demo: location.hash === '#demo', workspaces: false, requests: [] as string[] };
 Object.assign(window, { fixture });
 const records: UsageRecord[] = [
   { id: 'local', provider: 'deepseek', model: 'deepseek-chat', sessionId: 'local-session', purpose: 'conversation', startedAt: '2026-10-21T12:00:00.000Z', durationMs: 100, status: 'completed', usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 30 } },
@@ -23,10 +23,12 @@ const demoRecords: UsageRecord[] = Array.from({ length: 21 }, (_, day) => {
     usage: { inputTokens: (2400 + day * 130 + call * 250) * (modelIndex + 1), outputTokens: 600 + call * 80, cacheReadTokens: 10000 + (day * 1600 + call * 370) % 26000, cacheWriteTokens: 1500 + call * 120 },
   })));
 }).flat();
+/** One record per workspace: enough groups to page the details table. */
+const workspaceRecords: UsageRecord[] = Array.from({ length: 21 }, (_, i) => ({ ...records[0], id: `workspace-${i}`, workspace: `/srv/projects/w${String(i).padStart(2, '0')}` }));
 window.fetch = async input => {
   const url = new URL(String(input), 'http://fixture.test'); fixture.requests.push(url.href);
   if (fixture.fail) return Response.json({ error: '模拟网络错误' }, { status: 503 });
-  const data = report(fixture.empty ? [] : fixture.demo ? demoRecords : records, parseQuery(url));
+  const data = report(fixture.empty ? [] : fixture.demo ? demoRecords : fixture.workspaces ? workspaceRecords : records, parseQuery(url));
   if (url.searchParams.get('format') === 'csv') return new Response(toCsv(data), { headers: { 'Content-Type': 'text/csv' } });
   return Response.json(data);
 };

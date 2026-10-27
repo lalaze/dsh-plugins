@@ -25,10 +25,12 @@ test('DSH 与远程智能体汇总（含旧 Claude SSH 记录）：缓存不重�
   assert.equal(report(records, { groupBy: 'model', source: 'remote-agents' }).totals.requests, 1);
   assert.equal(report(records, { groupBy: 'model', source: 'dsh' }).totals.requests, 2);
 });
-test('优先使用供应商明确的总量；模型名相同但服务商不同不会合并', () => {
+test('优先使用供应商明确的总量；明细按所选分类分组：同名模型合并，服务商分开', () => {
   const records = [record({ usage: { inputTokens: 1, outputTokens: 2, totalTokens: 9 } }), record({ provider: 'other' })];
   const data = report(records, { groupBy: 'model' });
-  assert.equal(data.groups.length, 2); assert.equal(data.totals.totalTokens, 109);
+  assert.equal(data.groups.length, 1); assert.equal(data.totals.totalTokens, 109);
+  assert.deepEqual(data.groups, data.breakdowns.model, 'detail rows are the selected category');
+  assert.deepEqual(report(records, { groupBy: 'provider' }).groups.map(g => [g.label, g.totals.totalTokens]), [['other', 100], ['deepseek', 9]]);
 });
 test('日期首尾包含，模型/服务商/会话筛选一致；无会话辅助请求仍计入', () => {
   const records = [record({ startedAt: '2026-10-20T23:59:59.999Z' }), record(), record({ startedAt: '2026-10-21T23:59:59.999Z', sessionId: undefined, purpose: 'session-title' }), record({ startedAt: '2026-10-22T00:00:00.000Z' })];
@@ -98,8 +100,8 @@ test('写入失败计数且后续写入可恢复；不覆盖损坏的旧文件',
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 test('CSV 正确转义，并中和分组名称中的电子表格公式', () => {
-  const csv = toCsv(report([record({ provider: '=cmd,"x"' })], { groupBy: 'model' }));
-  assert.ok(csv.startsWith('\uFEFF')); assert.ok(csv.includes('"\'=cmd,""x"" / chat"'));
+  const csv = toCsv(report([record({ provider: '=cmd,"x"' })], { groupBy: 'provider' }));
+  assert.ok(csv.startsWith('\uFEFF')); assert.ok(csv.includes('"\'=cmd,""x"""'));
   assert.ok(csv.endsWith('\r\n'));
 });
 test('插件钩子覆盖两类调用；API、筛选和 CSV 共用持久化结果', async () => {
@@ -150,7 +152,7 @@ test('真实 Cordis 与 LlmRuntime waterfall 经适配器派发后恰好采集�
     await new Promise(resolve => setTimeout(resolve, 50));
     const remote = await (await fetcher!(new Request('http://example.test/api/usage-stats?source=remote-agents&groupBy=model'))).json();
     assert.equal(remote.totals.requests, 2, 'the remote-cli model call itself is not counted'); assert.equal(remote.totals.totalTokens, 555);
-    assert.deepEqual(remote.groups.map((g: { label: string }) => g.label).sort(), ['claude-ssh-fixture / chat', 'remote-cli-codex / gpt-5.5']);
+    assert.deepEqual(remote.groups.map((g: { label: string }) => g.label).sort(), ['chat', 'gpt-5.5']);
     const label = (rows: { label: string }[]) => rows.map(row => row.label);
     assert.deepEqual(label(remote.breakdowns.provider), ['Codex', 'Claude Code']); assert.deepEqual(label(remote.breakdowns.host), ['Build box', 'Unknown host']);
     assert.deepEqual(label(remote.breakdowns.workspace), ['/srv/app', 'No workspace']); assert.deepEqual(label(remote.breakdowns.vendor), ['OpenAI', 'Anthropic']);

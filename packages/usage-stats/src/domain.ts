@@ -28,7 +28,6 @@ export interface Totals {
   reasoningTokens: number;
   totalTokens: number;
 }
-export type GroupBy = 'day' | 'model' | 'session' | 'source';
 export type Source = 'dsh' | 'remote-agents';
 /** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. */
 export const sourceOf = (provider: string): Source => provider.startsWith('remote-cli-') || provider.startsWith('claude-ssh-') ? 'remote-agents' : 'dsh';
@@ -45,6 +44,9 @@ export interface UsageGroup { key: string; label: string; totals: Totals }
 /** The dashboard's usage breakdowns: CLI or provider, workspace, model, model vendor and machine. */
 export type Dimension = 'provider' | 'workspace' | 'model' | 'vendor' | 'host';
 export const DIMENSIONS: readonly Dimension[] = ['provider', 'workspace', 'model', 'vendor', 'host'];
+/** Detail rows follow a dashboard category; `day`, `session` and `source` remain for API clients. */
+export type GroupBy = Dimension | 'day' | 'session' | 'source';
+const isDimension = (value: string): value is Dimension => (DIMENSIONS as readonly string[]).includes(value);
 export interface UsageReport {
   totals: Totals;
   groups: UsageGroup[];
@@ -124,7 +126,7 @@ function date(value: string | null): string | undefined {
 export function parseQuery(url: URL): Query {
   const p = url.searchParams;
   const groupBy = p.get('groupBy') ?? 'day';
-  if (!['day', 'model', 'session', 'source'].includes(groupBy)) throw new Error("Unsupported grouping");
+  if (!isDimension(groupBy) && !['day', 'session', 'source'].includes(groupBy)) throw new Error("Unsupported grouping");
   const rawSource = p.get('source');
   let source: Source | undefined;
   if (rawSource === 'dsh' || rawSource === 'remote-agents') source = rawSource;
@@ -150,15 +152,19 @@ export function report(records: readonly UsageRecord[], query: Query, failedWrit
   for (const r of records) {
     const day = query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
     if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source)) continue;
-    const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, modelOf(r)]) : r.sessionId ?? '';
-    const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${modelOf(r)}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
-    add(totals, r); accumulate(groups, key, label, r);
+    add(totals, r);
+    if (!isDimension(query.groupBy)) {
+      const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : r.sessionId ?? '';
+      const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
+      accumulate(groups, key, label, r);
+    }
     accumulate(series, day, day, r);
     accumulate(sources, sourceOf(r.provider), SOURCE_LABELS[sourceOf(r.provider)], r);
     for (const by of DIMENSIONS) accumulate(breakdowns[by], ...dimension(r, by), r);
   }
   const largest = (map: Map<string, UsageGroup>) => [...map.values()].sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || b.totals.requests - a.totals.requests || a.label.localeCompare(b.label));
-  return { totals, groups: [...groups.values()].sort((a, b) => query.groupBy === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
+  const by = query.groupBy;
+  return { totals, groups: isDimension(by) ? largest(breakdowns[by]) : [...groups.values()].sort((a, b) => by === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
     series: [...series.values()].sort((a, b) => a.key.localeCompare(b.key)),
     sources: [...sources.values()].sort((a, b) => a.key.localeCompare(b.key)),
     breakdowns: Object.fromEntries(DIMENSIONS.map(by => [by, largest(breakdowns[by])])) as Record<Dimension, UsageGroup[]>,
