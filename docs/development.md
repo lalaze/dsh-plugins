@@ -19,7 +19,7 @@ TypeScript、tsx、esbuild 和 Node 类型由根目录提供。React、DSH 接�
    }
    ```
 
-4. 按插件实际入口设置 `main`、`types`、`exports`、`files`、DSH 清单和构建配置。当前插件的服务端编译结果位于 `lib/server/`，客户端为 `lib/client.js`，可参考 [Claude SSH 清单](../packages/claude-ssh/package.json)。后端插件无需客户端构建步骤。
+4. 按插件实际入口设置 `main`、`types`、`exports`、`files`、DSH 清单和构建配置。当前插件的服务端编译结果位于 `lib/server/`，客户端为 `lib/client.js`，可参考 [Remote Agents 清单](../packages/remote-agents/package.json)。后端插件无需客户端构建步骤。
 5. 定义 `build`、`typecheck`、`test` 和 `prepack` 脚本；`check` 可组合前三项，`test:ui` 按需添加。当前使用 Node test runner，命令为 `node --import tsx --test test/*.test.ts`。让 `prepack` 执行构建，确保归档包含最新产物。
 6. 在根目录执行 `pnpm install` 更新唯一锁文件，再运行 `pnpm --filter <包名> check`。根目录 README 的插件表需要同时更新。
 
@@ -49,12 +49,14 @@ pnpm pack:plugins
 单独打包当前插件：
 
 ```sh
-pnpm --filter dsh-claude-ssh pack:plugin
+pnpm --filter dsh-remote-agents pack:plugin
 ```
 
 新增插件若需要同样的快捷命令，在自己的 `scripts` 中添加 `"pack:plugin": "pnpm pack --pack-destination ../../dist"`。每个可发布包应通过 `files` 明确包含编译产物、patch、README、LICENSE 和必要文档，源码测试及根目录工具不进入安装包。
 
 发布前检查归档内容，并从归档验证入口可以解析。使用 `.tgz` 安装时不需要用户拿到整个大仓；不要把 GitHub 根仓库地址作为子包安装地址。
+
+通过插件市场发布时运行 `pnpm release:market`（可加 `--dry-run`），再 `git push origin market`。脚本要求工作区干净，按 `pnpm pack` 的产物生成去掉 `scripts` 与 `devDependencies` 的安装包，提交到只追加的 `market` 分支，并用 DSH 自带的校验器（`@deepseek-ai/dsh-plugin-market-index`）检查索引。插件标题取自各包 README 的一级标题，简介取自根目录 README 的插件表，所以新增插件时更新插件表即可。发布新版本前必须升级版本号；同一版本内容变化会被提示并跳过。
 
 ## 共享代码
 

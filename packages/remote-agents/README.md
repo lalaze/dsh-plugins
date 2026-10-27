@@ -25,7 +25,7 @@ Model catalogs are saved per machine on the DSH server and shared between client
 
 ## Unified remote sessions
 
-Open **Sidebar → Remote sessions**, or **Settings → Remote agents → Open sessions**. The list includes main-chat bindings and delegated agents, with search by title, CLI, host or path, and filters for pending requests and archived sessions.
+Open **Settings → Remote agents → Open sessions**. There is no remote sessions entry in the sidebar. The list includes main-chat bindings and delegated agents, with search by title, CLI, host or path, and filters for pending requests and archived sessions.
 
 - **Create:** choose a saved machine, CLI and model, then describe the task. The current DSH workspace path is used on that machine.
 - **History and follow-ups:** read streaming output, expandable reasoning and tool details, and load earlier history. Send follow-ups to background agents here; use **Open in main chat** for bound conversations so their native DSH history stays consistent.
@@ -72,11 +72,13 @@ DSH uses the remote `acp` profile's providers, models and credentials. Antigravi
 
 ## Hosts
 
+**Remove** stays available when a host is offline or SSH fails. Hosts with saved sessions ask for confirmation first. **Remove host and sessions** stops attached CLI processes and permanently deletes that host’s plugin sessions (including archived sessions), saved output and model catalog without reconnecting over SSH.
+
 Add machines under **Settings → Remote agents**. Pick a `Host` alias from the DSH machine's `~/.ssh/config` (including `Include` files) or enter `build-box`, `user@build-box` or `ssh://user@build-box:2222`. The original alias is saved, so OpenSSH resolves `HostName`, `User`, `Port`, `IdentityFile` and `ProxyJump` when connecting. The picker never expands wildcards, runs `Match exec` or opens a connection.
 
 The DSH server needs noninteractive key or agent access and verified host keys (`BatchMode=yes`, `StrictHostKeyChecking=yes`). Passwords are not stored. Remote machines need only SSH and the signed-in CLIs, not this plugin. Each host pins its SSH machine identity; if it changes, add the machine again.
 
-Noninteractive SSH commands retain an already configured Node.js ≥22. If the current runtime is too old, the plugin selects a compatible installed nvm or Homebrew runtime. Without one, it keeps the existing environment and reports CLI errors; it never installs or upgrades Node automatically.
+Before running discovery or a CLI, SSH loads the remote user’s interactive login environment for Bash, Zsh and Fish. This includes proxy, authentication and configuration-directory variables that may be set only in interactive startup files. Startup output is separated from CLI protocol output, and startup scripts cannot consume CLI input. Other login shells keep the POSIX launch path. The plugin retains an already configured Node.js ≥22. If the current runtime is too old, the plugin selects a compatible installed nvm or Homebrew runtime. Without one, it keeps the existing environment and reports CLI errors; it never installs or upgrades Node automatically.
 
 ## Install and upgrade
 
@@ -84,10 +86,18 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.7.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.11.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.10:** Fixes `3: Bad file descriptor` when remote login scripts close inherited descriptors, blocking model discovery or CLI startup. Restart DSH after updating, then refresh the host’s models.
+
+**Upgrading from 0.2.9:** Hosts with saved sessions can now be removed after an SSH error. Confirm removal to delete their plugin sessions and saved output without reconnecting.
+
+**Upgrading from 0.2.8:** Remote CLIs now load the remote shell’s interactive login environment. This addresses authentication failures caused by missing shell environment when the same Claude command succeeds in an interactive terminal. Update and restart DSH, refresh the machine’s models, and retry the conversation.
+
+**Upgrading from 0.2.7:** Remote sessions now open only through settings; the sidebar entry has been removed. Update the plugin and refresh the client.
 
 **Upgrading from 0.2.6:** Main-chat models are filtered by the workspace machine and verified again before sending. Existing conversations can continue only when their machine and directory match. Update the server plugin and refresh the client; machines and model caches need no migration.
 

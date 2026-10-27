@@ -4,12 +4,10 @@
 
 用于开发多个 DeepSeek Harness 插件的 pnpm 大仓。每个插件独立维护包名、版本、清单、源码、测试、文档和安装包。
 
-**其中 `dsh-claude-ssh` 是基于 [Oh My Claude](https://github.com/lcestou/dsh-oh-my-claude) 1.5.5 修改的版本。** 本插件沿用上游的 Claude Code 接入实现，在此基础上增加远程工作区验证与路由、按工作区显示模型，以及 DSH 兼容性修复。感谢 Oh My Claude 作者提供原始实现。具体上游提交、许可与署名见[来源说明](packages/claude-ssh/UPSTREAM.md)和[第三方声明](packages/claude-ssh/THIRD_PARTY_NOTICES.md)。
-
 | 插件 | 目录 | 功能 |
 | --- | --- | --- |
-| `dsh-claude-ssh` | [packages/claude-ssh](packages/claude-ssh/README.zh-CN.md) | 在 DSH 中通过系统 OpenSSH 使用远端 Claude Code |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务 |
+| `dsh-session-models` | [packages/session-models](packages/session-models/README.zh-CN.md) | 在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Sidebar Browser 网页内的元素、Console 和网络调试浮窗 |
@@ -47,30 +45,41 @@ pnpm pack:plugins   # 构建并打包，产物集中到 dist/
 只操作某个插件：
 
 ```sh
-pnpm --filter dsh-claude-ssh check
-pnpm --filter dsh-claude-ssh pack:plugin
+pnpm --filter dsh-remote-agents check
+pnpm --filter dsh-remote-agents pack:plugin
 ```
-
-Claude 的 check 包含模板回归与远程工作区兼容测试。离线测试和真实运行验收的区别见[插件文档](packages/claude-ssh/README.zh-CN.md#开发与验收)。
 
 ## 安装插件
 
-远程智能体 **0.2.7** 在 DSH 原生模型选择器中仅显示当前工作区对应机器的模型，并按 Claude、Codex 等 CLI 提供方分组，支持点击标题折叠并记住状态，直接使用主对话；侧栏的“远程会话”统一管理历史、续聊与待审批请求，分派工具继续可用。运行 `pnpm --filter dsh-remote-agents pack:plugin` 构建 `dist/dsh-remote-agents-0.2.7.tgz`。安装方法及与 0.1.x 的区别见[安装与升级](packages/remote-agents/README.zh-CN.md#安装与升级)。
+远程智能体 **0.2.11** 在 DSH 原生模型选择器中仅显示当前工作区对应机器的模型，并按 Claude、Codex 等 CLI 提供方分组，支持点击标题折叠并记住状态，直接使用主对话；设置中的“打开会话”统一管理历史、续聊与待审批请求，分派工具继续可用。运行 `pnpm --filter dsh-remote-agents pack:plugin` 构建 `dist/dsh-remote-agents-0.2.11.tgz`。安装方法及与 0.1.x 的区别见[安装与升级](packages/remote-agents/README.zh-CN.md#安装与升级)。
 
 构建后按插件安装到目标 DSH profile：
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-claude-ssh-0.3.2.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.11.tgz"
 ```
 
 桌面端请完全退出 DSH，使用桌面应用自带的 `dsh` 命令，将参数改为 `--profile desktop` 后安装并重新打开；npm 版 CLI 不能管理这个保留 profile。Web 端请重启更新的 profile 并刷新浏览器。插件目前未发布到 npm。仓库根目录是私有工作区，安装时应使用各插件的压缩包。
+
+### 插件市场
+
+`pnpm release:market` 构建全部插件，将可直接安装的包提交到 `market` 分支，并更新其中的 `index.json`：一份 DSH 插件市场索引，列出每个已发布版本，并固定到对应提交。之后用 `git push origin market` 发布。发布要求工作区干净；索引中已有的版本会跳过，代码改动但未升级版本号的插件会给出提示。`--dry-run` 可预览。不要改写或强制推送 `market`，已安装版本依赖其中的提交。
+
+在 DSH 中安装和更新：打开 **插件**，在实验插件中开启 **Custom plugin markets**，然后在 **Discover** 中添加索引地址：
+
+```text
+https://raw.githubusercontent.com/lalaze/dsh-plugins/market/index.json
+```
+
+有新版本时 Discover 会显示 **Update available**，点击后会打开已安装插件的详情页。当前 DSH 的第三方插件需先卸载旧版，再从市场或“添加插件”安装新版；已安装状态下不会提供安装按钮。DSH 只为官方插件提供一键更新。
 
 ## 目录与新增插件
 
 ```text
 packages/
-  claude-ssh/           # dsh-claude-ssh 的源码、测试、清单和文档
+  remote-agents/        # dsh-remote-agents 的源码、测试、清单和文档
+  session-models/       # 侧栏会话的模型图标与状态徽标
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景
   browser-devtools/     # Sidebar Browser 网页内调试浮窗

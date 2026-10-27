@@ -4,12 +4,10 @@
 
 A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plugin has its own manifest, source, tests, documentation, and installable package.
 
-**`dsh-claude-ssh` is a modified version of [Oh My Claude](https://github.com/lcestou/dsh-oh-my-claude), based on upstream version 1.5.5.** It retains the upstream Claude Code integration and adds verified remote-workspace routing, workspace-specific model visibility, and compatibility fixes for DSH. Thanks to the Oh My Claude authors for the original implementation. See [upstream provenance](packages/claude-ssh/UPSTREAM.md) and [third-party notices](packages/claude-ssh/THIRD_PARTY_NOTICES.md) for the exact revision and attribution.
-
 | Package | Directory | Description |
 | --- | --- | --- |
-| `dsh-claude-ssh` | [packages/claude-ssh](packages/claude-ssh/README.md) | Use remote Claude Code over system OpenSSH in DSH |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them |
+| `dsh-session-models` | [packages/session-models](packages/session-models/README.md) | Model icons and status badges on sidebar sessions, with the exact model in the hover card |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | In-page element, Console and network debugger for DSH Sidebar Browser |
@@ -47,30 +45,41 @@ pnpm pack:plugins   # Build and pack packages into dist/
 Work on one plugin with a package filter:
 
 ```sh
-pnpm --filter dsh-claude-ssh check
-pnpm --filter dsh-claude-ssh pack:plugin
+pnpm --filter dsh-remote-agents check
+pnpm --filter dsh-remote-agents pack:plugin
 ```
-
-Claude's check includes the upstream regression suite and remote-workspace compatibility checks. See the [plugin documentation](packages/claude-ssh/README.md#development-and-validation) for the distinction between offline tests and live verification.
 
 ## Installation
 
-Remote Agents **0.2.7** lists only the current workspace machine’s remote models, grouped by Claude, Codex and other CLIs, in DSH's model picker and main conversation. The sidebar’s Remote sessions view brings history, follow-ups and pending approvals together; delegation tools remain available. Build `dist/dsh-remote-agents-0.2.7.tgz` with `pnpm --filter dsh-remote-agents pack:plugin`. See [install and upgrade](packages/remote-agents/README.md#install-and-upgrade), including what changed from 0.1.x.
+Remote Agents **0.2.11** lists only the current workspace machine’s remote models, grouped by Claude, Codex and other CLIs, in DSH's model picker and main conversation. The Open sessions button in settings brings history, follow-ups and pending approvals together; delegation tools remain available. Build `dist/dsh-remote-agents-0.2.11.tgz` with `pnpm --filter dsh-remote-agents pack:plugin`. See [install and upgrade](packages/remote-agents/README.md#install-and-upgrade), including what changed from 0.1.x.
 
 Install an individual built archive into the desired DSH profile:
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-claude-ssh-0.3.2.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.11.tgz"
 ```
 
 For Desktop, fully quit DSH and use the desktop application's bundled `dsh` command with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. For Web, restart the updated profile and refresh the browser. Plugins are not currently published to npm. The repository root is a private workspace; install individual plugin archives rather than the GitHub root.
+
+### Plugin market
+
+`pnpm release:market` builds every plugin, commits the install-ready packages to the `market` branch, and updates `index.json` there: a DSH plugin market index listing every released version, each pinned to a commit. Publish with `git push origin market`. A release requires a clean working tree; versions already in the index are skipped, and a plugin that changed without a version bump is reported. `--dry-run` previews the release. Never rewrite or force-push `market`, because installed versions resolve through its commits.
+
+To install and update from DSH, open **Plugins**, switch on **Custom plugin markets** under experimental plugins, and add this index source on the **Discover** tab:
+
+```text
+https://raw.githubusercontent.com/lalaze/dsh-plugins/market/index.json
+```
+
+Discover marks a newer release **Update available** and opens the installed plugin’s detail page when clicked. Third-party plugins currently require uninstalling the old version before installing the new version from Discover or Add plugin; an installed plugin has no Install button. DSH offers one-click updates only for its official plugins.
 
 ## Layout and new plugins
 
 ```text
 packages/
-  claude-ssh/           # dsh-claude-ssh: source, tests, manifest, docs
+  remote-agents/        # dsh-remote-agents: source, tests, manifest, docs
+  session-models/       # Model icons and status badges on sidebar sessions
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds
   browser-devtools/     # In-page debugger for Sidebar Browser tabs

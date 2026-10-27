@@ -5,6 +5,7 @@ import { loadSettings, translate } from './api.js';
 import { composerText, installTranslationDom, readComposer, replaceComposer } from './dom.js';
 import { installLocale, localizeError, ui, useLocale } from './i18n.js';
 import { TranslationSettingsSection } from './settings.js';
+import { installStyles } from './styles.js';
 
 interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -86,6 +87,7 @@ function ComposerTranslateButton({ inputActions, useInput }: ComposerSlotProps) 
 }
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
+  ctx.effect(() => installStyles());
   ctx.effect(() => installTranslationDom());
   ctx.slots.inject('settings.section', () => { ctx.slots.register({ name: 'settings.section', id: 'translate', order: 72, label: () => ui('Translation') }, TranslationSettingsSection); });
   ctx.slots.inject('conversation.input.left', () => { ctx.slots.register({ name: 'conversation.input.left', id: 'translate', order: 60 }, (props: ComposerSlotProps) => <ComposerTranslateButton inputActions={props.inputActions} useInput={props.useInput} />); });

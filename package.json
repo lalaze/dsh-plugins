@@ -13,7 +13,8 @@
     "test": "pnpm -r --if-present run test",
     "test:ui": "pnpm -r --if-present run test:ui",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",
-    "pack:plugins": "pnpm -r --filter './packages/*' --filter '!@dsh-plugins/i18n' pack --pack-destination dist"
+    "pack:plugins": "pnpm -r --filter './packages/*' --filter '!@dsh-plugins/i18n' pack --pack-destination dist",
+    "release:market": "node scripts/release-market.mjs"
   },
   "license": "MIT",
   "repository": {
@@ -21,9 +22,10 @@
     "url": "git+https://github.com/lalaze/dsh-plugins.git"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
-    "tsx": "^4.20.6",
+    "@deepseek-ai/dsh-plugin-market-index": "0.2.1-rc.2",
+    "@types/node": "^22.19.0",
     "esbuild": "^0.25.11",
-    "@types/node": "^22.19.0"
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   }
 }

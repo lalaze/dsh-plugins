@@ -64,8 +64,33 @@ export class OpenSshTransport implements SshTransport {
     this.args = ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', ...(url.port ? ['-p', url.port] : []), '--', `${decodeURIComponent(url.username) ? `${decodeURIComponent(url.username)}@` : ''}${url.hostname}`];
   }
   private spawn(script: string): ChildProcessWithoutNullStreams {
-    // SSH may use zsh/fish; execute our POSIX bootstrap in sh (unmatched nvm globs are harmless).
-    return spawn(this.binary, [...this.args, `sh -c ${quote(REMOTE_PATH + script)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    // Auth/proxy exports often live after an interactive-shell guard in the user's rc file.
+    // Load exported variables in a separate process: shell startup files may close
+    // inherited descriptors. The parent retains the CLI streams throughout startup.
+    // A private, short-lived directory keeps exports off stdout and out of argv.
+    const command = `
+dsh_login_shell="\${SHELL:-/bin/sh}"
+case "\${dsh_login_shell##*/}" in
+  bash|zsh|fish)
+    dsh_environment_dir="$(mktemp -d "\${TMPDIR:-/tmp}/dsh-cli-env.XXXXXXXXXX")" || exit "$?"
+    set -- "$dsh_environment_dir"
+    trap 'rm -rf -- "$1"' 0
+    trap 'exit 1' 1 2 15
+    printf '%s\\n' 'umask 077; export -p > "$0.env"' > "$1/capture.sh" || exit "$?"
+    case "\${dsh_login_shell##*/}" in
+      fish) dsh_capture='exec /bin/sh "$argv[2]"' ;;
+      *) dsh_capture='exec /bin/sh "$1"' ;;
+    esac
+    "$dsh_login_shell" -lic "$dsh_capture" dsh-login "$1/capture.sh" </dev/null 1>&2 || exit "$?"
+    [ -s "$1/capture.sh.env" ] || { printf '%s\\n' 'Remote login shell did not export its environment' >&2; exit 1; }
+    . "$1/capture.sh.env" || exit "$?"
+    rm -rf -- "$1"
+    trap - 0 1 2 15
+    ;;
+esac
+exec /bin/sh -c ${quote(REMOTE_PATH + script)}
+`;
+    return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   }
   exec(script: string, timeout = 20_000): Promise<string> {
     return new Promise((resolve, reject) => {

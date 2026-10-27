@@ -36,10 +36,10 @@ try {
   browser('set', 'viewport', '1440', '1000');
 
   if (!process.argv.includes('--models-only')) {
-  // Settings remain available alongside the sidebar session entry.
+  // Remote sessions are available only from settings.
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 2 && window.fixture.slots[0] === "settings.section:remote-agents"');
-  expect('!document.querySelector(".ra-launch,.ra-workspace,dialog")');
+  expect('window.fixture.slots.length === 1 && window.fixture.slots[0] === "settings.section:remote-agents"');
+  expect('!document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   expect('!document.querySelector(".ra-chat-projects,[aria-label=项目名称],[aria-label=远程项目路径]")');
   wait('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://build-box\\"]")');
   browser('click', '.ra-ssh-trigger'); wait('document.querySelector(".ra-ssh-menu:popover-open")');
@@ -76,7 +76,7 @@ try {
   wait('document.querySelector(".ra-hosts .ra-host-row")?.textContent.includes("DSH 模型选择器中有 1 个模型")');
   browser('click', 'button:text-is("刷新模型")');
   wait('document.querySelector(".ra-hosts .ra-badge")?.textContent === "已连接"');
-  console.log('PASS: settings and session slots, SSH alias keyboard selection, config refresh, host creation and connection');
+  console.log('PASS: settings-only session entry, SSH alias keyboard selection, config refresh, host creation and connection');
 
   const groups = state().modelGroups;
   if (groups.map(g => g.name).join(',') !== 'Codex') throw new Error('CLI providers were not exposed as separate model picker groups');
@@ -121,13 +121,12 @@ try {
   wait('document.querySelector(".ra-settings [role=alert]")?.textContent.includes("模拟连接中断")');
   fixture({ failReads: false }); browser('click', 'button:text-is("重试")');
   wait('document.querySelector(".ra-hosts input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 2 && !document.querySelector(".ra-launch,.ra-workspace,dialog")');
+  expect('window.fixture.slots.length === 1 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
-  console.log('PASS: settings load failure and retry; session entry available without opening a panel or adding a composer launcher');
+  console.log('PASS: settings load failure and retry; session entry remains in settings without a sidebar or composer launcher');
 
   fixture({ seedSessions: true });
-  wait('document.querySelector(".ra-attention-count")?.textContent === "1"');
-  browser('click', '.ra-session-launch'); wait('document.querySelector("dialog[open] .ra-session-item")');
+  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
   expect('document.querySelectorAll(".ra-session-item").length === 3');
   browser('fill', '[aria-label="搜索会话"]', 'no-such-session');
   expect('document.querySelectorAll(".ra-session-item").length === 0');
@@ -139,9 +138,9 @@ try {
   expect('document.querySelector("dialog").scrollWidth <= innerWidth');
   image('sessions-mobile-approval');
   browser('press', 'Escape'); wait('!document.querySelector("dialog[open]")');
-  expect('document.activeElement.classList.contains("ra-session-launch")');
+  expect('document.activeElement === document.querySelector(".ra-settings-heading button")');
   if (state().answers.length || state().stops) throw new Error('Closing the panel resolved or stopped a pending approval');
-  browser('click', '.ra-session-launch'); wait('document.querySelector("dialog[open] .ra-session-item")');
+  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
   browser('click', '.ra-session-item:has-text("审查构建脚本")'); wait('document.querySelector(".ra-permission")');
   browser('click', 'button:text-is("允许本次会话")');
   wait('!document.querySelector(".ra-permission") && document.querySelector(".ra-output")?.textContent.includes("审批已通过")');
@@ -171,7 +170,7 @@ try {
   expect('!document.querySelector("[aria-label=给智能体发消息]")');
   browser('click', 'button:text-is("在主对话打开")'); wait('!document.querySelector("dialog[open]")');
   expect('window.fixture.navigation.at(-1) === "fixture-main-chat"');
-  browser('click', '.ra-session-launch'); wait('document.querySelector("dialog[open] .ra-list-heading")');
+  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-list-heading")');
   browser('click', '.ra-list-heading button'); wait('document.querySelector("[aria-label=会话机器] option")');
   browser('fill', '[aria-label="任务"]', '检查 API 的分页实现');
   browser('click', 'button:text-is("开始会话")'); wait('document.querySelector(".ra-detail-heading h2")?.textContent === "检查 API 的分页实现"');
@@ -184,6 +183,34 @@ try {
   const sessionErrors = browser('errors'); if (sessionErrors.errors?.length) throw new Error(JSON.stringify(sessionErrors.errors));
   console.log('PASS: unified sessions, filters, native navigation, pagination, approval reopening and scope, lost-send recovery, rename/archive/restore, new sessions and mobile layouts');
 
+  // An SSH failure must not trap hosts behind undeletable saved sessions.
+  evaluate('window.fixture.setLocale("zh")');
+  const saved = state().state.agents;
+  evaluate(`(async()=>await fetch('/api/remote-agents',{method:'POST',headers:{'content-type':'application/json','X-DSH-Remote-Agents':'1'},body:JSON.stringify({action:'archive',agentId:${JSON.stringify(saved[0].id)}})}))()`);
+  fixture({ connectionError: 'ssh: Could not resolve hostname ubuntu-claude-103: nodename nor servname provided, or not known' });
+  browser('open', `${base}?offline-removal`);
+  wait('document.querySelector(".ra-host-row")');
+  browser('click', '.ra-host-row button:text-is("刷新模型")');
+  wait('document.querySelector(".ra-host-error")?.textContent.includes("Could not resolve hostname")');
+  expect('!document.querySelector(".ra-host-top button.ra-danger").disabled');
+  browser('click', '.ra-host-top button.ra-danger');
+  wait('document.querySelector(".ra-remove-confirm")');
+  expect(`document.querySelector('.ra-remove-confirm').textContent.includes('${saved.length} 个已保存会话') && document.querySelector('.ra-remove-confirm').textContent.includes('包括已归档会话')`);
+  if (state().state.agents.length !== saved.length) throw new Error('Opening removal confirmation deleted sessions');
+  browser('set', 'viewport', '390', '844');
+  expect('document.documentElement.scrollWidth <= innerWidth'); image('host-removal-offline-mobile');
+  browser('click', '.ra-remove-confirm button:text-is("取消")');
+  wait('!document.querySelector(".ra-remove-confirm")');
+  if (state().state.agents.length !== saved.length) throw new Error('Cancelling removal deleted sessions');
+  browser('click', '.ra-host-top button.ra-danger');
+  browser('click', '.ra-remove-confirm button:text-is("移除机器并删除会话")');
+  wait('!document.querySelector(".ra-host-row")');
+  const removed = state();
+  if (removed.state.hosts.length || removed.state.agents.length || removed.tasks.length || removed.modelGroups.length) throw new Error('Offline removal left host sessions or models behind');
+  fixture({ connectionError: '' });
+  browser('set', 'viewport', '1440', '1000');
+  console.log('PASS: offline host removal with active/archived sessions, explicit confirmation, cancellation and model cleanup');
+
   }
   const trigger = '[data-native-picker] button';
   const menu = '[data-menu-material]';
@@ -193,7 +220,7 @@ try {
   const visible = '[data-ra-model-option]:not([data-ra-model-hidden])';
   browser('set', 'viewport', '1440', '1000');
   wait('document.querySelector("[data-native-picker] button")');
-  expect('window.fixture.slots.length === 2');
+  expect('window.fixture.slots.length === 1');
   browser('click', trigger); wait('document.querySelector("[data-menu-material] > button")');
   image('model-groups-native-root');
   browser('click', rootModel); wait('document.querySelector("[data-ra-model-provider]")');
