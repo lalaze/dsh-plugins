@@ -4,7 +4,7 @@ export interface WorkspacePlacement {
     hostIds: string[];
     cwd?: string;
 }
-interface Endpoint {
+export interface Endpoint {
     host: string;
     username: string;
     port: number;
@@ -30,6 +30,10 @@ export interface WorkspaceRuntime {
         }>;
     };
 }
+/** DSH's home directory, which holds dsh-remote's workspace folders under `remote-workspaces`. */
+export declare const dshHome: () => string;
+export declare const under: (root: string, path: string) => boolean;
+export declare const sameEndpoint: (a: Endpoint, b: Endpoint) => boolean;
 /** Resolve SSH aliases locally; do not start a CLI or connect merely to list models. */
 export declare function sshEndpoint(connection: string, signal?: AbortSignal): Promise<Endpoint>;
 /** Admission is derived from the workspace origin, never a display name or a matching path alone. */
@@ -48,4 +52,3 @@ export declare class WorkspaceAccess {
     resolve(cwd: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement>;
     private fromRuntime;
 }
-export {};

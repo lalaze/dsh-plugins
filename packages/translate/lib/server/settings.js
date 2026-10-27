@@ -6,6 +6,7 @@ export const defaultTranslationSettings = {
     fallbackApiKey: '',
     fallbackModel: '',
     englishLockModels: 'claude, anthropic',
+    paragraphTranslate: true,
 };
 export function parseTranslationSettings(value) {
     const input = value && typeof value === 'object' ? value : {};
@@ -14,6 +15,7 @@ export function parseTranslationSettings(value) {
         apiUrl: text('apiUrl').trim().slice(0, 2048), apiKey: text('apiKey').slice(0, 8192), model: text('model').trim().slice(0, 300),
         fallbackApiUrl: text('fallbackApiUrl').trim().slice(0, 2048), fallbackApiKey: text('fallbackApiKey').slice(0, 8192), fallbackModel: text('fallbackModel').trim().slice(0, 300),
         englishLockModels: text('englishLockModels').trim().slice(0, 2000),
+        paragraphTranslate: typeof input.paragraphTranslate === 'boolean' ? input.paragraphTranslate : defaultTranslationSettings.paragraphTranslate,
     };
 }
 /**

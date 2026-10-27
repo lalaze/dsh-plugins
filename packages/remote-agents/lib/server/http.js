@@ -1,6 +1,6 @@
-import { cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError } from './domain.js';
+import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError } from './domain.js';
 import { ChatProjects } from './chat-projects.js';
-export function createHandler(service, projects = new ChatProjects(service), workspace) {
+export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
         try {
@@ -76,6 +76,15 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'connect':
                     result = await service.connect(hostId());
                     break;
+                case 'browse':
+                    result = await service.browse(hostId(), input.path === undefined ? undefined : browsePath(input.path));
+                    break;
+                case 'createWorkspace': {
+                    if (!workspaces)
+                        throw new RemoteError('Remote workspaces are unavailable', 501);
+                    result = await workspaces.create(hostId(), browsePath(input.path), request.signal);
+                    break;
+                }
                 case 'providers':
                     result = await service.providers(hostId(), remotePath(input.cwd), input.refresh === true);
                     break;

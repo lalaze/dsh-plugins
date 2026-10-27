@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend } from './backend.js';
 import { readSshConfigHosts } from './ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from './domain.js';
-import { busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput } from './domain.js';
+import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput } from './domain.js';
 export class RemoteAgentsService {
     store;
     readSshConfig;
@@ -219,6 +219,20 @@ export class RemoteAgentsService {
         };
     }
     async summary(id) { const task = this.task(id); return this.summarize(task, await this.live(task)); }
+    /** One directory level on a verified host; `path` defaults to the remote home. */
+    async browse(hostId, path, options = {}) {
+        const target = path === undefined ? undefined : browsePath(path);
+        // Listing runs outside `use`: a missing directory must not mark the host connection as failed.
+        const backend = await this.use(hostId, async (backend) => backend);
+        if (!backend.listDirectory)
+            throw new RemoteError('This host cannot browse directories', 501);
+        try {
+            return await backend.listDirectory(target, options);
+        }
+        catch (error) {
+            throw new RemoteError(this.safeError(error), 502);
+        }
+    }
     async addHost(input, options = {}) {
         const value = record(input);
         const host = { id: randomUUID(), label: field(value.label, 'host name', 100), connection: connectionInput(value.connection) };

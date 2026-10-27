@@ -17,7 +17,10 @@ export interface StartOptions {
     stderr?(data: Buffer): void;
 }
 export interface SshTransport {
-    exec(script: string, timeout?: number): Promise<string>;
+    /** `login: false` skips the remote login environment; for commands that need no CLI configuration. */
+    exec(script: string, timeout?: number, options?: {
+        login?: boolean;
+    }): Promise<string>;
     start(cwd: string, argv: string[], options?: StartOptions): Child;
     upload?(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
     /** Commands run in a POSIX shell where a detached relay can outlive the connection. */
@@ -31,7 +34,9 @@ export declare class OpenSshTransport implements SshTransport {
     private spawn;
     /** Runs a POSIX shell command on the SSH host. */
     protected spawnRemote(command: string): ChildProcessWithoutNullStreams;
-    exec(script: string, timeout?: number): Promise<string>;
+    exec(script: string, timeout?: number, options?: {
+        login?: boolean;
+    }): Promise<string>;
     /** Binary stdin with backpressure; atomic, private, digest-verified remote copies. */
     upload(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
     start(cwd: string, argv: string[], options?: StartOptions): Child;

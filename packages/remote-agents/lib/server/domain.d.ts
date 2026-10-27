@@ -294,6 +294,22 @@ export interface Dashboard {
     hosts: Host[];
     agents: AgentSummary[];
 }
+/** One remote directory level: `path` is canonical; `entries` lists subdirectories only. */
+export interface DirectoryListing {
+    path: string;
+    home: string;
+    entries: {
+        name: string;
+        path: string;
+    }[];
+    truncated: boolean;
+}
+/** A remote directory adopted as a DSH workspace through its local anchor folder. */
+export interface RemoteWorkspace {
+    hostId: string;
+    path: string;
+    remotePath: string;
+}
 export declare const busy: (agent: Pick<AgentSummary, "status">) => boolean;
 export declare class RemoteError extends Error {
     readonly status: number;
@@ -303,6 +319,8 @@ export declare function record(value: unknown): Record<string, unknown>;
 export declare function field(value: unknown, label: string, max?: number): string;
 export declare function identifier(value: unknown): string;
 export declare function remotePath(value: unknown): string;
+/** An absolute remote path, or one under the remote home written as `~` or `~/…`. */
+export declare function browsePath(value: unknown): string;
 export declare function taskInput(value: unknown): TaskInput;
 export declare function attachmentInput(value: unknown): Attachment[];
 export declare function cursorInput(value: unknown): Cursor | undefined;

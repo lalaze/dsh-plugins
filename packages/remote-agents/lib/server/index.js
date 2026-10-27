@@ -8,6 +8,7 @@ import { delegationTools } from './tools.js';
 import { ChatProjects } from './chat-projects.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import { WorkspaceAccess } from './workspace-access.js';
+import { RemoteWorkspaces } from './remote-workspaces.js';
 export const name = 'dsh-remote-agents';
 export const inject = ['connection'];
 const stateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', name);
@@ -18,6 +19,7 @@ export async function apply(ctx, config = {}) {
     const service = new RemoteAgentsService(store);
     const projects = new ChatProjects(service);
     const workspace = new WorkspaceAccess(() => store.hosts(), { runtime: () => ctx.get('subprocess') });
+    const workspaces = new RemoteWorkspaces(service, workspace);
     const sessionCwd = async (sessionId) => {
         const sessions = ctx.get('sessions');
         const live = () => sessions?.get?.(sessionId);
@@ -36,7 +38,7 @@ export async function apply(ctx, config = {}) {
     ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, async (id, signal) => {
             const cwd = await sessionCwd(id), placement = await workspace.resolve(cwd, signal);
             return cwd === await sessionCwd(id) ? placement : { hostIds: [] };
-        }) });
+        }, workspaces) });
     ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
         const host = scoped;
         const steps = new Map();

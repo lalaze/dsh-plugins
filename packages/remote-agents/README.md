@@ -8,7 +8,7 @@ Use remote Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity directly in 
 Each CLI appears as a separate provider in DSH's ordinary model picker:
 
 1. Open **Settings → Remote agents** and add an SSH host and select the CLIs you want to enable. Saving discovers only their models; you can also save a machine first and choose its CLIs later. **No project name or project path is required.**
-2. Select a remote workspace in DSH, then choose a model labelled with its host under **Claude**, **Codex** or another CLI provider. The native picker and `/model` only show models belonging to that workspace’s machine. Local, missing or unverified workspaces hide remote models. Because the workspace already identifies the machine, the composer button and the menu’s **Model** row show only the model name, such as **Opus 5.5**; the model list shows the host in muted text after each name, and the button’s tooltip shows the full name.
+2. Select a remote workspace in DSH (see [Remote workspaces](#remote-workspaces)), then choose a model labelled with its host under **Claude**, **Codex** or another CLI provider. The native picker and `/model` only show models belonging to that workspace’s machine. Local, missing or unverified workspaces hide remote models. Because the workspace already identifies the machine, the composer button and the menu’s **Model** row show only the model name, such as **Opus 5.5**; the model list shows the host in muted text after each name, and the button’s tooltip shows the full name.
 3. Send messages in the normal composer. Conversations execute in **the current workspace’s verified remote directory**, translating dsh-remote mirrors and Claude SSH placeholders. Every send and follow-up checks machine and directory placement again, so an old model selection cannot send to another machine after a workspace switch. Missing remote directories fail explicitly.
 
 Change the CLI checkboxes on a machine card and click **Apply selection**. Disabled CLIs are neither probed nor shown in the model picker; existing agents keep running. New machines start with no CLIs selected, while older saved machines retain their existing provider scope.
@@ -26,6 +26,14 @@ Model catalogs are saved per machine on the DSH server and shared between client
 - **Usage ring:** a ring before the send button shows how full the remote session's context window is. Hover over it, or click it, to see the remote account's plan limits for Claude and Codex, such as the session and weekly windows. These come from the CLI on the SSH host, so credentials never leave it. Limits are read when the panel opens, cached for five minutes and read again after a turn finishes; use the refresh button to check now.
 - Lost responses can replay the saved output by message identity without sending the task again. Unconfirmed delivery or an unfinished response after disconnection is reported explicitly. Send a new message to continue the saved session.
 - Main chat accepts **text, uploaded images and files**. Claude and Codex receive images through their native protocols; ACP CLIs expose image input only when their initialization reports support. Files are streamed over SSH into the verified remote workspace and supplied as read-only paths for the CLI’s file tools. Only attachments from the conversation are transferred. The CLI uses its own credentials, tools, instructions and context management. DSH summarization runs in a disposable CLI session, separate from the coding conversation.
+
+## Remote workspaces
+
+Use DSH's **Add workspace** to work on a directory of a saved machine. With machines saved, it opens a dialog with two tabs: **This computer** uses the system folder picker as before, and **Remote machine** browses the selected machine's directories over SSH. Choose a folder and **Use this folder** to add it; the remote models of that machine are then available in its conversations. Without saved machines, **Add workspace** opens the system folder picker directly.
+
+- The dialog remembers the last tab and each machine's last folder. Paths may start with `~/`. Hidden folders are listed after **Show hidden folders**.
+- Files stay on the remote machine. DSH records the workspace as an empty local folder under `$DSH_HOME/remote-workspaces/`, in the same format as the dsh-remote plugin, so workspaces created by either plugin keep working. DSH's own Files panel and terminal show that local folder, not the remote one.
+- If dsh-remote is also installed, its **Add workspace** dialog takes precedence.
 
 ## Unified remote sessions
 
@@ -102,10 +110,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.19.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.20.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.19:** **Add workspace** gains a **Remote machine** tab that adds a saved machine's directory as a DSH workspace. Codex now also offers **Remote CLI settings**, which leaves approval policy and sandbox to `~/.codex/config.toml` on the remote machine. New main-chat conversations and agents DSH starts without an explicit mode use it for both Claude and Codex. Existing sessions keep their saved mode. Restart DSH and click **Refresh models** beside each machine after updating.
 
 **Upgrading from 0.2.18:** Remote CLIs now keep running when DSH quits or SSH disconnects, and DSH reconnects and catches up automatically. This needs Node.js 18+ on the SSH host. Restart DSH after updating; sessions created earlier switch to a relay the next time their CLI starts.
 

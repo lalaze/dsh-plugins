@@ -1,5 +1,8 @@
 /** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export function permissionModes(provider, modes) {
+    // Codex's inherit mode leaves approval policy and sandbox to the remote config.toml.
+    if (provider === 'codex')
+        return modes.some(m => m.id === 'inherit') ? modes : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
     if (provider !== 'claude')
         return modes;
     const choices = modes.some(m => m.id === 'inherit') ? [...modes] : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
@@ -44,6 +47,13 @@ export function remotePath(value) {
     const path = field(value, 'remote project path');
     if (!/^(?:\/|[a-zA-Z]:[\\/])/.test(path) || /[\n]/.test(path))
         throw new RemoteError('Enter an absolute remote project path');
+    return path;
+}
+/** An absolute remote path, or one under the remote home written as `~` or `~/…`. */
+export function browsePath(value) {
+    const path = field(value, 'remote path');
+    if (!/^(?:\/|~$|~\/)/.test(path) || /\n/.test(path))
+        throw new RemoteError('Enter an absolute remote path or one starting with ~/');
     return path;
 }
 export function taskInput(value) {

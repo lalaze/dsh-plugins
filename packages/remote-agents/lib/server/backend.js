@@ -20,6 +20,7 @@ export const CLI_PROVIDERS = [
     { id: 'codebuddy', label: PROVIDER_LABELS.codebuddy, command: 'codebuddy', protocol: 'acp', args: ['--acp'] },
 ];
 const SESSION_LIMIT = 8;
+const DIRECTORY_LIMIT = 2000;
 const ACCOUNT_TTL = 300_000;
 const list = (value) => Array.isArray(value) ? value : [];
 /** Claude's `list_models` control response: `supportedEffortLevels` holds per-model reasoning choices. */
@@ -66,6 +67,26 @@ export class SshBackend {
         const path = await this.transport.exec('printf \'%s\' "$HOME"');
         this.assertOpen();
         return remotePath(path);
+    }
+    async listDirectory(path, options = {}) {
+        this.assertOpen();
+        // NUL-separated: directory names may contain any byte except '/' and NUL. `+` marks a truncated listing.
+        const output = await this.transport.exec(`dsh_target=${quote(path ?? '~')}
+case "$dsh_target" in '~') dsh_target="$HOME" ;; '~/'*) dsh_target="$HOME/\${dsh_target#??}" ;; esac
+cd -- "$dsh_target" 2>/dev/null || { printf '%s\\n' 'Not a readable directory' >&2; exit 3; }
+printf '%s\\0%s\\0' "$(pwd -P)" "$(cd -- "$HOME" 2>/dev/null && pwd -P || printf '%s' "$HOME")"
+${options.entries === false ? '' : `dsh_count=0
+for dsh_entry in * .[!.]* ..?*; do
+  [ -d "$dsh_entry" ] || continue
+  dsh_count=$((dsh_count + 1))
+  [ "$dsh_count" -le ${DIRECTORY_LIMIT} ] || { printf '+\\0'; break; }
+  printf 'd%s\\0' "$dsh_entry"
+done`}`, 15_000, { login: false });
+        this.assertOpen();
+        const [cwd, home, ...rest] = output.split('\0'), canonical = remotePath(cwd);
+        const entries = rest.filter(item => item.startsWith('d') && item.length > 1 && !item.includes('\n')).map(item => item.slice(1))
+            .sort((a, b) => a.localeCompare(b)).map(name => ({ name, path: canonical === '/' ? `/${name}` : `${canonical}/${name}` }));
+        return { path: canonical, home: remotePath(home), entries, truncated: rest.includes('+') };
     }
     async connect() {
         this.assertOpen();
@@ -144,8 +165,8 @@ export class SshBackend {
                         if (!cursor)
                             break;
                     }
-                    modes = [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }];
-                    defaultModeId = 'workspace-write';
+                    modes = permissionModes('codex', [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]);
+                    defaultModeId = 'inherit';
                 }
                 else if (definition.protocol === 'claude') {
                     await peer.control({ subtype: 'initialize' });

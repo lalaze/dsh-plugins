@@ -6,7 +6,10 @@ export type TranslationSettings = {
     fallbackApiKey: string;
     fallbackModel: string;
     englishLockModels: string;
+    /** Show a translate button beside each paragraph of a chat message. */
+    paragraphTranslate: boolean;
 };
+export type TextSetting = Exclude<keyof TranslationSettings, 'paragraphTranslate'>;
 export declare const defaultTranslationSettings: TranslationSettings;
 export declare function parseTranslationSettings(value: unknown): TranslationSettings;
 /**

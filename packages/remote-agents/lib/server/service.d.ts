@@ -1,7 +1,7 @@
 import { type BackendFactory } from './backend.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
-import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type Host, type Task, type UsageReport } from './domain.js';
+import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type Task, type UsageReport } from './domain.js';
 export interface UsageOptions {
     /** The conversation's selected route; picks its CLI when the conversation used several. */
     route?: string;
@@ -59,6 +59,10 @@ export declare class RemoteAgentsService {
     private live;
     private summarize;
     summary(id: string): Promise<AgentSummary>;
+    /** One directory level on a verified host; `path` defaults to the remote home. */
+    browse(hostId: string, path?: string, options?: {
+        entries?: boolean;
+    }): Promise<DirectoryListing>;
     addHost(input: unknown, options?: {
         discoverModels?: boolean;
     }): Promise<Dashboard>;

@@ -5,9 +5,11 @@ import { homedir, hostname, userInfo } from 'node:os';
 import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { remotePath } from './domain.js';
 import { connectionInput } from './ssh.js';
-const under = (root, path) => { const r = relative(root, path); return r === '' || r !== '..' && !r.startsWith(`..${sep}`) && !isAbsolute(r); };
+/** DSH's home directory, which holds dsh-remote's workspace folders under `remote-workspaces`. */
+export const dshHome = () => process.env.DSH_HOME?.trim() || join(homedir(), '.dsh');
+export const under = (root, path) => { const r = relative(root, path); return r === '' || r !== '..' && !r.startsWith(`..${sep}`) && !isAbsolute(r); };
 const normalizeHost = (host) => host.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
-const sameEndpoint = (a, b) => normalizeHost(a.host) === normalizeHost(b.host) && a.username === b.username && a.port === b.port;
+export const sameEndpoint = (a, b) => normalizeHost(a.host) === normalizeHost(b.host) && a.username === b.username && a.port === b.port;
 async function json(path) {
     try {
         if ((await stat(path)).size > 1_048_576)
@@ -42,7 +44,7 @@ export class WorkspaceAccess {
     constructor(hosts, options = {}) {
         this.hosts = hosts;
         this.options = options;
-        this.home = options.home ?? (process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'));
+        this.home = options.home ?? dshHome();
         this.omc = options.omc ?? (process.env.DSH_OMC_STATE_DIR || join(homedir(), '.local', 'state', 'dsh-oh-my-claude'));
     }
     async binding(cwd) {
@@ -64,7 +66,14 @@ export class WorkspaceAccess {
                     throw new Error();
                 connectionInput(`ssh://${meta.username}@${meta.host.includes(':') && !meta.host.startsWith('[') ? `[${meta.host}]` : meta.host}:${port}`);
                 const path = posix.join(remotePath(meta.remotePath), ...parts.slice(2));
-                return { endpoint: { host: meta.host, username: meta.username, port }, cwd: path, revision: JSON.stringify([realMirror, meta, path]) };
+                let alias;
+                try {
+                    alias = typeof meta.alias === 'string' && meta.alias ? connectionInput(meta.alias) : undefined;
+                }
+                catch {
+                    alias = undefined;
+                }
+                return { endpoint: { host: meta.host, username: meta.username, port }, ...(alias ? { alias } : {}), cwd: path, revision: JSON.stringify([realMirror, meta, path]) };
             }
             catch {
                 throw new Error('Cannot read a valid remote workspace binding');
@@ -99,10 +108,19 @@ export class WorkspaceAccess {
             return this.fromRuntime(cwd, signal);
         }
         const endpointFor = this.options.endpoint ?? sshEndpoint;
-        const endpoint = binding.endpoint ?? await endpointFor(binding.connection, signal);
+        const endpoints = [binding.endpoint ?? await endpointFor(binding.connection, signal)];
+        if (binding.alias) {
+            try {
+                endpoints.push(await endpointFor(binding.alias, signal));
+            }
+            catch {
+                signal?.throwIfAborted();
+            }
+        }
         const matches = await Promise.all(this.hosts().map(async (host) => {
             try {
-                return sameEndpoint(endpoint, await endpointFor(host.connection, signal)) ? host.id : undefined;
+                const candidate = await endpointFor(host.connection, signal);
+                return endpoints.some(endpoint => sameEndpoint(endpoint, candidate)) ? host.id : undefined;
             }
             catch (error) {
                 signal?.throwIfAborted();

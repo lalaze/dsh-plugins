@@ -1,4 +1,4 @@
-import type { AccountUsage, Agent, Attachment, Choice, Cursor, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
+import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
 import { type SshTransport } from './ssh.js';
 import type { Store } from './store.js';
 export { connectionInput } from './ssh.js';
@@ -7,6 +7,10 @@ export interface Backend {
     connect(): Promise<string>;
     close(): Promise<void>;
     homeDirectory(): Promise<string>;
+    /** Canonicalize a directory (`~` expands to the remote home) and optionally list its subdirectories. */
+    listDirectory?(path: string | undefined, options?: {
+        entries?: boolean;
+    }): Promise<DirectoryListing>;
     providers(cwd: string, refresh: boolean): Promise<Provider[]>;
     create(task: Task, signal?: AbortSignal): Promise<Agent>;
     recover(task: Task, signal?: AbortSignal): Promise<Agent>;
@@ -79,6 +83,9 @@ export declare class SshBackend implements Backend {
     constructor(host: HostConfig, store: Store, transport?: SshTransport);
     private assertOpen;
     homeDirectory(): Promise<string>;
+    listDirectory(path: string | undefined, options?: {
+        entries?: boolean;
+    }): Promise<DirectoryListing>;
     connect(): Promise<string>;
     private history;
     providers(cwd: string, refresh: boolean): Promise<Provider[]>;

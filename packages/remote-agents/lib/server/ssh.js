@@ -100,9 +100,9 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
     spawnRemote(command) {
         return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     }
-    exec(script, timeout = 20_000) {
+    exec(script, timeout = 20_000, options = {}) {
         return new Promise((resolve, reject) => {
-            const child = this.spawn(script);
+            const child = options.login === false ? this.spawnRemote(script) : this.spawn(script);
             let stdout = '', stderr = '', bytes = 0;
             const timer = setTimeout(() => { child.kill(); reject(new Error('SSH probe timed out')); }, timeout);
             child.stdout.on('data', data => { bytes += data.length; if (bytes > 2_000_000) {
