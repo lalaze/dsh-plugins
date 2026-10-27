@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { acquireUsageStore } from './store.js';
 import { observe } from './observe.js';
-import { parseQuery, report, toCsv } from './domain.js';
+import { parseQuery, report, toCsv, validRecord } from './domain.js';
 export const name = 'dsh-usage-stats';
 export const inject = ['llm', 'connection'];
 const defaultStateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', name);
@@ -24,6 +24,14 @@ export async function apply(ctx, config = {}) {
                 turn.release();
             }
         })(), { global: true, prepend: true });
+        // Turns of main-chat remote models arrive through llm/stream above; this covers the rest without double counting.
+        ctx.on('remote-agents/usage', record => {
+            if (!validRecord(record) || !record.provider.startsWith('remote-cli-'))
+                return;
+            const { id, startedAt, provider, model, sessionId, purpose, status, durationMs, usage } = record;
+            store.append({ id, startedAt, provider, model, ...(sessionId ? { sessionId } : {}), purpose, status, durationMs, ...(usage ? { usage } : {}) })
+                .catch(error => console.warn("[dsh-usage-stats] Could not record remote agent usage", error));
+        }, { global: true });
         // The host connection supplies authentication, origin checks and native carriers.
         ctx.connection.fetch.register({ path: '/api/usage-stats', methods: ['GET'], requestBody: 'buffered', fetch: async (request) => {
                 try {

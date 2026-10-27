@@ -4,9 +4,9 @@
 
 支持英语和简体中文，随 DSH 的语言设置即时切换；宿主未提供语言服务时回退到英语。
 
-`dsh-usage-stats` 同时统计 DSH 模型调用和通过 `dsh-claude-ssh` 发起的远端 Claude Code 用量。在 DSH **设置 → 使用量统计** 中查看，按来源、日期、服务商、模型、会话筛选，按日期、来源、模型或会话分组，并导出当前筛选结果的 CSV。
+`dsh-usage-stats` 同时统计 DSH 模型调用、通过 `dsh-claude-ssh` 发起的远端 Claude Code 用量，以及通过 `dsh-remote-agents` 运行的远程 CLI（Claude Code、Codex 及 ACP CLI）用量。在 DSH **设置 → 使用量统计** 中查看，按来源、日期、服务商、模型、会话筛选，按日期、来源、模型或会话分组，并导出当前筛选结果的 CSV。
 
-界面包含总 Token、调用次数、缓存读取占比和调用完成率；用量趋势可切换 Token/调用次数，旁侧显示 DSH 与 Claude SSH 来源占比。支持今天、近 7 天、近 30 天和自定义日期；服务商、模型和会话筛选可展开。明细默认按模型展示，每页 10 组，适配浅色、深色和窄屏布局。趋势补齐无调用日期，超过 48 天时按等长时间段汇总，保持总量一致。
+界面包含总 Token、调用次数、缓存读取占比和调用完成率；用量趋势可切换 Token/调用次数，旁侧显示 DSH、Claude SSH 与远程智能体的来源占比。支持今天、近 7 天、近 30 天和自定义日期；服务商、模型和会话筛选可展开。明细默认按模型展示，每页 10 组，适配浅色、深色和窄屏布局。趋势补齐无调用日期，超过 48 天时按等长时间段汇总，保持总量一致。
 
 ## 构建与安装
 
@@ -16,7 +16,7 @@
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter dsh-usage-stats check
 corepack pnpm --filter dsh-usage-stats pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.2.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.3.tgz"
 ```
 
 以上命令在仓库根目录执行。桌面端改用 `--profile desktop`，安装前完全退出 DSH，安装后重新打开；Web 端重启对应 profile 并刷新页面。Claude SSH 来源需另行安装该插件，建议使用 `0.1.7` 或更新版本，以保留远端失败结果返回的用量。
@@ -26,6 +26,7 @@ dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.2.tgz"
 - 从启用插件后开始记录，不扫描历史会话，不访问云端账单或远端账户。
 - 一次公开 `llm/stream` 调用记一次调用，包括会话、标题生成和上下文压缩；这不是底层 HTTP 请求/重试次数。
 - Claude SSH 一轮可能在远端执行多次模型或工具调用，这里按远端最终 `result.usage` 的整轮合计记录一次。服务商为 `claude-ssh-<主机 ID>`，模型为选中的 `sonnet`/`opus`/`haiku` 别名，不声称解析成具体版本。独立在远端终端运行的 Claude Code 不经过 DSH，因此不在本插件范围内。
+- 远程智能体（需 `dsh-remote-agents` 0.2.21 或更新版本）是独立来源，同样按远端每轮记录一次：主对话中的轮次经由 DSH 模型调用记录；DSH 分派的智能体和在“打开会话”中发送的轮次由该插件以事件上报，不会重复计数。服务商为 `remote-cli-<CLI>`，模型保留模型名及速度档位。Codex 按线程累计用量的差值计算本轮；ACP CLI 仅在其上报用量时计入。
 - 输入 Token 指**未缓存输入**；缓存读取、缓存写入独立列出。总 Token 优先采用适配器提供的 `totalTokens`，否则为输入 + 输出 + 缓存读取 + 缓存写入；推理 Token 已包含在输出中，不再相加。
 - 同一调用多次返回 `usage` 时采用最后一个有效快照，不将累计值重复相加。
 - 失败/取消调用仍保留已经返回的用量。未返回用量的调用仅计次数，页面明确显示“已返回用量”比例，不将未知用量当成已知零。SSH 断线或强行终止远端进程时可能拿不到最终用量。

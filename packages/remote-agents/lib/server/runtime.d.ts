@@ -1,4 +1,4 @@
-import { type Agent, type NativeAttachment, type NativeProtocol, type PermissionAnswer, type Task } from './domain.js';
+import { type Agent, type TurnUsage, type NativeAttachment, type NativeProtocol, type PermissionAnswer, type Task } from './domain.js';
 import { JsonlPeer } from './ssh.js';
 import { type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
@@ -7,6 +7,11 @@ export declare function initializeCodex(peer: JsonlPeer): Promise<void>;
 export declare function initializeAcp(peer: JsonlPeer): Promise<any>;
 export interface SessionHooks {
     turnEnded?(): void;
+    /** Tokens a finished turn used, with when it started and whether it succeeded. */
+    usage?(usage: TurnUsage, turn: {
+        startedAt: string | null;
+        failed: boolean;
+    }): void;
     /** The CLI process ended or was terminated; a relay's remote files can be removed. */
     ended?(): void;
 }
@@ -25,6 +30,9 @@ export declare class CliSession {
     private activeMessage?;
     private confirmed;
     private partialText;
+    /** Codex running thread totals, now and when the current turn began. */
+    private codexTotal;
+    private codexBefore;
     private suspended;
     private intentionalClose;
     private diskFailed;
@@ -63,6 +71,8 @@ export declare class CliSession {
     private confirm;
     private complete;
     private setContext;
+    /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
+    private turnUsage;
     /** Persist once per turn rather than per token report. */
     private saveContext;
     /** Claude reports its exact context breakdown on request, including after compaction. */

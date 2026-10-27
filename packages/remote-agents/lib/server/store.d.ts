@@ -1,4 +1,4 @@
-import { type ChatProject, type HostConfig, type Task } from './domain.js';
+import { type ChatProject, type HostConfig, type Task, type TurnUsage } from './domain.js';
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup {
     hostId: string;
@@ -18,6 +18,11 @@ export declare class Store {
     /** The file content this instance last read or wrote; undefined when the file did not exist. */
     private saved?;
     private closed;
+    /** Listeners for the tokens each finished CLI turn used; the plugin forwards them to usage statistics. */
+    readonly usageListeners: Set<(taskId: string, usage: TurnUsage, turn: {
+        startedAt: string | null;
+        failed: boolean;
+    }) => void>;
     constructor(path: string);
     get directory(): string;
     open(): Promise<void>;

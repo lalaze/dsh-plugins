@@ -24,8 +24,12 @@ export interface Totals {
     totalTokens: number;
 }
 export type GroupBy = 'day' | 'model' | 'session' | 'source';
-export type Source = 'dsh' | 'claude-ssh';
+export type Source = 'dsh' | 'claude-ssh' | 'remote-agents';
+/** dsh-claude-ssh names providers `claude-ssh-<host>`; dsh-remote-agents names its CLI routes `remote-cli-<cli>`. */
 export declare const sourceOf: (provider: string) => Source;
+export declare const SOURCE_LABELS: Record<Source, string>;
+/** dsh-remote-agents chat routes are `<machine>/<cli>/<model>[/<speed>]`; statistics keep the model and speed. */
+export declare function remoteModel(route: string): string;
 export interface Query {
     from?: string;
     to?: string;

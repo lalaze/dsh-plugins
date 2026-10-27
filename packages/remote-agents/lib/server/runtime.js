@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { questionsOf } from './domain.js';
 import { RelayExit, RelayReleased } from './relay.js';
 import { configureAcpSession } from './acp.js';
-import { claudeMessageTokens, codexContext, contextUsage } from './usage.js';
+import { acpTurnUsage, claudeMessageTokens, claudeTurnUsage, codexContext, codexTurnUsage, contextUsage } from './usage.js';
 const list = (value) => Array.isArray(value) ? value : [];
 const contentText = (content) => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
 export async function initializeCodex(peer) {
@@ -34,6 +34,9 @@ export class CliSession {
     activeMessage;
     confirmed = false;
     partialText = false;
+    /** Codex running thread totals, now and when the current turn began. */
+    codexTotal;
+    codexBefore;
     suspended = true;
     intentionalClose = false;
     diskFailed = false;
@@ -283,6 +286,13 @@ export class CliSession {
     }
     setContext(context) { if (context)
         this.agent.context = context; }
+    /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
+    turnUsage(usage, failed = false) {
+        if (!usage || !this.activeMessage)
+            return;
+        this.append({ type: 'usage', usage });
+        this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed });
+    }
     /** Persist once per turn rather than per token report. */
     saveContext() {
         const context = this.agent.context, key = JSON.stringify(context ?? null);
@@ -357,8 +367,10 @@ export class CliSession {
             return;
         }
         // Codex reports the resumed thread's usage while its history replay is still suppressed.
-        if (m.method === 'thread/tokenUsage/updated')
+        if (m.method === 'thread/tokenUsage/updated') {
             this.setContext(codexContext(m.params?.tokenUsage));
+            this.codexTotal = m.params?.tokenUsage?.total ?? this.codexTotal;
+        }
         if (this.suspended)
             return; // A resume can replay native history already present in our log.
         if (m.event === 'step_update') {
@@ -388,11 +400,14 @@ export class CliSession {
         const p = m.params ?? {};
         if (m.method === 'turn/started') {
             this.confirm();
+            this.codexBefore = this.codexTotal;
             if (this.agent.activeTurn && p.turn?.id)
                 this.agent.activeTurn.turnId = p.turn.id;
         }
         if (m.method === 'turn/completed') {
             this.confirm();
+            this.turnUsage(codexTurnUsage(this.codexTotal, this.codexBefore), p.turn?.status === 'failed');
+            this.codexBefore = this.codexTotal;
             if (p.turn?.status === 'failed')
                 this.fail(p.turn.error?.message ?? 'Remote turn failed');
             else
@@ -457,6 +472,7 @@ export class CliSession {
                     this.tool(String(block.tool_use_id), String(this.tools.get(String(block.tool_use_id))?.name ?? 'Tool'), block.is_error ? 'failed' : 'completed', contentText(block.content));
         if (m.type === 'result') {
             this.confirm();
+            this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success');
             if (m.is_error || m.subtype !== 'success')
                 this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed'));
             else
@@ -473,6 +489,7 @@ export class CliSession {
         // ACP acknowledges `session/cancel` by ending the prompt with `stopReason: cancelled`.
         if (this.protocol() === 'acp') {
             this.confirm();
+            this.turnUsage(acpTurnUsage(m.result?.usage));
             this.complete(m.result?.stopReason === 'cancelled' ? 'canceled' : 'completed');
             return;
         }

@@ -9,6 +9,8 @@ export class Store {
     /** The file content this instance last read or wrote; undefined when the file did not exist. */
     saved;
     closed = false;
+    /** Listeners for the tokens each finished CLI turn used; the plugin forwards them to usage statistics. */
+    usageListeners = new Set();
     constructor(path) {
         this.path = path;
     }

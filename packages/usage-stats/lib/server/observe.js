@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
-import { validUsage } from './domain.js';
+import { remoteModel, validUsage } from './domain.js';
 /** Observe one public stream call. Usage chunks replace prior snapshots, as in DSH's accumulator. */
 export async function* observe(options, next, save, warn) {
     const id = randomUUID();
     const startedAt = new Date().toISOString();
     const start = performance.now();
-    const identity = { provider: options.provider, model: options.model, sessionId: options.sessionId, purpose: options.purpose ?? 'conversation' };
+    const identity = { provider: options.provider, model: options.provider.startsWith('remote-cli-') ? remoteModel(options.model) : options.model, sessionId: options.sessionId, purpose: options.purpose ?? 'conversation' };
     let usage;
     let status = 'cancelled';
     try {

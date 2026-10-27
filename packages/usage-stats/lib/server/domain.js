@@ -1,4 +1,18 @@
-export const sourceOf = (provider) => provider.startsWith('claude-ssh-') ? 'claude-ssh' : 'dsh';
+/** dsh-claude-ssh names providers `claude-ssh-<host>`; dsh-remote-agents names its CLI routes `remote-cli-<cli>`. */
+export const sourceOf = (provider) => provider.startsWith('claude-ssh-') ? 'claude-ssh' : provider.startsWith('remote-cli-') ? 'remote-agents' : 'dsh';
+export const SOURCE_LABELS = { dsh: "DSH model calls", 'claude-ssh': "Remote Claude SSH", 'remote-agents': "Remote agents" };
+/** dsh-remote-agents chat routes are `<machine>/<cli>/<model>[/<speed>]`; statistics keep the model and speed. */
+export function remoteModel(route) {
+    const [, cli, model, tier, ...extra] = route.split('/');
+    if (!cli || !model || extra.length)
+        return route;
+    try {
+        return decodeURIComponent(model) + (tier ? ` · ${decodeURIComponent(tier)}` : '');
+    }
+    catch {
+        return route;
+    }
+}
 const counters = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens', 'totalTokens'];
 export function validUsage(value) {
     if (!value || typeof value !== 'object')
@@ -47,7 +61,7 @@ export function parseQuery(url) {
         throw new Error("Unsupported grouping");
     const rawSource = p.get('source');
     let source;
-    if (rawSource === 'dsh' || rawSource === 'claude-ssh')
+    if (rawSource === 'dsh' || rawSource === 'claude-ssh' || rawSource === 'remote-agents')
         source = rawSource;
     else if (rawSource)
         throw new Error("Unsupported request source");
@@ -77,11 +91,11 @@ export function report(records, query, failedWrites = 0) {
         if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && r.model !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source))
             continue;
         const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, r.model]) : r.sessionId ?? '';
-        const label = query.groupBy === 'source' ? sourceOf(r.provider) === 'dsh' ? "DSH model calls" : "Remote Claude SSH" : query.groupBy === 'model' ? `${r.provider} / ${r.model}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
+        const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${r.model}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
         add(totals, r);
         accumulate(groups, key, label, r);
         accumulate(series, day, day, r);
-        accumulate(sources, sourceOf(r.provider), sourceOf(r.provider) === 'dsh' ? "DSH model calls" : "Remote Claude SSH", r);
+        accumulate(sources, sourceOf(r.provider), SOURCE_LABELS[sourceOf(r.provider)], r);
     }
     return { totals, groups: [...groups.values()].sort((a, b) => query.groupBy === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
         series: [...series.values()].sort((a, b) => a.key.localeCompare(b.key)),
