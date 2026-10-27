@@ -288,6 +288,45 @@
       ]
     },
     {
+      "name": "dsh-workspace-tags",
+      "title": {
+        "en": "DSH Workspace Tags",
+        "zh": "DSH 工作区标签"
+      },
+      "description": {
+        "en": "Colored workspace tags, with sidebar grouping by tag or by running status",
+        "zh": "为工作区添加彩色标签，侧栏可按标签或运行状态分组"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/workspace-tags",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/workspace-tags"
+      },
+      "metadata": {
+        "keywords": [
+          "sidebar",
+          "workspace",
+          "tags"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793116065,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "471d640773db6b056ba4c5503d160c1b24955aa5",
+            "path": "packages/workspace-tags"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.3 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
       "name": "dsh-usage-stats",
       "title": {
         "en": "DSH Usage Statistics",
