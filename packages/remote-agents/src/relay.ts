@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { quote, type Child, type SshTransport } from './ssh.js';
+import type { RelayUnavailable } from './domain.js';
 
 /**
  * Runs on the SSH host and owns one CLI process, so the CLI outlives DSH and its SSH connection.
@@ -363,7 +364,7 @@ export class RelayLink implements Child {
 export class RelayClient {
   private constructor(private readonly transport: SshTransport) {}
   /** Install the relay script once per version; unavailable without Node.js 18 or newer on the host. */
-  static async open(transport: SshTransport): Promise<RelayClient | undefined> {
+  static async open(transport: SshTransport): Promise<RelayClient | RelayUnavailable | undefined> {
     if (!transport.relays) return;
     const output = await transport.exec(`command -v node >/dev/null 2>&1 || { printf missing-node; exit 0; }
 node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 18 ? 0 : 1)' || { printf old-node; exit 0; }
@@ -378,7 +379,8 @@ DSH_RELAY_SCRIPT_END
   mv -f "$dsh_relay_tmp" ${SCRIPT}
 fi
 printf ready`);
-    return output.trim().endsWith('ready') ? new RelayClient(transport) : undefined;
+    const result = output.trim();
+    return result.endsWith('ready') ? new RelayClient(transport) : result === 'missing-node' || result === 'old-node' ? result : 'install-failed';
   }
   private async command(name: 'start' | 'remove', args: string[], timeout?: number): Promise<{ removed: string[] }> {
     const output = await this.transport.exec(`node ${SCRIPT} ${name} ${RELAYS} ${args.map(quote).join(' ')}`, timeout);

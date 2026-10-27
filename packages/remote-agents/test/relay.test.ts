@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { existsSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { relayHarness, transcript, waitFor } from './relay-harness.js';
+import { RELAY_UNAVAILABLE } from '../src/domain.js';
+import { RelayClient } from '../src/relay.js';
+import type { SshTransport } from '../src/ssh.js';
 
+/** A relay client on a host that is known to support relays. */
+const openRelay = async (transport: SshTransport) => { const client = await RelayClient.open(transport); assert.ok(client instanceof RelayClient, `relay unavailable: ${client}`); return client; };
 const PROTOCOLS = [['codex', 'Codex app-server'], ['claude', 'Claude stream-json'], ['dsh', 'ACP']] as const;
 
 for (const [provider, label] of PROTOCOLS) test(`${label}: a task keeps running through a DSH shutdown, completes offline and is recovered once after restart`, async t => {
@@ -39,6 +45,15 @@ for (const [provider, label] of PROTOCOLS) test(`${label}: a task keeps running 
   await next.service.delete(agent.id);
   await waitFor(async () => (await readdir(h.relays)).length === 0, 'relay removal');
   await waitFor(() => !h.alive(daemon), 'relay daemon exit');
+});
+
+test('without a usable Node.js the CLI is not started and the reason is reported', async t => {
+  const fake = await mkdtemp(join(tmpdir(), 'dsh-old-node-')); t.after(() => rm(fake, { recursive: true, force: true }));
+  await writeFile(join(fake, 'node'), '#!/bin/sh\nexit 1\n'); await chmod(join(fake, 'node'), 0o755);
+  const h = await relayHarness(t, { PATH: `${fake}:${process.env.PATH}` });
+  const agent = await h.first.service.create(h.request('claude', 'stream 1'));
+  assert.equal(agent.started, false); assert.equal(agent.error, RELAY_UNAVAILABLE['old-node']);
+  assert.equal(existsSync(h.relays), false, 'no relay was installed');
 });
 
 test('repeated SSH interruptions reconnect from the saved byte offset without losing or repeating output', async t => {
@@ -163,11 +178,10 @@ test('a forcibly killed DSH loses no remote output: the restarted one resumes fr
 });
 
 test('a relay started by an interrupted initialization is removed, and retrying starts cleanly once', async t => {
-  const { RelayClient } = await import('../src/relay.js');
   const h = await relayHarness(t);
   await h.first.service.connect(h.hostId);
   const relayId = randomUUID(), input = h.request('codex', 'stream 2');
-  await RelayClient.open(h.first.transport).then(client => client!.launch(relayId, h.cwd, [join(h.home, '.local/bin/codex'), 'app-server']));
+  await openRelay(h.first.transport).then(client => client.launch(relayId, h.cwd, [join(h.home, '.local/bin/codex'), 'app-server']));
   const serverId = h.first.store.hosts()[0].serverId!;
   await h.first.store.update(state => { state.tasks.push({ ...input, serverId, title: 'Interrupted', createdAt: new Date().toISOString(), state: 'creating', relay: { id: relayId } }); });
   await h.first.service.close();
@@ -219,13 +233,13 @@ test('native DSH conversations: shutdown leaves the turn running; the next messa
 });
 
 test('relay links deliver large payloads once, drop partial frames and keep exact UTF-8 byte offsets', async t => {
-  const { RelayClient, RelayLink } = await import('../src/relay.js');
+  const { RelayLink } = await import('../src/relay.js');
   const { JsonlPeer } = await import('../src/ssh.js');
   const { writeFile, stat } = await import('node:fs/promises');
   const h = await relayHarness(t);
   const echo = join(h.root, 'echo.mjs');
   await writeFile(echo, `let b = Buffer.alloc(0); process.stdin.on('data', d => { b = Buffer.concat([b, d]); let i; while ((i = b.indexOf(10)) >= 0) { const line = b.subarray(0, i); b = b.subarray(i + 1); process.stdout.write(JSON.stringify({ bytes: line.length, head: line.subarray(0, 12).toString(), text: '多字节🌏' }) + '\\n'); } });`);
-  const client = (await RelayClient.open(h.first.transport))!, id = randomUUID();
+  const client = await openRelay(h.first.transport), id = randomUUID();
   await client.launch(id, h.cwd, [process.execPath, echo]);
   // A client that disconnects mid-line must not deliver the fragment.
   const raw = h.first.transport.start('/', ['sh', '-c', `exec node "$HOME"/.dsh-remote-agents/relay/relay-*.mjs attach "$HOME/.dsh-remote-agents/relays-v1" "$1" 0`, 'x', id]);

@@ -11,7 +11,7 @@ import { RemoteAgentsService } from '../src/service.js';
 import { TaskHistory } from '../src/history.js';
 import { createHandler } from '../src/http.js';
 import { fixture } from './fakes.js';
-import type { DshPermission } from '../src/domain.js';
+import { RELAY_UNAVAILABLE, type DshPermission } from '../src/domain.js';
 
 const CODEX_PROVIDER = chatProviderId('codex');
 const user = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } });
@@ -329,6 +329,12 @@ test('Codex chats map the DSH composer permission and skip modes their catalog l
   remote.catalog[0].modes.push({ id: 'read-only', label: 'Read only' }); await projects.refresh(project.id);
   await collect(adapter.stream(options('Read only', { sessionId: SessionId('read-only-conversation') })));
   assert.equal(remote.created!.modeId, 'read-only');
+});
+
+test('a host that cannot keep the CLI running after DSH quits fails the response with the reason', async t => {
+  const { remote, adapter, options } = await setup(t);
+  remote.onCreate = () => { throw new Error(RELAY_UNAVAILABLE['missing-node']); };
+  await assert.rejects(collect(adapter.stream(options())), (error: Error) => error.message === RELAY_UNAVAILABLE['missing-node']);
 });
 
 test('new Codex chats use the remote CLI permission config instead of forcing workspace write', async t => {

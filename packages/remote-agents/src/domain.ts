@@ -131,6 +131,14 @@ export interface Agent {
   /** A persistent CLI whose SSH connection is being re-established. */
   reconnecting?: boolean;
 }
+/** Why a host cannot run CLIs under a relay. */
+export type RelayUnavailable = 'missing-node' | 'old-node' | 'install-failed';
+/** A CLI is never started without a relay, because it would end silently with DSH. */
+export const RELAY_UNAVAILABLE: Readonly<Record<RelayUnavailable, string>> = {
+  'missing-node': 'The remote CLI was not started: Node.js was not found on the SSH host\'s login PATH, so the CLI could not keep running after DSH quits or SSH disconnects. Make Node.js 18 or newer available to the SSH login shell, then retry.',
+  'old-node': 'The remote CLI was not started: the SSH host\'s Node.js is older than 18, so the CLI could not keep running after DSH quits or SSH disconnects. Make Node.js 18 or newer available to the SSH login shell, then retry.',
+  'install-failed': 'The remote CLI was not started: the background relay could not be installed in ~/.dsh-remote-agents on the SSH host, so the CLI could not keep running after DSH quits or SSH disconnects. Check that the directory is writable, then retry.',
+};
 export interface TaskInput {
   id: string;
   hostId: string;

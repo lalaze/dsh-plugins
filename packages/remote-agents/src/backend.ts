@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
-import { enabledProvidersOf, permissionModes, PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
+import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, RelayUnavailable, Task, TimelinePage } from './domain.js';
+import { enabledProvidersOf, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError } from './domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from './ssh.js';
 import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
 import { TaskHistory } from './history.js';
@@ -85,6 +85,8 @@ export class SshBackend implements Backend {
   /** Tasks with an operation in flight; their sessions are never evicted. */
   private leases = new Map<string, number>();
   private relayClient?: { at: number; value: Promise<RelayClient | undefined> };
+  /** Why the last relay check failed; CLIs are not started until it succeeds. */
+  private relayUnavailable?: RelayUnavailable;
   private ending = new Map<string, Promise<void>>();
   private cleaning?: Promise<void>;
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport) {
@@ -198,14 +200,18 @@ done`}`, 15_000, { login: false });
     const task = this.store.task(t => t.agentId === id && t.hostId === this.host.id);
     if (!task) throw new RemoteError('Remote agent not found', 404); return task;
   }
-  /** Hosts with Node.js 18+ run CLIs under a relay; others keep a direct SSH pipe. */
+  /** Hosts with Node.js 18+ run CLIs under a relay; transports without relay support keep a direct SSH pipe. */
   private relays(reinstall = false): Promise<RelayClient | undefined> {
     if (!this.transport.relays) return Promise.resolve(undefined);
     const cached = this.relayClient;
     if (cached && !reinstall && Date.now() - cached.at < 60_000) return cached.value;
-    const value = RelayClient.open(this.transport);
+    const value = RelayClient.open(this.transport).then(result => {
+      this.relayUnavailable = typeof result === 'string' ? result : undefined;
+      return typeof result === 'string' ? undefined : result;
+    });
     this.relayClient = { at: Date.now(), value };
-    value.then(client => { if (client && this.relayClient?.value === value) this.relayClient.at = Infinity; }, () => { if (this.relayClient?.value === value) this.relayClient = undefined; });
+    // A missing relay is checked again on the next start, so installing Node.js takes effect on retry.
+    value.then(client => { if (this.relayClient?.value === value) { if (client) this.relayClient.at = Infinity; else this.relayClient = undefined; } }, () => { if (this.relayClient?.value === value) this.relayClient = undefined; });
     return value;
   }
   /** Forget a relay locally and remove it remotely now, or once the host is reachable. */
@@ -321,6 +327,10 @@ done`}`, 15_000, { login: false });
     let argv = [...profile.argv];
     if (profile.protocol === 'antigravity') argv = antigravityArguments(argv[0], task, resume);
     if (profile.protocol === 'claude') argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native!.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : [])];
+    const relay = await this.relays();
+    this.assertOpen(); signal?.throwIfAborted();
+    // A direct pipe would end silently with DSH; refuse and say why before touching the host.
+    if (!relay && this.transport.relays) throw new RemoteError(RELAY_UNAVAILABLE[this.relayUnavailable ?? 'install-failed'], 409);
     const history = await this.history(task.id);
     // Upload before creating a native session, so a failed upload can be retried safely.
     const attachments = !resume ? await transferAttachments(this.transport, this.store.directory, task.id, task.id, profile.cwd, task.attachments ?? [], signal) : [];
@@ -332,8 +342,6 @@ done`}`, 15_000, { login: false });
       idle[1].close(); this.sessions.delete(idle[0]);
     }
     const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : argv;
-    const relay = await this.relays();
-    this.assertOpen(); signal?.throwIfAborted();
     let link: RelayLink | undefined;
     if (relay) {
       // Record the relay before it exists, so an interrupted start is cleaned up rather than leaked.
@@ -349,8 +357,7 @@ done`}`, 15_000, { login: false });
       catch (error) { await this.relayEnded(task.id, relayId).catch(() => {}); throw error; }
       link = this.link(relayId, 0, state => { if (this.sessions.get(task.id)?.relay === link) this.sessions.get(task.id)!.agent.reconnecting = !state.connected; });
     }
-    const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch)), history, link);
-    this.sessions.set(task.id, session);
+    const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch)), history, link);    this.sessions.set(task.id, session);
     link?.open();
     try {
       await session.initialize(profile.protocol, argv, resume);
