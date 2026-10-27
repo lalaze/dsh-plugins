@@ -108,7 +108,7 @@ test('插件钩子覆盖两类调用；API、筛选和 CSV 共用持久化结果
   try {
     let handler: ((o: GenerateOptions, next: () => AsyncIterable<StreamChunk>) => AsyncIterable<StreamChunk>) | undefined;
     let fetcher: ((r: Request) => Promise<Response>) | undefined;
-    const ctx = { effect: (setup: () => () => void) => { dispose = setup(); }, on: (event: string, fn: typeof handler, scope: unknown) => { assert.equal(event, 'llm/stream'); assert.deepEqual(scope, { global: true, prepend: true }); handler = fn; }, connection: { fetch: { register: (route: { path: string; methods: string[]; fetch: typeof fetcher }) => { assert.equal(route.path, '/api/usage-stats'); assert.deepEqual(route.methods, ['GET']); fetcher = route.fetch; } } } } as unknown as Context;
+    const ctx = { effect: (setup: () => () => void) => { dispose = setup(); }, on: (event: string, fn: typeof handler, scope: unknown) => { if (event === 'remote-agents/usage') return; assert.equal(event, 'llm/stream'); assert.deepEqual(scope, { global: true, prepend: true }); handler = fn; }, connection: { fetch: { register: (route: { path: string; methods: string[]; fetch: typeof fetcher }) => { assert.equal(route.path, '/api/usage-stats'); assert.deepEqual(route.methods, ['GET']); fetcher = route.fetch; } } } } as unknown as Context;
     await apply(ctx, { stateDir: root });
     for (const provider of ['deepseek', 'claude-ssh-host']) await collect(handler!({ ...options, provider }, () => stream([{ type: 'usage', usage: { inputTokens: 2, outputTokens: 3 } }, stop])));
     const response = await fetcher!(new Request('http://example.test/api/usage-stats?groupBy=source'));
@@ -140,6 +140,19 @@ test('真实 Cordis 与 LlmRuntime waterfall 经适配器派发后恰好采集�
     const data = await (await fetcher!(new Request('http://example.test/api/usage-stats?groupBy=source'))).json();
     assert.equal(data.totals.requests, 2); assert.equal(data.totals.totalTokens, 10); assert.equal(data.totals.withUsage, 2);
     assert.deepEqual(data.groups.map((g: { totals: { requests: number } }) => g.totals.requests), [1, 1]);
+    // dsh-remote-agents: a main-chat turn arrives through llm/stream; a delegated turn arrives as an event from another plugin.
+    ctx.llm.registerAdapter(['remote-cli-claude'], new Adapter());
+    await collect(ctx.llm.stream({ ...options, provider: 'remote-cli-claude', model: 'host-1/claude/claude-opus-5/priority' }));
+    const other = ctx.extend({});
+    other.emit('remote-agents/usage', { id: 'delegated', startedAt: '2026-10-27T10:00:00.000Z', provider: 'remote-cli-codex', model: 'gpt-5.5', sessionId: 'remote-agent:t1', purpose: 'delegation', status: 'completed', durationMs: 1200, usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 400 } });
+    other.emit('remote-agents/usage', { id: 'bad', provider: 'deepseek' } as never);
+    other.emit('remote-agents/usage', { id: 'not-remote', startedAt: '2026-10-27T10:00:00.000Z', provider: 'deepseek', model: 'chat', purpose: 'delegation', status: 'completed', durationMs: 1 });
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const remote = await (await fetcher!(new Request('http://example.test/api/usage-stats?source=remote-agents&groupBy=model'))).json();
+    assert.equal(remote.totals.requests, 2); assert.equal(remote.totals.totalTokens, 555);
+    assert.deepEqual(remote.groups.map((g: { label: string }) => g.label).sort(), ['remote-cli-claude / claude-opus-5 · priority', 'remote-cli-codex / gpt-5.5']);
+    const sources = await (await fetcher!(new Request('http://example.test/api/usage-stats?groupBy=source'))).json();
+    assert.deepEqual(sources.groups.map((g: { key: string; label: string }) => [g.key, g.label]).sort(), [['claude-ssh', 'Remote Claude SSH'], ['dsh', 'DSH model calls'], ['remote-agents', 'Remote agents']]);
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 test('调用进行时重载插件，新旧调用均保留在 API 与重启后的文件中', async () => {
@@ -173,4 +186,13 @@ test('调用进行时重载插件，新旧调用均保留在 API 与重启后的
     const reloaded = await (await fetcher!(new Request('http://example.test/api/usage-stats'))).json();
     assert.equal(reloaded.totals.requests, 3);
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
+});
+test('远程智能体：remote-cli 服务商归入独立来源，聊天路由只保留模型与速度', async () => {
+  const { remoteModel, sourceOf } = await import('../src/domain.js');
+  assert.equal(sourceOf('remote-cli-claude'), 'remote-agents'); assert.equal(sourceOf('claude-ssh-host'), 'claude-ssh'); assert.equal(sourceOf('deepseek'), 'dsh');
+  assert.equal(remoteModel('host-1/claude/claude-opus-5'), 'claude-opus-5');
+  assert.equal(remoteModel('host-1/codex/gpt-5.5/priority'), 'gpt-5.5 · priority');
+  assert.equal(remoteModel('p1/claude/a%2Fb'), 'a/b');
+  assert.equal(remoteModel('gpt-5.5'), 'gpt-5.5'); assert.equal(remoteModel('a/b/c/d/e'), 'a/b/c/d/e');
+  assert.equal(parseQuery(new URL('http://example.test/?source=remote-agents')).source, 'remote-agents');
 });

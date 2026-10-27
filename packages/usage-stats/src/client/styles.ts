@@ -1,5 +1,5 @@
 export const styles = `
-.dsh-usage{--us-accent:#0b9f83;--us-purple:#8b78e6;--us-muted:color-mix(in srgb,currentColor 55%,transparent);--us-line:color-mix(in srgb,currentColor 11%,transparent);--us-surface:color-mix(in srgb,currentColor 2.5%,transparent);box-sizing:border-box;width:100%;max-width:1280px;margin:0 auto;padding:28px;display:grid;gap:24px;font-size:13px;line-height:1.5;container-type:inline-size}
+.dsh-usage{--us-accent:#0b9f83;--us-purple:#8b78e6;--us-amber:#d9822b;--us-muted:color-mix(in srgb,currentColor 55%,transparent);--us-line:color-mix(in srgb,currentColor 11%,transparent);--us-surface:color-mix(in srgb,currentColor 2.5%,transparent);box-sizing:border-box;width:100%;max-width:1280px;margin:0 auto;padding:28px;display:grid;gap:24px;font-size:13px;line-height:1.5;container-type:inline-size}
 .dsh-usage *{box-sizing:border-box}
 .dsh-usage button,.dsh-usage input,.dsh-usage select{font:inherit;color:inherit}
 .dsh-usage button{cursor:pointer}

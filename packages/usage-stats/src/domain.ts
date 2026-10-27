@@ -25,8 +25,16 @@ export interface Totals {
   totalTokens: number;
 }
 export type GroupBy = 'day' | 'model' | 'session' | 'source';
-export type Source = 'dsh' | 'claude-ssh';
-export const sourceOf = (provider: string): Source => provider.startsWith('claude-ssh-') ? 'claude-ssh' : 'dsh';
+export type Source = 'dsh' | 'claude-ssh' | 'remote-agents';
+/** dsh-claude-ssh names providers `claude-ssh-<host>`; dsh-remote-agents names its CLI routes `remote-cli-<cli>`. */
+export const sourceOf = (provider: string): Source => provider.startsWith('claude-ssh-') ? 'claude-ssh' : provider.startsWith('remote-cli-') ? 'remote-agents' : 'dsh';
+export const SOURCE_LABELS: Record<Source, string> = { dsh: "DSH model calls", 'claude-ssh': "Remote Claude SSH", 'remote-agents': "Remote agents" };
+/** dsh-remote-agents chat routes are `<machine>/<cli>/<model>[/<speed>]`; statistics keep the model and speed. */
+export function remoteModel(route: string): string {
+  const [, cli, model, tier, ...extra] = route.split('/');
+  if (!cli || !model || extra.length) return route;
+  try { return decodeURIComponent(model) + (tier ? ` · ${decodeURIComponent(tier)}` : ''); } catch { return route; }
+}
 export interface Query { from?: string; to?: string; provider?: string; model?: string; sessionId?: string; source?: Source; groupBy: GroupBy }
 export interface UsageGroup { key: string; label: string; totals: Totals }
 export interface UsageReport {
@@ -77,7 +85,7 @@ export function parseQuery(url: URL): Query {
   if (!['day', 'model', 'session', 'source'].includes(groupBy)) throw new Error("Unsupported grouping");
   const rawSource = p.get('source');
   let source: Source | undefined;
-  if (rawSource === 'dsh' || rawSource === 'claude-ssh') source = rawSource;
+  if (rawSource === 'dsh' || rawSource === 'claude-ssh' || rawSource === 'remote-agents') source = rawSource;
   else if (rawSource) throw new Error("Unsupported request source");
   const from = date(p.get('from')); const to = date(p.get('to'));
   if (from && to && from > to) throw new Error("Start date must not be later than end date");
@@ -97,10 +105,10 @@ export function report(records: readonly UsageRecord[], query: Query, failedWrit
     const day = r.startedAt.slice(0, 10);
     if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && r.model !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source)) continue;
     const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, r.model]) : r.sessionId ?? '';
-    const label = query.groupBy === 'source' ? sourceOf(r.provider) === 'dsh' ? "DSH model calls" : "Remote Claude SSH" : query.groupBy === 'model' ? `${r.provider} / ${r.model}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
+    const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${r.model}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
     add(totals, r); accumulate(groups, key, label, r);
     accumulate(series, day, day, r);
-    accumulate(sources, sourceOf(r.provider), sourceOf(r.provider) === 'dsh' ? "DSH model calls" : "Remote Claude SSH", r);
+    accumulate(sources, sourceOf(r.provider), SOURCE_LABELS[sourceOf(r.provider)], r);
   }
   return { totals, groups: [...groups.values()].sort((a, b) => query.groupBy === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
     series: [...series.values()].sort((a, b) => a.key.localeCompare(b.key)),

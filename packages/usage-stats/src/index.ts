@@ -6,7 +6,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { acquireUsageStore } from './store.js';
 import { observe } from './observe.js';
-import { parseQuery, report, toCsv } from './domain.js';
+import { parseQuery, report, toCsv, validRecord, type UsageRecord } from './domain.js';
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /** Sent by dsh-remote-agents for remote CLI turns that no DSH model call covered, such as delegated agents. */
+    'remote-agents/usage'(record: UsageRecord): void;
+  }
+}
 
 export const name = 'dsh-usage-stats';
 export const inject = ['llm', 'connection'];
@@ -25,6 +32,13 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
         yield* observe(options, next, record => store.append(record), error => console.warn("[dsh-usage-stats] Could not record usage", error));
       } finally { turn.release(); }
     })(), { global: true, prepend: true });
+    // Turns of main-chat remote models arrive through llm/stream above; this covers the rest without double counting.
+    ctx.on('remote-agents/usage', record => {
+      if (!validRecord(record) || !record.provider.startsWith('remote-cli-')) return;
+      const { id, startedAt, provider, model, sessionId, purpose, status, durationMs, usage } = record;
+      store.append({ id, startedAt, provider, model, ...(sessionId ? { sessionId } : {}), purpose, status, durationMs, ...(usage ? { usage } : {}) })
+        .catch(error => console.warn("[dsh-usage-stats] Could not record remote agent usage", error));
+    }, { global: true });
     // The host connection supplies authentication, origin checks and native carriers.
     ctx.connection.fetch.register({ path: '/api/usage-stats', methods: ['GET'], requestBody: 'buffered', fetch: async request => {
       try {
