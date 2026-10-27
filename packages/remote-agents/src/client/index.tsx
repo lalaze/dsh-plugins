@@ -8,6 +8,7 @@ import { HostManager } from './hosts.js';
 import { styles } from './styles.js';
 import { Sessions } from './sessions.js';
 import { installModelGroups } from './model-groups.js';
+import { ModelLabel } from './model-label.js';
 import { installWorkspaceModels, type WorkspaceClient } from './workspace-models.js';
 import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './usage.js';
 import { symbols } from '@deepseek-ai/cordis';
@@ -67,6 +68,7 @@ export function apply(ctx: Client): void {
   };
   ctx.slots.inject('settings.section', () => { ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, Surface); });
   ctx.effect(installModelGroups);
+  ctx.slots.inject('conversation.input.model.label', () => { ctx.slots.register({ name: 'conversation.input.model.label', id: 'remote-agents-model-label' }, ModelLabel); });
   ctx.effect(installUsageStyles);
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     // Read through the service itself: this plugin's proxy would resolve dependencies from our context.

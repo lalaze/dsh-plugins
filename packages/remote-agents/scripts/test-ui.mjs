@@ -228,7 +228,7 @@ try {
   const visible = '[data-ra-model-option]:not([data-ra-model-hidden])';
   browser('set', 'viewport', '1440', '1000');
   wait('document.querySelector("[data-native-picker] button")');
-  expect('window.fixture.slots.length === 2');
+  expect('window.fixture.slots.length === 3');
   browser('click', trigger); wait('document.querySelector("[data-menu-material] > button")');
   image('model-groups-native-root');
   browser('click', rootModel); wait('document.querySelector("[data-ra-model-provider]")');
@@ -293,16 +293,19 @@ try {
   expect('!document.querySelector("[data-menu-material]").textContent.includes("ubuntu")');
   evaluate('window.fixture.workspace("ubuntu")');
   wait('document.querySelectorAll("[data-ra-model-provider]").length === 2');
-  expect('!document.querySelector("[data-native-picker] button").textContent.includes("macmini")');
+  expect('!document.querySelector("[data-native-picker] button").title.includes("macmini")');
   expect('!document.querySelector("[data-menu-material]").textContent.includes("macmini")');
   browser('click', heading('remote-cli-claude'));
   expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-claude] [data-ra-model-option]:not([data-ra-model-hidden])").length === 1');
-  browser('click', `${menu} button:has-text("Claude model · ubuntu")`); wait('!document.querySelector("[data-menu-material]")');
-  wait('document.querySelector("[data-native-picker] button").textContent.includes("ubuntu")');
+  // Rows keep the host as muted text; the composer caption shows only the model, with the host in its tooltip.
+  expect('document.querySelector(\'[data-menu-material] [data-model-id="ubuntu/claude/claude-model"] [data-ra-model-host]\').textContent === "ubuntu"');
+  browser('click', `${menu} button[title="Claude model · ubuntu"]`); wait('!document.querySelector("[data-menu-material]")');
+  wait('document.querySelector("[data-native-picker] button").title.includes("Claude model · ubuntu")');
+  expect('document.querySelector("[data-native-picker] [data-model-id]").textContent === "Claude model"');
   const rejected = evaluate('window.fixture.selectModel({provider:"remote-cli-codex",model:"macmini/codex/codex-model"})');
   if (rejected.ok !== false) throw new Error('Cross-machine selection was accepted');
   evaluate('window.fixture.workspace("local")');
-  wait('!document.querySelector("[data-native-picker] button").textContent.includes("ubuntu")');
+  wait('!document.querySelector("[data-native-picker] button").title.includes("ubuntu")');
   // With no current choice, the native trigger opens the model list directly.
   browser('click', trigger);
   wait('document.querySelectorAll("[data-ra-model-provider]").length === 1');
@@ -311,7 +314,7 @@ try {
   browser('press', 'Escape'); browser('press', 'Escape');
   evaluate('window.fixture.workspace("macmini")');
   browser('open', `${base}?workspace-reset`);
-  wait('document.querySelector("[data-native-picker] button").textContent.includes("macmini")');
+  wait('document.querySelector("[data-native-picker] button").title.includes("macmini")');
   // The usage ring shows context fill; hovering opens the account's plan limits, as in Paseo.
   const hours = h => new Date(Date.now() + h * 3600e3 + 60e3).toISOString();
   fixture({ seedUsage: { context: { used: 169000, max: 1000000 }, account: { provider: 'codex', plan: 'Plus', email: 'dev@example.com', checkedAt: new Date().toISOString(), windows: [{ id: 'codex:primary', label: 'Session', usedPercent: 18, resetsAt: hours(4) }, { id: 'codex:secondary', label: 'Weekly', usedPercent: 35, resetsAt: hours(48) }] } } });

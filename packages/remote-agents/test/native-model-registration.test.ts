@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots';
+import React from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { apply, type Client } from '../src/client/index.js';
+import { ModelLabel, type ModelLabelProps } from '../src/client/model-label.js';
 
 test('enabling remote agents preserves the native model seat and its already-declared label slot', t => {
   const core = new SlotCore();
@@ -28,5 +31,15 @@ test('enabling remote agents preserves the native model seat and its already-dec
   assert.equal(core.entriesOfSlot('conversation.input.model')[0].component, native);
   assert.equal(core.entries('conversation.input.model').length, 1);
   assert.ok(core.specDynamic('conversation.input.model.label'));
+  assert.equal(core.entriesOfSlot('conversation.input.model.label')[0].component, ModelLabel);
   assert.equal(core.entries('conversation.input.right').length, 1, 'the usage ring sits before the submit action');
+});
+
+test('remote model captions drop the host while list rows keep it muted', () => {
+  const html = (provider: string, name: string, placement: ModelLabelProps['placement']) => renderToStaticMarkup(React.createElement(ModelLabel, { provider: { id: provider }, model: { name }, placement }));
+  assert.equal(html('remote-cli-claude', 'Opus 5.5 · ubuntu-claude', 'trigger'), 'Opus 5.5');
+  assert.equal(html('remote-cli-claude', 'Opus 5.5 · ubuntu-claude', 'menu'), 'Opus 5.5');
+  assert.match(html('remote-cli-claude', 'Opus 5.5 · ubuntu-claude', 'option'), /^Opus 5\.5<span data-ra-model-host="" [^>]*>ubuntu-claude<\/span>$/);
+  assert.equal(html('remote-cli-codebuddy', 'Auto · Fast · macmini', 'menu'), 'Auto · Fast', 'only the last separator splits off the host');
+  assert.equal(html('deepseek', 'DeepSeek · V4', 'trigger'), 'DeepSeek · V4', 'other providers keep their catalog name');
 });
