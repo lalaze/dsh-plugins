@@ -1,6 +1,6 @@
 {
   "name": "dsh-translate",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "description": "Translation controls for DeepSeek Harness conversations",
   "type": "module",
   "main": "lib/server/index.js",
@@ -28,7 +28,7 @@
     "bundle": { "patch": "./cordis.patch.yml" },
     "client": {
       "platform": "web",
-      "inject": ["@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-model-selection"]
+      "inject": ["@deepseek-ai/dsh-client-ui-settings", "@deepseek-ai/dsh-client-locale", "@deepseek-ai/dsh-client-ui-conversation", "@deepseek-ai/dsh-client-ui-model-selection"]
     }
   },
   "peerDependencies": {

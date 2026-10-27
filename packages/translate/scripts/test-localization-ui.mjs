@@ -1,6 +1,6 @@
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -26,14 +26,16 @@ try {
   browser('snapshot', '-i');
   expect('document.querySelector("select").textContent.includes("Japanese") && document.body.textContent.includes("Fallback API URL")');
   const draft = 'document.querySelector("[data-dsh-translate-draft]")';
-  const label = 'document.querySelector("[data-dsh-translate-label]").textContent';
+  const label = `${draft}.getAttribute("aria-label")`;
   const lock = 'document.querySelector("[data-dsh-translate-lock]")';
-  // Claude is locked to English by default: the badge shows and requests ask for English.
-  expect(`${draft}.dataset.dshTranslateTarget === "en" && ${lock}?.textContent === "EN" && ${draft}.title === "Translate draft to English (Alt/Option+T)"`);
+  // Claude is locked to English by default; the compact icon explains its target in the tooltip.
+  expect(`${draft}.dataset.dshTranslateTarget === "en" && !${lock} && ${draft}.title === "Translate draft to English (Alt/Option+T)"`);
+  expect(`${draft}.textContent === "" && ${draft}.children.length === 1 && ${draft}.firstElementChild.tagName.toLowerCase() === "svg" && ${draft}.getBoundingClientRect().width === 28`);
   browser('click', '[data-dsh-translate-draft]');
   wait(`${label} === "Undo"`);
-  expect('document.querySelector("[data-composer-input]").value === "Hello world" && window.fixture.lastTarget === "en"');
-  expect(`getComputedStyle(${lock}).display === "none"`);
+  expect('document.querySelector("[data-fixture-composer]").value === "Hello world" && window.fixture.draft === "Hello world" && window.fixture.lastTarget === "en" && window.fixture.lastText === "你好世界"');
+  expect('document.querySelector("[hidden] textarea").value === "另一个会话的草稿"');
+  expect(`${draft}.textContent === "" && ${draft}.querySelector("svg") !== null && ${draft}.title === "Undo"`);
   browser('click', '[data-dsh-browser-devtools=toggle]');
   const guest = 'document.querySelector("iframe").contentDocument';
   wait(`${guest}.querySelector(".dsh-bdt-title")?.textContent === "Page debugger"`);
@@ -44,7 +46,7 @@ try {
   expect('document.querySelector("[data-dsh-browser-devtools=toggle]").getAttribute("aria-label") === "关闭调试浮窗"');
   expect('document.querySelector("select").textContent.includes("日语") && document.body.textContent.includes("备用 API 地址")');
   browser('click', '[data-dsh-translate-draft]');
-  expect('document.querySelector("[data-composer-input]").value === "你好世界"');
+  expect('document.querySelector("[data-fixture-composer]").value === "你好世界" && window.fixture.draft === "你好世界"');
   // Other models keep automatic direction until their keyword is configured.
   evaluate('window.fixture.setModel("deepseek-official", "deepseek-flash")');
   wait(`${draft}.dataset.dshTranslateTarget === "auto" && !${lock} && ${draft}.title === "翻译草稿（Alt/Option+T）"`);
@@ -54,9 +56,29 @@ try {
   browser('click', '[data-dsh-translate-draft]');
   browser('fill', 'input[placeholder="claude, anthropic"]', 'claude, deepseek');
   browser('click', '.dsh-translate-actions button:text-is("保存设置")');
-  wait(`${draft}.dataset.dshTranslateTarget === "en" && ${lock}?.textContent === "EN"`);
+  wait(`${draft}.dataset.dshTranslateTarget === "en" && !${lock} && ${draft}.title === "将草稿翻译为英文（Alt/Option+T）"`);
   expect('JSON.parse(localStorage.getItem("dsh-translate.settings.v1")).englishLockModels === "claude, deepseek"');
-  browser('fill', 'textarea:not([data-composer-input])', 'Test input');
+  // A response for an older draft must leave newer edits intact and must not offer Undo.
+  evaluate('window.fixture.defer = true');
+  const requests = evaluate('window.fixture.requests');
+  browser('click', '[data-dsh-translate-draft]');
+  wait(`${draft}.dataset.dshTranslateBusy !== undefined`);
+  evaluate('document.querySelector("[data-fixture-composer]").dispatchEvent(new KeyboardEvent("keydown", {bubbles: true, altKey: true, key: "t"}))');
+  expect(`window.fixture.requests === ${requests + 1}`);
+  evaluate('window.fixture.setDraft("翻译期间修改的新草稿")');
+  wait('window.fixture.draft === "翻译期间修改的新草稿"');
+  evaluate('window.fixture.resolveTranslation()');
+  wait(`${draft}.dataset.dshTranslateBusy === undefined`);
+  expect(`window.fixture.draft === "翻译期间修改的新草稿" && document.querySelector("[data-fixture-composer]").value === window.fixture.draft && ${draft}.dataset.dshTranslateUndo === undefined && ${label} !== "撤销"`);
+  // Undo restores the exact draft, including leading/trailing whitespace and line breaks.
+  evaluate('window.fixture.defer = false; window.fixture.setDraft("  第一行\\n第二行\\n  ")');
+  wait('window.fixture.draft === "  第一行\\n第二行\\n  "');
+  browser('click', '[data-dsh-translate-draft]');
+  wait(`${label} === "撤销"`);
+  expect('window.fixture.draft === "Hello world"');
+  browser('click', '[data-dsh-translate-draft]');
+  expect('window.fixture.draft === "  第一行\\n第二行\\n  " && document.querySelector("[data-fixture-composer]").value === window.fixture.draft');
+  browser('fill', '.dsh-translate-settings textarea', 'Test input');
   evaluate('window.fixture.fail = true');
   browser('click', '.dsh-translate-actions button:text-is("翻译")');
   wait('document.querySelector("[role=alert]")?.textContent === "请先填写翻译模型名"');
@@ -69,8 +91,33 @@ try {
   wait('document.querySelector(".dsh-translate-settings h2")?.textContent === "Translation API"');
   evaluate('window.fixture.setLocale("zh")');
   expect('document.querySelector(".dsh-translate-settings h2").textContent === "Translation API"');
+  // Exercise actual Cordis startup with a desktop locale service that arrives later.
+  const settings = await build({ absWorkingDir: fileURLToPath(new URL('../', import.meta.url)), entryPoints: ['test/ui/settings-locale.fixture.tsx'], bundle: true, write: false, platform: 'browser', format: 'iife', target: 'es2022' });
+  const settingsFile = join(temp, 'settings.html');
+  await writeFile(settingsFile, '<!doctype html><html><meta charset="utf-8"><body><script>' + settings.outputFiles[0].text.replaceAll('</script', '<\\/script') + '</script></body></html>');
+  browser('open', pathToFileURL(settingsFile).href);
+  wait('document.body.dataset.fixtureReady !== undefined');
+  const activatedBeforeLocale = evaluate('document.querySelectorAll("[data-plugin]").length');
+  evaluate('window.fixture.startLocale()');
+  wait('document.querySelectorAll("[data-plugin]").length === 2');
+  const labelsAfterStartup = evaluate('[...document.querySelectorAll("[data-plugin]")].map(button => button.textContent)');
+  if (activatedBeforeLocale || labelsAfterStartup.join(',') !== '翻译,使用量统计') throw new Error(`Async locale startup: ${activatedBeforeLocale} settings activated too early; labels after Chinese host became ready: ${labelsAfterStartup.join(', ')}`);
+  const translationLabel = 'document.querySelector("[data-plugin=translate]")?.textContent';
+  const usageLabel = 'document.querySelector("[data-plugin=usage-stats]")?.textContent';
+  wait(`${translationLabel} === "翻译" && ${usageLabel} === "使用量统计"`);
+  wait('document.querySelector(".dsh-translate-settings h2")?.textContent === "翻译 API" && document.querySelector(".us-title h2")?.textContent === "使用量统计"');
+  evaluate('window.fixture.setLocale("en")');
+  wait(`${translationLabel} === "Translation" && ${usageLabel} === "Usage statistics"`);
+  wait('document.querySelector(".dsh-translate-settings h2").textContent === "Translation API" && document.querySelector(".us-title h2").textContent === "Usage statistics"');
+  evaluate('window.fixture.setLocale("zh")');
+  wait(`${translationLabel} === "翻译" && ${usageLabel} === "使用量统计"`);
+  wait('document.querySelector(".dsh-translate-settings h2").textContent === "翻译 API" && document.querySelector(".us-title h2").textContent === "使用量统计"');
+  for (const plugin of ['translate', 'usage-stats']) {
+    const manifest = JSON.parse(await readFile(new URL(`../../${plugin}/package.json`, import.meta.url), 'utf8'));
+    if (!manifest.dsh.client.inject.includes('@deepseek-ai/dsh-client-locale')) throw new Error(`${plugin}: locale package must be loaded by DSH`);
+  }
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors));
-  console.log('PASS: English fallback, live translation and guest debugger localization, target languages, fallback fields, undo state, model English lock and localized errors');
+  console.log('PASS: scoped controlled composer replacement, inactive composer isolation, pending edits, duplicate requests, exact undo, async host locale startup, settings localization, model English lock and localized errors');
 } finally {
   try { browser('close'); } catch {}
   await rm(temp, { recursive: true, force: true });

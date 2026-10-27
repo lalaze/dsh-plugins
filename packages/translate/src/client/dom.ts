@@ -12,9 +12,22 @@ function selectedMessage(selection: Selection): Element | null {
 }
 function removeOverlays() { document.querySelectorAll(overlaySelector).forEach(node => node.remove()); }
 function button(text: string, title: string) { const value = document.createElement('button'); value.type = 'button'; value.textContent = text; value.title = title; value.dataset.dshTranslateOverlay = ''; Object.assign(value.style, { position: 'fixed', zIndex: '2147483000', border: '1px solid #52525b', borderRadius: '6px', padding: '5px 9px', background: '#27272a', color: '#f4f4f5', cursor: 'pointer', boxShadow: '0 4px 18px #0006' }); return value; }
-export function readComposer(): HTMLElement | null { return document.querySelector<HTMLElement>('[data-composer-input], textarea[aria-label*="message" i], textarea[placeholder*="message" i], textarea[placeholder*="消息" i], [contenteditable="true"]'); }
+export const composerScope = '[data-composer-card], [data-composer-seat], form';
+const composerSelector = 'textarea[data-composer-input], input[data-composer-input], [data-composer-input] textarea, [data-input-scroll] textarea, textarea[aria-label*="message" i], textarea[placeholder*="message" i], textarea[placeholder*="消息" i], [contenteditable="true"]';
+function editable(element: HTMLElement): boolean {
+  return element.isConnected && element.getClientRects().length > 0 && !element.closest('[hidden], [inert], [aria-hidden="true"]') && !element.matches(':disabled, [readonly]');
+}
+/** Prefer the input beside the action; inactive sessions can keep their inputs mounted. */
+export function readComposer(origin?: Element | null): HTMLElement | null {
+  const scope = origin?.closest(composerScope);
+  const local = scope?.querySelectorAll<HTMLElement>('textarea, input[data-composer-input], [contenteditable="true"]');
+  if (local) return Array.from(local).find(editable) ?? null;
+  const focused = document.activeElement;
+  if (focused instanceof HTMLElement && focused.matches(composerSelector) && editable(focused)) return focused;
+  return Array.from(document.querySelectorAll<HTMLElement>(composerSelector)).find(editable) ?? null;
+}
 export function composerText(element: HTMLElement): string { return element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement ? element.value : (element.innerText || element.textContent || ''); }
-export function replaceComposer(element: HTMLElement, value: string): void { if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) { const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), 'value')?.set; setter?.call(element, value); } else { element.textContent = value; } element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value })); element.focus(); }
+export function replaceComposer(element: HTMLElement, value: string): void { if (element instanceof HTMLTextAreaElement || element instanceof HTMLInputElement) { const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set; setter?.call(element, value); } else { element.textContent = value; } element.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value })); element.focus(); }
 
 export function installTranslationDom(): () => void {
   let disposed = false; let selected = ''; let anchor: DOMRect | undefined; let request = 0;

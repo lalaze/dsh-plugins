@@ -4,7 +4,7 @@ import type { LocaleContext } from '@dsh-plugins/i18n';
 import { MAX_SOURCE_LENGTH } from '../rpc.js';
 import { locksDraftsToEnglish } from '../settings.js';
 import { loadSettings, subscribeSettings, translate } from './api.js';
-import { composerText, installTranslationDom, readComposer, replaceComposer } from './dom.js';
+import { composerScope, composerText, installTranslationDom, readComposer, replaceComposer } from './dom.js';
 import { installLocale, localizeError, ui, useLocale } from './i18n.js';
 import { TranslationSettingsSection } from './settings.js';
 import { installStyles } from './styles.js';
@@ -41,18 +41,21 @@ function useCurrentModel(sessionId: string | undefined): Selection | null {
 }
 
 export const name = 'dsh-translate-client';
-export const inject = ['slots'];
+// The desktop language bridge initializes asynchronously; wait before registering UI.
+export const inject = ['slots', 'locale'];
 
 // Alt/Option+T targets the focused composer, or the sole mounted composer.
 const shortcutTargets = new Set<{ scope: () => Element | null; run: () => void }>();
 function onShortcut(event: KeyboardEvent) {
   if (!event.altKey || event.code !== 'KeyT' && event.key.toLowerCase() !== 't') return;
   const targets = [...shortcutTargets];
-  const target = targets.length === 1 ? targets[0] : targets.find(entry => entry.scope()?.contains(document.activeElement));
+  const origin = event.target instanceof Node ? event.target : document.activeElement;
+  const target = targets.length === 1 ? targets[0] : targets.find(entry => entry.scope()?.contains(origin));
   if (!target) return;
   event.preventDefault();
   target.run();
 }
+// A translation mark in the host icon grid (16px box, 1px stroke).
 function TranslateIcon() {
   return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M1.5 3.5h7M5 2v1.5M3 3.5c.6 2.4 2.1 4.2 4.4 5.4M7 3.5C6.4 6.1 4.7 8.3 2 9.5M8.5 14l3-7 3 7M9.6 11.6h3.8" />
@@ -66,11 +69,15 @@ function ComposerTranslateButton({ sessionId, inputActions, useInput }: Composer
   const hostDraft = useInput?.(state => state.draft);
   const [state, setState] = useState<DraftState>({ phase: 'idle' });
   const button = useRef<HTMLButtonElement>(null);
-  // Older hosts without the composer API keep the editor-element fallback.
-  const read = useCallback(() => hostDraft ?? (readComposer() ? composerText(readComposer()!) : ''), [hostDraft]);
+  // Older hosts without the composer API keep the editor-element fallback, scoped to this composer.
+  const read = useCallback(() => {
+    if (hostDraft !== undefined) return hostDraft;
+    const editor = readComposer(button.current);
+    return editor ? composerText(editor) : '';
+  }, [hostDraft]);
   const write = useCallback((text: string) => {
     if (inputActions) inputActions.setDraft(text);
-    else { const editor = readComposer(); if (editor) replaceComposer(editor, text); }
+    else { const editor = readComposer(button.current); if (editor) replaceComposer(editor, text); }
   }, [inputActions]);
   const latest = useRef({ read, write, state, english });
   latest.current = { read, write, state, english };
@@ -79,13 +86,15 @@ function ComposerTranslateButton({ sessionId, inputActions, useInput }: Composer
     const { read, write, state, english } = latest.current;
     if (state.phase === 'busy') return;
     if (state.phase === 'undo') { write(state.original); setState({ phase: 'idle' }); return; }
-    const original = read().trim();
-    if (!original || original.length > MAX_SOURCE_LENGTH) return;
+    // Undo restores the exact draft, including surrounding whitespace.
+    const original = read();
+    const source = original.trim();
+    if (!source || source.length > MAX_SOURCE_LENGTH) return;
     setState({ phase: 'busy' });
     try {
-      const result = await translate(original, english ? 'en' : 'auto', loadSettings());
-      // Never overwrite a draft edited while translation was in flight.
-      if (latest.current.read().trim() !== original) { setState({ phase: 'idle' }); return; }
+      const result = await translate(source, english ? 'en' : 'auto', loadSettings());
+      // Never overwrite a draft edited while translation was in flight, or one this button no longer owns.
+      if (!button.current?.isConnected || latest.current.read() !== original) { setState({ phase: 'idle' }); return; }
       latest.current.write(result.translation);
       setState({ phase: 'undo', original, translated: result.translation });
     } catch (error) {
@@ -102,20 +111,21 @@ function ComposerTranslateButton({ sessionId, inputActions, useInput }: Composer
     if (state.phase === 'undo' && hostDraft !== undefined && hostDraft.trim() !== state.translated.trim()) setState({ phase: 'idle' });
   }, [hostDraft, state]);
   useEffect(() => {
-    const entry = { scope: () => button.current?.closest('form') ?? button.current?.parentElement?.parentElement ?? null, run: () => void run() };
+    const entry = { scope: () => button.current?.closest(composerScope) ?? button.current?.parentElement?.parentElement ?? null, run: () => void run() };
     if (shortcutTargets.size === 0) document.addEventListener('keydown', onShortcut);
     shortcutTargets.add(entry);
     return () => { shortcutTargets.delete(entry); if (shortcutTargets.size === 0) document.removeEventListener('keydown', onShortcut); };
   }, [run]);
 
-  const label = state.phase === 'busy' ? ui('Translating…') : state.phase === 'undo' ? ui('Undo') : state.phase === 'error' ? localizeError(state.error) : ui('Translate');
-  const title = state.phase === 'error' ? localizeError(state.error) : ui(english ? 'Translate draft to English (Alt/Option+T)' : 'Translate draft (Alt/Option+T)');
+  // Keep the icon intact; expose the current action through its tooltip and accessible name.
+  const title = state.phase === 'busy' ? ui('Translating…') : state.phase === 'undo' ? ui('Undo') : state.phase === 'error' ? localizeError(state.error)
+    : ui(english ? 'Translate draft to English (Alt/Option+T)' : 'Translate draft (Alt/Option+T)');
   return <button ref={button} type="button" data-dsh-translate-draft data-state={state.phase}
     data-dsh-translate-target={english ? 'en' : 'auto'} data-dsh-translate-busy={state.phase === 'busy' ? '' : undefined}
     data-dsh-translate-undo={state.phase === 'undo' ? state.original : undefined} data-dsh-translate-error={state.phase === 'error' ? state.error : undefined}
-    className="dsh-translate-composer-button" title={title} aria-busy={state.phase === 'busy'}
+    className="dsh-translate-composer-button" title={title} aria-label={title} aria-busy={state.phase === 'busy'}
     disabled={state.phase === 'busy' || (hostDraft !== undefined && state.phase !== 'undo' && !hostDraft.trim())} onClick={() => void run()}>
-    <TranslateIcon /><span data-dsh-translate-label>{label}</span>{english && <span data-dsh-translate-lock aria-hidden="true">EN</span>}
+    <TranslateIcon />
   </button>;
 }
 export function apply(ctx: Client): void {

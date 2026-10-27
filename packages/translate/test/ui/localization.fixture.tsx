@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { apply as applyTranslation } from '../../src/client/index.js';
 import { apply as applyDevTools } from '../../../browser-devtools/src/client/index.js';
@@ -11,13 +11,16 @@ let models = { current: { provider: 'remote-cli-claude', model: 'p1/claude/sonne
 const modelListeners = new Set<() => void>();
 const modelStore = { getSnapshot: () => models, subscribe(listener: () => void) { modelListeners.add(listener); return () => { modelListeners.delete(listener); }; } };
 const fixture = {
-  setLocale: locale.setLocale, fail: false, requests: 0, lastTarget: '',
+  setLocale: locale.setLocale, fail: false, requests: 0, lastTarget: '', lastText: '',
+  defer: false, resolveTranslation: () => {}, setDraft: (_text: string) => {}, draft: '你好世界',
   setModel(provider: string, model: string) { models = { current: { provider, model } }; for (const listener of modelListeners) listener(); },
 };
 Object.assign(window, { fixture });
 window.fetch = async (_input, init) => {
   fixture.requests++;
   fixture.lastTarget = JSON.parse(String(init?.body ?? '{}')).target ?? '';
+  fixture.lastText = JSON.parse(String(init?.body ?? '{}')).text ?? '';
+  if (fixture.defer) await new Promise<void>(resolve => { fixture.resolveTranslation = resolve; });
   return fixture.fail ? Response.json({ error: 'Enter a translation model first' }, { status: 400 })
     : Response.json({ translation: 'Hello world', target: 'en', model: 'fixture-model', detectedLanguage: 'zh-CN', note: null });
 };
@@ -34,7 +37,14 @@ const ctx = {
 };
 applyTranslation(ctx);
 const ComposerSeat = Composer as React.FC<{ sessionId: string }>;
-createRoot(mount).render(<><Settings /><textarea data-composer-input aria-label="Draft" defaultValue="你好世界" /><ComposerSeat sessionId="session-1" /></>);
+function ControlledComposer() {
+  const [draft, setDraft] = useState('你好世界');
+  fixture.setDraft = setDraft;
+  fixture.draft = draft;
+  return <div data-composer-card><textarea data-fixture-composer placeholder="输入消息" value={draft} onChange={event => setDraft(event.target.value)} /><ComposerSeat sessionId="session-1" /></div>;
+}
+// A mounted inactive composer must never receive another composer's translation.
+createRoot(mount).render(<><Settings /><div hidden><textarea aria-label="Message" defaultValue="另一个会话的草稿" /></div><ControlledComposer /></>);
 
 // Execute the real serialized debugger in a separate page, as Electron's webview does.
 const container = document.createElement('div');

@@ -11,7 +11,7 @@ Build and install:
 ```sh
 pnpm --filter dsh-translate check
 pnpm --filter dsh-translate pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-translate-0.1.2.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-translate-0.1.4.tgz"
 ```
 
 Configure the API from **Settings → Translation**. The key is kept in the browser profile and sent only to the configured endpoint. Translation requests are limited to 5,000 characters and three concurrent calls.
