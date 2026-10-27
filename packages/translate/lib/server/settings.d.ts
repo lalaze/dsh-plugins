@@ -6,10 +6,12 @@ export type TranslationSettings = {
     fallbackApiKey: string;
     fallbackModel: string;
     englishLockModels: string;
+    /** Translate CJK drafts into English before they are sent to an English-locked model. */
+    translateOnSend: boolean;
     /** Show a translate button beside each paragraph of a chat message. */
     paragraphTranslate: boolean;
 };
-export type TextSetting = Exclude<keyof TranslationSettings, 'paragraphTranslate'>;
+export type TextSetting = Exclude<keyof TranslationSettings, 'paragraphTranslate' | 'translateOnSend'>;
 export declare const defaultTranslationSettings: TranslationSettings;
 export declare function parseTranslationSettings(value: unknown): TranslationSettings;
 /**

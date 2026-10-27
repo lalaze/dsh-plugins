@@ -11,7 +11,9 @@
 ```sh
 pnpm --filter dsh-translate check
 pnpm --filter dsh-translate pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-translate-0.1.7.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-translate-0.1.8.tgz"
 ```
 
 在 **设置 → 翻译** 填写接口地址、Key 和模型。Key 保存在当前浏览器配置中，只发送到填写的接口。单次翻译最多 5000 字符，同时最多处理 3 个请求。
+
+匹配“英文锁定”关键词（默认 `claude, anthropic`）的模型，草稿始终翻译为英文。选中此类模型时，用 Enter 或发送按钮发送中文、日文或韩文草稿，会先翻译为英文，再自动发送译文。输入框上方的提示会显示进度，并在按译文发送后告知。按 Esc 可取消；草稿被修改或翻译失败时不会发送。Shift+Enter、输入法组字中的回车和 `/` 命令不受影响。可在**设置 → 翻译**中关闭。
