@@ -140,17 +140,20 @@ test('真实 Cordis 与 LlmRuntime waterfall 经适配器派发后恰好采集�
     const data = await (await fetcher!(new Request('http://example.test/api/usage-stats?groupBy=source'))).json();
     assert.equal(data.totals.requests, 2); assert.equal(data.totals.totalTokens, 10); assert.equal(data.totals.withUsage, 2);
     assert.deepEqual(data.groups.map((g: { totals: { requests: number } }) => g.totals.requests), [1, 1]);
-    // dsh-remote-agents: a main-chat turn arrives through llm/stream; a delegated turn arrives as an event from another plugin.
+    // dsh-remote-agents: its model calls are left to its event, which carries every turn with machine and directory.
     ctx.llm.registerAdapter(['remote-cli-claude'], new Adapter());
     await collect(ctx.llm.stream({ ...options, provider: 'remote-cli-claude', model: 'host-1/claude/claude-opus-5/priority' }));
     const other = ctx.extend({});
-    other.emit('remote-agents/usage', { id: 'delegated', startedAt: '2026-10-27T10:00:00.000Z', provider: 'remote-cli-codex', model: 'gpt-5.5', sessionId: 'remote-agent:t1', purpose: 'delegation', status: 'completed', durationMs: 1200, usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 400 } });
+    other.emit('remote-agents/usage', { id: 'delegated', startedAt: '2026-10-27T10:00:00.000Z', provider: 'remote-cli-codex', model: 'gpt-5.5', sessionId: 'remote-agent:t1', purpose: 'delegation', status: 'completed', durationMs: 1200, usage: { inputTokens: 100, outputTokens: 50, cacheReadTokens: 400 }, host: 'Build box', workspace: '/srv/app' });
     other.emit('remote-agents/usage', { id: 'bad', provider: 'deepseek' } as never);
     other.emit('remote-agents/usage', { id: 'not-remote', startedAt: '2026-10-27T10:00:00.000Z', provider: 'deepseek', model: 'chat', purpose: 'delegation', status: 'completed', durationMs: 1 });
     await new Promise(resolve => setTimeout(resolve, 50));
     const remote = await (await fetcher!(new Request('http://example.test/api/usage-stats?source=remote-agents&groupBy=model'))).json();
-    assert.equal(remote.totals.requests, 3); assert.equal(remote.totals.totalTokens, 560);
-    assert.deepEqual(remote.groups.map((g: { label: string }) => g.label).sort(), ['claude-ssh-fixture / chat', 'remote-cli-claude / claude-opus-5 · priority', 'remote-cli-codex / gpt-5.5']);
+    assert.equal(remote.totals.requests, 2, 'the remote-cli model call itself is not counted'); assert.equal(remote.totals.totalTokens, 555);
+    assert.deepEqual(remote.groups.map((g: { label: string }) => g.label).sort(), ['claude-ssh-fixture / chat', 'remote-cli-codex / gpt-5.5']);
+    const label = (rows: { label: string }[]) => rows.map(row => row.label);
+    assert.deepEqual(label(remote.breakdowns.provider), ['Codex', 'Claude Code']); assert.deepEqual(label(remote.breakdowns.host), ['Build box', 'Unknown host']);
+    assert.deepEqual(label(remote.breakdowns.workspace), ['/srv/app', 'No workspace']); assert.deepEqual(label(remote.breakdowns.vendor), ['OpenAI', 'Anthropic']);
     const sources = await (await fetcher!(new Request('http://example.test/api/usage-stats?groupBy=source'))).json();
     assert.deepEqual(sources.groups.map((g: { key: string; label: string }) => [g.key, g.label]).sort(), [['dsh', 'DSH model calls'], ['remote-agents', 'Remote agents']]);
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
@@ -196,4 +199,21 @@ test('远程智能体：remote-cli 与旧 claude-ssh 服务商归入同一来源
   assert.equal(remoteModel('gpt-5.5'), 'gpt-5.5'); assert.equal(remoteModel('a/b/c/d/e'), 'a/b/c/d/e');
   assert.equal(parseQuery(new URL('http://example.test/?source=remote-agents')).source, 'remote-agents');
   assert.throws(() => parseQuery(new URL('http://example.test/?source=claude-ssh')), /Unsupported request source/);
+});
+test('分类：Provider 按 CLI 合并，模型厂商按模型名识别，DSH 调用的主机为本机', () => {
+  const usage = (n: number) => ({ inputTokens: n, outputTokens: 0 });
+  const records = [
+    record({ id: 'a', provider: 'remote-cli-claude', model: 'claude-opus-5', host: 'Box A', workspace: '/srv/a', usage: usage(600) }),
+    record({ id: 'b', provider: 'claude-ssh-old', model: 'sonnet', usage: usage(100) }),
+    record({ id: 'c', provider: 'remote-cli-codex', model: 'host-1/codex/gpt-5.5/priority', host: 'Box B', workspace: '/srv/b', usage: usage(250) }),
+    record({ id: 'd', provider: 'deepseek-official', model: 'deepseek-flash', workspace: '/home/me/app', usage: usage(50) }),
+  ];
+  const { breakdowns } = report(records, { groupBy: 'model' });
+  const rows = (by: keyof typeof breakdowns) => breakdowns[by].map(g => [g.key, g.label, g.totals.totalTokens]);
+  assert.deepEqual(rows('provider'), [['Claude Code', 'Claude Code', 700], ['Codex', 'Codex', 250], ['deepseek-official', 'deepseek-official', 50]]);
+  assert.deepEqual(rows('vendor'), [['Anthropic', 'Anthropic', 700], ['OpenAI', 'OpenAI', 250], ['DeepSeek', 'DeepSeek', 50]]);
+  assert.deepEqual(rows('model').map(r => r[1]), ['claude-opus-5', 'gpt-5.5 · priority', 'sonnet', 'deepseek-flash']);
+  assert.deepEqual(rows('host'), [['Box A', 'Box A', 600], ['Box B', 'Box B', 250], ['?', 'Unknown host', 100], ['', 'This computer', 50]]);
+  assert.deepEqual(rows('workspace').map(r => r[1]), ['/srv/a', '/srv/b', 'No workspace', '/home/me/app']);
+  assert.equal(report(records, { groupBy: 'model', model: 'gpt-5.5 · priority' }).totals.requests, 1, 'the model filter uses the shown name');
 });

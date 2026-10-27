@@ -17,7 +17,8 @@ const records: UsageRecord[] = [
 const demoRecords: UsageRecord[] = Array.from({ length: 21 }, (_, day) => {
   const startedAt = new Date(Date.now() - (20 - day) * 86_400_000).toISOString().slice(0, 10) + 'T12:00:00.000Z';
   return ['deepseek', 'claude-ssh-dev', 'claude-ssh-dev', 'remote-cli-codex'].flatMap((provider, modelIndex) => Array.from({ length: 3 + (day * 7 + modelIndex * 3) % 14 }, (_, call) => ({
-    id: `demo-${day}-${modelIndex}-${call}`, startedAt, provider, model: ['deepseek-chat', 'sonnet', 'opus', 'gpt-5.5'][modelIndex], sessionId: `session-${modelIndex}`, purpose: 'conversation', durationMs: 3000,
+    id: `demo-${day}-${modelIndex}-${call}`, startedAt, provider, model: ['deepseek-chat', 'sonnet', 'opus', 'gpt-5.5'][modelIndex], sessionId: `session-${modelIndex}`,
+    ...(modelIndex ? { host: ['', 'gpu-box', 'gpu-box', 'build-server'][modelIndex], workspace: ['', '/srv/projects/api', '/home/dev/projects/web-app', '/srv/projects/api'][modelIndex] } : { workspace: '/Users/me/notes' }), purpose: 'conversation', durationMs: 3000,
     status: day === 18 && call === 2 ? 'error' as const : 'completed' as const,
     usage: { inputTokens: (2400 + day * 130 + call * 250) * (modelIndex + 1), outputTokens: 600 + call * 80, cacheReadTokens: 10000 + (day * 1600 + call * 370) % 26000, cacheWriteTokens: 1500 + call * 120 },
   })));

@@ -25,18 +25,28 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   try {
     const store = await lease.ready;
     ctx.effect(() => lease.release);
-    ctx.on('llm/stream', (options, next) => (async function* () {
-      const turn = acquireUsageStore(path);
-      try {
-        const store = await turn.ready;
-        yield* observe(options, next, record => store.append(record), error => console.warn("[dsh-usage-stats] Could not record usage", error));
-      } finally { turn.release(); }
-    })(), { global: true, prepend: true });
-    // Turns of main-chat remote models arrive through llm/stream above; this covers the rest without double counting.
+    // A conversation's workspace, from DSH's session service when it is available.
+    const workspaceOf = (sessionId?: string) => {
+      if (!sessionId) return undefined;
+      try { const cwd = (ctx.get('sessions') as { get?(id: string): { header?: { cwd?: unknown } } | undefined } | undefined)?.get?.(sessionId)?.header?.cwd; return typeof cwd === 'string' && cwd ? cwd : undefined; }
+      catch { return undefined; }
+    };
+    ctx.on('llm/stream', (options, next) => {
+      // Remote CLI turns are recorded once from dsh-remote-agents' event, with their machine and remote directory.
+      if (options.provider.startsWith('remote-cli-')) return next();
+      return (async function* () {
+        const turn = acquireUsageStore(path);
+        try {
+          const store = await turn.ready;
+          yield* observe(options, next, record => store.append(record), error => console.warn("[dsh-usage-stats] Could not record usage", error), workspaceOf(options.sessionId));
+        } finally { turn.release(); }
+      })();
+    }, { global: true, prepend: true });
+    // Every finished remote CLI turn, including main-chat replies, which llm/stream above leaves to this event.
     ctx.on('remote-agents/usage', record => {
       if (!validRecord(record) || !record.provider.startsWith('remote-cli-')) return;
-      const { id, startedAt, provider, model, sessionId, purpose, status, durationMs, usage } = record;
-      store.append({ id, startedAt, provider, model, ...(sessionId ? { sessionId } : {}), purpose, status, durationMs, ...(usage ? { usage } : {}) })
+      const { id, startedAt, provider, model, sessionId, purpose, status, durationMs, usage, host, workspace } = record;
+      store.append({ id, startedAt, provider, model, ...(sessionId ? { sessionId } : {}), purpose, status, durationMs, ...(usage ? { usage } : {}), ...(host ? { host } : {}), ...(workspace ? { workspace } : {}) })
         .catch(error => console.warn("[dsh-usage-stats] Could not record remote agent usage", error));
     }, { global: true });
     // The host connection supplies authentication, origin checks and native carriers.

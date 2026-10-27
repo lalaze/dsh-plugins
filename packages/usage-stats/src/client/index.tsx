@@ -1,7 +1,7 @@
 import type { LocaleContext } from '@dsh-plugins/i18n';
 import { ui, installLocale, useLocale, formatLocale } from './i18n.js';
 import React, { useEffect, useState } from 'react';
-import type { GroupBy, UsageReport, Totals } from '../domain.js';
+import type { Dimension, GroupBy, UsageReport, Totals } from '../domain.js';
 import { compact, dateRange, trendBuckets } from './metrics.js';
 import { styles } from './styles.js';
 
@@ -59,6 +59,25 @@ function Metric({ label, value, detail, title }: { label: string; value: string;
 }
 function Status({ totals: t }: { totals: Totals }) {
   return t.errors || t.cancelled ? <span className="us-badge us-error">{t.errors ? ui("{0} failed", { 0: number(t.errors) }) : ''}{t.errors && t.cancelled ? ' · ' : ''}{t.cancelled ? ui("{0} cancelled", { 0: number(t.cancelled) }) : ''}</span> : <span className="us-badge">{ui("Completed")}</span>;
+}
+const BREAKDOWNS = [['provider', "By provider"], ['workspace', "By workspace"], ['model', "By model"], ['vendor', "By model vendor"], ['host', "By host"]] as const;
+const BREAKDOWN_ROWS = 8;
+/** Long workspace paths keep their last two folders; the full path is in the tooltip. */
+const shortPath = (path: string) => { const parts = path.split(/[\\/]/).filter(Boolean); return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path; };
+function Breakdowns({ data }: { data: UsageReport }) {
+  const [by, setBy] = useState<Dimension>('provider'); const [all, setAll] = useState(false);
+  const rows = data.breakdowns?.[by] ?? [], total = data.totals.totalTokens;
+  return <section className="us-panel us-breakdown" aria-label={ui("Usage breakdown")}>
+    <div className="us-panel-head"><div><h3>{ui("Usage breakdown")}</h3><p className="us-subtitle">{ui("Share of reported tokens")}</p></div></div>
+    <div className="us-segment us-breakdown-tabs" role="group" aria-label={ui("Break down by")}>{BREAKDOWNS.map(([value, label]) => <button key={value} aria-pressed={by === value} onClick={() => { setBy(value); setAll(false); }}>{ui(label)}</button>)}</div>
+    {rows.length ? <ol className="us-breakdown-list">{(all ? rows : rows.slice(0, BREAKDOWN_ROWS)).map(g => {
+      const placeholder = g.key === '' || g.key === '?', name = placeholder ? ui(g.label) : by === 'workspace' ? shortPath(g.label) : g.label;
+      return <li key={g.key}><div className="us-breakdown-row"><span className="us-breakdown-name" title={placeholder ? name : g.label}>{name}</span><b className="us-number" title={number(g.totals.totalTokens)}>{compact(g.totals.totalTokens)}</b></div>
+        <div className="us-breakdown-bar"><span style={{ width: `${total ? g.totals.totalTokens / total * 100 : 0}%` }} /></div>
+        <div className="us-breakdown-meta"><span>{ui("{0} requests", { 0: number(g.totals.requests) })}</span><span className="us-number">{percent(g.totals.totalTokens, total)}</span></div></li>;
+    })}</ol> : <p className="us-muted">{ui("No matching records")}</p>}
+    {rows.length > BREAKDOWN_ROWS && <button className="us-button us-breakdown-more" onClick={() => setAll(!all)}>{all ? ui("Show fewer") : ui("Show all {0}", { 0: number(rows.length) })}</button>}
+  </section>;
 }
 export function Dashboard() {
   useLocale();
@@ -128,6 +147,7 @@ export function Dashboard() {
       <div className="us-summary"><Metric label={ui("Total tokens")} value={compact(t.totalTokens)} title={number(t.totalTokens)} detail={ui("Input {0} / Output {1}", { 0: compact(t.inputTokens), 1: compact(t.outputTokens) })} /><Metric label={ui("Requests")} value={number(t.requests)} detail={ui("Usage reported {0}/{1}", { 0: number(t.withUsage), 1: number(t.requests) })} /><Metric label={ui("Cache read share")} value={t.withUsage ? percent(t.cacheReadTokens, t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens) : '—'} detail={ui("Cache reads {0} tokens", { 0: compact(t.cacheReadTokens) })} /><Metric label={ui("Completion rate")} value={percent(t.completed, t.requests)} detail={ui("Failed {0} · Cancelled {1}", { 0: number(t.errors), 1: number(t.cancelled) })} /></div>
       {t.withUsage < t.requests && <div className="us-notice us-warning" role="status">{ui("{0} requests returned no usage. Token totals only include reported data.", { 0: number(t.requests - t.withUsage) })}</div>}
       <div className="us-charts"><Trend data={data} /><Sources data={data} /></div>
+      <Breakdowns data={data} />
       <section className="us-panel" aria-label={ui("Usage details")}><div className="us-details-head"><div><h3>{ui("Usage details")}</h3><p className="us-subtitle">{ui("See where your usage comes from")}</p></div><label className="us-actions"><span className="us-muted" style={{ fontSize: 11 }}>{ui("Group")}</span><select className="us-group-select" aria-label={ui("Group by")} value={groupBy} onChange={e => setGroupBy(e.target.value as GroupBy)}>{([['model', ui("By model")], ['day', ui("By day")], ['source', ui("By source")], ['session', ui("By session")]] as const).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></div>
         {data.groups.length ? <><div className="us-scroll" tabIndex={0} aria-label={ui("Usage details, scroll horizontally")}><table className="us-table"><thead><tr>{['model' === groupBy ? ui("Model / Provider") : groupBy === 'day' ? ui("Date · UTC") : groupBy === 'source' ? ui("Request source") : ui("Session"), ui("Requests"), ui("Input"), ui("Output"), ui("Cache read / write"), ui("Total tokens"), ui("Status")].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{data.groups.slice(currentPage * 10, (currentPage + 1) * 10).map(g => {
           const split = groupBy === 'model' ? g.label.indexOf(' / ') : -1;

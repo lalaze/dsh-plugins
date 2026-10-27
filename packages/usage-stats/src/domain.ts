@@ -10,6 +10,10 @@ export interface UsageRecord {
   status: 'completed' | 'error' | 'cancelled';
   durationMs: number;
   usage?: TokenUsage;
+  /** Remote turns: the machine's saved name. DSH model calls run on this computer and leave it unset. */
+  host?: string;
+  /** The conversation's workspace directory: remote for remote turns, local for DSH model calls. */
+  workspace?: string;
 }
 export interface Totals {
   requests: number;
@@ -37,9 +41,14 @@ export function remoteModel(route: string): string {
 }
 export interface Query { from?: string; to?: string; provider?: string; model?: string; sessionId?: string; source?: Source; groupBy: GroupBy }
 export interface UsageGroup { key: string; label: string; totals: Totals }
+/** The dashboard's usage breakdowns: CLI or provider, workspace, model, model vendor and machine. */
+export type Dimension = 'provider' | 'workspace' | 'model' | 'vendor' | 'host';
+export const DIMENSIONS: readonly Dimension[] = ['provider', 'workspace', 'model', 'vendor', 'host'];
 export interface UsageReport {
   totals: Totals;
   groups: UsageGroup[];
+  /** Every breakdown of the filtered records, largest first. */
+  breakdowns: Record<Dimension, UsageGroup[]>;
   series: UsageGroup[];
   sources: UsageGroup[];
   filters: { providers: string[]; models: string[]; sessions: string[] };
@@ -49,6 +58,37 @@ export interface UsageReport {
   generatedAt: string;
 }
 const counters = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens', 'totalTokens'] as const;
+const CLI_LABELS: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', codebuddy: 'CodeBuddy', antigravity: 'Antigravity', dsh: 'DSH' };
+/** Remote turns are named by their CLI, which merges a CLI's turns across machines; DSH providers keep their ID. */
+export function providerLabel(provider: string): string {
+  const cli = /^remote-cli-(.+)$/.exec(provider)?.[1];
+  return cli ? CLI_LABELS[cli] ?? cli : provider.startsWith('claude-ssh-') ? 'Claude Code' : provider;
+}
+/** Older remote main-chat records kept the chat route as their model. */
+export const modelOf = (r: Pick<UsageRecord, 'provider' | 'model'>) => r.provider.startsWith('remote-cli-') ? remoteModel(r.model) : r.model;
+// The same model-name and provider rules dsh-session-models uses for its vendor icons.
+const MODEL_VENDORS: readonly (readonly [RegExp, string])[] = [
+  [/claude|sonnet|opus|haiku/i, 'Anthropic'], [/deepseek/i, 'DeepSeek'], [/gemini|gemma/i, 'Google'], [/grok/i, 'xAI'], [/qwen|qwq/i, 'Qwen'],
+  [/kimi|moonshot/i, 'Moonshot'], [/\bglm|chatglm/i, 'Zhipu'], [/doubao/i, 'Doubao'], [/minimax|\babab/i, 'MiniMax'],
+  [/mistral|codestral|devstral|magistral/i, 'Mistral'], [/\bgpt|\bo[1-9](?:-|$)|codex|chatgpt/i, 'OpenAI'],
+];
+const PROVIDER_VENDORS: readonly (readonly [RegExp, string])[] = [
+  [/anthropic|claude/i, 'Anthropic'], [/openai|codex|azure/i, 'OpenAI'], [/deepseek|^dsh$/i, 'DeepSeek'], [/gemini|google|vertex/i, 'Google'],
+  [/xai|grok/i, 'xAI'], [/qwen|dashscope|bailian|alibaba/i, 'Qwen'], [/moonshot|kimi/i, 'Moonshot'], [/zhipu|bigmodel|glm/i, 'Zhipu'],
+  [/doubao|volcengine/i, 'Doubao'], [/minimax/i, 'MiniMax'], [/mistral/i, 'Mistral'], [/antigravity/i, 'Google'], [/codebuddy/i, 'Tencent'],
+];
+export function vendorOf(r: Pick<UsageRecord, 'provider' | 'model'>): string {
+  const model = modelOf(r), provider = r.provider.replace(/^remote-cli-/, '');
+  return MODEL_VENDORS.find(([pattern]) => pattern.test(model))?.[1] ?? PROVIDER_VENDORS.find(([pattern]) => pattern.test(provider))?.[1] ?? 'Other';
+}
+/** Group key and label; placeholder labels (empty or `?` keys) are translated by the dashboard. */
+function dimension(r: UsageRecord, by: Dimension): [string, string] {
+  if (by === 'provider') { const label = providerLabel(r.provider); return [label, label]; }
+  if (by === 'workspace') return r.workspace ? [r.workspace, r.workspace] : ['', "No workspace"];
+  if (by === 'model') { const model = modelOf(r); return [model, model]; }
+  if (by === 'vendor') { const vendor = vendorOf(r); return [vendor, vendor]; }
+  return r.host ? [r.host, r.host] : sourceOf(r.provider) === 'dsh' ? ['', "This computer"] : ['?', "Unknown host"];
+}
 export function validUsage(value: unknown): value is TokenUsage {
   if (!value || typeof value !== 'object') return false;
   const usage = value as Record<string, unknown>;
@@ -60,6 +100,7 @@ export function validRecord(value: unknown): value is UsageRecord {
   return typeof r.id === 'string' && typeof r.startedAt === 'string' && Number.isFinite(Date.parse(r.startedAt)) &&
     typeof r.provider === 'string' && typeof r.model === 'string' && typeof r.purpose === 'string' &&
     (r.sessionId === undefined || typeof r.sessionId === 'string') && ['completed', 'error', 'cancelled'].includes(r.status) &&
+    (r.host === undefined || typeof r.host === 'string' && r.host.length <= 1024) && (r.workspace === undefined || typeof r.workspace === 'string' && r.workspace.length <= 4096) &&
     Number.isFinite(r.durationMs) && r.durationMs >= 0 && (r.usage === undefined || validUsage(r.usage));
 }
 function emptyTotals(): Totals {
@@ -96,6 +137,7 @@ export function report(records: readonly UsageRecord[], query: Query, failedWrit
   const totals = emptyTotals();
   const groups = new Map<string, UsageGroup>();
   const series = new Map<string, UsageGroup>(); const sources = new Map<string, UsageGroup>();
+  const breakdowns = Object.fromEntries(DIMENSIONS.map(by => [by, new Map<string, UsageGroup>()])) as Record<Dimension, Map<string, UsageGroup>>;
   const accumulate = (map: Map<string, UsageGroup>, key: string, label: string, r: UsageRecord) => {
     let group = map.get(key);
     if (!group) { group = { key, label, totals: emptyTotals() }; map.set(key, group); }
@@ -103,17 +145,20 @@ export function report(records: readonly UsageRecord[], query: Query, failedWrit
   };
   for (const r of records) {
     const day = r.startedAt.slice(0, 10);
-    if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && r.model !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source)) continue;
-    const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, r.model]) : r.sessionId ?? '';
-    const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${r.model}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
+    if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source)) continue;
+    const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, modelOf(r)]) : r.sessionId ?? '';
+    const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${modelOf(r)}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
     add(totals, r); accumulate(groups, key, label, r);
     accumulate(series, day, day, r);
     accumulate(sources, sourceOf(r.provider), SOURCE_LABELS[sourceOf(r.provider)], r);
+    for (const by of DIMENSIONS) accumulate(breakdowns[by], ...dimension(r, by), r);
   }
+  const largest = (map: Map<string, UsageGroup>) => [...map.values()].sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || b.totals.requests - a.totals.requests || a.label.localeCompare(b.label));
   return { totals, groups: [...groups.values()].sort((a, b) => query.groupBy === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
     series: [...series.values()].sort((a, b) => a.key.localeCompare(b.key)),
     sources: [...sources.values()].sort((a, b) => a.key.localeCompare(b.key)),
-    filters: { providers: [...new Set(records.map(r => r.provider))].sort(), models: [...new Set(records.map(r => r.model))].sort(), sessions: [...new Set(records.flatMap(r => r.sessionId ? [r.sessionId] : []))].sort() },
+    breakdowns: Object.fromEntries(DIMENSIONS.map(by => [by, largest(breakdowns[by])])) as Record<Dimension, UsageGroup[]>,
+    filters: { providers: [...new Set(records.map(r => r.provider))].sort(), models: [...new Set(records.map(modelOf))].sort(), sessions: [...new Set(records.flatMap(r => r.sessionId ? [r.sessionId] : []))].sort() },
     query, recordedSince: records.reduce<string | undefined>((first, r) => !first || r.startedAt < first ? r.startedAt : first, undefined), failedWrites, generatedAt: new Date().toISOString() };
 }
 export function toCsv(data: UsageReport): string {
