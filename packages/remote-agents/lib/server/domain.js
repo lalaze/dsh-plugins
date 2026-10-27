@@ -20,6 +20,12 @@ export function presetMode(provider, modes, permission) {
     const mode = permission && PRESET_MODES[provider]?.[permission];
     return mode && permissionModes(provider, modes).some(m => m.id === mode) ? mode : undefined;
 }
+/** A CLI is never started without a relay, because it would end silently with DSH. */
+export const RELAY_UNAVAILABLE = {
+    'missing-node': 'The remote CLI was not started: Node.js was not found on the SSH host\'s login PATH, so the CLI could not keep running after DSH quits or SSH disconnects. Make Node.js 18 or newer available to the SSH login shell, then retry.',
+    'old-node': 'The remote CLI was not started: the SSH host\'s Node.js is older than 18, so the CLI could not keep running after DSH quits or SSH disconnects. Make Node.js 18 or newer available to the SSH login shell, then retry.',
+    'install-failed': 'The remote CLI was not started: the background relay could not be installed in ~/.dsh-remote-agents on the SSH host, so the CLI could not keep running after DSH quits or SSH disconnects. Check that the directory is writable, then retry.',
+};
 export const inputModalitiesOf = (provider, model) => model.inputModalities ?? (['claude', 'codex'].includes(provider) ? ['text', 'image'] : ['text']);
 export const PROVIDER_LABELS = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };
 /** Older machines retain their providers until the user explicitly changes the selection. */

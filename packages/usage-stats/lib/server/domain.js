@@ -14,6 +14,7 @@ export function remoteModel(route) {
     }
 }
 export const DIMENSIONS = ['provider', 'workspace', 'model', 'vendor', 'host'];
+const isDimension = (value) => DIMENSIONS.includes(value);
 const counters = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens', 'totalTokens'];
 const CLI_LABELS = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', codebuddy: 'CodeBuddy', antigravity: 'Antigravity', dsh: 'DSH' };
 /** Remote turns are named by their CLI, which merges a CLI's turns across machines; DSH providers keep their ID. */
@@ -100,7 +101,7 @@ function date(value) {
 export function parseQuery(url) {
     const p = url.searchParams;
     const groupBy = p.get('groupBy') ?? 'day';
-    if (!['day', 'model', 'session', 'source'].includes(groupBy))
+    if (!isDimension(groupBy) && !['day', 'session', 'source'].includes(groupBy))
         throw new Error("Unsupported grouping");
     const rawSource = p.get('source');
     let source;
@@ -141,17 +142,20 @@ export function report(records, query, failedWrites = 0) {
         const day = query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
         if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source))
             continue;
-        const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, modelOf(r)]) : r.sessionId ?? '';
-        const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${modelOf(r)}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
         add(totals, r);
-        accumulate(groups, key, label, r);
+        if (!isDimension(query.groupBy)) {
+            const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : r.sessionId ?? '';
+            const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
+            accumulate(groups, key, label, r);
+        }
         accumulate(series, day, day, r);
         accumulate(sources, sourceOf(r.provider), SOURCE_LABELS[sourceOf(r.provider)], r);
         for (const by of DIMENSIONS)
             accumulate(breakdowns[by], ...dimension(r, by), r);
     }
     const largest = (map) => [...map.values()].sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || b.totals.requests - a.totals.requests || a.label.localeCompare(b.label));
-    return { totals, groups: [...groups.values()].sort((a, b) => query.groupBy === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
+    const by = query.groupBy;
+    return { totals, groups: isDimension(by) ? largest(breakdowns[by]) : [...groups.values()].sort((a, b) => by === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
         series: [...series.values()].sort((a, b) => a.key.localeCompare(b.key)),
         sources: [...sources.values()].sort((a, b) => a.key.localeCompare(b.key)),
         breakdowns: Object.fromEntries(DIMENSIONS.map(by => [by, largest(breakdowns[by])])),

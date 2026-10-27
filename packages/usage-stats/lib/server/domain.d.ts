@@ -27,7 +27,6 @@ export interface Totals {
     reasoningTokens: number;
     totalTokens: number;
 }
-export type GroupBy = 'day' | 'model' | 'session' | 'source';
 export type Source = 'dsh' | 'remote-agents';
 /** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. */
 export declare const sourceOf: (provider: string) => Source;
@@ -53,6 +52,8 @@ export interface UsageGroup {
 /** The dashboard's usage breakdowns: CLI or provider, workspace, model, model vendor and machine. */
 export type Dimension = 'provider' | 'workspace' | 'model' | 'vendor' | 'host';
 export declare const DIMENSIONS: readonly Dimension[];
+/** Detail rows follow a dashboard category; `day`, `session` and `source` remain for API clients. */
+export type GroupBy = Dimension | 'day' | 'session' | 'source';
 export interface UsageReport {
     totals: Totals;
     groups: UsageGroup[];

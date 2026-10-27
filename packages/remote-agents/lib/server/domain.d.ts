@@ -206,6 +206,10 @@ export interface Agent {
     /** A persistent CLI whose SSH connection is being re-established. */
     reconnecting?: boolean;
 }
+/** Why a host cannot run CLIs under a relay. */
+export type RelayUnavailable = 'missing-node' | 'old-node' | 'install-failed';
+/** A CLI is never started without a relay, because it would end silently with DSH. */
+export declare const RELAY_UNAVAILABLE: Readonly<Record<RelayUnavailable, string>>;
 export interface TaskInput {
     id: string;
     hostId: string;

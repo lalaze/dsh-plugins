@@ -443,7 +443,8 @@ DSH_RELAY_SCRIPT_END
   mv -f "$dsh_relay_tmp" ${SCRIPT}
 fi
 printf ready`);
-        return output.trim().endsWith('ready') ? new RelayClient(transport) : undefined;
+        const result = output.trim();
+        return result.endsWith('ready') ? new RelayClient(transport) : result === 'missing-node' || result === 'old-node' ? result : 'install-failed';
     }
     async command(name, args, timeout) {
         const output = await this.transport.exec(`node ${SCRIPT} ${name} ${RELAYS} ${args.map(quote).join(' ')}`, timeout);

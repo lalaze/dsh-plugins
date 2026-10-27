@@ -1,4 +1,5 @@
 import { type Child, type SshTransport } from './ssh.js';
+import type { RelayUnavailable } from './domain.js';
 /**
  * Runs on the SSH host and owns one CLI process, so the CLI outlives DSH and its SSH connection.
  *
@@ -83,7 +84,7 @@ export declare class RelayClient {
     private readonly transport;
     private constructor();
     /** Install the relay script once per version; unavailable without Node.js 18 or newer on the host. */
-    static open(transport: SshTransport): Promise<RelayClient | undefined>;
+    static open(transport: SshTransport): Promise<RelayClient | RelayUnavailable | undefined>;
     private command;
     launch(id: string, cwd: string, argv: string[]): Promise<void>;
     /** Stop each CLI if it still runs and delete its saved output; returns the relays confirmed removed. */

@@ -78,6 +78,8 @@ export declare class SshBackend implements Backend {
     /** Tasks with an operation in flight; their sessions are never evicted. */
     private leases;
     private relayClient?;
+    /** Why the last relay check failed; CLIs are not started until it succeeds. */
+    private relayUnavailable?;
     private ending;
     private cleaning?;
     constructor(host: HostConfig, store: Store, transport?: SshTransport);
@@ -90,7 +92,7 @@ export declare class SshBackend implements Backend {
     private history;
     providers(cwd: string, refresh: boolean): Promise<Provider[]>;
     private task;
-    /** Hosts with Node.js 18+ run CLIs under a relay; others keep a direct SSH pipe. */
+    /** Hosts with Node.js 18+ run CLIs under a relay; transports without relay support keep a direct SSH pipe. */
     private relays;
     /** Forget a relay locally and remove it remotely now, or once the host is reachable. */
     private relayEnded;

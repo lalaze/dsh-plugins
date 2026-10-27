@@ -14,6 +14,24 @@ const hash = (...parts) => createHash('sha256').update(JSON.stringify(parts)).di
 const disposal = (reason) => !!reason && typeof reason === 'object' && ['disposed', 'released'].includes(String(reason.kind));
 const RELEASED = { kind: 'released' };
 const blockText = (content) => content.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n');
+/**
+ * DSH frames title input as an instruction line followed by a JSON array of `{ text }` human
+ * messages. Title the session from the first of them, never from the instruction itself.
+ */
+function sessionTitleOf(request) {
+    let text = request;
+    const json = request.slice(request.indexOf('\n') + 1).trim();
+    if (json.startsWith('[')) {
+        try {
+            const messages = JSON.parse(json);
+            const first = Array.isArray(messages) ? messages.map(m => typeof m?.text === 'string' ? m.text.trim() : '').find(Boolean) : undefined;
+            if (first)
+                text = first;
+        }
+        catch { /* Not DSH's framing: use the request text as before. */ }
+    }
+    return text.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Remote CLI';
+}
 /** A speed tier (Codex Fast) is a separate picker row: DSH model selections carry only a model and a reasoning effort. */
 export const chatModelId = (projectId, provider, model, serviceTier) => `${projectId}/${encodeURIComponent(provider)}/${encodeURIComponent(model)}${serviceTier ? `/${encodeURIComponent(serviceTier)}` : ''}`;
 /** Remote tools already execute inside the CLI. Record their lifecycle without dispatching a DSH tool. */
@@ -132,7 +150,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         controller.abort(RELEASED); }
     async *stream(options) {
         if (options.purpose === 'session-title') {
-            const title = options.messages.filter(m => m.role === 'user').map(m => blockText(m.content)).at(-1)?.replace(/\s+/g, ' ').slice(0, 80) || 'Remote CLI';
+            const title = sessionTitleOf(options.messages.filter(m => m.role === 'user').map(m => blockText(m.content)).at(-1) ?? '');
             yield { type: 'block-start', index: 0, blockType: 'text' };
             yield { type: 'text-delta', index: 0, text: title };
             yield { type: 'block-end', index: 0, block: { type: 'text', text: title } };

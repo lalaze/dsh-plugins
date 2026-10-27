@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { enabledProvidersOf, permissionModes, PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
+import { enabledProvidersOf, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError } from './domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote } from './ssh.js';
 import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
 import { TaskHistory } from './history.js';
@@ -53,6 +53,8 @@ export class SshBackend {
     /** Tasks with an operation in flight; their sessions are never evicted. */
     leases = new Map();
     relayClient;
+    /** Why the last relay check failed; CLIs are not started until it succeeds. */
+    relayUnavailable;
     ending = new Map();
     cleaning;
     constructor(host, store, transport) {
@@ -210,17 +212,25 @@ done`}`, 15_000, { login: false });
             throw new RemoteError('Remote agent not found', 404);
         return task;
     }
-    /** Hosts with Node.js 18+ run CLIs under a relay; others keep a direct SSH pipe. */
+    /** Hosts with Node.js 18+ run CLIs under a relay; transports without relay support keep a direct SSH pipe. */
     relays(reinstall = false) {
         if (!this.transport.relays)
             return Promise.resolve(undefined);
         const cached = this.relayClient;
         if (cached && !reinstall && Date.now() - cached.at < 60_000)
             return cached.value;
-        const value = RelayClient.open(this.transport);
+        const value = RelayClient.open(this.transport).then(result => {
+            this.relayUnavailable = typeof result === 'string' ? result : undefined;
+            return typeof result === 'string' ? undefined : result;
+        });
         this.relayClient = { at: Date.now(), value };
-        value.then(client => { if (client && this.relayClient?.value === value)
-            this.relayClient.at = Infinity; }, () => { if (this.relayClient?.value === value)
+        // A missing relay is checked again on the next start, so installing Node.js takes effect on retry.
+        value.then(client => { if (this.relayClient?.value === value) {
+            if (client)
+                this.relayClient.at = Infinity;
+            else
+                this.relayClient = undefined;
+        } }, () => { if (this.relayClient?.value === value)
             this.relayClient = undefined; });
         return value;
     }
@@ -373,6 +383,12 @@ done`}`, 15_000, { login: false });
             argv = antigravityArguments(argv[0], task, resume);
         if (profile.protocol === 'claude')
             argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : [])];
+        const relay = await this.relays();
+        this.assertOpen();
+        signal?.throwIfAborted();
+        // A direct pipe would end silently with DSH; refuse and say why before touching the host.
+        if (!relay && this.transport.relays)
+            throw new RemoteError(RELAY_UNAVAILABLE[this.relayUnavailable ?? 'install-failed'], 409);
         const history = await this.history(task.id);
         // Upload before creating a native session, so a failed upload can be retried safely.
         const attachments = !resume ? await transferAttachments(this.transport, this.store.directory, task.id, task.id, profile.cwd, task.attachments ?? [], signal) : [];
@@ -386,9 +402,6 @@ done`}`, 15_000, { login: false });
             this.sessions.delete(idle[0]);
         }
         const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : argv;
-        const relay = await this.relays();
-        this.assertOpen();
-        signal?.throwIfAborted();
         let link;
         if (relay) {
             // Record the relay before it exists, so an interrupted start is cleaned up rather than leaked.
