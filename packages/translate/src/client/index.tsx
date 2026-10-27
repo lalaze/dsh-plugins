@@ -5,6 +5,7 @@ import { MAX_SOURCE_LENGTH } from '../rpc.js';
 import { locksDraftsToEnglish } from '../settings.js';
 import { loadSettings, subscribeSettings, translate } from './api.js';
 import { composerScope, composerText, installTranslationDom, readComposer, replaceComposer } from './dom.js';
+import { installParagraphTranslation, TRANSLATE_ICON_PATH } from './paragraph.js';
 import { installLocale, localizeError, ui, useLocale } from './i18n.js';
 import { TranslationSettingsSection } from './settings.js';
 import { installStyles } from './styles.js';
@@ -58,7 +59,7 @@ function onShortcut(event: KeyboardEvent) {
 // A translation mark in the host icon grid (16px box, 1px stroke).
 function TranslateIcon() {
   return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M1.5 3.5h7M5 2v1.5M3 3.5c.6 2.4 2.1 4.2 4.4 5.4M7 3.5C6.4 6.1 4.7 8.3 2 9.5M8.5 14l3-7 3 7M9.6 11.6h3.8" />
+    <path d={TRANSLATE_ICON_PATH} />
   </svg>;
 }
 // A spinning ring shown in place of the icon while a translation is in flight.
@@ -139,6 +140,7 @@ export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
   ctx.effect(() => installStyles());
   ctx.effect(() => installTranslationDom());
+  ctx.effect(() => installParagraphTranslation());
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     const service = scoped.modelDirectories;
     // Cordis may proxy service methods; model-directory stores retain their original receiver.

@@ -6,7 +6,11 @@ export type TranslationSettings = {
   fallbackApiKey: string;
   fallbackModel: string;
   englishLockModels: string;
+  /** Show a translate button beside each paragraph of a chat message. */
+  paragraphTranslate: boolean;
 };
+
+export type TextSetting = Exclude<keyof TranslationSettings, 'paragraphTranslate'>;
 
 export const defaultTranslationSettings: TranslationSettings = {
   apiUrl: 'https://api.openai.com/v1/chat/completions',
@@ -16,15 +20,17 @@ export const defaultTranslationSettings: TranslationSettings = {
   fallbackApiKey: '',
   fallbackModel: '',
   englishLockModels: 'claude, anthropic',
+  paragraphTranslate: true,
 };
 
 export function parseTranslationSettings(value: unknown): TranslationSettings {
   const input = value && typeof value === 'object' ? value as Record<string, unknown> : {};
-  const text = (key: keyof TranslationSettings) => typeof input[key] === 'string' ? input[key] as string : defaultTranslationSettings[key];
+  const text = (key: TextSetting) => typeof input[key] === 'string' ? input[key] as string : defaultTranslationSettings[key];
   return {
     apiUrl: text('apiUrl').trim().slice(0, 2048), apiKey: text('apiKey').slice(0, 8192), model: text('model').trim().slice(0, 300),
     fallbackApiUrl: text('fallbackApiUrl').trim().slice(0, 2048), fallbackApiKey: text('fallbackApiKey').slice(0, 8192), fallbackModel: text('fallbackModel').trim().slice(0, 300),
     englishLockModels: text('englishLockModels').trim().slice(0, 2000),
+    paragraphTranslate: typeof input.paragraphTranslate === 'boolean' ? input.paragraphTranslate : defaultTranslationSettings.paragraphTranslate,
   };
 }
 
