@@ -27,6 +27,19 @@
       },
       "versions": [
         {
+          "version": "0.2.19",
+          "publishTimestamp": 1793091591,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "c1e92555780f67a907d232842f76d991b901c86e",
+            "path": "packages/remote-agents"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
+        {
           "version": "0.2.18",
           "publishTimestamp": 1793082019,
           "source": {
@@ -259,6 +272,19 @@
       },
       "versions": [
         {
+          "version": "0.1.2",
+          "publishTimestamp": 1793091591,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "c1e92555780f67a907d232842f76d991b901c86e",
+            "path": "packages/usage-stats"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
+        {
           "version": "0.1.1",
           "publishTimestamp": 1793019392,
           "source": {
@@ -373,6 +399,19 @@
         ]
       },
       "versions": [
+        {
+          "version": "0.1.4",
+          "publishTimestamp": 1793091591,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "c1e92555780f67a907d232842f76d991b901c86e",
+            "path": "packages/translate"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
         {
           "version": "0.1.2",
           "publishTimestamp": 1793065415,
