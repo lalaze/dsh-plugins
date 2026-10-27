@@ -268,7 +268,7 @@ test('permissions and questions use native DSH services and select only a one-ti
   assert.equal(remote.answers[0].answer.selectedActionId, 'once'); assert.deepEqual(remote.answers[1].answer.answers, { Checks: 'Tests, and lint' });
 });
 
-test('new Claude chats inherit remote permissions even with an old cached default, and follow-ups preserve the selected mode', async t => {
+for (const mode of ['acceptEdits', 'auto']) test(`new Claude chats inherit remote permissions even with an old cached default, and follow-ups preserve ${mode}`, async t => {
   const { remote, projects, project, adapter, options, service, store } = await setup(t);
   remote.catalog[1] = { id: 'claude', label: 'Claude Code', status: 'ready', defaultModeId: 'default',
     models: [{ id: 'claude-model', label: 'Claude model' }], modes: [{ id: 'default', label: 'Ask before tools' }, { id: 'acceptEdits', label: 'Accept edits' }] };
@@ -277,9 +277,9 @@ test('new Claude chats inherit remote permissions even with an old cached defaul
   await collect(adapter.stream(input));
   assert.equal(remote.created!.modeId, undefined);
   const task = store.snapshot().tasks[0];
-  await service.setMode(task.id, 'acceptEdits');
+  await service.setMode(task.id, mode);
   await collect(adapter.stream({ ...input, messages: [...input.messages, user('Continue editing')] }));
-  assert.equal(store.snapshot().tasks[0].modeId, 'acceptEdits');
+  assert.equal(store.snapshot().tasks[0].modeId, mode);
   assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
 });
 

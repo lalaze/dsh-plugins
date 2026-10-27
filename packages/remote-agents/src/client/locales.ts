@@ -12,6 +12,8 @@ export const zh: Record<string, string> = {
   "Invalid attachment destination": "附件目标路径无效。",
   "Unsupported image format": "不支持此图片格式。",
   "Remote CLI settings": "沿用远端 CLI 设置",
+  "Auto · safety checks": "Auto（自动安全审查）",
+  "Claude uses non-interactive CLI settings, which can differ from terminal defaults. Select Auto explicitly to use automatic safety checks.": "Claude 使用非交互 CLI 设置，可能与终端默认模式不同。要使用自动安全审查，请明确选择 Auto。",
   "Permission mode": "权限模式",
   "Ask before tools": "操作前询问",
   "Plan": "规划",

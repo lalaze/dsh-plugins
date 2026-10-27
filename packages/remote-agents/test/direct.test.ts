@@ -529,6 +529,33 @@ test('mode changes release the idle session, and the next message resumes it wit
   assert.equal(ssh.admissions.length, 2);
 });
 
+test('Claude Auto is available for new sessions and is explicitly passed to the non-interactive CLI', async t => {
+  const { service, ssh, request, hostId } = await fixture(t, 'claude');
+  const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'claude')!;
+  assert.ok(provider.modes.some(m => m.id === 'auto'));
+  await service.create({ ...request, modeId: 'auto' });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'auto');
+  assert.equal(ssh.live.argv.includes('--dangerously-skip-permissions'), false);
+});
+
+test('pre-upgrade Claude sessions can select Auto and retain it across messages and reconnects', async t => {
+  const { service, ssh, request, store } = await fixture(t, 'claude');
+  const agent = await service.create(request), first = ssh.live;
+  const sessionId = first.argv[first.argv.indexOf('--session-id') + 1];
+  first.finish(); await tick();
+  await store.update(state => { state.tasks.find(task => task.id === agent.id)!.modes = [{ id: 'default', label: 'Ask before tools' }]; });
+  assert.ok((await service.summary(agent.id)).modes.some(m => m.id === 'auto'));
+  await service.setMode(agent.id, 'auto');
+  await service.send(agent.id, { id: randomUUID(), text: 'Continue with classifier checks' });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'auto');
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--resume') + 1], sessionId);
+  ssh.live.finish(); await tick();
+  ssh.live.exit(new Error('disconnected')); await service.retry(agent.id);
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'auto');
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--resume') + 1], sessionId);
+  assert.equal(store.snapshot().tasks[0].modeId, 'auto');
+});
+
 test('Claude inherits remote permission settings unless a mode is explicitly selected, including after resume', async t => {
   const { service, ssh, request, hostId, store } = await fixture(t, 'claude');
   const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'claude')!;

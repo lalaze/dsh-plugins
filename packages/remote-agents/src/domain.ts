@@ -17,9 +17,12 @@ export interface HostConfig { id: string; label: string; connection: string; pas
 export interface SshConfigHost { alias: string; connection: string }
 export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
-/** Older saved Claude catalogs also need a way to return to the remote CLI's settings. */
+/** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export function permissionModes(provider: string, modes: Choice[]): Choice[] {
-  return provider === 'claude' && !modes.some(m => m.id === 'inherit') ? [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes] : modes;
+  if (provider !== 'claude') return modes;
+  const choices = modes.some(m => m.id === 'inherit') ? [...modes] : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
+  if (!choices.some(m => m.id === 'auto')) choices.splice(choices.findIndex(m => m.id === 'inherit') + 1, 0, { id: 'auto', label: 'Auto · safety checks' });
+  return choices;
 }
 /** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
 export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string; serviceTiers?: Choice[]; inputModalities?: ('text' | 'image')[] }
