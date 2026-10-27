@@ -60,6 +60,15 @@ const server = createServer(async (request, response) => {
         if (input.connectionError !== undefined) connectionError = input.connectionError || undefined;
         if (input.sshConfig) { sshConfig.hosts = input.sshConfig.hosts; sshConfig.warnings = input.sshConfig.warnings ?? []; }
         if (input.loseSend) remote.loseSend = true;
+        if (input.seedUsage) {
+          let [project] = new ChatProjects(service).hosts();
+          if (!project) { await service.addHost({ label: 'macmini', connection: 'ssh://macmini' }, { discoverModels: true }); [project] = new ChatProjects(service).hosts(); }
+          const route = 'macmini/codex/codex-model';
+          const task = store.snapshot().tasks.find(t => t.chat?.sessionId === 'fixture-conversation')
+            ?? await service.create({ id: randomUUID(), hostId: project.hostId, cwd: '/srv/macmini', provider: 'codex', model: 'remote-model', prompt: '用量演示' }, { chat: { sessionId: 'fixture-conversation', route } });
+          remote.live(task.id).context = input.seedUsage.context;
+          remote.accountUsage = input.seedUsage.account ?? null;
+        }
         if (input.seedSessions) {
           let project = new ChatProjects(service).hosts()[0];
           if (!project) {

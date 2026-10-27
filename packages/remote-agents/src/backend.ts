@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { Agent, Attachment, Cursor, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
+import type { AccountUsage, Agent, Attachment, Choice, Cursor, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
 import { enabledProvidersOf, PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from './ssh.js';
 import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
@@ -8,6 +8,7 @@ import type { Store } from './store.js';
 import { discoverAcpCatalog } from './acp.js';
 import { antigravityArguments, ANTIGRAVITY_NOTICE, ANTIGRAVITY_RUNNER, decodeAntigravityModels } from './antigravity.js';
 import { attachmentPrompt, transferAttachments } from './attachments.js';
+import { readAccountUsage } from './usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 export { connectionInput } from './ssh.js';
@@ -32,6 +33,8 @@ export interface Backend {
   detach(task: Task): Promise<void>;
   /** Detach and delete saved output. */
   forget(task: Task): Promise<void>;
+  /** Plan limits of the account a CLI is signed in with; null when the CLI does not report them. */
+  account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null>;
 }
 export type BackendFactory = (host: HostConfig) => Backend;
 export const CLI_PROVIDERS = [
@@ -43,6 +46,7 @@ export const CLI_PROVIDERS = [
   { id: 'codebuddy', label: PROVIDER_LABELS.codebuddy, command: 'codebuddy', protocol: 'acp' as const, args: ['--acp'] },
 ];
 const SESSION_LIMIT = 8;
+const ACCOUNT_TTL = 300_000;
 type Profile = { protocol: NativeProtocol; argv: string[]; cwd: string; provider: Provider };
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 /** Claude's `list_models` control response: `supportedEffortLevels` holds per-model reasoning choices. */
@@ -53,6 +57,13 @@ export function claudeModels(result: unknown): Model[] {
     thinkingOptions: list(m.supportedEffortLevels ?? m.efforts).filter((e): e is string => typeof e === 'string').map(id => ({ id, label: id })),
   }));
 }
+/** Codex speed tiers. `serviceTiers` carries request IDs such as `priority`; older CLIs only list `additionalSpeedTiers` names. */
+export function codexServiceTiers(model: Record<string, unknown>): Choice[] | undefined {
+  const tiers: Choice[] = Array.isArray(model.serviceTiers)
+    ? model.serviceTiers.filter(t => typeof t?.id === 'string' && t.id).map(t => ({ id: t.id, label: typeof t.name === 'string' && t.name ? t.name : t.id }))
+    : list(model.additionalSpeedTiers).filter((id): id is string => typeof id === 'string' && !!id).map(id => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
+  return tiers.length ? tiers : undefined;
+}
 export class SshBackend implements Backend {
   private readonly transport: SshTransport;
   private closed = false;
@@ -62,6 +73,7 @@ export class SshBackend implements Backend {
   private sessions = new Map<string, CliSession>();
   private histories = new Map<string, Promise<TaskHistory>>();
   private starting = new Map<string, Promise<Agent>>();
+  private accounts = new Map<string, { at: number; value: Promise<AccountUsage> }>();
   /** Tasks with an operation in flight; their sessions are never evicted. */
   private leases = new Map<string, number>();
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport) {
@@ -126,7 +138,7 @@ export class SshBackend implements Backend {
           let cursor: string | undefined;
           for (let page = 0; page < 20; page++) {
             const result = await peer.request('model/list', { limit: 100, ...(cursor ? { cursor } : {}) });
-            models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']) as Model['inputModalities'], isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })) })));
+            models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']) as Model['inputModalities'], isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })), serviceTiers: codexServiceTiers(m) })));
             cursor = result?.nextCursor; if (!cursor) break;
           }
           modes = [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]; defaultModeId = 'workspace-write';
@@ -200,7 +212,8 @@ export class SshBackend implements Backend {
       idle[1].close(); this.sessions.delete(idle[0]);
     }
     const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : argv;
-    const session = new CliSession(new JsonlPeer(this.transport.start(profile.cwd, launch)), { ...task, executionCwd: profile.cwd }, history, this.store);
+    // A finished turn changed the account's usage; read it again when it is next shown.
+    const session = new CliSession(new JsonlPeer(this.transport.start(profile.cwd, launch)), { ...task, executionCwd: profile.cwd }, history, this.store, { turnEnded: () => this.accounts.delete(task.provider) });
     this.sessions.set(task.id, session);
     try {
       await session.initialize(profile.protocol, argv, resume);
@@ -256,6 +269,33 @@ export class SshBackend implements Backend {
     this.histories.delete(task.id);
     await (await history.catch(() => new TaskHistory(this.store.directory, task.id))).remove();
     await rm(join(this.store.directory, 'attachments', task.id), { recursive: true, force: true });
+  }
+  async account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null> {
+    this.assertOpen();
+    const definition = CLI_PROVIDERS.find(p => p.id === provider);
+    if (definition?.protocol !== 'codex' && definition?.protocol !== 'claude') return null;
+    const cached = this.accounts.get(provider);
+    if (cached && !refresh && Date.now() - cached.at < ACCOUNT_TTL) return cached.value;
+    const value = this.readAccount(definition, cwd);
+    this.accounts.set(provider, { at: Date.now(), value });
+    value.catch(() => { if (this.accounts.get(provider)?.value === value) this.accounts.delete(provider); });
+    return value;
+  }
+  /** Ask a running session of this CLI, or briefly start one without a prompt. */
+  private async readAccount(definition: typeof CLI_PROVIDERS[number], cwd: string | undefined): Promise<AccountUsage> {
+    const live = [...this.sessions.values()].find(s => s.alive && s.task.provider === definition.id && s.agent.status !== 'initializing');
+    if (live) return readAccountUsage(live.peer, definition.protocol, live.account);
+    const path = await this.transport.exec(`printf '%s' "$(command -v ${quote(definition.command)} 2>/dev/null || true)"`);
+    this.assertOpen();
+    if (!path.startsWith('/')) throw new Error(`${definition.label} is not installed on this SSH host`);
+    const argv = definition.protocol === 'claude' ? [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'] : [path, ...definition.args];
+    const peer = new JsonlPeer(this.transport.start(cwd ?? await this.homeDirectory(), argv)); this.probes.add(peer);
+    try {
+      peer.onMessage(message => { if (message.method && message.id !== undefined) peer.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Usage checks do not execute tools' } }); });
+      if (definition.protocol === 'codex') { await initializeCodex(peer); return await readAccountUsage(peer, 'codex'); }
+      const init = await peer.control({ subtype: 'initialize' });
+      return await readAccountUsage(peer, 'claude', init?.account);
+    } finally { this.probes.delete(peer); peer.close(); }
   }
   async close(): Promise<void> {
     this.closed = true;

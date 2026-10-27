@@ -9,11 +9,13 @@ import { styles } from './styles.js';
 import { Sessions } from './sessions.js';
 import { installModelGroups } from './model-groups.js';
 import { installWorkspaceModels, type WorkspaceClient } from './workspace-models.js';
+import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './usage.js';
+import { symbols } from '@deepseek-ai/cordis';
 
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
   inject?(services: string[], factory: (scoped: Client) => void): unknown;
-  slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC): unknown };
+  slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC<any>): unknown };
 }
 function Settings({ openSessions }: { openSessions: () => void }) {
   useLocale();
@@ -65,5 +67,13 @@ export function apply(ctx: Client): void {
   };
   ctx.slots.inject('settings.section', () => { ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, Surface); });
   ctx.effect(installModelGroups);
+  ctx.effect(installUsageStyles);
+  ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
+    // Read through the service itself: this plugin's proxy would resolve dependencies from our context.
+    const service = (scoped as unknown as { modelDirectories: ModelDirectories }).modelDirectories;
+    setModelDirectories((service as unknown as Record<symbol, ModelDirectories | undefined>)[symbols.original] ?? service);
+    return () => setModelDirectories(undefined);
+  }));
+  ctx.slots.inject('conversation.input.right', () => { ctx.slots.register({ name: 'conversation.input.right', id: 'remote-agents-usage', order: 50 }, UsageRing); });
   ctx.inject?.(['modelDirectories', 'sessions', 'workspaces'], scoped => installWorkspaceModels(scoped as unknown as WorkspaceClient));
 }

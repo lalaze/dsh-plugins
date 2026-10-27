@@ -1,4 +1,4 @@
-import { cursorInput, field, identifier, record, remotePath, RemoteError } from './domain.js';
+import { cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError } from './domain.js';
 import type { RemoteAgentsService } from './service.js';
 import { ChatProjects } from './chat-projects.js';
 import type { WorkspacePlacement } from './workspace-access.js';
@@ -21,6 +21,14 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
       switch (action) {
         case 'workspaceModels': result = workspace ? await workspace(field(input.sessionId, 'session ID', 256), request.signal) : { hostIds: [] }; break;
         case 'hostCatalogs': result = projects.hosts(); break;
+        case 'usage': {
+          const route = input.model === undefined ? undefined : field(input.model, 'model', 1000);
+          const [projectId, cli] = route?.split('/') ?? [], project = projects.routes().find(p => p.id === projectId);
+          let provider: string | undefined;
+          try { provider = cli === undefined ? undefined : decodeURIComponent(cli); } catch { provider = undefined; }
+          const target = project && provider && Object.hasOwn(PROVIDER_LABELS, provider) ? { hostId: project.hostId, provider } : undefined;
+          result = await service.usage(field(input.sessionId, 'session ID', 256), { route, target, account: input.account === true, refresh: input.refresh === true }); break;
+        }
         case 'discoverHost': result = await service.discoverHost(hostId()); break;
         case 'setHostProviders': result = await service.setHostProviders(hostId(), input.providers); break;
         case 'chatProjects': result = projects.list(); break;

@@ -44,13 +44,14 @@ export const CLI_NAMES: Readonly<Record<string, string>> = {
 
 /**
  * Resolve a DSH model selection to a row badge.
- * dsh-remote-agents routes are `remote-cli` or `remote-cli-<cli>`, with model ids `<project>/<cli>/<native model>`.
+ * dsh-remote-agents routes are `remote-cli` or `remote-cli-<cli>`, with model ids `<project>/<cli>/<native model>`
+ * and an optional `/<speed tier>` (Codex Fast).
  */
 export function describeSelection({ provider, model }: Selection): ModelBadge {
   let cli: string | undefined, name = model;
   if (provider === 'remote-cli' || provider.startsWith('remote-cli-')) {
     const parts = model.split('/');
-    if (parts.length === 3) { cli = decode(parts[1]); name = decode(parts[2]); }
+    if (parts.length === 3 || parts.length === 4) { cli = decode(parts[1]); name = decode(parts[2]); }
     else if (provider !== 'remote-cli') cli = provider.slice('remote-cli-'.length);
   }
   const brand = match(MODEL_RULES, name) ?? match(PROVIDER_RULES, cli ?? provider) ?? 'generic';

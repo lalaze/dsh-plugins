@@ -29,6 +29,7 @@ export async function nativeModelFixture(modelDirectories = { directoryFor: (_id
   const register = core.register.bind(core) as (options: Record<string, unknown>, component: unknown) => () => void;
   register({ name: 'root', children: {
     'conversation.input.model': { kind: 'single', scope: 'session' },
+    'conversation.input.right': { kind: 'list', scope: 'session' },
     'settings.section': { kind: 'list', scope: 'root' },
     'sidebar.footer.action': { kind: 'list', scope: 'root' },
   } }, () => null);

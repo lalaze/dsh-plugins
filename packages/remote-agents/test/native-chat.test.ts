@@ -340,6 +340,25 @@ test('switching models within a CLI retains the conversation and its old message
   await collect(adapter.stream(options('Back to first model'))); assert.equal(remote.creates, 1); assert.equal(remote.sends, 2);
 });
 
+test('Codex speed tiers are separate picker rows that start, switch and leave Fast on the same conversation', async t => {
+  const { adapter, options, remote, store, projects, project } = await setup(t);
+  remote.catalog[0].models[0].serviceTiers = [{ id: 'priority', label: 'Fast' }]; await projects.refresh(project.id);
+  const models = await adapter.listModels(CODEX_PROVIDER);
+  assert.deepEqual(models.map(m => m.name), ['Remote model · Build server', 'Remote model Fast · Build server']);
+  const fast = chatModelId(project.id, 'codex', 'remote-model', 'priority');
+  assert.equal(models[1].id, fast);
+  assert.deepEqual((await adapter.resolveModel(CODEX_PROVIDER, fast)).reasoning?.efforts.map(e => e.id), ['high']);
+  await assert.rejects(adapter.resolveModel(CODEX_PROVIDER, chatModelId(project.id, 'codex', 'remote-model', 'flex')), /unavailable/);
+  await assert.rejects(adapter.resolveModel(CODEX_PROVIDER, `${fast}/extra`), /unavailable/);
+  await collect(adapter.stream(options('Go fast', { model: fast })));
+  assert.equal(remote.created?.serviceTier, 'priority');
+  await collect(adapter.stream(options('Back to the configured speed')));
+  assert.equal(remote.creates, 1); assert.equal(remote.detaches, 1);
+  assert.equal(store.snapshot().tasks[0].serviceTier, undefined);
+  await collect(adapter.stream(options('Fast again', { model: fast })));
+  assert.equal(store.snapshot().tasks[0].serviceTier, 'priority'); assert.equal(remote.detaches, 2);
+});
+
 test('native tool cards produce a valid DSH session lifecycle and never request DSH tool dispatch', async t => {
   const session = Session.create(SessionId('native-cards'));
   session.append('turn/start', { turn: 1 }); session.append('step/start', { turn: 1, step: 1 });

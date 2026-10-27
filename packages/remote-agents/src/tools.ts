@@ -184,17 +184,17 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
     },
     {
       name: 'remote_agent_providers',
-      description: 'Check which coding CLIs are installed and signed in on a remote host for a project directory, with their models, permission modes and thinking levels. Call this before remote_agent_create when unsure which provider or model to use.',
+      description: 'Check which coding CLIs are installed and signed in on a remote host for a project directory, with their models, permission modes, thinking levels and speeds. Call this before remote_agent_create when unsure which provider or model to use.',
       parameters: params({ host: string('Saved host name, SSH alias or host ID.'), cwd: string('Absolute project directory on that host.'), refresh: { type: 'boolean', description: 'Ignore the 30-second discovery cache.' } }, ['host', 'cwd']),
-      output: { schema: {}, render: (_args, value) => text((value as { providers: { id: string; label: string; status: string; error?: string; notice?: string; models: { id: string; label: string; thinking: string[] }[]; modes: { id: string; label: string }[]; defaultMode?: string }[] }).providers.map(p => p.status !== 'ready'
+      output: { schema: {}, render: (_args, value) => text((value as { providers: { id: string; label: string; status: string; error?: string; notice?: string; models: { id: string; label: string; thinking: string[]; speeds?: string[] }[]; modes: { id: string; label: string }[]; defaultMode?: string }[] }).providers.map(p => p.status !== 'ready'
         ? `${p.id} (${p.label}): ${p.status}${p.error ? ` — ${p.error}` : ''}`
-        : [`${p.id} (${p.label}): ready${p.notice ? ` — ${p.notice}` : ''}`, `  models: ${p.models.map(m => `${m.id}${m.thinking.length ? ` [thinking: ${m.thinking.join('/')}]` : ''}`).join(', ')}`, `  modes: ${p.modes.map(m => `${m.id}${m.id === p.defaultMode ? ' (default)' : ''}`).join(', ') || 'CLI settings'}`].join('\n')).join('\n')) },
+        : [`${p.id} (${p.label}): ready${p.notice ? ` — ${p.notice}` : ''}`, `  models: ${p.models.map(m => `${m.id}${m.thinking.length ? ` [thinking: ${m.thinking.join('/')}]` : ''}${m.speeds?.length ? ` [speed: ${m.speeds.join('/')}]` : ''}`).join(', ')}`, `  modes: ${p.modes.map(m => `${m.id}${m.id === p.defaultMode ? ' (default)' : ''}`).join(', ') || 'CLI settings'}`].join('\n')).join('\n')) },
       isConcurrencySafe: () => true,
       async execute(raw) {
         const args = input(raw), target = findHost(required(args.host, 'host'));
         const providers = await service.providers(target.id, remotePath(args.cwd), args.refresh === true);
         return { providers: providers.map(p => ({ id: p.id, label: p.label, status: p.status, ...(p.error ? { error: p.error } : {}), ...(p.notice ? { notice: p.notice } : {}),
-          models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { default: true } : {}), thinking: (m.thinkingOptions ?? []).map(o => o.id) })),
+          models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { default: true } : {}), thinking: (m.thinkingOptions ?? []).map(o => o.id), ...(m.serviceTiers?.length ? { speeds: m.serviceTiers.map(o => o.label) } : {}) })),
           modes: p.modes.map(m => ({ id: m.id, label: m.label })), ...(p.defaultModeId ? { defaultMode: p.defaultModeId } : {}) })) };
       },
     },
@@ -205,7 +205,8 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
         host: string('Saved host name, SSH alias or host ID.'), cwd: string('Absolute project directory on the remote host.'),
         provider: string('CLI provider ID: claude, codex, dsh, grok, codebuddy or antigravity.'), prompt: string('Complete, self-contained task for the agent.'),
         model: string('Model ID or name. Defaults to the CLI default model.'), mode: string('Permission mode ID. Defaults to the CLI default, which asks before risky actions.'),
-        thinking: string('Thinking level ID, when the model supports it.'), title: string('Short title (at most 100 characters).'),
+        thinking: string('Thinking level ID, when the model supports it.'), speed: string('Speed tier, such as Fast for Codex, when the model offers one. Faster tiers use more of the remote account\'s quota. Defaults to the CLI setting.'),
+        title: string('Short title (at most 100 characters).'),
         wait: waitParam, timeoutSeconds: timeoutParam,
       }, ['host', 'cwd', 'provider', 'prompt']),
       output: reportOutput,
@@ -218,13 +219,14 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
         const model = pick(provider.models, optional(args.model, 'model'), 'model') ?? provider.models.find(m => m.isDefault) ?? provider.models[0];
         const mode = pick(provider.modes, optional(args.mode, 'mode'), 'mode') ?? provider.modes.find(m => m.id === provider.defaultModeId);
         const thinking = pick(model.thinkingOptions ?? [], optional(args.thinking, 'thinking'), 'thinking level') ?? model.thinkingOptions?.find(o => o.id === model.defaultThinkingOptionId);
+        const speed = pick(model.serviceTiers ?? [], optional(args.speed, 'speed'), 'speed');
         if (mode && unrestricted(mode)) {
           // The remote CLI would act without per-action approval; that needs the user's explicit consent.
           const outcome = exec.agent ? await host.approval.request({ agent: exec.agent, toolName: 'remote_agent_create', callId: exec.callId, signal: exec.signal,
             reason: `Start ${provider.label} on ${target.label}:${cwd} in "${mode.label}" mode. It will not ask before running commands or editing files.` }) : 'unavailable';
           if (outcome !== 'allowed-once') throw new Error(`Starting a remote agent in "${mode.label}" mode needs the user's approval (${outcome}). Use a mode that asks before acting.`);
         }
-        const created = await service.create({ id: randomUUID(), hostId: target.id, cwd, provider: provider.id, model: model.id, prompt, ...(mode ? { modeId: mode.id } : {}), ...(thinking ? { thinkingOptionId: thinking.id } : {}) },
+        const created = await service.create({ id: randomUUID(), hostId: target.id, cwd, provider: provider.id, model: model.id, prompt, ...(mode ? { modeId: mode.id } : {}), ...(thinking ? { thinkingOptionId: thinking.id } : {}), ...(speed ? { serviceTier: speed.id } : {}) },
           { origin: 'dsh', ...(optional(args.title, 'title') ? { title: optional(args.title, 'title')!.slice(0, 100) } : {}) });
         if (created.status === 'error') throw new Error(`The remote agent did not start: ${created.error ?? 'unknown error'}. Agent ${created.id} is saved; use remote_agent_list to inspect its status.`);
         return args.wait === false ? report([await service.state(created.id)], new Set(), false) : settle([created.id], exec, timeout);

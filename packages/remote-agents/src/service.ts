@@ -3,9 +3,18 @@ import { connectionInput, SshBackend, type Backend, type BackendFactory } from '
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from './domain.js';
-import { busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task } from './domain.js';
+import { busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task, type UsageReport } from './domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
+export interface UsageOptions {
+  /** The conversation's selected route; picks its CLI when the conversation used several. */
+  route?: string;
+  /** Machine and CLI of the selected route, for a conversation that has not started a session yet. */
+  target?: { hostId: string; provider: string };
+  /** Also read plan limits, which may contact the SSH host. */
+  account?: boolean;
+  refresh?: boolean;
+}
 export interface CreateOptions { title?: string; origin?: Task['origin']; chat?: Task['chat']; signal?: AbortSignal }
 export interface SendOptions {
   /** Interrupt a running turn. When false, a working agent rejects the message. */
@@ -156,6 +165,7 @@ export class RemoteAgentsService {
       id: task.id, hostId: task.hostId, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model,
       ...(task.chat ? { chatSessionId: task.chat.sessionId } : {}),
       ...(task.modeId ? { modeId: task.modeId } : {}), ...(task.thinkingOptionId ? { thinkingOptionId: task.thinkingOptionId } : {}),
+      ...(task.serviceTier ? { serviceTier: task.serviceTier } : {}),
       modes: permissionModes(task.provider, task.modes ?? []), title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
       archived: task.archived === true, delegated: task.origin === 'dsh', started: !!task.agentId, attached: !!live && live.status !== 'closed', status, pendingPermissions: pending,
       ...(error ? { error } : {}), ...(resumable !== undefined ? { resumable } : {}), ...(task.native?.sessionId ? { nativeSessionId: task.native.sessionId } : {}),
@@ -224,6 +234,7 @@ export class RemoteAgentsService {
         if (request.attachments?.some(a => a.kind === 'image') && !inputModalitiesOf(provider.id, model).includes('image')) throw new RemoteError('This remote CLI does not support image input');
         if (request.modeId && !provider.modes.some(m => m.id === request.modeId)) throw new RemoteError('The selected mode is unavailable', 409);
         if (request.thinkingOptionId && !model.thinkingOptions?.some(m => m.id === request.thinkingOptionId)) throw new RemoteError('The selected thinking level is unavailable', 409);
+        if (request.serviceTier && !model.serviceTiers?.some(t => t.id === request.serviceTier)) throw new RemoteError('The selected speed is unavailable', 409);
         const now = new Date().toISOString();
         const task: Task = { ...request, serverId: host.serverId!, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), state: 'creating' };
         // Persist the exact execution intent and idempotency key before any remote mutation.
@@ -294,11 +305,11 @@ export class RemoteAgentsService {
       await this.updateTask(id, next => { next.thinkingOptionId = thinkingOptionId; });
     });
   }
-  /** Change a model by resuming the same native session. Existing receipts keep their original namespace. */
-  async setModel(id: string, model: string, thinkingOptionId?: string, route?: string): Promise<void> {
+  /** Change a model or speed by resuming the same native session. Existing receipts keep their original namespace. */
+  async setModel(id: string, model: string, thinkingOptionId?: string, route?: string, serviceTier?: string): Promise<void> {
     return this.serial(id, async () => {
       const task = this.task(id);
-      if (task.model === model && task.thinkingOptionId === thinkingOptionId) return;
+      if (task.model === model && task.thinkingOptionId === thinkingOptionId && task.serviceTier === serviceTier) return;
       if (busy(await this.summary(id))) throw new RemoteError('Stop the agent before changing its model', 409);
       if (task.native?.resumable === false) throw new RemoteError('This CLI cannot resume with a different model. Start a new conversation.', 409);
       await this.use(task.hostId, async backend => {
@@ -306,13 +317,29 @@ export class RemoteAgentsService {
         const selected = provider?.models.find(m => m.id === model);
         if (!selected) throw new RemoteError('The selected model is unavailable on this host', 409);
         if (thinkingOptionId && !selected.thinkingOptions?.some(e => e.id === thinkingOptionId)) throw new RemoteError('The selected thinking level is unavailable', 409);
+        if (serviceTier && !selected.serviceTiers?.some(t => t.id === serviceTier)) throw new RemoteError('The selected speed is unavailable', 409);
         if (task.agentId) await backend.detach(task);
         await this.updateTask(id, next => {
-          next.model = model; next.thinkingOptionId = thinkingOptionId;
+          next.model = model; next.thinkingOptionId = thinkingOptionId; next.serviceTier = serviceTier;
           if (next.chat && route) { next.chat.receiptRoute ??= next.chat.route; next.chat.route = route; }
         });
       }, task.serverId);
     });
+  }
+  /** Context comes from local state; only plan limits are read from the SSH host, and they are cached. */
+  async usage(sessionId: string, options: UsageOptions = {}): Promise<UsageReport | null> {
+    const cli = (route: string) => route.split('/').slice(0, 2).join('/');
+    const task = this.store.tasks(t => t.chat?.sessionId === sessionId && (!options.route || cli(t.chat.route) === cli(options.route)))
+      .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))[0];
+    const target = task ? { hostId: task.hostId, provider: task.provider } : options.target;
+    if (!target) return null;
+    const report: UsageReport = { provider: target.provider, context: task ? (await this.live(task))?.context ?? task.context ?? null : null };
+    if (!options.account) return report;
+    try {
+      const account = await this.use(target.hostId, backend => backend.account(target.provider, task ? task.executionCwd ?? task.cwd : undefined, options.refresh === true), task?.serverId);
+      if (account) report.account = account;
+    } catch (error) { report.account = { provider: target.provider, windows: [], checkedAt: new Date().toISOString(), error: this.safeError(error) }; }
+    return report;
   }
   async rename(id: string, title: string): Promise<AgentSummary> {
     return this.serial(id, async () => {

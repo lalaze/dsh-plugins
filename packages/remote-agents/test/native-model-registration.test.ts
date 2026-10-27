@@ -11,6 +11,7 @@ test('enabling remote agents preserves the native model seat and its already-dec
     'settings.section': { kind: 'list', scope: 'root' },
     'sidebar.footer.action': { kind: 'list', scope: 'root' },
     'conversation.input.model': { kind: 'single', scope: 'session' },
+    'conversation.input.right': { kind: 'list', scope: 'session' },
   } }, () => null);
   const native = () => null;
   register({ name: 'conversation.input.model', children: {
@@ -27,4 +28,5 @@ test('enabling remote agents preserves the native model seat and its already-dec
   assert.equal(core.entriesOfSlot('conversation.input.model')[0].component, native);
   assert.equal(core.entries('conversation.input.model').length, 1);
   assert.ok(core.specDynamic('conversation.input.model.label'));
+  assert.equal(core.entries('conversation.input.right').length, 1, 'the usage ring sits before the submit action');
 });

@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-models",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Model icons and status badges on DeepSeek Harness sidebar sessions",
   "type": "module",
   "main": "lib/server/index.js",

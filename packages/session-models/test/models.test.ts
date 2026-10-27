@@ -8,6 +8,7 @@ const brand = (provider: string, model: string) => describeSelection({ provider,
 test('remote CLI routes resolve the native model first, then the CLI', () => {
   assert.deepEqual(describeSelection({ provider: 'remote-cli-claude', model: 'p1/claude/sonnet' }), { brand: 'claude', model: 'sonnet', cli: 'claude' });
   assert.deepEqual(describeSelection({ provider: 'remote-cli-codex', model: 'p1/codex/gpt-5.1-codex' }), { brand: 'openai', model: 'gpt-5.1-codex', cli: 'codex' });
+  assert.deepEqual(describeSelection({ provider: 'remote-cli-codex', model: 'p1/codex/gpt-5.5/priority' }), { brand: 'openai', model: 'gpt-5.5', cli: 'codex' });
   assert.deepEqual(describeSelection({ provider: 'remote-cli', model: 'p1/dsh/deepseek-chat' }), { brand: 'deepseek', model: 'deepseek-chat', cli: 'dsh' });
   assert.deepEqual(describeSelection({ provider: 'remote-cli-antigravity', model: 'p1/antigravity/gemini-3-pro' }), { brand: 'gemini', model: 'gemini-3-pro', cli: 'antigravity' });
   assert.equal(brand('remote-cli-codebuddy', 'p1/codebuddy/auto'), 'codebuddy');

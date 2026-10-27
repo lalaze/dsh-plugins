@@ -47,6 +47,7 @@ export class Store {
   chatProjects(): ChatProject[] { return structuredClone(this.state.mainChatProjects ?? []); }
   /** A copy of one saved agent record, without cloning the whole registry. */
   task(predicate: (task: Task) => boolean): Task | undefined { const found = this.state.tasks.find(predicate); return found && structuredClone(found); }
+  tasks(predicate: (task: Task) => boolean): Task[] { return structuredClone(this.state.tasks.filter(predicate)); }
   /** Serialize read/modify/atomic-rename, including concurrent HTTP requests. */
   async update(change: (next: State) => void): Promise<void> {
     const write = this.writes.then(async () => {

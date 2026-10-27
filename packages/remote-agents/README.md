@@ -20,6 +20,8 @@ Model catalogs are saved per machine on the DSH server and shared between client
 - Each DSH conversation and selected machine / CLI has an independent native CLI session, with its working directory bound on the first message. Follow-ups reuse it, including after a DSH restart when that CLI supports resume. Switching models within a CLI resumes that same session; a non-resumable CLI asks you to start a new conversation. Previously separate model sessions remain accessible. Switching machines or CLIs supplies available conversation text as context; DSH's local system prompt, injected workspace instructions and local tool schemas are excluded.
 - Replies and thinking stream into the main conversation. Remote tool calls appear as native DSH tool cards; they execute on the remote machine. They are recorded as completed external work, so DSH never executes them again. Approvals and questions use DSH's native prompts.
 - The DSH thinking selector uses the CLI's discovered reasoning levels. The CLI's default permission mode applies. **Stop** or cancelling the response interrupts the remote CLI turn.
+- **Codex Fast:** Codex models that offer a faster service tier also appear as a separate picker entry, such as **GPT-5.5 Fast · build-box**. Fast uses more of the remote account's quota. Switching between the normal and Fast entries keeps the same Codex thread. The normal entry uses the remote Codex configuration, including a `service_tier` set there.
+- **Usage ring:** a ring before the send button shows how full the remote session's context window is. Hover over it, or click it, to see the remote account's plan limits for Claude and Codex, such as the session and weekly windows. These come from the CLI on the SSH host, so credentials never leave it. Limits are read when the panel opens, cached for five minutes and read again after a turn finishes; use the refresh button to check now.
 - Lost responses can replay the saved output by message identity without sending the task again. Unconfirmed delivery or an unfinished response after disconnection is reported explicitly. Send a new message to continue the saved session.
 - Main chat accepts **text, uploaded images and files**. Claude and Codex receive images through their native protocols; ACP CLIs expose image input only when their initialization reports support. Files are streamed over SSH into the verified remote workspace and supplied as read-only paths for the CLI’s file tools. Only attachments from the conversation are transferred. The CLI uses its own credentials, tools, instructions and context management. DSH summarization runs in a disposable CLI session, separate from the coding conversation.
 
@@ -46,7 +48,7 @@ DSH's own agent gets six tools to hand work to remote CLIs, the counterpart of P
 | Tool | Purpose |
 | --- | --- |
 | `remote_agent_list` | Hosts, recent projects and agents with their status |
-| `remote_agent_providers` | CLIs, models, modes and thinking levels available in a remote project |
+| `remote_agent_providers` | CLIs, models, modes, thinking levels and speeds available in a remote project |
 | `remote_agent_create` | Start an agent with a self-contained task; waits for its reply by default |
 | `remote_agent_send` | Follow up with an agent (ID or prefix); refuses to interrupt a working agent unless `interrupt: true` |
 | `remote_agent_wait` | Wait for one or more agents and return their replies; a timeout leaves them running |

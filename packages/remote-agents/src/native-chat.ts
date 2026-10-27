@@ -26,7 +26,8 @@ export interface ChatHost extends Partial<ToolHost> {
 }
 const hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 const blockText = (content: readonly { type: string; text?: string }[]) => content.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n');
-export const chatModelId = (projectId: string, provider: string, model: string) => `${projectId}/${encodeURIComponent(provider)}/${encodeURIComponent(model)}`;
+/** A speed tier (Codex Fast) is a separate picker row: DSH model selections carry only a model and a reasoning effort. */
+export const chatModelId = (projectId: string, provider: string, model: string, serviceTier?: string) => `${projectId}/${encodeURIComponent(provider)}/${encodeURIComponent(model)}${serviceTier ? `/${encodeURIComponent(serviceTier)}` : ''}`;
 
 /** Remote tools already execute inside the CLI. Record their lifecycle without dispatching a DSH tool. */
 class NativeToolRows {
@@ -82,21 +83,22 @@ export class RemoteCliAdapter extends LlmAdapter {
     const projects = this.projects.hosts();
     return projects.flatMap(project => {
       const host = this.projects.service.hosts().find(h => h.id === project.hostId);
-      return project.providers.filter(p => p.status === 'ready' && chatProviderId(p.id) === provider).flatMap(p => p.models.map(m => ({
-        provider, id: chatModelId(project.id, p.id, m.id), name: `${m.label} · ${host?.label ?? project.label}`,
+      return project.providers.filter(p => p.status === 'ready' && chatProviderId(p.id) === provider).flatMap(p => p.models.flatMap(m => [undefined, ...m.serviceTiers ?? []].map(tier => ({
+        provider, id: chatModelId(project.id, p.id, m.id, tier?.id), name: `${m.label}${tier ? ` ${tier.label}` : ''} · ${host?.label ?? project.label}`,
         description: `${host?.label ?? project.label} · ${p.label}`, inputModalities: inputModalitiesOf(p.id, m),
-      })));
+      }))));
     });
   }
   private route(providerRoute: string, modelId: string) {
-    const [projectId, providerId, nativeModel, ...extra] = modelId.split('/');
+    const [projectId, providerId, nativeModel, nativeTier, ...extra] = modelId.split('/');
     const project = this.projects.routes().find(p => p.id === projectId);
-    let cli: string, model: string;
-    try { cli = decodeURIComponent(providerId ?? ''); model = decodeURIComponent(nativeModel ?? ''); } catch { throw new LlmError('Invalid remote CLI model', 'INVALID_MODEL'); }
+    let cli: string, model: string, serviceTier: string | undefined;
+    try { cli = decodeURIComponent(providerId ?? ''); model = decodeURIComponent(nativeModel ?? ''); serviceTier = nativeTier === undefined ? undefined : decodeURIComponent(nativeTier); } catch { throw new LlmError('Invalid remote CLI model', 'INVALID_MODEL'); }
     const provider = project?.providers.find(p => p.id === cli && p.status === 'ready');
     const selected = provider?.models.find(m => m.id === model);
-    if (!project || !provider || !selected || extra.length || (providerRoute !== CHAT_PROVIDER && providerRoute !== chatProviderId(provider.id))) throw new LlmError('This remote model is unavailable. Add its host or refresh models in Settings → Remote agents.', 'INVALID_MODEL');
-    return { project, provider, model: selected };
+    const tierAvailable = serviceTier === undefined || !!selected?.serviceTiers?.some(t => t.id === serviceTier);
+    if (!project || !provider || !selected || !tierAvailable || extra.length || (providerRoute !== CHAT_PROVIDER && providerRoute !== chatProviderId(provider.id))) throw new LlmError('This remote model is unavailable. Add its host or refresh models in Settings → Remote agents.', 'INVALID_MODEL');
+    return { project, provider, model: selected, serviceTier };
   }
   override async resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
     signal?.throwIfAborted(); const route = this.route(provider, model);
@@ -129,7 +131,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     const sessionId = options.sessionId;
     if (!sessionId) throw new LlmError('Select a remote CLI in a DSH conversation to use it.', 'SESSION_REQUIRED');
     if (this.active.has(sessionId)) throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
-    const { project, provider, model } = this.route(options.provider, options.model), service = this.projects.service;
+    const { project, provider, model, serviceTier } = this.route(options.provider, options.model), service = this.projects.service;
     const lastUser = options.messages.findLast(m => m.role === 'user' && (!m.source || m.source.kind === 'user'));
     if (!lastUser || lastUser.role !== 'user') throw new LlmError('A user message is required for the remote CLI.', 'INVALID_REQUEST');
     const contentOf = (message: typeof lastUser) => restoreFiles(message.content, message.id ? this.host.userContent?.(sessionId, message.id) : undefined);
@@ -185,7 +187,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         admitted = true;
         const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt, ...(attachments.length ? { attachments } : {}),
           // Old cached Claude catalogs must not override remote permissions.
-          ...(provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}) },
+          ...(provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) },
         { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, signal });
         if (!agent.started) throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
       } else {
@@ -194,7 +196,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         const page = await service.messageTimeline(task.id, messageId);
         if (!page.found) {
           const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
-          await service.setModel(task.id, model.id, effort, options.model);
+          await service.setModel(task.id, model.id, effort, options.model, serviceTier);
           admitted = true; await service.send(task.id, { id: messageId, text: prompt, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
         } else admitted = true;
       }
