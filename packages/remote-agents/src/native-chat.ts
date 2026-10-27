@@ -31,6 +31,22 @@ const hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(
 const disposal = (reason: unknown) => !!reason && typeof reason === 'object' && ['disposed', 'released'].includes(String((reason as { kind?: unknown }).kind));
 const RELEASED = { kind: 'released' } as const;
 const blockText = (content: readonly { type: string; text?: string }[]) => content.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n');
+/**
+ * DSH frames title input as an instruction line followed by a JSON array of `{ text }` human
+ * messages. Title the session from the first of them, never from the instruction itself.
+ */
+function sessionTitleOf(request: string): string {
+  let text = request;
+  const json = request.slice(request.indexOf('\n') + 1).trim();
+  if (json.startsWith('[')) {
+    try {
+      const messages: unknown = JSON.parse(json);
+      const first = Array.isArray(messages) ? (messages as ({ text?: unknown } | null)[]).map(m => typeof m?.text === 'string' ? m.text.trim() : '').find(Boolean) : undefined;
+      if (first) text = first;
+    } catch { /* Not DSH's framing: use the request text as before. */ }
+  }
+  return text.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Remote CLI';
+}
 /** A speed tier (Codex Fast) is a separate picker row: DSH model selections carry only a model and a reasoning effort. */
 export const chatModelId = (projectId: string, provider: string, model: string, serviceTier?: string) => `${projectId}/${encodeURIComponent(provider)}/${encodeURIComponent(model)}${serviceTier ? `/${encodeURIComponent(serviceTier)}` : ''}`;
 
@@ -120,7 +136,7 @@ export class RemoteCliAdapter extends LlmAdapter {
   close(): void { this.released = true; for (const controller of this.controllers) controller.abort(RELEASED); }
   override async *stream(options: GenerateOptions): AsyncGenerator<StreamChunk> {
     if (options.purpose === 'session-title') {
-      const title = options.messages.filter(m => m.role === 'user').map(m => blockText(m.content)).at(-1)?.replace(/\s+/g, ' ').slice(0, 80) || 'Remote CLI';
+      const title = sessionTitleOf(options.messages.filter(m => m.role === 'user').map(m => blockText(m.content)).at(-1) ?? '');
       yield { type: 'block-start', index: 0, blockType: 'text' }; yield { type: 'text-delta', index: 0, text: title };
       yield { type: 'block-end', index: 0, block: { type: 'text', text: title } }; yield { type: 'finish', reason: { kind: 'stop' } }; return;
     }

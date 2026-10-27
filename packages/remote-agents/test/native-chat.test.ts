@@ -445,6 +445,9 @@ test('text-only input, auxiliary calls and unavailable routes never start an uni
   await assert.rejects(collect(adapter.stream(options('Work', { model: 'removed/model' }))), /unavailable/);
   await assert.rejects(collect(adapter.stream(options('Work', { reasoningEffort: ReasoningEffortId('unknown') }))), /thinking level/);
   assert.ok(text(await collect(adapter.stream(options('Title', { purpose: 'session-title' })))));
+  // DSH's title request: an instruction line, then a JSON array of the human messages.
+  const framed = `Generate the session title from this JSON array of human messages:\n${JSON.stringify([{ seq: 1, text: '  Fix the\nlogin bug ' }, { seq: 2, text: 'Also add tests' }])}`;
+  assert.equal(text(await collect(adapter.stream(options(framed, { purpose: 'session-title' })))), 'Fix the login bug');
 
   assert.equal(remote.creates, 0);
 });
