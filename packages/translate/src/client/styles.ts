@@ -7,6 +7,8 @@ const CSS = `
 .dsh-translate-composer-button[data-dsh-translate-busy]{color:var(--dsw-alias-label-secondary,currentColor);cursor:progress}
 .dsh-translate-composer-button[data-dsh-translate-error]{color:var(--dsw-alias-state-error-primary,#e5484d)}
 .dsh-translate-composer-button svg{flex:none;width:14px;height:14px}
+.dsh-translate-send-notice{position:fixed;z-index:2147483000;box-sizing:border-box;max-width:min(520px,calc(100vw - 12px));padding:7px 12px;border:1px solid #52525b;border-radius:7px;background:#18181b;color:#f4f4f5;box-shadow:0 6px 18px #0007;font-size:12px;line-height:1.5}
+.dsh-translate-send-notice[data-tone=error]{color:#fca5a5}
 .dsh-translate-paragraph-button{position:fixed;z-index:2147483000;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-secondary,#a1a1aa);cursor:pointer;opacity:.7}
 .dsh-translate-paragraph-button[hidden]{display:none}
 .dsh-translate-paragraph-button:hover,.dsh-translate-paragraph-button:focus-visible{opacity:1;outline:none;background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.16))}

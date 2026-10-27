@@ -6,11 +6,13 @@ export type TranslationSettings = {
   fallbackApiKey: string;
   fallbackModel: string;
   englishLockModels: string;
+  /** Translate CJK drafts into English before they are sent to an English-locked model. */
+  translateOnSend: boolean;
   /** Show a translate button beside each paragraph of a chat message. */
   paragraphTranslate: boolean;
 };
 
-export type TextSetting = Exclude<keyof TranslationSettings, 'paragraphTranslate'>;
+export type TextSetting = Exclude<keyof TranslationSettings, 'paragraphTranslate' | 'translateOnSend'>;
 
 export const defaultTranslationSettings: TranslationSettings = {
   apiUrl: 'https://api.openai.com/v1/chat/completions',
@@ -20,6 +22,7 @@ export const defaultTranslationSettings: TranslationSettings = {
   fallbackApiKey: '',
   fallbackModel: '',
   englishLockModels: 'claude, anthropic',
+  translateOnSend: true,
   paragraphTranslate: true,
 };
 
@@ -31,6 +34,7 @@ export function parseTranslationSettings(value: unknown): TranslationSettings {
     fallbackApiUrl: text('fallbackApiUrl').trim().slice(0, 2048), fallbackApiKey: text('fallbackApiKey').slice(0, 8192), fallbackModel: text('fallbackModel').trim().slice(0, 300),
     englishLockModels: text('englishLockModels').trim().slice(0, 2000),
     paragraphTranslate: typeof input.paragraphTranslate === 'boolean' ? input.paragraphTranslate : defaultTranslationSettings.paragraphTranslate,
+    translateOnSend: typeof input.translateOnSend === 'boolean' ? input.translateOnSend : defaultTranslationSettings.translateOnSend,
   };
 }
 

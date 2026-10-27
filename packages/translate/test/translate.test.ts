@@ -56,3 +56,8 @@ test('a word with context is translated in the sense of its passage', async () =
   assert.equal(parseTranslationRequest({ text: 'word', settings, context: 'x'.repeat(5000) }).context!.length, MAX_CONTEXT_LENGTH);
   assert.equal('context' in parseTranslationRequest({ text: 'word', settings, context: 42 }), false);
 });
+test('translating drafts before sending is on by default and only a boolean turns it off', () => {
+  assert.equal(parseTranslationSettings({}).translateOnSend, true);
+  assert.equal(parseTranslationSettings({ translateOnSend: false }).translateOnSend, false);
+  assert.equal(parseTranslationSettings({ translateOnSend: 'no' }).translateOnSend, true);
+});
