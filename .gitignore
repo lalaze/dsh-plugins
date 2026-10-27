@@ -5,3 +5,4 @@ dist/
 *.tgz
 *.tgz.sha256
 .DS_Store
+.dsh-remote-agents/
