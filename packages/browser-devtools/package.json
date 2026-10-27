@@ -1,6 +1,6 @@
 {
   "name": "dsh-browser-devtools",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A Chrome-style debugger docked under DSH Desktop sidebar browser tabs",
   "type": "module",
   "main": "lib/server/index.js",
