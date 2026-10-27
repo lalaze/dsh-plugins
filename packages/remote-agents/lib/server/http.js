@@ -106,7 +106,7 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     result = await service.retry(agentId());
                     break;
                 case 'archive':
-                    result = await service.archive(agentId(), input.archived !== false);
+                    result = await service.archive(agentId(), input.archived !== false, { onlyIdle: input.onlyIdle === true });
                     break;
                 case 'rename':
                     result = await service.rename(agentId(), field(input.title, 'title', 100));

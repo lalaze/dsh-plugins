@@ -81,7 +81,9 @@ export declare class RemoteAgentsService {
     stop(id: string): Promise<void>;
     respond(id: string, requestId: string, input: unknown): Promise<void>;
     /** Soft delete: interrupt, release the CLI process and hide the agent. Output and the native session are kept. */
-    archive(id: string, archived?: boolean): Promise<AgentSummary>;
+    archive(id: string, archived?: boolean, options?: {
+        onlyIdle?: boolean;
+    }): Promise<AgentSummary>;
     delete(id: string): Promise<void>;
     /** Applies from the next message: the idle session is released and resumed with the new mode. */
     setMode(id: string, modeId: string): Promise<AgentSummary>;
