@@ -1,6 +1,11 @@
-/** Older saved Claude catalogs also need a way to return to the remote CLI's settings. */
+/** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export function permissionModes(provider, modes) {
-    return provider === 'claude' && !modes.some(m => m.id === 'inherit') ? [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes] : modes;
+    if (provider !== 'claude')
+        return modes;
+    const choices = modes.some(m => m.id === 'inherit') ? [...modes] : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
+    if (!choices.some(m => m.id === 'auto'))
+        choices.splice(choices.findIndex(m => m.id === 'inherit') + 1, 0, { id: 'auto', label: 'Auto · safety checks' });
+    return choices;
 }
 export const inputModalitiesOf = (provider, model) => model.inputModalities ?? (['claude', 'codex'].includes(provider) ? ['text', 'image'] : ['text']);
 export const PROVIDER_LABELS = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };

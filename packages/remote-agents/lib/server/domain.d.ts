@@ -43,7 +43,7 @@ export interface Choice {
     label: string;
     isDefault?: boolean;
 }
-/** Older saved Claude catalogs also need a way to return to the remote CLI's settings. */
+/** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export declare function permissionModes(provider: string, modes: Choice[]): Choice[];
 /** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
 export interface Model extends Choice {

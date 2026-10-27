@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { enabledProvidersOf, PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
+import { enabledProvidersOf, permissionModes, PROVIDER_LABELS, remotePath, RemoteError } from './domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote } from './ssh.js';
 import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
 import { TaskHistory } from './history.js';
@@ -146,7 +146,7 @@ export class SshBackend {
                 else if (definition.protocol === 'claude') {
                     await peer.control({ subtype: 'initialize' });
                     models = claudeModels(await peer.control({ subtype: 'list_models' }));
-                    modes = [{ id: 'inherit', label: 'Remote CLI settings' }, { id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }];
+                    modes = permissionModes('claude', [{ id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }]);
                     defaultModeId = 'inherit';
                 }
                 else {

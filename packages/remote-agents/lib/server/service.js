@@ -271,7 +271,7 @@ export class RemoteAgentsService {
                     throw new RemoteError('The selected model is unavailable on this host', 409);
                 if (request.attachments?.some(a => a.kind === 'image') && !inputModalitiesOf(provider.id, model).includes('image'))
                     throw new RemoteError('This remote CLI does not support image input');
-                if (request.modeId && !provider.modes.some(m => m.id === request.modeId))
+                if (request.modeId && !permissionModes(provider.id, provider.modes).some(m => m.id === request.modeId))
                     throw new RemoteError('The selected mode is unavailable', 409);
                 if (request.thinkingOptionId && !model.thinkingOptions?.some(m => m.id === request.thinkingOptionId))
                     throw new RemoteError('The selected thinking level is unavailable', 409);
