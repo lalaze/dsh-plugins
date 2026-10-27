@@ -11,6 +11,7 @@ import { ChatProjects } from './chat-projects.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { WorkspaceAccess, type WorkspaceRuntime } from './workspace-access.js';
+import { RemoteWorkspaces } from './remote-workspaces.js';
 
 export const name = 'dsh-remote-agents';
 export const inject = ['connection'];
@@ -22,6 +23,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   const service = new RemoteAgentsService(store);
   const projects = new ChatProjects(service);
   const workspace = new WorkspaceAccess(() => store.hosts(), { runtime: () => ctx.get('subprocess') as WorkspaceRuntime | undefined });
+  const workspaces = new RemoteWorkspaces(service, workspace);
   const sessionCwd = async (sessionId: string): Promise<string | undefined> => {
     const sessions = ctx.get('sessions') as { get?(id: string): { header: { cwd?: string } } | undefined } | undefined;
     const live = () => sessions?.get?.(sessionId);
@@ -39,7 +41,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, async (id, signal) => {
     const cwd = await sessionCwd(id), placement = await workspace.resolve(cwd, signal);
     return cwd === await sessionCwd(id) ? placement : { hostIds: [] };
-  }) });
+  }, workspaces) });
   ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { agents: { get(id: string): unknown } };
     const steps = new Map<string, { session: Session; turn: number; step: number }>();

@@ -22,6 +22,8 @@ export class FakeRemote {
   catalog = structuredClone(providers);
   home = '/home/builder';
   homeError?: string;
+  /** Remote directories and their subdirectory names, keyed by canonical path. */
+  directories: Record<string, string[]> = { '/home/builder': ['app', 'notes'], '/home/builder/app': [], '/home/builder/notes': [], '/srv': ['app'], '/srv/app': [] };
   discoveries = 0;
   accountUsage: AccountUsage | null = null;
   accountReads: { provider: string; cwd?: string; refresh: boolean }[] = [];
@@ -45,6 +47,12 @@ export class FakeRemote {
     connect: async () => this.serverId,
     close: async () => { this.closes++; },
     homeDirectory: async () => { if (this.homeError) throw new Error(this.homeError); return this.home; },
+    listDirectory: async (path, options = {}) => {
+      const target = !path || path === '~' ? this.home : path.startsWith('~/') ? `${this.home}/${path.slice(2)}` : path.replace(/\/+$/, '') || '/';
+      const names = this.directories[target];
+      if (!names) throw new Error('Not a readable directory');
+      return { path: target, home: this.home, truncated: false, entries: options.entries === false ? [] : names.map(name => ({ name, path: `${target}/${name}` })) };
+    },
     providers: async () => { this.discoveries++; const enabled = enabledProvidersOf(this.store?.hosts().find(h => h.id === host.id) ?? host); return structuredClone(this.catalog.filter(p => enabled.includes(p.id))); },
     create: async task => {
       let agent = this.receipts.get(task.id);

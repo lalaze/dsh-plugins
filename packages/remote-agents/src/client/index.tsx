@@ -13,6 +13,7 @@ import { ModelLabel } from './model-label.js';
 import { installCustomModelLabels } from './custom-model-label.js';
 import { installWorkspaceModels, type WorkspaceClient } from './workspace-models.js';
 import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './usage.js';
+import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDirectories } from './workspace-flow.js';
 import { symbols } from '@deepseek-ai/cordis';
 
 export interface Client extends LocaleContext {
@@ -82,4 +83,10 @@ export function apply(ctx: Client): void {
   }));
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({ name: 'conversation.input.right', id: 'remote-agents-usage', order: 50 }, UsageRing));
   ctx.inject?.(['modelDirectories', 'sessions', 'workspaces'], scoped => installWorkspaceModels(scoped as unknown as WorkspaceClient));
+  // Add workspace gains a Remote machine tab. Ahead of DSH's own picker (0), behind dsh-remote's (-100) when both are installed.
+  const Flow = workspaceFlow(() => (ctx.get as ((name: string) => unknown) | undefined)?.('uiWorkspace') as LocalDirectories | undefined);
+  ctx.slots.inject(DIRECTORY_FLOWS[0], () => ctx.slots.inject(DIRECTORY_FLOWS[1], () => {
+    const disposers = DIRECTORY_FLOWS.map(name => ctx.slots.register({ name, id: 'remote-agents-workspace-flow', priority: DIRECTORY_FLOW_PRIORITY }, Flow));
+    return () => { for (const dispose of disposers) if (typeof dispose === 'function') dispose(); };
+  }));
 }

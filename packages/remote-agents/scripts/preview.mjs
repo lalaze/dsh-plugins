@@ -11,12 +11,15 @@ import { FakeRemote } from '../test/fakes.ts';
 import { ANTIGRAVITY_NOTICE } from '../src/antigravity.ts';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from '../src/native-chat.ts';
 import { ChatProjects } from '../src/chat-projects.ts';
+import { RemoteWorkspaces } from '../src/remote-workspaces.ts';
+import { WorkspaceAccess } from '../src/workspace-access.ts';
 import { randomUUID } from 'node:crypto';
 
 const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-preview-'));
 const store = new Store(join(directory, 'state.json')); await store.open();
 const remote = new FakeRemote();
 remote.store = store;
+remote.directories['/home/builder'] = ['app', 'notes', '.config']; remote.directories['/home/builder/.config'] = [];
 remote.catalog[0].models[0].label = 'Remote model';
 remote.catalog.push({ id: 'dsh', label: 'DSH', status: 'ready', models: [{ id: 'dsh-remote', label: 'DSH remote model' }], modes: [] });
 remote.catalog.push({ id: 'antigravity', label: 'Antigravity', status: 'ready', notice: ANTIGRAVITY_NOTICE, models: [{ id: 'agy-remote', label: 'Antigravity remote model' }], modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }], defaultModeId: 'default' });
@@ -39,7 +42,15 @@ const service = new RemoteAgentsService(store, host => {
     const agent = remote.agents.get(id);
     if (!agent.pendingPermissions.length) { remote.append(id, { type: 'assistant_message', text: answer.behavior === 'allow' ? '审批已通过，检查完成。' : '已拒绝该操作。' }); agent.status = 'idle'; }
   } };
-}, async () => sshConfig), handler = createHandler(service, undefined, async () => ({ hostIds: workspaceHostIds }));
+}, async () => sshConfig);
+// `ssh -G` for the preview: every alias resolves to itself as builder@alias:22.
+const endpoint = async connection => ({ host: new URL(connection).hostname, username: 'builder', port: 22 });
+const access = new WorkspaceAccess(() => store.hosts(), { home: directory, omc: join(directory, 'omc'), endpoint });
+const workspaces = new RemoteWorkspaces(service, access, { home: directory, endpoint });
+let createDelay = 0;
+const handler = createHandler(service, undefined, async () => ({ hostIds: workspaceHostIds }), {
+  create: async (...args) => { if (createDelay) await new Promise(resolve => setTimeout(resolve, createDelay)); return workspaces.create(...args); },
+});
 const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined });
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = await build({ absWorkingDir: root, entryPoints: ['test/ui/app.fixture.tsx'], bundle: true, write: false, outfile: 'preview.js', loader: { '.woff2': 'dataurl', '.woff': 'dataurl', '.ttf': 'dataurl' }, platform: 'browser', format: 'esm', target: 'es2022' });
@@ -57,6 +68,7 @@ const server = createServer(async (request, response) => {
         const input = JSON.parse(body.toString());
         if (Array.isArray(input.workspaceHostIds)) workspaceHostIds = input.workspaceHostIds;
         if (input.failReads !== undefined) failReads = input.failReads === true;
+        if (input.createDelay !== undefined) createDelay = Number(input.createDelay) || 0;
         if (input.connectionError !== undefined) connectionError = input.connectionError || undefined;
         if (input.sshConfig) { sshConfig.hosts = input.sshConfig.hosts; sshConfig.warnings = input.sshConfig.warnings ?? []; }
         if (input.loseSend) remote.loseSend = true;

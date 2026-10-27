@@ -24,7 +24,8 @@ test('enabling remote agents preserves the native model seat and its already-dec
   const ctx = {
     get(name: string) { return name === 'modelDirectories' ? { directoryFor() { throw new Error('Native picker owns model selection'); } } : undefined; },
     effect(factory: () => () => void) { cleanups.push(factory()); },
-    slots: { inject: (_name: string, factory: () => void) => factory(), register: core.register.bind(core) },
+    // Like the renderer, inject runs only once its slot is declared.
+    slots: { inject: (name: string, factory: () => void) => (core as unknown as { spec(name: string): unknown }).spec(name) ? factory() : undefined, register: core.register.bind(core) },
   } as Client;
   t.after(() => { for (const cleanup of cleanups.reverse()) cleanup(); });
   assert.doesNotThrow(() => apply(ctx));
@@ -61,7 +62,7 @@ test('remote labels coexist with a label contribution already registered by anot
   const ctx: Client = {
     effect(factory) { cleanups.push(factory()); },
     slots: {
-      inject(_name, factory) { const dispose = factory() as unknown; if (typeof dispose === 'function') cleanups.push(dispose as () => void); },
+      inject(name, factory) { if (!(core as unknown as { spec(name: string): unknown }).spec(name)) return; const dispose = factory() as unknown; if (typeof dispose === 'function') cleanups.push(dispose as () => void); },
       register,
     },
   };

@@ -40,8 +40,18 @@ try {
   if (!process.argv.includes('--models-only')) {
   // Remote sessions are available only from settings.
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")');
-  expect('window.fixture.slots.join() === "settings.section:remote-agents,conversation.input.model.label:remote-agents-model-label,conversation.input.right:remote-agents-usage"');
+  expect('window.fixture.slots.join() === "settings.section:remote-agents,conversation.input.model.label:remote-agents-model-label,conversation.input.right:remote-agents-usage,conversation.hero.workspace.directoryFlow:remote-agents-workspace-flow,sidebar.workspaces.directoryFlow:remote-agents-workspace-flow"');
   expect('!document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
+  // Add workspace: this plugin shadows DSH's own picker. Without saved machines the OS chooser opens directly.
+  const openFlow = () => { wait('document.querySelector("[data-flow-open=false]")'); browser('click', '[data-open-flow]'); };
+  expect('window.fixture.flow.owner === "remote-agents"');
+  openFlow(); wait('window.fixture.flow.picked.length === 1');
+  expect('window.fixture.flow.picked[0] === "/Users/me/project" && window.fixture.flow.picks === 1 && !document.querySelector(".ra-flow")');
+  evaluate('window.fixture.flow.localPick = null');
+  openFlow(); wait('window.fixture.flow.cancelled === 1');
+  expect('window.fixture.flow.picks === 2 && !document.querySelector(".ra-flow") && !window.fixture.flow.errors.length');
+  evaluate('window.fixture.flow.localPick = "/Users/me/project"');
+  console.log('PASS: Add workspace without saved machines behaves as the native picker');
   expect('!document.querySelector(".ra-chat-projects,[aria-label=项目名称],[aria-label=远程项目路径]")');
   wait('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://build-box\\"]")');
   browser('click', '.ra-ssh-trigger'); wait('document.querySelector(".ra-ssh-menu:popover-open")');
@@ -79,6 +89,72 @@ try {
   browser('click', 'button:text-is("刷新模型")');
   wait('document.querySelector(".ra-hosts .ra-badge")?.textContent === "已连接"');
   console.log('PASS: settings-only session entry, SSH alias keyboard selection, config refresh, host creation and connection');
+
+  // With a saved machine, Add workspace offers this computer or the machine.
+  const flowPath = 'document.querySelector(".ra-flow input[aria-label=文件夹路径]")?.value';
+  const flowEntries = '[...document.querySelectorAll(".ra-flow-entry")].map(e => e.textContent).sort().join()';
+  openFlow(); wait('document.querySelector("dialog.ra-flow[open]")');
+  expect('document.querySelector(".ra-flow [role=tab][aria-selected=true]").textContent === "本机"');
+  browser('click', '.ra-flow button:text-is("选择文件夹…")');
+  wait('window.fixture.flow.picked.length === 2'); wait('!document.querySelector("dialog.ra-flow")');
+  expect('window.fixture.flow.picked[1] === "/Users/me/project"');
+  openFlow(); wait('document.querySelector("dialog.ra-flow[open]")');
+  browser('click', '.ra-flow [role=tab]:text-is("远程机器")');
+  wait(`${flowPath} === "/home/builder"`);
+  expect(`${flowEntries} === "app,notes"`);
+  browser('check', '.ra-flow-foot input[type=checkbox]');
+  expect(`${flowEntries} === ".config,app,notes"`);
+  browser('uncheck', '.ra-flow-foot input[type=checkbox]');
+  expect('document.querySelector(".ra-flow .ra-foot").textContent.includes("build-box")');
+  browser('set', 'media', 'light'); image('workspace-flow-light');
+  browser('set', 'media', 'dark'); image('workspace-flow-dark');
+  browser('click', '.ra-flow-entry >> text="app"');
+  wait(`${flowPath} === "/home/builder/app"`); wait('document.querySelector(".ra-flow-note")?.textContent === "没有子文件夹"');
+  browser('click', '.ra-flow button:text-is("使用此文件夹")');
+  wait('window.fixture.flow.picked.length === 3'); wait('!document.querySelector("dialog.ra-flow")');
+  expect('window.fixture.flow.picked[2].endsWith("/remote-workspaces/build-box-builder-22/app")');
+  // Reopening restores the tab and the machine's last folder. Failures stay in the dialog; Escape cancels.
+  openFlow(); wait('document.querySelector("dialog.ra-flow[open]")');
+  wait(`${flowPath} === "/home/builder/app"`);
+  expect('document.querySelector(".ra-flow [role=tab][aria-selected=true]").textContent === "远程机器"');
+  // Only a folder that was listed successfully, and is still shown in the path field, can be added.
+  const useFolder = 'document.querySelector(".ra-flow-foot .ra-primary")';
+  expect(`!${useFolder}.disabled`);
+  browser('fill', '.ra-flow input[aria-label=文件夹路径]', '/home/builder/notes');
+  expect(`${useFolder}.disabled`);
+  browser('fill', '.ra-flow input[aria-label=文件夹路径]', '/srv/missing'); browser('press', 'Enter');
+  wait('document.querySelector(".ra-flow [role=alert]")?.textContent === "该路径不是可读取的目录"');
+  expect(`${useFolder}.disabled`);
+  browser('click', '.ra-flow button[aria-label=上一级]');
+  wait(`${flowPath} === "/home/builder"`); expect(`!document.querySelector(".ra-flow [role=alert]") && !${useFolder}.disabled`);
+  browser('set', 'viewport', '390', '844');
+  expect('(()=>{const r=document.querySelector("dialog.ra-flow").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&document.querySelector("dialog.ra-flow").scrollWidth<=r.width})()');
+  image('workspace-flow-mobile');
+  browser('set', 'viewport', '1440', '1000');
+  browser('press', 'Escape'); wait('!document.querySelector("dialog.ra-flow")');
+  expect('window.fixture.flow.cancelled === 2 && window.fixture.flow.picked.length === 3');
+  // A browse composition refuses the OS chooser: this computer is listed inside the dialog instead.
+  evaluate('window.fixture.flow.refusePick = true');
+  openFlow(); wait('document.querySelector("dialog.ra-flow[open]")');
+  browser('click', '.ra-flow [role=tab]:text-is("本机")');
+  browser('click', '.ra-flow button:text-is("选择文件夹…")');
+  wait(`${flowPath} === "/Users/me"`); expect(`${flowEntries} === "notes,project"`);
+  browser('click', '.ra-flow-entry >> text="notes"'); wait(`${flowPath} === "/Users/me/notes"`);
+  browser('click', '.ra-flow button[aria-label=上一级]'); wait(`${flowPath} === "/Users/me"`);
+  browser('click', '.ra-flow button:text-is("使用此文件夹")');
+  wait('window.fixture.flow.picked.length === 4'); wait('!document.querySelector("dialog.ra-flow")');
+  expect('window.fixture.flow.picked[3] === "/Users/me" && !window.fixture.flow.errors.length');
+  evaluate('window.fixture.flow.refusePick = false');
+  // Closing while a folder is being added cancels it: the late response reports nothing.
+  fixture({ createDelay: 1500 });
+  openFlow(); wait('document.querySelector("dialog.ra-flow[open]")');
+  browser('click', '.ra-flow [role=tab]:text-is("远程机器")'); wait(`${flowPath} === "/home/builder/app"`);
+  browser('click', '.ra-flow button:text-is("使用此文件夹")'); wait(`${useFolder}.textContent === "正在打开…"`);
+  browser('click', '.ra-flow button[aria-label=关闭]'); wait('!document.querySelector("dialog.ra-flow")');
+  evaluate('(async()=>{await new Promise(resolve => setTimeout(resolve, 2500));return true})()');
+  expect('window.fixture.flow.picked.length === 4 && window.fixture.flow.cancelled === 3 && !window.fixture.flow.errors.length');
+  fixture({ createDelay: 0 });
+  console.log('PASS: Add workspace with saved machines: this computer, remote browsing and adoption, remembered folder, unconfirmed and failed folders, cancel, cancelled adoption and browse fallback');
 
   const groups = state().modelGroups;
   if (groups.map(g => g.name).join(',') !== 'Codex') throw new Error('CLI providers were not exposed as separate model picker groups');
@@ -123,7 +199,7 @@ try {
   wait('document.querySelector(".ra-settings [role=alert]")?.textContent.includes("模拟连接中断")');
   fixture({ failReads: false }); browser('click', 'button:text-is("重试")');
   wait('document.querySelector(".ra-hosts input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 3 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
+  expect('window.fixture.slots.length === 5 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
   console.log('PASS: settings load failure and retry; session entry remains in settings without a sidebar or composer launcher');
 
@@ -241,7 +317,7 @@ try {
   const visible = '[data-ra-model-option]:not([data-ra-model-hidden])';
   browser('set', 'viewport', '1440', '1000');
   wait('document.querySelector("[data-native-picker] button")');
-  expect('window.fixture.slots.length === 3');
+  expect('window.fixture.slots.length === 5');
   browser('click', trigger); wait('document.querySelector("[data-menu-material] > button")');
   image('model-groups-native-root');
   browser('click', rootModel); wait('document.querySelector("[data-ra-model-provider]")');
