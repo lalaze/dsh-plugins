@@ -1,9 +1,10 @@
-import { cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError } from './domain.js';
+import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError } from './domain.js';
 import type { RemoteAgentsService } from './service.js';
 import { ChatProjects } from './chat-projects.js';
 import type { WorkspacePlacement } from './workspace-access.js';
+import type { RemoteWorkspaces } from './remote-workspaces.js';
 
-export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>) {
+export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Pick<RemoteWorkspaces, 'create'>) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
     try {
@@ -39,6 +40,11 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'addHost': result = await service.addHost(input.host, { discoverModels: true }); break;
         case 'removeHost': result = await service.removeHost(hostId(), { deleteAgents: input.deleteAgents === true }); break;
         case 'connect': result = await service.connect(hostId()); break;
+        case 'browse': result = await service.browse(hostId(), input.path === undefined ? undefined : browsePath(input.path)); break;
+        case 'createWorkspace': {
+          if (!workspaces) throw new RemoteError('Remote workspaces are unavailable', 501);
+          result = await workspaces.create(hostId(), browsePath(input.path), request.signal); break;
+        }
         case 'providers': result = await service.providers(hostId(), remotePath(input.cwd), input.refresh === true); break;
         case 'create': result = await service.create(input.agent, input.title === undefined ? {} : { title: field(input.title, 'title', 100) }); break;
         case 'agent': {

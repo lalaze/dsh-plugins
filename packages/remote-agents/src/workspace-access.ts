@@ -8,17 +8,20 @@ import { remotePath, type HostConfig } from './domain.js';
 import { connectionInput } from './ssh.js';
 
 export interface WorkspacePlacement { hostIds: string[]; cwd?: string }
-interface Endpoint { host: string; username: string; port: number }
-interface Binding { connection?: string; endpoint?: Endpoint; cwd: string; revision: string }
+export interface Endpoint { host: string; username: string; port: number }
+/** `alias` is the ~/.ssh/config Host a dsh-remote machine was saved as; its current resolution also identifies the machine. */
+interface Binding { connection?: string; endpoint?: Endpoint; alias?: string; cwd: string; revision: string }
 /** The public DSH subprocess contract; the provider owns remote workspace routing. */
 export interface WorkspaceRuntime {
   spawn(spec: { argv: string[]; cwd: string; stdio: { stdin: 'ignore'; stdout: 'pipe'; stderr: 'pipe' }; graceMs: number; signal: AbortSignal }): {
     stdout?: Readable; stderr?: Readable; terminate(): void; done: Promise<{ exitCode: number | null }>;
   };
 }
-const under = (root: string, path: string) => { const r = relative(root, path); return r === '' || r !== '..' && !r.startsWith(`..${sep}`) && !isAbsolute(r); };
+/** DSH's home directory, which holds dsh-remote's workspace folders under `remote-workspaces`. */
+export const dshHome = () => process.env.DSH_HOME?.trim() || join(homedir(), '.dsh');
+export const under = (root: string, path: string) => { const r = relative(root, path); return r === '' || r !== '..' && !r.startsWith(`..${sep}`) && !isAbsolute(r); };
 const normalizeHost = (host: string) => host.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
-const sameEndpoint = (a: Endpoint, b: Endpoint) => normalizeHost(a.host) === normalizeHost(b.host) && a.username === b.username && a.port === b.port;
+export const sameEndpoint = (a: Endpoint, b: Endpoint) => normalizeHost(a.host) === normalizeHost(b.host) && a.username === b.username && a.port === b.port;
 async function json(path: string): Promise<unknown> {
   try {
     if ((await stat(path)).size > 1_048_576) throw new Error('Remote workspace binding is too large');
@@ -45,7 +48,7 @@ export class WorkspaceAccess {
   constructor(private readonly hosts: () => readonly HostConfig[], private readonly options: {
     home?: string; omc?: string; endpoint?: typeof sshEndpoint; runtime?: () => WorkspaceRuntime | undefined;
   } = {}) {
-    this.home = options.home ?? (process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'));
+    this.home = options.home ?? dshHome();
     this.omc = options.omc ?? (process.env.DSH_OMC_STATE_DIR || join(homedir(), '.local', 'state', 'dsh-oh-my-claude'));
   }
   private async binding(cwd: string): Promise<Binding | undefined> {
@@ -63,7 +66,9 @@ export class WorkspaceAccess {
         if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) throw new Error();
         connectionInput(`ssh://${meta.username}@${meta.host.includes(':') && !meta.host.startsWith('[') ? `[${meta.host}]` : meta.host}:${port}`);
         const path = posix.join(remotePath(meta.remotePath), ...parts.slice(2));
-        return { endpoint: { host: meta.host, username: meta.username, port }, cwd: path, revision: JSON.stringify([realMirror, meta, path]) };
+        let alias: string | undefined;
+        try { alias = typeof meta.alias === 'string' && meta.alias ? connectionInput(meta.alias) : undefined; } catch { alias = undefined; }
+        return { endpoint: { host: meta.host, username: meta.username, port }, ...(alias ? { alias } : {}), cwd: path, revision: JSON.stringify([realMirror, meta, path]) };
       } catch { throw new Error('Cannot read a valid remote workspace binding'); }
     }
     const rows = await json(join(this.omc, 'remote-workspaces.json'));
@@ -88,9 +93,13 @@ export class WorkspaceAccess {
       return this.fromRuntime(cwd, signal);
     }
     const endpointFor = this.options.endpoint ?? sshEndpoint;
-    const endpoint = binding.endpoint ?? await endpointFor(binding.connection!, signal);
+    const endpoints = [binding.endpoint ?? await endpointFor(binding.connection!, signal)];
+    if (binding.alias) {
+      try { endpoints.push(await endpointFor(binding.alias, signal)); }
+      catch { signal?.throwIfAborted(); }
+    }
     const matches = await Promise.all(this.hosts().map(async host => {
-      try { return sameEndpoint(endpoint, await endpointFor(host.connection, signal)) ? host.id : undefined; }
+      try { const candidate = await endpointFor(host.connection, signal); return endpoints.some(endpoint => sameEndpoint(endpoint, candidate)) ? host.id : undefined; }
       catch (error) { signal?.throwIfAborted(); return undefined; }
     }));
     signal?.throwIfAborted();

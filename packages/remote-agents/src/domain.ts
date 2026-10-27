@@ -193,7 +193,11 @@ export interface AgentSummary {
 export interface AgentState { agent: AgentSummary; permissions: Permission[] }
 export interface AgentDetail extends AgentState { timeline: TimelinePage | null }
 export interface Dashboard { hosts: Host[]; agents: AgentSummary[] }
-export const busy = (agent: Pick<AgentSummary, 'status'>) => agent.status === 'starting' || agent.status === 'running' || agent.status === 'attention';
+/** One remote directory level: `path` is canonical; `entries` lists subdirectories only. */
+export interface DirectoryListing { path: string; home: string; entries: { name: string; path: string }[]; truncated: boolean }
+/** A remote directory adopted as a DSH workspace through its local anchor folder. */
+export interface RemoteWorkspace { hostId: string; path: string; remotePath: string }
+export const busy =(agent: Pick<AgentSummary, 'status'>) => agent.status === 'starting' || agent.status === 'running' || agent.status === 'attention';
 
 export class RemoteError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
@@ -214,6 +218,12 @@ export function identifier(value: unknown): string {
 export function remotePath(value: unknown): string {
   const path = field(value, 'remote project path');
   if (!/^(?:\/|[a-zA-Z]:[\\/])/.test(path) || /[\n]/.test(path)) throw new RemoteError('Enter an absolute remote project path');
+  return path;
+}
+/** An absolute remote path, or one under the remote home written as `~` or `~/…`. */
+export function browsePath(value: unknown): string {
+  const path = field(value, 'remote path');
+  if (!/^(?:\/|~$|~\/)/.test(path) || /\n/.test(path)) throw new RemoteError('Enter an absolute remote path or one starting with ~/');
   return path;
 }
 export function taskInput(value: unknown): TaskInput {

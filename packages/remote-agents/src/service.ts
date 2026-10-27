@@ -3,7 +3,7 @@ import { connectionInput, SshBackend, type Backend, type BackendFactory } from '
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from './domain.js';
-import { busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task, type UsageReport } from './domain.js';
+import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type HostConfig, type PermissionAnswer, type Task, type UsageReport } from './domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
 export interface UsageOptions {
@@ -192,6 +192,15 @@ export class RemoteAgentsService {
     };
   }
   async summary(id: string): Promise<AgentSummary> { const task = this.task(id); return this.summarize(task, await this.live(task)); }
+  /** One directory level on a verified host; `path` defaults to the remote home. */
+  async browse(hostId: string, path?: string, options: { entries?: boolean } = {}): Promise<DirectoryListing> {
+    const target = path === undefined ? undefined : browsePath(path);
+    // Listing runs outside `use`: a missing directory must not mark the host connection as failed.
+    const backend = await this.use(hostId, async backend => backend);
+    if (!backend.listDirectory) throw new RemoteError('This host cannot browse directories', 501);
+    try { return await backend.listDirectory(target, options); }
+    catch (error) { throw new RemoteError(this.safeError(error), 502); }
+  }
   async addHost(input: unknown, options: { discoverModels?: boolean } = {}): Promise<Dashboard> {
     const value = record(input);
     const host: HostConfig = { id: randomUUID(), label: field(value.label, 'host name', 100), connection: connectionInput(value.connection) };

@@ -61,7 +61,8 @@ export interface Child {
 }
 export interface StartOptions { stderr?(data: Buffer): void }
 export interface SshTransport {
-  exec(script: string, timeout?: number): Promise<string>;
+  /** `login: false` skips the remote login environment; for commands that need no CLI configuration. */
+  exec(script: string, timeout?: number, options?: { login?: boolean }): Promise<string>;
   start(cwd: string, argv: string[], options?: StartOptions): Child;
   upload?(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
   /** Commands run in a POSIX shell where a detached relay can outlive the connection. */
@@ -107,9 +108,9 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
   protected spawnRemote(command: string): ChildProcessWithoutNullStreams {
     return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   }
-  exec(script: string, timeout = 20_000): Promise<string> {
+  exec(script: string, timeout = 20_000, options: { login?: boolean } = {}): Promise<string> {
     return new Promise((resolve, reject) => {
-      const child = this.spawn(script); let stdout = '', stderr = '', bytes = 0;
+      const child = options.login === false ? this.spawnRemote(script) : this.spawn(script); let stdout = '', stderr = '', bytes = 0;
       const timer = setTimeout(() => { child.kill(); reject(new Error('SSH probe timed out')); }, timeout);
       child.stdout.on('data', data => { bytes += data.length; if (bytes > 2_000_000) { child.kill(); reject(new Error('SSH probe exceeded output limit')); } else stdout += data.toString(); });
       child.stderr.on('data', data => { stderr = (stderr + data).slice(-4000); });
