@@ -16,6 +16,7 @@ const CSS = `
 .dsh-translate-paragraph-card[data-state=busy]>div{display:flex;gap:6px;align-items:center;color:#a1a1aa}
 .dsh-translate-paragraph-card[data-state=busy] svg{flex:none;width:14px;height:14px}
 .dsh-translate-paragraph-card[data-state=error]{color:#fca5a5}
+.dsh-translate-paragraph-source{margin-bottom:2px;color:#a1a1aa;font-size:12px;overflow-wrap:anywhere}
 .dsh-translate-paragraph-close{position:absolute;top:4px;right:4px;width:22px;height:22px;padding:0;border:none;border-radius:5px;background:transparent;color:#a1a1aa;font-size:16px;line-height:1;cursor:pointer}
 .dsh-translate-paragraph-close:hover{background:rgba(127,127,127,.2);color:#f4f4f5}
 .dsh-translate-spinner{animation:dsh-translate-spin .8s linear infinite}

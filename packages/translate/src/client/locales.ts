@@ -20,7 +20,7 @@ export const zh = {
   "Translate paragraph": "翻译此段",
   "Hide translation": "隐藏译文",
   "Close": "关闭",
-  "Show a translate button beside message paragraphs": "在消息段落旁显示翻译按钮",
+  "Show a translate button beside message paragraphs and translate words on double-click": "在消息段落旁显示翻译按钮，并支持双击单词翻译",
   "API URL": "API 地址",
   "API Key": "API Key",
   "Model": "模型",

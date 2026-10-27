@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildTranslationPrompt, parseTranslationOutput, resolveTarget, translateSelection } from '../src/translate.js';
 import { defaultTranslationSettings, locksDraftsToEnglish, parseTranslationSettings } from '../src/settings.js';
+import { MAX_CONTEXT_LENGTH, parseTranslationRequest } from '../src/rpc.js';
 
 const settings = { ...defaultTranslationSettings, apiUrl: 'http://127.0.0.1:9999/v1/chat/completions', model: 'qwen-local' };
 test('auto target chooses English for Chinese and Chinese otherwise', () => {
@@ -43,4 +44,15 @@ test('the paragraph translate button is on by default and only a boolean turns i
   assert.equal(parseTranslationSettings({}).paragraphTranslate, true);
   assert.equal(parseTranslationSettings({ paragraphTranslate: false }).paragraphTranslate, false);
   assert.equal(parseTranslationSettings({ paragraphTranslate: 'false' }).paragraphTranslate, true);
+});
+test('a word with context is translated in the sense of its passage', async () => {
+  const prompt = buildTranslationPrompt('committed', 'zh-CN', 'It is committed on local main.');
+  assert.match(prompt, /Context: It is committed on local main\./); assert.match(prompt, /Word or phrase: committed/);
+  assert.doesNotMatch(buildTranslationPrompt('committed', 'zh-CN'), /Context/);
+  let sent = '';
+  await translateSelection({ text: 'committed', target: 'auto', context: 'It is committed on local main.', settings }, async (_url, init) => { sent = JSON.parse(String(init?.body)).messages[0].content; return new Response(JSON.stringify({ choices: [{ message: { content: '已提交' } }] }), { status: 200 }); });
+  assert.match(sent, /Context: It is committed/);
+  assert.equal(parseTranslationRequest({ text: 'word', settings, context: '  around  ' }).context, 'around');
+  assert.equal(parseTranslationRequest({ text: 'word', settings, context: 'x'.repeat(5000) }).context!.length, MAX_CONTEXT_LENGTH);
+  assert.equal('context' in parseTranslationRequest({ text: 'word', settings, context: 42 }), false);
 });

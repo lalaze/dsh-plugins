@@ -1,6 +1,6 @@
-import { MAX_SOURCE_LENGTH } from '../rpc.js';
+import { MAX_CONTEXT_LENGTH, MAX_SOURCE_LENGTH } from '../rpc.js';
 import { loadSettings, subscribeSettings, translate } from './api.js';
-import { messageSelector } from './dom.js';
+import { isWord, messageSelector } from './dom.js';
 import { i18n, localizeError, ui } from './i18n.js';
 
 // Overlays live outside DSH's message tree, so re-rendering or streaming a message never fights with them.
@@ -11,7 +11,9 @@ export const TRANSLATE_ICON_PATH = 'M1.5 3.5h7M5 2v1.5M3 3.5c.6 2.4 2.1 4.2 4.4 
 const icon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${TRANSLATE_ICON_PATH}"/></svg>`;
 const spinner = '<svg class="dsh-translate-spinner" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6" opacity="0.25"/><path d="M14 8a6 6 0 0 0-6-6"/></svg>';
 
-interface Card { block: Element; element: HTMLElement; body: HTMLElement }
+/** A translation card anchored to a paragraph, or to a double-clicked word's live range. */
+interface Card { key: object; scope: Element; rect(): DOMRect; alive(): boolean; width(rect: DOMRect): number; element: HTMLElement; body: HTMLElement }
+type Anchor = Omit<Card, 'element' | 'body'>;
 
 /** The innermost translatable block under `target` inside a chat message. */
 function blockAt(target: EventTarget | null): Element | null {
@@ -42,7 +44,7 @@ function gutter(block: Element): number {
 }
 
 function attach(): () => void {
-  const cards = new Map<Element, Card>();
+  const cards = new Map<object, Card>();
   let hovered: Element | null = null, hideTimer: ReturnType<typeof setTimeout> | undefined, frame = 0;
   const button = document.createElement('button');
   button.type = 'button'; button.className = 'dsh-translate-paragraph-button'; button.dataset.dshTranslateParagraph = ''; button.hidden = true; button.innerHTML = icon;
@@ -59,15 +61,15 @@ function attach(): () => void {
     button.hidden = false;
   };
   const placeCard = (card: Card) => {
-    if (!card.block.isConnected) { close(card); return; }
-    const rect = card.block.getBoundingClientRect(), bounds = area(card.block), element = card.element;
+    if (!card.alive()) { close(card); return; }
+    const rect = card.rect(), bounds = area(card.scope), element = card.element;
     const visible = rect.bottom > bounds.top && rect.top < bounds.bottom;
     element.style.visibility = visible ? '' : 'hidden';
     if (!visible) return;
-    const width = Math.min(Math.max(rect.width, 280), 620, innerWidth - 12);
+    const width = card.width(rect);
     element.style.width = `${width}px`;
     element.style.left = `${Math.min(Math.max(6, rect.left), innerWidth - width - 6)}px`;
-    // Below the paragraph by default; above it when the bottom of the conversation has no room.
+    // Below the anchor by default; above it when the bottom of the conversation has no room.
     const height = element.offsetHeight, below = rect.bottom + 6, above = rect.top - 6 - height;
     element.style.top = `${below + height <= bounds.bottom || above < bounds.top ? below : above}px`;
   };
@@ -78,20 +80,20 @@ function attach(): () => void {
   const observe = () => { observer.disconnect(); if (cards.size || !button.hidden) observer.observe(document.body, { childList: true, subtree: true, characterData: true }); };
 
   function hideButton() { clearTimeout(hideTimer); hovered = null; button.hidden = true; observe(); }
-  function close(card: Card) { card.element.remove(); if (cards.get(card.block) === card) cards.delete(card.block); label(); observe(); }
-  function open(block: Element) {
+  function close(card: Card) { card.element.remove(); if (cards.get(card.key) === card) cards.delete(card.key); label(); observe(); }
+  function open(anchor: Anchor, text: string, context?: string) {
     const element = document.createElement('div'), body = document.createElement('div'), dismiss = document.createElement('button');
     element.className = 'dsh-translate-paragraph-card'; element.dataset.dshTranslateParagraph = ''; element.dataset.state = 'busy'; element.setAttribute('role', 'status');
     body.innerHTML = spinner; body.append(ui('Translating…'));
     dismiss.type = 'button'; dismiss.className = 'dsh-translate-paragraph-close'; dismiss.textContent = '×'; dismiss.title = ui('Close'); dismiss.setAttribute('aria-label', ui('Close'));
-    const card: Card = { block, element, body };
+    const card: Card = { ...anchor, element, body };
     dismiss.addEventListener('click', () => close(card));
-    element.append(body, dismiss); document.body.append(element); cards.set(block, card);
+    if (context) { const source = document.createElement('div'); source.className = 'dsh-translate-paragraph-source'; source.textContent = text; element.append(source); }
+    element.append(body, dismiss); document.body.append(element); cards.set(card.key, card);
     placeCard(card); label(); observe();
-    const text = textOf(block);
-    const settle = (state: 'done' | 'error', value: string) => { if (cards.get(block) !== card) return; element.dataset.state = state; body.textContent = value; placeCard(card); };
+    const settle = (state: 'done' | 'error', value: string) => { if (cards.get(card.key) !== card) return; element.dataset.state = state; body.textContent = value; placeCard(card); };
     if (!text || text.length > MAX_SOURCE_LENGTH) { settle('error', localizeError('Text must contain 1–5,000 characters')); return; }
-    void translate(text, 'auto', loadSettings()).then(result => settle('done', result.translation), error => settle('error', localizeError(error instanceof Error ? error.message : String(error))));
+    void translate(text, 'auto', loadSettings(), context).then(result => settle('done', result.translation), error => settle('error', localizeError(error instanceof Error ? error.message : String(error))));
   }
 
   const onOver = (event: PointerEvent) => {
@@ -107,20 +109,38 @@ function attach(): () => void {
   // A click anywhere but a card or the paragraph button dismisses the cards; text in a card stays selectable.
   const onDown = (event: PointerEvent) => { if (cards.size && !(event.target instanceof Element && event.target.closest('[data-dsh-translate-paragraph]'))) closeAll(); };
   button.addEventListener('mousedown', event => event.preventDefault());
-  button.addEventListener('click', () => { if (!hovered) return; const card = cards.get(hovered); if (card) close(card); else open(hovered); });
-  document.addEventListener('pointerover', onOver); document.addEventListener('keydown', onKey); document.addEventListener('pointerdown', onDown, true);
+  button.addEventListener('click', () => {
+    const block = hovered; if (!block) return;
+    const card = cards.get(block);
+    if (card) close(card);
+    else open({ key: block, scope: block, rect: () => block.getBoundingClientRect(), alive: () => block.isConnected, width: rect => Math.min(Math.max(rect.width, 280), 620, innerWidth - 12) }, textOf(block));
+  });
+  // Double-clicking a word translates it in the sense of its surrounding passage.
+  const onDouble = (event: MouseEvent) => {
+    const selection = getSelection(), target = event.target;
+    if (!selection || selection.isCollapsed || !(target instanceof Element) || target.closest(skipSelector)) return;
+    const message = target.closest(messageSelector), text = selection.toString().trim();
+    if (!message || !isWord(text)) return;
+    const range = selection.getRangeAt(0).cloneRange(), scope = target.closest(blockSelector) ?? message;
+    if (!scope.contains(range.commonAncestorContainer)) return;
+    const before = document.createRange(); before.setStart(scope, 0); before.setEnd(range.startContainer, range.startOffset);
+    const passage = scope.textContent ?? '', at = before.toString().length, half = MAX_CONTEXT_LENGTH / 2;
+    const context = passage.length <= MAX_CONTEXT_LENGTH ? passage : passage.slice(Math.max(0, at - half), at + half);
+    open({ key: range, scope, rect: () => range.getBoundingClientRect(), alive: () => range.startContainer.isConnected, width: () => Math.min(360, innerWidth - 12) }, text, context.replace(/\s+/g, ' ').trim());
+  };
+  document.addEventListener('pointerover', onOver); document.addEventListener('keydown', onKey); document.addEventListener('pointerdown', onDown, true); document.addEventListener('dblclick', onDouble);
   document.addEventListener('scroll', schedule, true); window.addEventListener('resize', schedule);
   const unsubscribe = i18n.subscribe(label);
   return () => {
     unsubscribe(); observer.disconnect(); clearTimeout(hideTimer); if (frame) cancelAnimationFrame(frame);
-    document.removeEventListener('pointerover', onOver); document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown, true);
+    document.removeEventListener('pointerover', onOver); document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('dblclick', onDouble);
     document.removeEventListener('scroll', schedule, true); window.removeEventListener('resize', schedule);
     for (const card of cards.values()) card.element.remove();
     button.remove();
   };
 }
 
-/** A translate button beside each paragraph of a chat message, following the saved on/off setting. */
+/** A translate button beside each paragraph of a chat message and double-click word translation, following the saved on/off setting. */
 export function installParagraphTranslation(): () => void {
   let detach: (() => void) | undefined;
   const sync = () => {
