@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { apply, type Client } from '../../src/client/index.js';
 import { createLocaleFixture } from '../../../../scripts/locale-fixture.js';
@@ -48,8 +48,27 @@ Object.assign(window, { fixture: { setLocale: fixtureLocale.setLocale, slots: [.
 const theme = document.createElement('style');
 theme.textContent = ':root{--dsw-alias-label-primary:var(--dsh-text);--dsw-alias-label-secondary:var(--dsh-text-secondary);--dsw-alias-label-tertiary:var(--dsh-text-secondary);--dsw-alias-label-caption:var(--dsh-text-secondary);--dsw-menu-surface-fill:var(--dsh-bg-secondary);--dsw-radius-lg:12px;--dsw-radius-md:6px;--dsw-alias-interactive-bg-hover:#8882;--dsw-alias-menu-group-header-fill:var(--dsh-bg-secondary);--dsw-elevation-prominent:0 8px 32px #0004;--dsw-alias-bg-layer-1:var(--dsh-bg-secondary);--dsw-alias-bg-layer-3:var(--dsh-bg-card);--dsw-alias-border-l2:var(--dsh-border);--dsh-bg-card:#fff;--dsh-bg:#fafbfc;--dsh-bg-secondary:#f0f2f5;--dsh-border:#dce0e6;--dsh-text:#252931;--dsh-text-secondary:#687180}body{margin:0;background:var(--dsh-bg);color:var(--dsh-text)}@media(prefers-color-scheme:dark){:root{--dsh-bg-card:#2a2d33;--dsh-bg:#191b20;--dsh-bg-secondary:#21242a;--dsh-border:#353a44;--dsh-text:#e5e7eb;--dsh-text-secondary:#959da8}}';
 document.head.append(theme);
+// Explicit themes make the preview reviewable regardless of the reviewer's OS theme.
+const previewTheme = new URLSearchParams(location.search).get('theme');
+if (previewTheme === 'light' || previewTheme === 'dark') {
+  const palette = previewTheme === 'light'
+    ? { '--dsh-bg-card': '#fff', '--dsh-bg': '#fafbfc', '--dsh-bg-secondary': '#f0f2f5', '--dsh-border': '#dce0e6', '--dsh-text': '#252931', '--dsh-text-secondary': '#687180' }
+    : { '--dsh-bg-card': '#2a2d33', '--dsh-bg': '#191b20', '--dsh-bg-secondary': '#21242a', '--dsh-border': '#353a44', '--dsh-text': '#e5e7eb', '--dsh-text-secondary': '#959da8' };
+  for (const [key, value] of Object.entries(palette)) document.documentElement.style.setProperty(key, value);
+  document.documentElement.style.colorScheme = previewTheme;
+}
 const root = document.createElement('div'); document.body.append(root);
 const Settings = slots.get('settings.section:remote-agents')!;
 const Usage = slots.get('conversation.input.right:remote-agents-usage') as React.FC<{ sessionId?: string }>;
 const Picker = native.Picker;
-createRoot(root).render(<><Settings /><div data-native-picker style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1 }}><Picker /></div><div data-composer-right style={{ position: 'fixed', bottom: 60, right: 20, zIndex: 1 }}><Usage sessionId="fixture-conversation" /></div></>);
+function Preview() {
+  const settings = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.has('sessions')) settings.current?.querySelector<HTMLButtonElement>('.ra-settings-heading button')?.click();
+    const frame = params.has('history') ? requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('.ra-filters button:nth-child(2)')?.click()) : undefined;
+    return () => { if (frame !== undefined) cancelAnimationFrame(frame); };
+  }, []);
+  return <><div ref={settings}><Settings /></div><div data-native-picker style={{ position: 'fixed', bottom: 20, right: 20, zIndex: 1 }}><Picker /></div><div data-composer-right style={{ position: 'fixed', bottom: 60, right: 20, zIndex: 1 }}><Usage sessionId="fixture-conversation" /></div></>;
+}
+createRoot(root).render(<Preview />);

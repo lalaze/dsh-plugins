@@ -405,9 +405,14 @@ export class RemoteAgentsService {
     });
   }
   /** Soft delete: interrupt, release the CLI process and hide the agent. Output and the native session are kept. */
-  async archive(id: string, archived = true): Promise<AgentSummary> {
+  async archive(id: string, archived = true, options: { onlyIdle?: boolean } = {}): Promise<AgentSummary> {
     return this.serial(id, async () => {
       const task = this.task(id);
+      // A history row can become active between a dashboard poll and a bulk archive.
+      if (archived && options.onlyIdle) {
+        const latest = await this.summary(id);
+        if (busy(latest) || latest.status === 'error') throw new RemoteError('This session is active. Refresh before archiving.', 409);
+      }
       if (archived) await this.connection(task.hostId).backend.detach(task);
       await this.updateTask(id, next => { if (archived) next.archived = true; else delete next.archived; });
       return this.summary(id);

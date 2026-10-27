@@ -39,7 +39,7 @@ try {
   if (!process.argv.includes('--models-only')) {
   // Remote sessions are available only from settings.
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")');
-  expect('window.fixture.slots.join() === "settings.section:remote-agents,conversation.input.right:remote-agents-usage"');
+  expect('window.fixture.slots.join() === "settings.section:remote-agents,conversation.input.model.label:remote-agents-model-label,conversation.input.right:remote-agents-usage"');
   expect('!document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   expect('!document.querySelector(".ra-chat-projects,[aria-label=项目名称],[aria-label=远程项目路径]")');
   wait('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://build-box\\"]")');
@@ -122,20 +122,22 @@ try {
   wait('document.querySelector(".ra-settings [role=alert]")?.textContent.includes("模拟连接中断")');
   fixture({ failReads: false }); browser('click', 'button:text-is("重试")');
   wait('document.querySelector(".ra-hosts input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 2 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
+  expect('window.fixture.slots.length === 3 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
   console.log('PASS: settings load failure and retry; session entry remains in settings without a sidebar or composer launcher');
 
   fixture({ seedSessions: true });
   browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
-  expect('document.querySelectorAll(".ra-session-item").length === 3');
+  expect('document.querySelectorAll(".ra-session-item").length === 1');
+  image('sessions-overview');
   browser('fill', '[aria-label="搜索会话"]', 'no-such-session');
   expect('document.querySelectorAll(".ra-session-item").length === 0');
   browser('fill', '[aria-label="搜索会话"]', '');
-  browser('click', '.ra-filters button:text-is("待处理 (1)")');
   expect('document.querySelectorAll(".ra-session-item").length === 1');
   browser('click', '.ra-session-item'); wait('document.querySelector(".ra-permission")');
+  browser('click', 'button[aria-label="会话选项"]');
   expect('document.querySelector("[aria-label=权限模式]").disabled');
+  browser('click', 'button[aria-label="会话选项"]');
   browser('set', 'viewport', '390', '844');
   expect('document.querySelector("dialog").scrollWidth <= innerWidth');
   image('sessions-mobile-approval');
@@ -150,12 +152,15 @@ try {
   browser('click', 'button:text-is("返回会话列表")');
   expect('document.querySelector(".ra-session-list").getBoundingClientRect().width > 0');
   browser('set', 'viewport', '1440', '1000');
+  browser('click', '.ra-filters button:has-text("历史记录")');
   browser('click', '.ra-session-item:has-text("整理项目测试")'); wait('document.querySelector(".ra-output button")?.textContent === "加载更早的消息"');
+  browser('click', 'button[aria-label="会话选项"]');
   browser('select', '[aria-label="权限模式"]', 'full-access');
   wait('document.querySelector("[aria-label=权限模式]")?.value === "full-access" && !document.querySelector("[aria-label=权限模式]").disabled');
   if (state().tasks.find(t => t.title === '整理项目测试').modeId !== 'full-access') throw new Error('The session permission mode was not saved');
   browser('select', '[aria-label="权限模式"]', 'ask');
   wait('document.querySelector("[aria-label=权限模式]")?.value === "ask" && !document.querySelector("[aria-label=权限模式]").disabled');
+  browser('click', 'button[aria-label="会话选项"]');
   expect('!document.querySelector(".ra-output").textContent.includes("最早的一条历史消息")');
   browser('click', 'button:text-is("加载更早的消息")');
   wait('document.querySelector(".ra-output").textContent.includes("最早的一条历史消息")');
@@ -165,14 +170,15 @@ try {
   browser('click', 'button:text-is("检查送达情况")');
   wait('document.querySelector(".ra-compose button")?.textContent === "发送" && document.querySelector(".ra-output").textContent.includes("已完成：补充错误恢复测试")');
   if (state().sends !== 1 || state().interrupts) throw new Error('A lost response resent or interrupted the task');
+  browser('click', 'button[aria-label="会话选项"]');
   browser('click', 'button:text-is("重命名")'); browser('fill', '[aria-label="会话标题"]', '恢复测试已完成'); browser('click', '.ra-rename button');
   wait('document.querySelector(".ra-detail-heading h2")?.textContent === "恢复测试已完成"');
   browser('set', 'media', 'dark'); image('sessions-dark');
   browser('set', 'media', 'light'); image('sessions-light');
-  browser('click', 'button:text-is("归档")'); wait('document.querySelector(".ra-detail-heading .ra-badge")?.textContent === "已归档"');
-  browser('click', '.ra-filters button:text-is("已归档")'); wait('document.querySelectorAll(".ra-session-item").length === 1');
+  browser('click', 'button:text-is("归档")'); wait('document.querySelector(".ra-detail-actions")?.textContent.includes("恢复")');
+  browser('click', '.ra-archive-link'); wait('document.querySelectorAll(".ra-session-item").length === 1');
   browser('click', 'button:text-is("恢复")'); wait('document.querySelectorAll(".ra-session-item").length === 0');
-  browser('click', '.ra-filters button:text-is("全部会话")');
+  browser('click', '.ra-filters button:has-text("历史记录")');
   browser('click', '.ra-session-item:has-text("实现搜索功能")'); wait('document.querySelector(".ra-compose-note")');
   expect('!document.querySelector("[aria-label=给智能体发消息]")');
   browser('click', 'button:text-is("在主对话打开")'); wait('!document.querySelector("dialog[open]")');

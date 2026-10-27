@@ -52,7 +52,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'stop': await service.stop(agentId()); result = { ok: true }; break;
         case 'respond': await service.respond(agentId(), field(input.requestId, 'permission request', 500), input.answer); result = { ok: true }; break;
         case 'retry': result = await service.retry(agentId()); break;
-        case 'archive': result = await service.archive(agentId(), input.archived !== false); break;
+        case 'archive': result = await service.archive(agentId(), input.archived !== false, { onlyIdle: input.onlyIdle === true }); break;
         case 'rename': result = await service.rename(agentId(), field(input.title, 'title', 100)); break;
         case 'delete': await service.delete(agentId()); result = { ok: true }; break;
         case 'mode': result = await service.setMode(agentId(), field(input.modeId, 'mode', 200)); break;

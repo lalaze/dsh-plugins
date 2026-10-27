@@ -29,7 +29,7 @@ export function PermissionCard({ permission, busy, respond }: { permission: Perm
     {actions.some(a => a.scope === 'project') && <p className="ra-muted">{ui('Project approval saves only the suggested matching rules on the remote machine. Review them in Details.')}</p>}
     {(permission.detail || permission.input) && <details><summary>{ui('Details')}</summary><pre>{JSON.stringify(permission.detail ?? permission.input, null, 2)}</pre></details>}
     <div className="ra-actions" style={{ marginTop: 12 }}>
-      {actions.map(action => <button key={action.id} className={action.behavior === 'deny' ? 'ra-danger' : 'ra-primary'} disabled={busy} onClick={() => respond({ behavior: action.behavior, selectedActionId: action.id })}>{ui(action.label)}</button>)}
+      {actions.map(action => <button key={action.id} className={action.behavior === 'deny' ? 'ra-danger' : action.scope === 'once' ? 'ra-primary' : undefined} disabled={busy} onClick={() => respond({ behavior: action.behavior, selectedActionId: action.id })}>{ui(action.label)}</button>)}
       {!actions.length && (!questionForm || questions.length > 0) && <button className="ra-primary" disabled={busy || (questionForm && !complete)} onClick={() => respond({ behavior: 'allow', ...(questionForm ? { answers } : {}) })}>{ui(questionForm ? 'Submit answers' : 'Allow once')}</button>}
       {!actions.some(a => a.behavior === 'deny') && <button className="ra-danger" disabled={busy} onClick={() => respond({ behavior: 'deny' })}>{ui('Deny')}</button>}
     </div>

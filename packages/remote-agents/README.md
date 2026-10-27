@@ -29,7 +29,7 @@ Model catalogs are saved per machine on the DSH server and shared between client
 
 ## Unified remote sessions
 
-Open **Settings → Remote agents → Open sessions**. There is no remote sessions entry in the sidebar. The list includes main-chat bindings and delegated agents, with search by title, CLI, host or path, and filters for pending requests and archived sessions.
+Open **Settings → Remote agents → Open sessions**. There is no remote sessions entry in the sidebar. The list includes main-chat bindings and delegated agents, with search by title, CLI, host or path, and **In progress / History / Archived** views. The default view shows running tasks, pending approvals and errors; idle sessions move to History and remain available to continue. The two-pane interface groups sessions by date and shows the project, host and update time. Read conversations on the right; permission modes and renaming are in the header’s Session options. Archived sessions are linked at the bottom of the list. Agent replies render Markdown, and consecutive tool calls are collapsed into an expandable group.
 
 Choose **Permission mode** when creating a session or while an existing session is idle. Changes apply to the next message, including main-chat follow-ups. Claude defaults to **Remote CLI settings**, preserving the remote account/project permission configuration instead of forcing `default`. Existing sessions keep their explicit mode; select **Remote CLI settings** to return to the remote default. DSH workspace access does not grant remote CLI permissions. **Accept edits** still asks for commands requiring approval; **Full access** permits commands and edits without individual approval.
 
@@ -40,7 +40,7 @@ Native DSH approvals remain one-time grants. When Claude supplies matching allow
 - **Create:** choose a saved machine, CLI and model, then describe the task. The current DSH workspace path is used on that machine.
 - **History and follow-ups:** read streaming output, expandable reasoning and tool details, and load earlier history. Send follow-ups to background agents here; use **Open in main chat** for bound conversations so their native DSH history stays consistent.
 - **Approvals:** the sidebar counts sessions needing attention. Dismissing a native DSH approval keeps the request pending; respond in the session panel using the CLI's actual permission choices or question form. **Stop** explicitly interrupts the turn.
-- **Manage:** rename remote records, archive and restore them. Archiving preserves history and releases the CLI process. These actions affect the remote record, not the native DSH conversation's title or archive state.
+- **Manage:** rename remote records, archive and restore them. Use **Archive listed history** to archive the current search results in History. Each session is checked again before archiving so newly active sessions and pending approvals are skipped. Archiving preserves history and releases the CLI process. These actions affect the remote record, not the native DSH conversation's title or archive state.
 - **Delivery:** wait for the current turn or stop it before sending. After a lost response, **Check delivery** checks the same message without resending it. Pending messages survive reloads and reopening the session within the same browser tab.
 
 Closing the panel leaves background work running. See the recovery limits below for DSH shutdown and SSH disconnection.
@@ -102,10 +102,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.13.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.18.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.17:** Remote sessions use a two-pane reading layout with active/history views, date groups, bulk archiving, Markdown replies and collapsed tool activity. Permission mode and renaming are in the header’s Session options. Existing history and native CLI sessions remain available. Restart DSH and refresh the client after updating.
 
 **Upgrading from 0.2.12:** Adds image and file transfer from the main composer. Restart DSH and refresh the client after updating; refresh host models to pick up each CLI’s declared image capabilities.
 

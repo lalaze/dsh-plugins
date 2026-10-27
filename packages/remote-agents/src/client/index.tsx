@@ -1,3 +1,4 @@
+import { XIcon } from '@phosphor-icons/react/dist/csr/X';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { LocaleContext } from '@dsh-plugins/i18n';
@@ -47,7 +48,7 @@ function SessionDialog({ close, openChat, cwd }: { close: () => void; openChat: 
     return () => { element?.close(); document.body.style.overflow = overflow; if (focused instanceof HTMLElement) focused.focus(); };
   }, []);
   return createPortal(<dialog className="dsh-ra ra-dialog" ref={dialog} aria-label={ui('Remote sessions')} onCancel={close} onClose={close}>
-    <style>{styles}</style><div className="ra-dialog-bar"><span>{ui('Remote agents')}</span><button aria-label={ui('Close remote sessions')} onClick={close}>×</button></div>
+    <style>{styles}</style><div className="ra-dialog-bar"><span>{ui('Remote sessions')}</span><button aria-label={ui('Close remote sessions')} onClick={close}><XIcon size={19} /></button></div>
     <Sessions openChat={openChat} cwd={cwd} />
   </dialog>, document.body);
 }

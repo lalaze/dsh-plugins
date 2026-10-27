@@ -135,6 +135,32 @@ test('archive releases the CLI and hides the agent; messaging restores it; delet
   assert.equal((await service.removeHost(hostId)).hosts.length, 0);
 });
 
+test('history archiving rechecks live state, keeps output, and restores after a server restart', async t => {
+  const { service, remote, request, path } = await fixture(t);
+  const agent = await service.create(request());
+  remote.append(remote.live(agent.id).id, { type: 'assistant_message', text: 'Keep this result' });
+  const live = remote.live(agent.id);
+  live.status = 'running';
+  await assert.rejects(service.archive(agent.id, true, { onlyIdle: true }), /Refresh before archiving/);
+  live.status = 'error';
+  await assert.rejects(service.archive(agent.id, true, { onlyIdle: true }), /Refresh before archiving/);
+  live.status = 'idle';
+  live.pendingPermissions = [{ id: 'approval', name: 'Bash', kind: 'tool' }];
+  await assert.rejects(service.archive(agent.id, true, { onlyIdle: true }), /Refresh before archiving/);
+  assert.equal(remote.detaches, 0);
+  assert.equal((await service.summary(agent.id)).archived, false);
+  live.pendingPermissions = [];
+  await service.archive(agent.id, true, { onlyIdle: true });
+  await service.close();
+  const store = new Store(path); await store.open();
+  const resumed = new RemoteAgentsService(store, remote.backend); t.after(() => resumed.close());
+  assert.equal((await resumed.summary(agent.id)).archived, true);
+  const detail = await resumed.detail(agent.id);
+  assert.ok(detail.timeline?.entries.some(e => e.item.text === 'Keep this result'));
+  assert.equal((await resumed.archive(agent.id, false)).archived, false);
+  assert.equal(remote.forgets, 0);
+});
+
 test('mode changes use discovered modes, wait for idle, and apply by resuming the session', async t => {
   const { service, remote, request, store } = await fixture(t);
   const agent = await service.create(request());
