@@ -11,6 +11,7 @@ import { RemoteAgentsService } from '../src/service.js';
 import { TaskHistory } from '../src/history.js';
 import { createHandler } from '../src/http.js';
 import { fixture } from './fakes.js';
+import type { DshPermission } from '../src/domain.js';
 
 const CODEX_PROVIDER = chatProviderId('codex');
 const user = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } });
@@ -296,6 +297,38 @@ for (const mode of ['acceptEdits', 'auto']) test(`new Claude chats inherit remot
   await collect(adapter.stream({ ...input, messages: [...input.messages, user('Continue editing')] }));
   assert.equal(store.snapshot().tasks[0].modeId, mode);
   assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
+});
+
+test('Claude chats follow the DSH composer permission over a mode chosen in Open sessions', async t => {
+  let permission: DshPermission | undefined = 'workspace-write';
+  const { remote, projects, project, adapter, options, service, store } = await setup(t, { permission: () => permission });
+  remote.catalog[1] = { id: 'claude', label: 'Claude Code', status: 'ready', models: [{ id: 'claude-model', label: 'Claude model' }],
+    modes: [{ id: 'default', label: 'Ask before tools' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }] };
+  await projects.refresh(project.id);
+  const input = options('Follow the composer', { provider: chatProviderId('claude'), model: chatModelId(project.id, 'claude', 'claude-model') });
+  await collect(adapter.stream(input));
+  assert.equal(remote.created!.modeId, 'acceptEdits');
+  const task = store.snapshot().tasks[0];
+  await service.setMode(task.id, 'default'); permission = 'danger-full-access';
+  const second = { ...input, messages: [...input.messages, user('Continue with full access')] };
+  await collect(adapter.stream(second));
+  assert.equal(store.snapshot().tasks[0].modeId, 'bypassPermissions');
+  permission = 'auto';
+  await collect(adapter.stream({ ...second, messages: [...second.messages, user('Continue with Auto review')] }));
+  assert.equal(store.snapshot().tasks[0].modeId, 'auto');
+  permission = undefined;
+  await collect(adapter.stream({ ...second, messages: [...second.messages, user('Continue with a custom permission')] }));
+  assert.equal(store.snapshot().tasks[0].modeId, 'auto', 'a custom DSH permission keeps the saved mode');
+  assert.equal(remote.creates, 1); assert.equal(remote.sends, 3);
+});
+
+test('Codex chats map the DSH composer permission and skip modes their catalog lacks', async t => {
+  const { remote, projects, project, adapter, options } = await setup(t, { permission: () => 'read-only' });
+  await collect(adapter.stream(options('Not in the catalog')));
+  assert.equal(remote.created!.modeId, 'inherit');
+  remote.catalog[0].modes.push({ id: 'read-only', label: 'Read only' }); await projects.refresh(project.id);
+  await collect(adapter.stream(options('Read only', { sessionId: SessionId('read-only-conversation') })));
+  assert.equal(remote.created!.modeId, 'read-only');
 });
 
 test('new Codex chats use the remote CLI permission config instead of forcing workspace write', async t => {

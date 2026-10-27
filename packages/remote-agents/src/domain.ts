@@ -26,6 +26,18 @@ export function permissionModes(provider: string, modes: Choice[]): Choice[] {
   if (!choices.some(m => m.id === 'auto')) choices.splice(choices.findIndex(m => m.id === 'inherit') + 1, 0, { id: 'auto', label: 'Auto · safety checks' });
   return choices;
 }
+/** The DSH conversation's permission, as its preset's sandbox mode or `auto` for Auto review. */
+export type DshPermission = 'read-only' | 'workspace-write' | 'danger-full-access' | 'auto';
+const PRESET_MODES: Readonly<Record<string, Readonly<Record<DshPermission, string>>>> = {
+  // Claude has no read-only mode that keeps the normal workflow; asking before every tool is the closest.
+  claude: { 'read-only': 'default', 'workspace-write': 'acceptEdits', 'danger-full-access': 'bypassPermissions', auto: 'auto' },
+  codex: { 'read-only': 'read-only', 'workspace-write': 'workspace-write', 'danger-full-access': 'full-access', auto: 'workspace-write' },
+};
+/** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
+export function presetMode(provider: string, modes: Choice[], permission: DshPermission | undefined): string | undefined {
+  const mode = permission && PRESET_MODES[provider]?.[permission];
+  return mode && permissionModes(provider, modes).some(m => m.id === mode) ? mode : undefined;
+}
 /** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
 export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string; serviceTiers?: Choice[]; inputModalities?: ('text' | 'image')[] }
 export interface Provider {

@@ -5,7 +5,7 @@ import {
   type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk,
 } from '@deepseek-ai/dsh-llm';
 import type { Session, SessionSeq } from '@deepseek-ai/dsh-session';
-import { busy, inputModalitiesOf, remotePath, type Cursor, type TimelineEntry } from './domain.js';
+import { busy, inputModalitiesOf, presetMode, remotePath, type Cursor, type DshPermission, type TimelineEntry } from './domain.js';
 import { restoreFiles, stageAttachments, type AttachmentAccess } from './attachments.js';
 import { ChatProjects } from './chat-projects.js';
 import { decidePermission, type ToolHost } from './tools.js';
@@ -22,6 +22,8 @@ export interface ChatHost extends Partial<ToolHost> {
   workspace?(cwd: string, signal?: AbortSignal): Promise<WorkspacePlacement>;
   step(sessionId: NonNullable<GenerateOptions['sessionId']>): { session: Session; turn: number; step: number } | undefined;
   userContent?(sessionId: NonNullable<GenerateOptions['sessionId']>, messageId: string): readonly ContentBlock[] | undefined;
+  /** The conversation's permission from the DSH composer; undefined for a custom value or without permission presets. */
+  permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
   attachments?: AttachmentAccess;
 }
 const hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -253,12 +255,14 @@ export class RemoteCliAdapter extends LlmAdapter {
     try {
       const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
       if (!task) {
+        const composerMode = presetMode(provider.id, provider.modes, this.host.permission?.(sessionId));
         const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
         // A newly selected route receives prior human/assistant context, never local DSH tool schemas or its system prompt.
         admitted = true;
         const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt, ...(attachments.length ? { attachments } : {}),
-          // Native chats follow the remote CLI's own permission config; old cached Claude catalogs must not override it.
-          ...(provider.id === 'codex' ? { modeId: 'inherit' } : provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) },
+          // Native chats follow the DSH composer's permission. Without a matching mode Claude and Codex follow the
+          // remote CLI's own permission config; old cached Claude catalogs must not override it.
+          ...(composerMode ? { modeId: composerMode } : provider.id === 'codex' ? { modeId: 'inherit' } : provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) },
         { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, signal });
         if (!agent.started) throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
       } else {
@@ -280,6 +284,9 @@ export class RemoteCliAdapter extends LlmAdapter {
           }
           const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
           await service.setModel(task.id, model.id, effort, options.model, serviceTier);
+          // The composer's permission wins over a mode chosen in Open sessions; a custom DSH permission keeps the saved mode.
+          const mode = presetMode(task.provider, task.modes ?? [], this.host.permission?.(sessionId));
+          if (mode && mode !== service.store.task(t => t.id === task.id)?.modeId) await service.setMode(task.id, mode);
           admitted = true; await service.send(task.id, { id: messageId, text: prompt, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
         } else admitted = true;
       }
