@@ -16,13 +16,13 @@ async function* stream(chunks: StreamChunk[]) { yield* chunks; }
 async function collect(source: AsyncIterable<StreamChunk>) { const result: StreamChunk[] = []; for await (const chunk of source) result.push(chunk); return result; }
 const stop: StreamChunk = { type: 'finish', reason: { kind: 'stop' } };
 
-test('DSH 与 Claude SSH 汇总：缓存不重复计入，推理不额外累加；有无用量分开', () => {
+test('DSH 与远程智能体汇总（含旧 Claude SSH 记录）：缓存不重复计入，推理不额外累加；有无用量分开', () => {
   const records = [record(), record({ provider: 'claude-ssh-host', model: 'sonnet', usage: { inputTokens: 2, outputTokens: 3, cacheReadTokens: 7, cacheWriteTokens: 11 } }), record({ status: 'error', usage: undefined })];
   const data = report(records, { groupBy: 'source' });
   assert.equal(data.totals.totalTokens, 123);
   assert.equal(data.totals.requests, 3); assert.equal(data.totals.withUsage, 2); assert.equal(data.totals.errors, 1);
-  assert.equal(data.groups.find(g => g.key === 'claude-ssh')?.totals.totalTokens, 23);
-  assert.equal(report(records, { groupBy: 'model', source: 'claude-ssh' }).totals.requests, 1);
+  assert.equal(data.groups.find(g => g.key === 'remote-agents')?.totals.totalTokens, 23);
+  assert.equal(report(records, { groupBy: 'model', source: 'remote-agents' }).totals.requests, 1);
   assert.equal(report(records, { groupBy: 'model', source: 'dsh' }).totals.requests, 2);
 });
 test('优先使用供应商明确的总量；模型名相同但服务商不同不会合并', () => {
@@ -114,8 +114,8 @@ test('插件钩子覆盖两类调用；API、筛选和 CSV 共用持久化结果
     const response = await fetcher!(new Request('http://example.test/api/usage-stats?groupBy=source'));
     assert.equal(response.headers.get('Cache-Control'), 'no-store');
     const data = await response.json(); assert.equal(data.totals.requests, 2); assert.equal(data.totals.totalTokens, 10); assert.equal(data.groups.length, 2);
-    const filtered = await (await fetcher!(new Request('http://example.test/api/usage-stats?source=claude-ssh'))).json(); assert.equal(filtered.totals.requests, 1);
-    const csv = await fetcher!(new Request('http://example.test/api/usage-stats?source=claude-ssh&format=csv')); assert.match(csv.headers.get('Content-Type')!, /text\/csv/); assert.match(await csv.text(), /"1"/);
+    const filtered = await (await fetcher!(new Request('http://example.test/api/usage-stats?source=remote-agents'))).json(); assert.equal(filtered.totals.requests, 1);
+    const csv = await fetcher!(new Request('http://example.test/api/usage-stats?source=remote-agents&format=csv')); assert.match(csv.headers.get('Content-Type')!, /text\/csv/); assert.match(await csv.text(), /"1"/);
     assert.equal((await fetcher!(new Request('http://example.test/api/usage-stats?from=bad'))).status, 400);
     assert.equal((await fetcher!(new Request('http://example.test/api/usage-stats?format=bad'))).status, 400);
   } finally { dispose(); await rm(root, { recursive: true, force: true }); }
@@ -149,10 +149,10 @@ test('真实 Cordis 与 LlmRuntime waterfall 经适配器派发后恰好采集�
     other.emit('remote-agents/usage', { id: 'not-remote', startedAt: '2026-10-27T10:00:00.000Z', provider: 'deepseek', model: 'chat', purpose: 'delegation', status: 'completed', durationMs: 1 });
     await new Promise(resolve => setTimeout(resolve, 50));
     const remote = await (await fetcher!(new Request('http://example.test/api/usage-stats?source=remote-agents&groupBy=model'))).json();
-    assert.equal(remote.totals.requests, 2); assert.equal(remote.totals.totalTokens, 555);
-    assert.deepEqual(remote.groups.map((g: { label: string }) => g.label).sort(), ['remote-cli-claude / claude-opus-5 · priority', 'remote-cli-codex / gpt-5.5']);
+    assert.equal(remote.totals.requests, 3); assert.equal(remote.totals.totalTokens, 560);
+    assert.deepEqual(remote.groups.map((g: { label: string }) => g.label).sort(), ['claude-ssh-fixture / chat', 'remote-cli-claude / claude-opus-5 · priority', 'remote-cli-codex / gpt-5.5']);
     const sources = await (await fetcher!(new Request('http://example.test/api/usage-stats?groupBy=source'))).json();
-    assert.deepEqual(sources.groups.map((g: { key: string; label: string }) => [g.key, g.label]).sort(), [['claude-ssh', 'Remote Claude SSH'], ['dsh', 'DSH model calls'], ['remote-agents', 'Remote agents']]);
+    assert.deepEqual(sources.groups.map((g: { key: string; label: string }) => [g.key, g.label]).sort(), [['dsh', 'DSH model calls'], ['remote-agents', 'Remote agents']]);
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 test('调用进行时重载插件，新旧调用均保留在 API 与重启后的文件中', async () => {
@@ -187,12 +187,13 @@ test('调用进行时重载插件，新旧调用均保留在 API 与重启后的
     assert.equal(reloaded.totals.requests, 3);
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
 });
-test('远程智能体：remote-cli 服务商归入独立来源，聊天路由只保留模型与速度', async () => {
+test('远程智能体：remote-cli 与旧 claude-ssh 服务商归入同一来源，聊天路由只保留模型与速度', async () => {
   const { remoteModel, sourceOf } = await import('../src/domain.js');
-  assert.equal(sourceOf('remote-cli-claude'), 'remote-agents'); assert.equal(sourceOf('claude-ssh-host'), 'claude-ssh'); assert.equal(sourceOf('deepseek'), 'dsh');
+  assert.equal(sourceOf('remote-cli-claude'), 'remote-agents'); assert.equal(sourceOf('claude-ssh-host'), 'remote-agents', 'old Claude SSH records are remote turns'); assert.equal(sourceOf('deepseek'), 'dsh');
   assert.equal(remoteModel('host-1/claude/claude-opus-5'), 'claude-opus-5');
   assert.equal(remoteModel('host-1/codex/gpt-5.5/priority'), 'gpt-5.5 · priority');
   assert.equal(remoteModel('p1/claude/a%2Fb'), 'a/b');
   assert.equal(remoteModel('gpt-5.5'), 'gpt-5.5'); assert.equal(remoteModel('a/b/c/d/e'), 'a/b/c/d/e');
   assert.equal(parseQuery(new URL('http://example.test/?source=remote-agents')).source, 'remote-agents');
+  assert.throws(() => parseQuery(new URL('http://example.test/?source=claude-ssh')), /Unsupported request source/);
 });

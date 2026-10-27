@@ -40,7 +40,7 @@ try {
   wait('document.querySelectorAll("tbody tr").length === 2');
   expect('document.querySelectorAll(".us-bar-hit").length === 2');
   browser('snapshot', '-i');
-  browser('click', 'nav[aria-label="调用来源"] button:has-text("Claude SSH")');
+  browser('click', 'nav[aria-label="调用来源"] button:has-text("远程智能体")');
   wait(`${count}?.textContent === "2"`);
   expect(`${total}.textContent === "23" && document.body.textContent.includes("已返回用量 1/2")`);
   browser('select', '[aria-label="分组方式"]', 'model');
@@ -53,7 +53,7 @@ try {
   wait('document.querySelectorAll("tbody tr").length === 2');
   const csvPath = join(temp, 'usage.csv');
   browser('download', 'button:has-text("导出 CSV")', csvPath);
-  expect('window.fixture.requests.some(url => url.includes("source=claude-ssh") && url.includes("sessionId=remote-session") && url.includes("format=csv"))');
+  expect('window.fixture.requests.some(url => url.includes("source=remote-agents") && url.includes("sessionId=remote-session") && url.includes("format=csv"))');
   const csv = await readFile(csvPath, 'utf8');
   if (!csv.includes('claude-ssh-dev / sonnet') || csv.includes('deepseek-chat')) throw new Error('CSV did not preserve the active filters');
   evaluate('window.fixture.fail = true'); browser('click', 'button:has-text("刷新")');

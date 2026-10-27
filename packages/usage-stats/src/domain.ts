@@ -25,10 +25,10 @@ export interface Totals {
   totalTokens: number;
 }
 export type GroupBy = 'day' | 'model' | 'session' | 'source';
-export type Source = 'dsh' | 'claude-ssh' | 'remote-agents';
-/** dsh-claude-ssh names providers `claude-ssh-<host>`; dsh-remote-agents names its CLI routes `remote-cli-<cli>`. */
-export const sourceOf = (provider: string): Source => provider.startsWith('claude-ssh-') ? 'claude-ssh' : provider.startsWith('remote-cli-') ? 'remote-agents' : 'dsh';
-export const SOURCE_LABELS: Record<Source, string> = { dsh: "DSH model calls", 'claude-ssh': "Remote Claude SSH", 'remote-agents': "Remote agents" };
+export type Source = 'dsh' | 'remote-agents';
+/** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. */
+export const sourceOf = (provider: string): Source => provider.startsWith('remote-cli-') || provider.startsWith('claude-ssh-') ? 'remote-agents' : 'dsh';
+export const SOURCE_LABELS: Record<Source, string> = { dsh: "DSH model calls", 'remote-agents': "Remote agents" };
 /** dsh-remote-agents chat routes are `<machine>/<cli>/<model>[/<speed>]`; statistics keep the model and speed. */
 export function remoteModel(route: string): string {
   const [, cli, model, tier, ...extra] = route.split('/');
@@ -85,7 +85,7 @@ export function parseQuery(url: URL): Query {
   if (!['day', 'model', 'session', 'source'].includes(groupBy)) throw new Error("Unsupported grouping");
   const rawSource = p.get('source');
   let source: Source | undefined;
-  if (rawSource === 'dsh' || rawSource === 'claude-ssh' || rawSource === 'remote-agents') source = rawSource;
+  if (rawSource === 'dsh' || rawSource === 'remote-agents') source = rawSource;
   else if (rawSource) throw new Error("Unsupported request source");
   const from = date(p.get('from')); const to = date(p.get('to'));
   if (from && to && from > to) throw new Error("Start date must not be later than end date");

@@ -6,9 +6,9 @@ import { report, type UsageRecord } from '../src/domain.js';
 const record = (date: string, provider = 'deepseek', tokens = 10): UsageRecord => ({ id: date, startedAt: `${date}T12:00:00.000Z`, provider, model: 'chat', durationMs: 1, purpose: 'conversation', status: 'completed', usage: { inputTokens: tokens, outputTokens: 0 } });
 test('图表和排行使用同一筛选结果，不随明细分组切换丢失日期轴', () => {
   const records = [record('2026-10-01'), record('2026-10-03', 'claude-ssh-dev', 20), record('2026-10-04', 'claude-ssh-dev', 30)];
-  const data = report(records, { groupBy: 'session', source: 'claude-ssh', to: '2026-10-03' });
+  const data = report(records, { groupBy: 'session', source: 'remote-agents', to: '2026-10-03' });
   assert.equal(data.series.length, 1); assert.equal(data.series[0].key, '2026-10-03');
-  assert.equal(data.sources.length, 1); assert.equal(data.sources[0].key, 'claude-ssh');
+  assert.equal(data.sources.length, 1); assert.equal(data.sources[0].key, 'remote-agents');
   assert.equal(data.sources[0].totals.totalTokens, data.totals.totalTokens);
   assert.equal(data.series.reduce((n, g) => n + g.totals.requests, 0), data.totals.requests);
 });
