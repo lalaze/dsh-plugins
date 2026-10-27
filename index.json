@@ -27,6 +27,19 @@
       },
       "versions": [
         {
+          "version": "0.2.16",
+          "publishTimestamp": 1793071548,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "f7b38bdbeeff0c38b1b1f710fa602b8e611cd358",
+            "path": "packages/remote-agents"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
+        {
           "version": "0.2.15",
           "publishTimestamp": 1793066318,
           "source": {
