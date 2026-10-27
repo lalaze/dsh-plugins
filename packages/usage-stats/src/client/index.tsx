@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import type { Dimension, GroupBy, UsageReport, Totals } from '../domain.js';
 import { compact, dateRange, trendBuckets } from './metrics.js';
 import { styles } from './styles.js';
+import { TodayBadge } from './today.js';
 
 interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -165,4 +166,9 @@ export const inject = ['slots', 'locale'];
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'usage-stats', order: 70, label: () => ui("Usage statistics") }, Dashboard));
+  // Today's total at the start of the conversation header. A host that rejects the entry keeps the rest of the plugin working.
+  ctx.slots.inject('conversation.header.leading', () => {
+    try { return ctx.slots.register({ name: 'conversation.header.leading', id: 'usage-stats-today', order: 90 }, TodayBadge); }
+    catch (error) { console.warn('[dsh-usage-stats] Could not show today\'s usage in the conversation header', error); return undefined; }
+  });
 }

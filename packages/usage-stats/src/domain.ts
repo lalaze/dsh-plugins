@@ -39,7 +39,8 @@ export function remoteModel(route: string): string {
   if (!cli || !model || extra.length) return route;
   try { return decodeURIComponent(model) + (tier ? ` · ${decodeURIComponent(tier)}` : ''); } catch { return route; }
 }
-export interface Query { from?: string; to?: string; provider?: string; model?: string; sessionId?: string; source?: Source; groupBy: GroupBy }
+/** `tzOffset` is minutes east of UTC for day boundaries; without it days are UTC. */
+export interface Query { from?: string; to?: string; provider?: string; model?: string; sessionId?: string; source?: Source; groupBy: GroupBy; tzOffset?: number }
 export interface UsageGroup { key: string; label: string; totals: Totals }
 /** The dashboard's usage breakdowns: CLI or provider, workspace, model, model vendor and machine. */
 export type Dimension = 'provider' | 'workspace' | 'model' | 'vendor' | 'host';
@@ -131,7 +132,10 @@ export function parseQuery(url: URL): Query {
   const from = date(p.get('from')); const to = date(p.get('to'));
   if (from && to && from > to) throw new Error("Start date must not be later than end date");
   const filter = (key: string) => { const value = p.get(key) || undefined; if (value && value.length > 1024) throw new Error("Filter value is too long"); return value; };
-  return { from, to, groupBy: groupBy as GroupBy, source, provider: filter('provider'), model: filter('model'), sessionId: filter('sessionId') };
+  const tz = p.get('tz');
+  let tzOffset: number | undefined;
+  if (tz !== null && tz !== '') { tzOffset = Number(tz); if (!Number.isInteger(tzOffset) || tzOffset < -840 || tzOffset > 840) throw new Error("Unsupported time zone offset"); }
+  return { from, to, groupBy: groupBy as GroupBy, source, provider: filter('provider'), model: filter('model'), sessionId: filter('sessionId'), ...(tzOffset ? { tzOffset } : {}) };
 }
 export function report(records: readonly UsageRecord[], query: Query, failedWrites = 0): UsageReport {
   const totals = emptyTotals();
@@ -144,7 +148,7 @@ export function report(records: readonly UsageRecord[], query: Query, failedWrit
     add(group.totals, r);
   };
   for (const r of records) {
-    const day = r.startedAt.slice(0, 10);
+    const day = query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
     if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source)) continue;
     const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, modelOf(r)]) : r.sessionId ?? '';
     const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${modelOf(r)}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;

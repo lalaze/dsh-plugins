@@ -217,3 +217,13 @@ test('分类：Provider 按 CLI 合并，模型厂商按模型名识别，DSH �
   assert.deepEqual(rows('workspace').map(r => r[1]), ['/srv/a', '/srv/b', 'No workspace', '/home/me/app']);
   assert.equal(report(records, { groupBy: 'model', model: 'gpt-5.5 · priority' }).totals.requests, 1, 'the model filter uses the shown name');
 });
+test('时区偏移按本地日期划分“今日”，非法偏移被拒绝', () => {
+  const records = [record({ id: 'late', startedAt: '2026-10-26T20:00:00.000Z' }), record({ id: 'early', startedAt: '2026-10-27T16:30:00.000Z' })];
+  const shanghai = parseQuery(new URL('http://example.test/?from=2026-10-27&to=2026-10-27&tz=480'));
+  assert.equal(shanghai.tzOffset, 480);
+  assert.equal(report(records, shanghai).totals.requests, 1, '20:00 UTC on the 26th is the 27th in UTC+8; 16:30 UTC on the 27th is already the 28th');
+  assert.equal(report(records, { ...shanghai, tzOffset: undefined }).totals.requests, 1);
+  assert.deepEqual(report(records, { ...shanghai, from: undefined, to: undefined }).series.map(g => g.key), ['2026-10-27', '2026-10-28']);
+  for (const tz of ['900', '-841', '1.5', 'abc']) assert.throws(() => parseQuery(new URL(`http://example.test/?tz=${tz}`)), /time zone/);
+  assert.equal('tzOffset' in parseQuery(new URL('http://example.test/?tz=0')), false);
+});
