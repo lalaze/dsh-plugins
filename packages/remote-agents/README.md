@@ -116,6 +116,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.23:** A remote CLI is no longer started when its SSH host cannot run the background relay (no Node.js 18+ on the login PATH, or the relay cannot be installed); the response fails with the reason instead of silently using a direct SSH pipe that ends with DSH. Install Node.js 18 or newer on such hosts. New conversations are titled from your first message instead of DSH's title instruction; existing titles are not changed. Restart DSH after updating.
+
 **Upgrading from 0.2.22:** Claude and Codex in the main chat now follow the conversation's DSH permission (the composer or `/permission`) instead of always using the remote CLI's own settings: Workspace Write runs Claude in Accept edits, Full access runs without approval prompts, and Auto review runs Claude in Auto. The DSH permission overrides a mode chosen in Open sessions from the next message. Restart DSH after updating.
 
 **Upgrading from 0.2.21:** Every turn's usage, main chat included, now reaches `dsh-usage-stats` through the `remote-agents/usage` event with the machine name and remote directory, so usage can be broken down by host and workspace. Main chat no longer reports a turn's total to DSH as model usage, because it spans many model calls and would misstate the conversation's context size. Update `dsh-usage-stats` to 0.1.5 together with this version, or main-chat turns are counted twice. Restart DSH after updating.
