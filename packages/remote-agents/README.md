@@ -110,10 +110,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.19.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.20.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.19:** **Add workspace** gains a **Remote machine** tab that adds a saved machine's directory as a DSH workspace. Codex now also offers **Remote CLI settings**, which leaves approval policy and sandbox to `~/.codex/config.toml` on the remote machine. New main-chat conversations and agents DSH starts without an explicit mode use it for both Claude and Codex. Existing sessions keep their saved mode. Restart DSH and click **Refresh models** beside each machine after updating.
 
 **Upgrading from 0.2.18:** Remote CLIs now keep running when DSH quits or SSH disconnects, and DSH reconnects and catches up automatically. This needs Node.js 18+ on the SSH host. Restart DSH after updating; sessions created earlier switch to a relay the next time their CLI starts.
 

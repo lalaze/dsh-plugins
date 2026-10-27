@@ -110,10 +110,12 @@ DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要�
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.19.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.20.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.19 升级：** **添加工作区**新增“远程机器”页签，可将已保存机器上的目录添加为 DSH 工作区。Codex 也新增“沿用远端 CLI 设置”，审批策略和沙箱改由远端 `~/.codex/config.toml` 决定；新的主对话以及 DSH 未指定模式启动的智能体，Claude 和 Codex 均默认使用该模式。已有会话保留原模式。更新后重启 DSH，并点击各机器旁的 **刷新模型**。
 
 **从 0.2.18 升级：** 远程 CLI 现在会在 DSH 退出或 SSH 断开后继续运行，DSH 会自动重连并补齐输出。这需要 SSH 主机上有 Node.js 18 或更新版本。更新后重启 DSH；之前创建的会话会在下次启动 CLI 时改用中继。
 
