@@ -1,0 +1,9 @@
+# The sidebar's workspace browser comes from this package's fork of
+# ui-workspace, which registers the same slots; the stock one is disabled so
+# the two never claim them twice. Uninstalling this package restores it.
+- id: ui-workspace
+  disabled: true
+- insert:
+    - id: dsh-workspace-tags
+      name: dsh-workspace-tags
+      config: {}
