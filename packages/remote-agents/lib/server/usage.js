@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 const list = (value) => Array.isArray(value) ? value : [];
 const count = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 const capitalize = (value) => value ? value[0].toUpperCase() + value.slice(1) : value;
@@ -9,6 +10,17 @@ export function contextUsage(used, max) {
 /** Codex `thread/tokenUsage/updated`: the last request's total is what the context window holds. */
 export const codexContext = (usage) => contextUsage(usage?.last?.totalTokens ?? usage?.last?.total_tokens, usage?.modelContextWindow ?? usage?.model_context_window);
 const optional = (key, value) => value ? { [key]: value } : {};
+/** Providers match the `remote-cli-<cli>` chat routes; sessions are the DSH conversation, or the agent for other turns. */
+export function remoteUsageRecord(task, hosts, usage, turn, now = Date.now()) {
+    const started = turn.startedAt ? Date.parse(turn.startedAt) : NaN, host = hosts.find(h => h.id === task.hostId);
+    return {
+        id: randomUUID(), startedAt: new Date(Number.isFinite(started) ? started : now).toISOString(),
+        provider: `remote-cli-${task.provider}`, model: task.model, sessionId: task.chat?.sessionId ?? `remote-agent:${task.id}`,
+        purpose: task.chat ? 'conversation' : task.origin === 'dsh' ? 'delegation' : 'remote-session', status: turn.failed ? 'error' : 'completed',
+        durationMs: Number.isFinite(started) ? Math.max(0, now - started) : 0, usage,
+        ...(host ? { host: host.label } : {}), workspace: task.executionCwd ?? task.cwd,
+    };
+}
 /** Claude's `result.usage`: the whole turn, across every model call it made. */
 export function claudeTurnUsage(usage) {
     const input = count(usage?.input_tokens), output = count(usage?.output_tokens);

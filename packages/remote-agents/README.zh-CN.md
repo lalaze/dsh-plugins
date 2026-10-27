@@ -110,10 +110,12 @@ DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要�
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.21.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.22.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.21 升级：** 包括主对话在内，每轮用量都通过 `remote-agents/usage` 事件发送给 `dsh-usage-stats`，并附带主机名和远端目录，可按主机和工作区拆分。主对话不再把整轮合计作为模型用量报告给 DSH，因为它包含多次模型调用，会让 DSH 误判对话的上下文大小。请将 `dsh-usage-stats` 同时更新到 0.1.5，否则主对话轮次会被重复计数。更新后请重启 DSH。
 
 **从 0.2.20 升级：** 每轮结束时会记录本轮使用的 Token（Claude Code、Codex 及上报用量的 ACP CLI）。配合 `dsh-usage-stats` 0.1.3 或更新版本，可在**设置 → 使用量统计**的“远程智能体”来源中查看：主对话轮次经由 DSH 模型调用记录，DSH 分派的智能体和在“打开会话”中发送的轮次通过 `remote-agents/usage` 事件上报。更新前的轮次不会补录。更新后请重启 DSH。
 

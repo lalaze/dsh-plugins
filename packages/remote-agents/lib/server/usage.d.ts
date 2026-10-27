@@ -1,9 +1,28 @@
-import type { AccountUsage, ContextUsage, NativeProtocol, TurnUsage } from './domain.js';
+import type { AccountUsage, ContextUsage, HostConfig, NativeProtocol, Task, TurnUsage } from './domain.js';
 import type { JsonlPeer } from './ssh.js';
 /** Context fill, or nothing until the CLI has reported a window size. */
 export declare function contextUsage(used: unknown, max: unknown): ContextUsage | undefined;
 /** Codex `thread/tokenUsage/updated`: the last request's total is what the context window holds. */
 export declare const codexContext: (usage: any) => ContextUsage | undefined;
+/** One finished remote turn's usage, in dsh-usage-stats' record shape, with the machine and remote directory it ran in. */
+export interface RemoteUsageRecord {
+    id: string;
+    startedAt: string;
+    provider: string;
+    model: string;
+    sessionId?: string;
+    purpose: 'conversation' | 'delegation' | 'remote-session';
+    status: 'completed' | 'error';
+    durationMs: number;
+    usage: TurnUsage;
+    host?: string;
+    workspace?: string;
+}
+/** Providers match the `remote-cli-<cli>` chat routes; sessions are the DSH conversation, or the agent for other turns. */
+export declare function remoteUsageRecord(task: Task, hosts: readonly HostConfig[], usage: TurnUsage, turn: {
+    startedAt: string | null;
+    failed: boolean;
+}, now?: number): RemoteUsageRecord;
 /** Claude's `result.usage`: the whole turn, across every model call it made. */
 export declare function claudeTurnUsage(usage: any): TurnUsage | undefined;
 /** Codex reports running thread totals; a turn used the difference since the previous turn ended. */

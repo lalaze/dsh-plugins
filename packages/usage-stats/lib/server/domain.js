@@ -13,7 +13,49 @@ export function remoteModel(route) {
         return route;
     }
 }
+export const DIMENSIONS = ['provider', 'workspace', 'model', 'vendor', 'host'];
 const counters = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens', 'totalTokens'];
+const CLI_LABELS = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', codebuddy: 'CodeBuddy', antigravity: 'Antigravity', dsh: 'DSH' };
+/** Remote turns are named by their CLI, which merges a CLI's turns across machines; DSH providers keep their ID. */
+export function providerLabel(provider) {
+    const cli = /^remote-cli-(.+)$/.exec(provider)?.[1];
+    return cli ? CLI_LABELS[cli] ?? cli : provider.startsWith('claude-ssh-') ? 'Claude Code' : provider;
+}
+/** Older remote main-chat records kept the chat route as their model. */
+export const modelOf = (r) => r.provider.startsWith('remote-cli-') ? remoteModel(r.model) : r.model;
+// The same model-name and provider rules dsh-session-models uses for its vendor icons.
+const MODEL_VENDORS = [
+    [/claude|sonnet|opus|haiku/i, 'Anthropic'], [/deepseek/i, 'DeepSeek'], [/gemini|gemma/i, 'Google'], [/grok/i, 'xAI'], [/qwen|qwq/i, 'Qwen'],
+    [/kimi|moonshot/i, 'Moonshot'], [/\bglm|chatglm/i, 'Zhipu'], [/doubao/i, 'Doubao'], [/minimax|\babab/i, 'MiniMax'],
+    [/mistral|codestral|devstral|magistral/i, 'Mistral'], [/\bgpt|\bo[1-9](?:-|$)|codex|chatgpt/i, 'OpenAI'],
+];
+const PROVIDER_VENDORS = [
+    [/anthropic|claude/i, 'Anthropic'], [/openai|codex|azure/i, 'OpenAI'], [/deepseek|^dsh$/i, 'DeepSeek'], [/gemini|google|vertex/i, 'Google'],
+    [/xai|grok/i, 'xAI'], [/qwen|dashscope|bailian|alibaba/i, 'Qwen'], [/moonshot|kimi/i, 'Moonshot'], [/zhipu|bigmodel|glm/i, 'Zhipu'],
+    [/doubao|volcengine/i, 'Doubao'], [/minimax/i, 'MiniMax'], [/mistral/i, 'Mistral'], [/antigravity/i, 'Google'], [/codebuddy/i, 'Tencent'],
+];
+export function vendorOf(r) {
+    const model = modelOf(r), provider = r.provider.replace(/^remote-cli-/, '');
+    return MODEL_VENDORS.find(([pattern]) => pattern.test(model))?.[1] ?? PROVIDER_VENDORS.find(([pattern]) => pattern.test(provider))?.[1] ?? 'Other';
+}
+/** Group key and label; placeholder labels (empty or `?` keys) are translated by the dashboard. */
+function dimension(r, by) {
+    if (by === 'provider') {
+        const label = providerLabel(r.provider);
+        return [label, label];
+    }
+    if (by === 'workspace')
+        return r.workspace ? [r.workspace, r.workspace] : ['', "No workspace"];
+    if (by === 'model') {
+        const model = modelOf(r);
+        return [model, model];
+    }
+    if (by === 'vendor') {
+        const vendor = vendorOf(r);
+        return [vendor, vendor];
+    }
+    return r.host ? [r.host, r.host] : sourceOf(r.provider) === 'dsh' ? ['', "This computer"] : ['?', "Unknown host"];
+}
 export function validUsage(value) {
     if (!value || typeof value !== 'object')
         return false;
@@ -27,6 +69,7 @@ export function validRecord(value) {
     return typeof r.id === 'string' && typeof r.startedAt === 'string' && Number.isFinite(Date.parse(r.startedAt)) &&
         typeof r.provider === 'string' && typeof r.model === 'string' && typeof r.purpose === 'string' &&
         (r.sessionId === undefined || typeof r.sessionId === 'string') && ['completed', 'error', 'cancelled'].includes(r.status) &&
+        (r.host === undefined || typeof r.host === 'string' && r.host.length <= 1024) && (r.workspace === undefined || typeof r.workspace === 'string' && r.workspace.length <= 4096) &&
         Number.isFinite(r.durationMs) && r.durationMs >= 0 && (r.usage === undefined || validUsage(r.usage));
 }
 function emptyTotals() {
@@ -71,13 +114,21 @@ export function parseQuery(url) {
         throw new Error("Start date must not be later than end date");
     const filter = (key) => { const value = p.get(key) || undefined; if (value && value.length > 1024)
         throw new Error("Filter value is too long"); return value; };
-    return { from, to, groupBy: groupBy, source, provider: filter('provider'), model: filter('model'), sessionId: filter('sessionId') };
+    const tz = p.get('tz');
+    let tzOffset;
+    if (tz !== null && tz !== '') {
+        tzOffset = Number(tz);
+        if (!Number.isInteger(tzOffset) || tzOffset < -840 || tzOffset > 840)
+            throw new Error("Unsupported time zone offset");
+    }
+    return { from, to, groupBy: groupBy, source, provider: filter('provider'), model: filter('model'), sessionId: filter('sessionId'), ...(tzOffset ? { tzOffset } : {}) };
 }
 export function report(records, query, failedWrites = 0) {
     const totals = emptyTotals();
     const groups = new Map();
     const series = new Map();
     const sources = new Map();
+    const breakdowns = Object.fromEntries(DIMENSIONS.map(by => [by, new Map()]));
     const accumulate = (map, key, label, r) => {
         let group = map.get(key);
         if (!group) {
@@ -87,20 +138,24 @@ export function report(records, query, failedWrites = 0) {
         add(group.totals, r);
     };
     for (const r of records) {
-        const day = r.startedAt.slice(0, 10);
-        if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && r.model !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source))
+        const day = query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
+        if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source))
             continue;
-        const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, r.model]) : r.sessionId ?? '';
-        const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${r.model}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
+        const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : query.groupBy === 'model' ? JSON.stringify([r.provider, modelOf(r)]) : r.sessionId ?? '';
+        const label = query.groupBy === 'source' ? SOURCE_LABELS[sourceOf(r.provider)] : query.groupBy === 'model' ? `${r.provider} / ${modelOf(r)}` : query.groupBy === 'session' ? r.sessionId ?? "No session (auxiliary call)" : day;
         add(totals, r);
         accumulate(groups, key, label, r);
         accumulate(series, day, day, r);
         accumulate(sources, sourceOf(r.provider), SOURCE_LABELS[sourceOf(r.provider)], r);
+        for (const by of DIMENSIONS)
+            accumulate(breakdowns[by], ...dimension(r, by), r);
     }
+    const largest = (map) => [...map.values()].sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || b.totals.requests - a.totals.requests || a.label.localeCompare(b.label));
     return { totals, groups: [...groups.values()].sort((a, b) => query.groupBy === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
         series: [...series.values()].sort((a, b) => a.key.localeCompare(b.key)),
         sources: [...sources.values()].sort((a, b) => a.key.localeCompare(b.key)),
-        filters: { providers: [...new Set(records.map(r => r.provider))].sort(), models: [...new Set(records.map(r => r.model))].sort(), sessions: [...new Set(records.flatMap(r => r.sessionId ? [r.sessionId] : []))].sort() },
+        breakdowns: Object.fromEntries(DIMENSIONS.map(by => [by, largest(breakdowns[by])])),
+        filters: { providers: [...new Set(records.map(r => r.provider))].sort(), models: [...new Set(records.map(modelOf))].sort(), sessions: [...new Set(records.flatMap(r => r.sessionId ? [r.sessionId] : []))].sort() },
         query, recordedSince: records.reduce((first, r) => !first || r.startedAt < first ? r.startedAt : first, undefined), failedWrites, generatedAt: new Date().toISOString() };
 }
 export function toCsv(data) {

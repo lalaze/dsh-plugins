@@ -1,5 +1,4 @@
 import Schema from '@deepseek-ai/schemastery';
-import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from './store.js';
@@ -7,9 +6,10 @@ import { RemoteAgentsService } from './service.js';
 import { createHandler } from './http.js';
 import { delegationTools } from './tools.js';
 import { ChatProjects } from './chat-projects.js';
-import { CHAT_PROVIDERS, chatProviderId, RemoteCliAdapter } from './native-chat.js';
+import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import { WorkspaceAccess } from './workspace-access.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
+import { remoteUsageRecord } from './usage.js';
 export const name = 'dsh-remote-agents';
 export const inject = ['connection'];
 const stateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', name);
@@ -34,17 +34,12 @@ export async function apply(ctx, config = {}) {
     };
     // Close the store last: a reloaded plugin's new instance owns the state from then on.
     ctx.effect(() => async () => { await service.close(); await store.close(); });
-    // Main-chat turns report usage through their DSH model call; every other turn is announced for usage statistics.
-    let following = (_taskId) => false;
+    // Every finished turn is announced for usage statistics. Main chat does not report usage to DSH: a CLI turn's total
+    // spans many model calls and would misstate the conversation's context size.
     store.usageListeners.add((taskId, usage, turn) => {
         const task = store.task(t => t.id === taskId);
-        if (!task || following(taskId))
-            return;
-        const ended = Date.now(), started = turn.startedAt ? Date.parse(turn.startedAt) : NaN;
-        ctx.emit('remote-agents/usage', { id: randomUUID(), startedAt: new Date(Number.isFinite(started) ? started : ended).toISOString(),
-            provider: chatProviderId(task.provider), model: task.model, sessionId: task.chat?.sessionId ?? `remote-agent:${task.id}`,
-            purpose: task.origin === 'dsh' ? 'delegation' : 'remote-session', status: turn.failed ? 'error' : 'completed',
-            durationMs: Number.isFinite(started) ? Math.max(0, ended - started) : 0, usage });
+        if (task)
+            ctx.emit('remote-agents/usage', remoteUsageRecord(task, store.hosts(), usage, turn));
     });
     // Persistent CLIs kept running while DSH was away; reattach and catch up in the background.
     void service.resume();
@@ -82,7 +77,6 @@ export async function apply(ctx, config = {}) {
         const registration = scoped.llm.registerAdapter(CHAT_PROVIDERS, adapter);
         scoped.effect(() => projects.onChange(() => registration.replace(CHAT_PROVIDERS)));
         scoped.effect(() => () => adapter.close());
-        scoped.effect(() => { following = taskId => adapter.streaming(taskId); return () => { following = () => false; }; });
     });
     // Native conversation routes and settings also work without the delegation tool registry.
     ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {

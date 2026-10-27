@@ -110,10 +110,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.21.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.22.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.21:** Every turn's usage, main chat included, now reaches `dsh-usage-stats` through the `remote-agents/usage` event with the machine name and remote directory, so usage can be broken down by host and workspace. Main chat no longer reports a turn's total to DSH as model usage, because it spans many model calls and would misstate the conversation's context size. Update `dsh-usage-stats` to 0.1.5 together with this version, or main-chat turns are counted twice. Restart DSH after updating.
 
 **Upgrading from 0.2.20:** Each finished turn now records the tokens it used (Claude Code, Codex, and ACP CLIs that report usage). With `dsh-usage-stats` 0.1.3 or later, they appear under **Remote agents** in **Settings → Usage statistics**: main-chat turns through their DSH model call, delegated agents and turns sent from **Open sessions** through a `remote-agents/usage` event. Turns from before the update are not imported. Restart DSH after updating.
 

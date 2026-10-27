@@ -1,21 +1,9 @@
 import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
-import type { TurnUsage } from './domain.js';
-/** One finished remote turn's usage, in dsh-usage-stats' record shape. */
-export interface RemoteUsageRecord {
-    id: string;
-    startedAt: string;
-    provider: string;
-    model: string;
-    sessionId?: string;
-    purpose: 'delegation' | 'remote-session';
-    status: 'completed' | 'error';
-    durationMs: number;
-    usage: TurnUsage;
-}
+import { type RemoteUsageRecord } from './usage.js';
 declare module '@deepseek-ai/cordis' {
     interface Events {
-        /** A remote CLI turn that no DSH model call covered, such as delegated agents and turns sent from the sessions panel. */
+        /** Every finished remote CLI turn: main-chat replies, delegated agents and turns sent from the sessions panel. */
         'remote-agents/usage'(record: RemoteUsageRecord): void;
     }
 }

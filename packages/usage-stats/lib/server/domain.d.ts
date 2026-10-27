@@ -9,6 +9,10 @@ export interface UsageRecord {
     status: 'completed' | 'error' | 'cancelled';
     durationMs: number;
     usage?: TokenUsage;
+    /** Remote turns: the machine's saved name. DSH model calls run on this computer and leave it unset. */
+    host?: string;
+    /** The conversation's workspace directory: remote for remote turns, local for DSH model calls. */
+    workspace?: string;
 }
 export interface Totals {
     requests: number;
@@ -30,6 +34,7 @@ export declare const sourceOf: (provider: string) => Source;
 export declare const SOURCE_LABELS: Record<Source, string>;
 /** dsh-remote-agents chat routes are `<machine>/<cli>/<model>[/<speed>]`; statistics keep the model and speed. */
 export declare function remoteModel(route: string): string;
+/** `tzOffset` is minutes east of UTC for day boundaries; without it days are UTC. */
 export interface Query {
     from?: string;
     to?: string;
@@ -38,15 +43,21 @@ export interface Query {
     sessionId?: string;
     source?: Source;
     groupBy: GroupBy;
+    tzOffset?: number;
 }
 export interface UsageGroup {
     key: string;
     label: string;
     totals: Totals;
 }
+/** The dashboard's usage breakdowns: CLI or provider, workspace, model, model vendor and machine. */
+export type Dimension = 'provider' | 'workspace' | 'model' | 'vendor' | 'host';
+export declare const DIMENSIONS: readonly Dimension[];
 export interface UsageReport {
     totals: Totals;
     groups: UsageGroup[];
+    /** Every breakdown of the filtered records, largest first. */
+    breakdowns: Record<Dimension, UsageGroup[]>;
     series: UsageGroup[];
     sources: UsageGroup[];
     filters: {
@@ -59,6 +70,11 @@ export interface UsageReport {
     failedWrites: number;
     generatedAt: string;
 }
+/** Remote turns are named by their CLI, which merges a CLI's turns across machines; DSH providers keep their ID. */
+export declare function providerLabel(provider: string): string;
+/** Older remote main-chat records kept the chat route as their model. */
+export declare const modelOf: (r: Pick<UsageRecord, "provider" | "model">) => string;
+export declare function vendorOf(r: Pick<UsageRecord, 'provider' | 'model'>): string;
 export declare function validUsage(value: unknown): value is TokenUsage;
 export declare function validRecord(value: unknown): value is UsageRecord;
 export declare function parseQuery(url: URL): Query;

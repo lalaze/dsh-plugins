@@ -27,9 +27,6 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     private readonly host;
     private readonly pollMs;
     private active;
-    /** Tasks whose turn a DSH stream is following; its usage reaches statistics through that stream. */
-    private following;
-    streaming(taskId: string): boolean;
     private controllers;
     private released;
     private auxiliaryDirectories;

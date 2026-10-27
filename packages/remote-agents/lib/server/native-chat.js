@@ -70,9 +70,6 @@ export class RemoteCliAdapter extends LlmAdapter {
     host;
     pollMs;
     active = new Set();
-    /** Tasks whose turn a DSH stream is following; its usage reaches statistics through that stream. */
-    following = new Set();
-    streaming(taskId) { return this.following.has(taskId); }
     controllers = new Set();
     released = false;
     auxiliaryDirectories = new Map();
@@ -273,9 +270,6 @@ export class RemoteCliAdapter extends LlmAdapter {
                     }
                     if (entry.item.type === 'interrupted')
                         interrupted = true;
-                    // The latest report wins in DSH's accumulator; output caught up from an earlier turn is not this call's.
-                    if (entry.item.type === 'usage' && !recovered && entry.item.usage && typeof entry.item.usage === 'object')
-                        yield { type: 'usage', usage: entry.item.usage };
                 }
                 cursor = page.endCursor ?? cursor;
                 await delivered(id, cursor);
@@ -339,7 +333,6 @@ export class RemoteCliAdapter extends LlmAdapter {
         if (this.active.has(sessionId))
             throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
         this.active.add(sessionId);
-        this.following.add(taskId);
         this.controllers.add(controller);
         try {
             const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
@@ -407,7 +400,6 @@ export class RemoteCliAdapter extends LlmAdapter {
                 }
                 finally {
                     this.active.delete(sessionId);
-                    this.following.delete(taskId);
                     this.controllers.delete(controller);
                 }
             }
