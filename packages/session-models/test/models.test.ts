@@ -55,7 +55,7 @@ test('stylesheet groups rows by brand and skips archived rows and unsafe ids', (
   assert.match(css, /--dsm-color:#D97757/);
   assert.match(css, /session:s-3[^{]*\{[^}]*--dsm-color:var\(--dsw-alias-label-primary,currentColor\)/);
   assert.doesNotMatch(css, /bad/);
-  assert.match(css, /session:s-3"\]:not\(\[aria-description\]\)>span:first-child>svg\[data-state\][^{]*\{color:var\(--dsw-alias-label-primary,currentColor\)\}$/);
+  assert.match(css, /session:s-3"\]:not\(\[aria-description\]\)>span:first-child svg\[data-state\][^{]*\{color:var\(--dsw-alias-label-primary,currentColor\)\}$/);
   assert.equal(css.split('\n').length, BASE_CSS.split('\n').length + 3);
   assert.equal(buildCss(new Map()), BASE_CSS);
 });

@@ -21,17 +21,20 @@ const MONO = 'var(--dsw-alias-label-primary,currentColor)';
 // (state dot, running spinner, schedule clock) shrinks into the icon's lower-right corner.
 // The icon gets a transparent cut-out behind that badge, so it reads on any sidebar background.
 const CELL = `${ROW}>span:first-child`;
+// Status marks may sit directly in the cell or inside a host wrapper; the badge moves whichever child holds them.
+const DOT = '[data-state]:not(svg)', SPIN = 'svg[data-state]', MARK = '[data-session-schedule-mark]';
+const holding = (mark: string) => `:is(${mark},:has(${mark}))`;
 const MASK = ['-webkit-mask', 'mask'].map(p => `${p}-image:radial-gradient(circle at 12.5px 12.5px,transparent var(--dsm-cut,0px),#000 calc(var(--dsm-cut,0px) + .5px)),var(--dsm-icon,none);${p}-size:100% 100%,contain;${p}-repeat:no-repeat;${p}-position:center`).join(';');
 export const BASE_CSS = [
   `${CELL}{position:relative}`,
   `${CELL}::before{content:"";position:absolute;left:1px;top:3px;width:14px;height:14px;pointer-events:none;background:var(--dsm-color,transparent);${MASK};-webkit-mask-composite:source-in;mask-composite:intersect}`,
-  `${CELL}:has(>[data-state]:not(svg)){--dsm-cut:4px}`,
-  `${CELL}:has(>[data-session-schedule-mark]){--dsm-cut:5px}`,
-  `${CELL}:has(>svg[data-state]){--dsm-cut:5.5px}`,
+  `${CELL}:has(${DOT}){--dsm-cut:4px}`,
+  `${CELL}:has(${MARK}){--dsm-cut:5px}`,
+  `${CELL}:has(${SPIN}){--dsm-cut:5.5px}`,
   // Transforms leave the host's own sizing alone; without a badge variable they resolve to none.
-  `${CELL}>[data-state]:not(svg){transform:var(--dsm-dot,none)}`,
-  `${CELL}>svg[data-state]{transform:var(--dsm-spin,none)}`,
-  `${CELL}>[data-session-schedule-mark]{transform:var(--dsm-mark,none)}`,
+  `${CELL}>${holding(DOT)}{transform:var(--dsm-dot,none)}`,
+  `${CELL}>${holding(SPIN)}{transform:var(--dsm-spin,none)}`,
+  `${CELL}>${holding(MARK)}{transform:var(--dsm-mark,none)}`,
   '.dsm-hover{display:flex;align-items:center;gap:8px;min-width:0;color:#cfd3d6;font-size:12px;line-height:20px}',
   '.dsm-hover-icon{width:14px;height:14px;flex:none;background:var(--dsm-hover-color);-webkit-mask:var(--dsm-icon) center/contain no-repeat;mask:var(--dsm-icon) center/contain no-repeat}',
   '.dsm-hover-model{overflow-wrap:anywhere}',
@@ -52,7 +55,7 @@ export function buildCss(badges: ReadonlyMap<string, ModelBadge>): string {
   }
   if (!groups.size) return BASE_CSS;
   // The host's tertiary spinner fades out at badge size; badged rows draw it in the label color.
-  const spinners = [...groups.values()].flat().map(row => `${row}>svg[data-state]`).join(',');
+  const spinners = [...groups.values()].flat().map(row => `${row} ${SPIN}`).join(',');
   return [BASE_CSS, ...[...groups].map(([brand, rows]) =>
     `${rows.join(',')}{--dsm-icon:${iconUrl(brand)};--dsm-color:${BRAND_COLORS[brand] ?? MONO};${BADGE}}`),
   `${spinners}{color:${MONO}}`].join('\n');

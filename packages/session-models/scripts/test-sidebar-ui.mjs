@@ -45,6 +45,9 @@ try {
   expect(`${transform('qwen-schedule', '[data-session-schedule-mark]')} === "matrix(0.6, 0, 0, 0.6, 5.5, 5.5)"`, 'schedule mark badge');
   expect(`${before('kimi-error', 'maskImage')}.includes("url(")`, 'Kimi icon');
   expect(`${before('generic-done', 'maskImage')}.includes("url(")`, 'generic icon for unknown vendors');
+  expect(`${transform('grok-wrapped', '.mark')} === "matrix(0.85, 0, 0, 0.85, 5.5, 5.5)" && ${transform('grok-wrapped', '[data-state]')} === "none"`, 'a wrapped done dot moves into the corner');
+  expect(`getComputedStyle(${cell('grok-wrapped')}).getPropertyValue('--dsm-cut') === "4px"`, 'a wrapped done dot keeps its cut-out');
+  expect(`${before('grok-wrapped', 'backgroundColor')} === getComputedStyle(document.querySelector('.title')).color`, 'Grok follows the label color');
   // Archived rows stay blank, matching the host.
   expect(`${before('archived', 'backgroundColor')} === "rgba(0, 0, 0, 0)"`, 'archived row has no icon');
 
