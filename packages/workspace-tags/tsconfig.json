@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    // Published DSH packages omit their DSH type dependencies; without this the
+    // repo's hoisted 0.2.1-rc.2 copies would mix with this package's rc.3 ones.
+    "paths": {
+      "@deepseek-ai/*": ["./node_modules/@deepseek-ai/*"],
+      // Unpublished DSH source the specs import; vitest.config.ts aliases it the same way.
+      "@deepseek-ai/dsh-client-locale/src/locales/*": ["./test/fixtures/dsh-client-locale/*"]
+    }
+  },
+  "include": ["src", "test"],
+  // Upstream's specs and the sources vendored for them type-check only inside
+  // DSH's own tree (newer lib target, unpublished modules); Vitest still runs them.
+  "exclude": ["test/upstream", "test/fixtures/upstream-src", "test/fixtures/dsh-client-locale"]
+}

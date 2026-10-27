@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务 |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.zh-CN.md) | 在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型 |
+| `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Sidebar Browser 网页内的元素、Console 和网络调试浮窗 |
@@ -80,6 +81,7 @@ https://raw.githubusercontent.com/lalaze/dsh-plugins/market/index.json
 packages/
   remote-agents/        # dsh-remote-agents 的源码、测试、清单和文档
   session-models/       # 侧栏会话的模型图标与状态徽标
+  workspace-tags/       # 工作区标签，侧栏按标签或状态分组
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景
   browser-devtools/     # Sidebar Browser 网页内调试浮窗

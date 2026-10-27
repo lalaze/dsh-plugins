@@ -8,6 +8,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | --- | --- | --- |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.md) | Model icons and status badges on sidebar sessions, with the exact model in the hover card |
+| `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.md) | Colored workspace tags, with sidebar grouping by tag or by running status |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | In-page element, Console and network debugger for DSH Sidebar Browser |
@@ -80,6 +81,7 @@ Discover marks a newer release **Update available** and opens the installed plug
 packages/
   remote-agents/        # dsh-remote-agents: source, tests, manifest, docs
   session-models/       # Model icons and status badges on sidebar sessions
+  workspace-tags/       # Workspace tags and tag/status grouping in the sidebar
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds
   browser-devtools/     # In-page debugger for Sidebar Browser tabs
