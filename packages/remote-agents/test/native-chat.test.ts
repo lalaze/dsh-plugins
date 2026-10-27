@@ -33,7 +33,7 @@ test('machine catalogs persist and advertise models without project registration
   let changes = 0; projects.onChange(() => changes++);
   const [model] = await adapter.listModels(CODEX_PROVIDER);
   assert.equal(model.provider, CODEX_PROVIDER); assert.equal(model.name, 'Remote model · Build server');
-  assert.equal(model.description, 'Build server · Codex'); assert.deepEqual(model.inputModalities, ['text']);
+  assert.equal(model.description, 'Build server · Codex'); assert.deepEqual(model.inputModalities, ['text', 'image']);
   const reopened = new Store(path); await reopened.open(); assert.deepEqual(reopened.chatProjects(), []);
   assert.deepEqual(reopened.hosts()[0].catalog?.providers, project.providers);
   const probes = remote.discoveries;
@@ -239,12 +239,17 @@ test('DSH Stop cancels remote work and releases the conversation for a later fol
   await collect(adapter.stream(options('Continue safely'))); assert.equal(remote.sends, 1);
 });
 
-test('closing a stream early and disposing the adapter stop remote work', async t => {
+test('closing a stream early stops remote work; disposing the adapter or DSH shutdown leaves it running', async t => {
   const { adapter, options, remote } = await setup(t);
   remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
   const iterator = adapter.stream(options()); await iterator.next(); await iterator.return(undefined); assert.equal(remote.stops, 1);
+  const shutdown = new AbortController();
+  const disposed = adapter.stream(options('Shut down', { sessionId: SessionId('disposed'), signal: shutdown.signal })); await disposed.next();
+  shutdown.abort({ kind: 'disposed' });
+  await assert.rejects(collect(disposed)); assert.equal(remote.stops, 1, 'a DSH disposal cause is not a user Stop');
   const running = adapter.stream(options('Another conversation', { sessionId: SessionId('second') })); await running.next(); adapter.close();
-  await assert.rejects(collect(running), /abort/i); assert.equal(remote.stops, 2);
+  await assert.rejects(collect(running), /abort/i); assert.equal(remote.stops, 1, 'plugin unload releases the stream only');
+  assert.equal([...remote.agents.values()].filter(a => a.status === 'running').length, 2);
 });
 
 test('permissions and questions use native DSH services and select only a one-time CLI action', async t => {
@@ -255,6 +260,7 @@ test('permissions and questions use native DSH services and select only a one-ti
   });
   remote.onCreate = agent => {
     agent.status = 'running'; agent.pendingPermissions = [{ id: 'permission', kind: 'tool', name: 'Bash', actions: [
+      { id: 'project-rule', label: 'Save rule', behavior: 'allow', scope: 'project' },
       { id: 'acceptForSession', label: 'Always allow', behavior: 'allow' }, { id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' }] }];
     void (async () => {
       while (!remote.answers.length) await pause(5);
@@ -265,6 +271,21 @@ test('permissions and questions use native DSH services and select only a one-ti
   };
   assert.equal(text(await collect(adapter.stream(options()))), 'Done'); assert.equal(approvals, 1); assert.equal(questions, 1);
   assert.equal(remote.answers[0].answer.selectedActionId, 'once'); assert.deepEqual(remote.answers[1].answer.answers, { Checks: 'Tests, and lint' });
+});
+
+for (const mode of ['acceptEdits', 'auto']) test(`new Claude chats inherit remote permissions even with an old cached default, and follow-ups preserve ${mode}`, async t => {
+  const { remote, projects, project, adapter, options, service, store } = await setup(t);
+  remote.catalog[1] = { id: 'claude', label: 'Claude Code', status: 'ready', defaultModeId: 'default',
+    models: [{ id: 'claude-model', label: 'Claude model' }], modes: [{ id: 'default', label: 'Ask before tools' }, { id: 'acceptEdits', label: 'Accept edits' }] };
+  await projects.refresh(project.id);
+  const input = options('Use remote permissions', { provider: chatProviderId('claude'), model: chatModelId(project.id, 'claude', 'claude-model') });
+  await collect(adapter.stream(input));
+  assert.equal(remote.created!.modeId, undefined);
+  const task = store.snapshot().tasks[0];
+  await service.setMode(task.id, mode);
+  await collect(adapter.stream({ ...input, messages: [...input.messages, user('Continue editing')] }));
+  assert.equal(store.snapshot().tasks[0].modeId, mode);
+  assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
 });
 
 test('dismissed approvals stay pending and can be answered in the session panel without stopping the turn', async t => {
@@ -322,6 +343,25 @@ test('switching models within a CLI retains the conversation and its old message
   assert.equal(store.snapshot().tasks[0].model, 'next-model', 'replaying an older response never changes the live model');
   assert.equal(text(await collect(adapter.stream(second))), 'Follow-up completed.'); assert.equal(remote.sends, 1);
   await collect(adapter.stream(options('Back to first model'))); assert.equal(remote.creates, 1); assert.equal(remote.sends, 2);
+});
+
+test('Codex speed tiers are separate picker rows that start, switch and leave Fast on the same conversation', async t => {
+  const { adapter, options, remote, store, projects, project } = await setup(t);
+  remote.catalog[0].models[0].serviceTiers = [{ id: 'priority', label: 'Fast' }]; await projects.refresh(project.id);
+  const models = await adapter.listModels(CODEX_PROVIDER);
+  assert.deepEqual(models.map(m => m.name), ['Remote model · Build server', 'Remote model Fast · Build server']);
+  const fast = chatModelId(project.id, 'codex', 'remote-model', 'priority');
+  assert.equal(models[1].id, fast);
+  assert.deepEqual((await adapter.resolveModel(CODEX_PROVIDER, fast)).reasoning?.efforts.map(e => e.id), ['high']);
+  await assert.rejects(adapter.resolveModel(CODEX_PROVIDER, chatModelId(project.id, 'codex', 'remote-model', 'flex')), /unavailable/);
+  await assert.rejects(adapter.resolveModel(CODEX_PROVIDER, `${fast}/extra`), /unavailable/);
+  await collect(adapter.stream(options('Go fast', { model: fast })));
+  assert.equal(remote.created?.serviceTier, 'priority');
+  await collect(adapter.stream(options('Back to the configured speed')));
+  assert.equal(remote.creates, 1); assert.equal(remote.detaches, 1);
+  assert.equal(store.snapshot().tasks[0].serviceTier, undefined);
+  await collect(adapter.stream(options('Fast again', { model: fast })));
+  assert.equal(store.snapshot().tasks[0].serviceTier, 'priority'); assert.equal(remote.detaches, 2);
 });
 
 test('native tool cards produce a valid DSH session lifecycle and never request DSH tool dispatch', async t => {

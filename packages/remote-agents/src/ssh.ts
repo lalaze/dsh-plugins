@@ -1,6 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { StringDecoder } from 'node:string_decoder';
-import { field, RemoteError } from './domain.js';
+import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
+import { field, remotePath, RemoteError } from './domain.js';
 
 export const quote = (value: string) => `'${value.replace(/'/g, "'\\''")}'`;
 /** Keep a compatible configured Node; otherwise use the newest installed runtime >=22. */
@@ -48,16 +50,25 @@ export function connectionInput(value: unknown): string {
   return `ssh://${username ? `${username}@` : ''}${url.hostname}${url.port ? `:${url.port}` : ''}`;
 }
 export interface Child {
-  write(value: string): void;
+  /** `inputId` lets a relay drop a line it already delivered; direct pipes ignore it. */
+  write(value: string, inputId?: string): void;
+  /** Release this connection. A relay keeps its CLI running; a direct SSH pipe ends it. */
   stop(): void;
   onData(callback: (data: Buffer) => void): void;
   onExit(callback: (error: Error) => void): void;
+  /** Byte offset of the first output byte this child delivers. */
+  readonly offset?: number;
 }
+export interface StartOptions { stderr?(data: Buffer): void }
 export interface SshTransport {
   exec(script: string, timeout?: number): Promise<string>;
-  start(cwd: string, argv: string[]): Child;
+  start(cwd: string, argv: string[], options?: StartOptions): Child;
+  upload?(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
+  /** Commands run in a POSIX shell where a detached relay can outlive the connection. */
+  readonly relays?: boolean;
 }
 export class OpenSshTransport implements SshTransport {
+  readonly relays: boolean = true;
   private readonly args: string[];
   constructor(connection: string, private readonly binary = 'ssh') {
     const url = new URL(connectionInput(connection));
@@ -90,6 +101,10 @@ case "\${dsh_login_shell##*/}" in
 esac
 exec /bin/sh -c ${quote(REMOTE_PATH + script)}
 `;
+    return this.spawnRemote(command);
+  }
+  /** Runs a POSIX shell command on the SSH host. */
+  protected spawnRemote(command: string): ChildProcessWithoutNullStreams {
     return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   }
   exec(script: string, timeout = 20_000): Promise<string> {
@@ -103,13 +118,59 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
       child.stdin.on('error', () => {}); child.stdin.end();
     });
   }
-  start(cwd: string, argv: string[]): Child {
+  /** Binary stdin with backpressure; atomic, private, digest-verified remote copies. */
+  async upload(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted(); remotePath(cwd);
+    const parts = relativePath.split('/');
+    if (!relativePath.startsWith('.dsh-remote-agents/attachments/') || parts.some(p => !p || p === '.' || p === '..') || /[\\\0\r\n]/.test(relativePath) || !/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(bytes) || bytes < 0) throw new RemoteError('Invalid attachment destination');
+    const dirs = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
+    const script = `set -e
+cd ${quote(cwd)}
+umask 077
+for dsh_upload_dir in ${dirs.map(quote).join(' ')}; do
+  [ ! -L "$dsh_upload_dir" ] || { printf '%s\\n' 'Attachment destination is a symbolic link' >&2; exit 1; }
+  mkdir -p -- "$dsh_upload_dir"
+  chmod 700 "$dsh_upload_dir"
+done
+[ ! -L ${quote(relativePath)} ] && { [ ! -e ${quote(relativePath)} ] || [ -f ${quote(relativePath)} ]; } || { printf '%s\\n' 'Invalid attachment destination' >&2; exit 1; }
+dsh_upload_tmp="$(mktemp ${quote(`${dirs.at(-1)}/.upload.XXXXXXXXXX`)})"
+trap 'rm -f -- "$dsh_upload_tmp"' 0
+trap 'exit 1' 1 2 15
+cat > "$dsh_upload_tmp"
+[ "$(wc -c < "$dsh_upload_tmp" | tr -d ' ')" = ${quote(String(bytes))} ] || { printf '%s\\n' 'Attachment byte count mismatch' >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then dsh_upload_digest="$(sha256sum "$dsh_upload_tmp")"; else dsh_upload_digest="$(shasum -a 256 "$dsh_upload_tmp")"; fi
+case "$dsh_upload_digest" in ${sha256}' '*) ;; *) printf '%s\\n' 'Attachment checksum mismatch' >&2; exit 1;; esac
+chmod 400 "$dsh_upload_tmp"
+mv -f -- "$dsh_upload_tmp" ${quote(relativePath)}
+printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
+`;
+    const child = this.spawn(script); let stdout = '', stderr = '', ended = false;
+    const abort = () => child.kill('SIGTERM');
+    const timer = setTimeout(abort, 300_000);
+    signal?.addEventListener('abort', abort, { once: true });
+    child.stdout.on('data', chunk => { stdout = (stdout + chunk).slice(-16_000); });
+    child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
+    const completion = new Promise<void>((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', code => { ended = true; if (code === 0) resolve(); else reject(new Error(stderr.trim() || `SSH attachment upload failed (${code})`)); });
+    });
+    try {
+      await Promise.all([pipeline(Readable.from(data), child.stdin, { signal }), completion]);
+      signal?.throwIfAborted(); return remotePath(stdout.trim());
+    } catch (error) {
+      if (!ended && !['EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(String((error as NodeJS.ErrnoException).code))) child.kill('SIGTERM');
+      await completion.catch(() => {});
+      signal?.throwIfAborted();
+      throw stderr.trim() ? new Error(stderr.trim()) : error;
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); if (!ended) child.kill('SIGTERM'); }
+  }
+  start(cwd: string, argv: string[], options: StartOptions = {}): Child {
     const process = this.spawn(`cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
     let stderr = '', exited: Error | undefined;
     const data = new Set<(data: Buffer) => void>(), exits = new Set<(error: Error) => void>();
     const end = (error: Error) => { if (exited) return; exited = error; for (const listener of exits) listener(error); };
     process.stdout.on('data', chunk => { for (const listener of data) listener(chunk); });
-    process.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
+    process.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); options.stderr?.(chunk); });
     process.stdin.on('error', error => end(error)); process.on('error', end);
     process.on('close', code => end(new Error(stderr.trim() || `Remote CLI exited (${code})`)));
     return {
@@ -121,40 +182,60 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
   }
 }
 export type WireMessage = Record<string, any>;
+/** Byte range of one output line in the CLI's output stream. */
+export interface Frame { start: number; end: number }
+const FRAME_LIMIT = 64_000_000;
 /** JSONL supports native Codex, ACP JSON-RPC and Claude's control frames. */
 export class JsonlPeer {
+  /** Request IDs stay unique across reconnections: a replayed response can never answer a newer request. */
+  private readonly prefix = `dsh-${randomUUID().slice(0, 8)}`;
   private nextId = 0;
   private pending = new Map<string, { resolve: (value: any) => void; reject: (error: Error) => void; timer?: ReturnType<typeof setTimeout> }>();
-  private listeners = new Set<(message: WireMessage) => void>();
+  private listeners = new Set<(message: WireMessage, frame: Frame) => void>();
   private exits = new Set<(error: Error) => void>();
   private ended?: Error;
+  private processed: number;
   constructor(private readonly child: Child) {
-    const decoder = new StringDecoder('utf8'); let buffer = '';
+    // Split on bytes: a newline never occurs inside a UTF-8 sequence, so offsets stay exact.
+    this.processed = child.offset ?? 0;
+    let parts: Buffer[] = [], size = 0;
     child.onData(data => {
-      buffer += decoder.write(data);
-      if (buffer.length > 8_000_000) { this.finish(new Error('Remote CLI frame exceeded output limit')); child.stop(); return; }
-      let index: number;
-      while ((index = buffer.indexOf('\n')) >= 0) {
-        const line = buffer.slice(0, index); buffer = buffer.slice(index + 1);
-        let message: WireMessage;
-        try { message = JSON.parse(line); } catch { continue; }
-        if (!message || typeof message !== 'object' || Array.isArray(message)) continue;
-        const key = message.type === 'control_response' ? String(message.response?.request_id) : message.id !== undefined && !message.method ? String(message.id) : undefined;
-        const request = key ? this.pending.get(key) : undefined;
-        if (request && key) {
-          this.pending.delete(key); clearTimeout(request.timer);
-          const error = message.error ?? (message.response?.subtype === 'error' ? { message: message.response.error } : null);
-          if (error) request.reject(new Error(typeof error.message === 'string' ? error.message : JSON.stringify(error)));
-          else request.resolve(message.type === 'control_response' ? message.response?.response : message.result);
-        } else for (const listener of this.listeners) {
-          try { listener(message); } catch (error) { this.finish(error instanceof Error ? error : new Error(String(error))); child.stop(); return; }
+      let index = 0;
+      while (index < data.length && !this.ended) {
+        const newline = data.indexOf(10, index);
+        if (newline < 0) {
+          parts.push(data.subarray(index)); size += data.length - index;
+          if (size > FRAME_LIMIT) { this.finish(new Error('Remote CLI frame exceeded output limit')); child.stop(); }
+          return;
         }
+        const line = parts.length ? Buffer.concat([...parts, data.subarray(index, newline)]) : data.subarray(index, newline);
+        parts = []; size = 0; index = newline + 1;
+        const frame = { start: this.processed, end: this.processed + line.length + 1 };
+        this.dispatch(line.toString('utf8'), frame);
+        this.processed = frame.end;
       }
     });
     child.onExit(error => this.finish(error));
   }
+  /** Byte offset after the last dispatched line. */
+  get position(): number { return this.processed; }
+  private dispatch(line: string, frame: Frame): void {
+    let message: WireMessage;
+    try { message = JSON.parse(line); } catch { return; }
+    if (!message || typeof message !== 'object' || Array.isArray(message)) return;
+    const key = message.type === 'control_response' ? String(message.response?.request_id) : message.id !== undefined && !message.method ? String(message.id) : undefined;
+    const request = key ? this.pending.get(key) : undefined;
+    if (request && key) {
+      this.pending.delete(key); clearTimeout(request.timer);
+      const error = message.error ?? (message.response?.subtype === 'error' ? { message: message.response.error } : null);
+      if (error) request.reject(new Error(typeof error.message === 'string' ? error.message : JSON.stringify(error)));
+      else request.resolve(message.type === 'control_response' ? message.response?.response : message.result);
+    } else for (const listener of this.listeners) {
+      try { listener(message, frame); } catch (error) { this.finish(error instanceof Error ? error : new Error(String(error))); this.child.stop(); return; }
+    }
+  }
   get alive(): boolean { return !this.ended; }
-  onMessage(listener: (message: WireMessage) => void): void { this.listeners.add(listener); }
+  onMessage(listener: (message: WireMessage, frame: Frame) => void): void { this.listeners.add(listener); }
   onExit(listener: (error: Error) => void): void { this.exits.add(listener); if (this.ended) listener(this.ended); }
   waitForMessage(predicate: (message: WireMessage) => boolean, timeout = 20_000): Promise<WireMessage> {
     return new Promise((resolve, reject) => {
@@ -166,13 +247,13 @@ export class JsonlPeer {
       if (this.ended) failed(this.ended);
     });
   }
-  send(message: WireMessage): void { if (this.ended) throw this.ended; this.child.write(`${JSON.stringify(message)}\n`); }
+  send(message: WireMessage, inputId?: string): void { if (this.ended) throw this.ended; this.child.write(`${JSON.stringify(message)}\n`, inputId); }
   request(method: string, params: Record<string, unknown> = {}, timeout = 20_000): Promise<any> {
-    const id = `dsh-${++this.nextId}`;
+    const id = `${this.prefix}-${++this.nextId}`;
     return this.wait(id, { jsonrpc: '2.0', id, method, params }, timeout);
   }
   control(request: Record<string, unknown>, timeout = 20_000): Promise<any> {
-    const request_id = `dsh-${++this.nextId}`;
+    const request_id = `${this.prefix}-${++this.nextId}`;
     return this.wait(request_id, { type: 'control_request', request_id, request }, timeout);
   }
   private wait(id: string, message: WireMessage, timeout: number): Promise<any> {

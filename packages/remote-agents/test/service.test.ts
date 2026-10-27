@@ -135,6 +135,32 @@ test('archive releases the CLI and hides the agent; messaging restores it; delet
   assert.equal((await service.removeHost(hostId)).hosts.length, 0);
 });
 
+test('history archiving rechecks live state, keeps output, and restores after a server restart', async t => {
+  const { service, remote, request, path } = await fixture(t);
+  const agent = await service.create(request());
+  remote.append(remote.live(agent.id).id, { type: 'assistant_message', text: 'Keep this result' });
+  const live = remote.live(agent.id);
+  live.status = 'running';
+  await assert.rejects(service.archive(agent.id, true, { onlyIdle: true }), /Refresh before archiving/);
+  live.status = 'error';
+  await assert.rejects(service.archive(agent.id, true, { onlyIdle: true }), /Refresh before archiving/);
+  live.status = 'idle';
+  live.pendingPermissions = [{ id: 'approval', name: 'Bash', kind: 'tool' }];
+  await assert.rejects(service.archive(agent.id, true, { onlyIdle: true }), /Refresh before archiving/);
+  assert.equal(remote.detaches, 0);
+  assert.equal((await service.summary(agent.id)).archived, false);
+  live.pendingPermissions = [];
+  await service.archive(agent.id, true, { onlyIdle: true });
+  await service.close();
+  const store = new Store(path); await store.open();
+  const resumed = new RemoteAgentsService(store, remote.backend); t.after(() => resumed.close());
+  assert.equal((await resumed.summary(agent.id)).archived, true);
+  const detail = await resumed.detail(agent.id);
+  assert.ok(detail.timeline?.entries.some(e => e.item.text === 'Keep this result'));
+  assert.equal((await resumed.archive(agent.id, false)).archived, false);
+  assert.equal(remote.forgets, 0);
+});
+
 test('mode changes use discovered modes, wait for idle, and apply by resuming the session', async t => {
   const { service, remote, request, store } = await fixture(t);
   const agent = await service.create(request());
@@ -235,4 +261,16 @@ test('HTTP boundary rejects malformed input, form submissions, oversized bodies 
   const response = await handle(new Request('http://dsh.test/api/remote-agents'));
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal((await response.json()).agents[0].id, created.id);
+});
+
+test('a store refuses to overwrite state written by another DSH instance, and refuses writes once closed', async t => {
+  const { path, store: stale, service } = await fixture(t);
+  const current = new Store(path); await current.open();
+  await current.update(state => { state.hosts.push({ id: randomUUID(), label: 'Added after reload', connection: 'ssh://second-host' }); });
+  await assert.rejects(stale.update(state => { state.tasks = []; }), /changed by another DSH instance/);
+  const reopened = new Store(path); await reopened.open();
+  assert.equal(reopened.hosts().length, 2, 'the newer state is kept');
+  await current.close();
+  await assert.rejects(current.update(() => {}), /closed/);
+  await service.close();
 });

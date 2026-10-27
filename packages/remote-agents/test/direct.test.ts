@@ -35,7 +35,9 @@ class FakeCli implements Child {
     if (m.event === 'dsh_interrupt') { this.emit({ event: 'result', result: { status: 'ERROR', error: 'cancelled' } }); this.exit(new Error('Antigravity interrupted')); return; }
     if (m.type === 'control_request') {
       if (m.request.subtype === 'interrupt') { if (this.transport.claudeInterruptError) this.emit({ type: 'result', subtype: 'error_during_execution', is_error: true }); else this.finish(); }
-      this.control(m, m.request.subtype === 'list_models' ? { models: [{ value: 'claude-remote', displayName: 'Claude remote', supportedEffortLevels: ['high'] }] } : {});
+      const usage: Record<string, unknown> = { initialize: { account: { email: 'dev@example.com', subscriptionType: 'Claude Pro' } }, get_context_usage: this.transport.claudeContext, get_usage: this.transport.claudeUsage };
+      if (m.request.subtype === 'get_usage') this.transport.accountChecks.push(this.provider);
+      this.control(m, m.request.subtype === 'list_models' ? { models: [{ value: 'claude-remote', displayName: 'Claude remote', supportedEffortLevels: ['high'] }] } : usage[m.request.subtype] ?? {});
       return;
     }
     if (m.type === 'user' || m.event === 'user' || m.method === 'turn/start' || m.method === 'session/prompt') {
@@ -46,8 +48,10 @@ class FakeCli implements Child {
       return;
     }
     if (m.method === 'initialize') this.reply(m, this.provider === 'codex' ? { userAgent: 'fake-codex' } : { protocolVersion: 1, agentCapabilities: this.provider === 'dsh' ? { sessionCapabilities: { resume: {}, close: {} } } : { loadSession: this.transport.loadSession } });
-    if (m.method === 'model/list') this.reply(m, { data: [{ id: 'model-id', model: this.transport.model, displayName: 'Remote model', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }] }], nextCursor: null });
+    if (m.method === 'model/list') this.reply(m, { data: [{ id: 'model-id', model: this.transport.model, displayName: 'Remote model', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }], ...this.transport.speeds }], nextCursor: null });
     if (m.method === 'thread/start' || m.method === 'thread/resume') this.reply(m, { thread: { id: m.params.threadId ?? 'thread-remote' } });
+    if (m.method === 'account/read') this.reply(m, { account: { type: 'chatgpt', email: 'dev@example.com', planType: 'plus' } });
+    if (m.method === 'account/rateLimits/read') { this.transport.accountChecks.push(this.provider); this.reply(m, { rateLimits: { limitId: 'codex', primary: { usedPercent: 18, windowDurationMins: 300 } } }); }
     if (m.method === 'session/new' || m.method === 'session/load' || m.method === 'session/resume') {
       this.configOptions = structuredClone(this.transport.configOptions);
       this.reply(m, { sessionId: m.params.sessionId ?? 'acp-session', configOptions: this.configOptions, models: this.transport.acpModels ? { currentModelId: 'acp-remote', availableModels: [{ modelId: 'acp-remote', name: 'ACP remote' }] } : undefined, modes: this.transport.acpModes ? { currentModeId: 'ask', availableModes: [{ id: 'ask', name: 'Ask' }] } : undefined });
@@ -94,6 +98,9 @@ class FakeSsh implements SshTransport {
   admissions: { provider: string; binding: unknown }[] = [];
   model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; dropPrompt = false; claudeInterruptError = false;
   configOptions?: any[];
+  speeds: Record<string, unknown> = {};
+  claudeContext?: unknown; claudeUsage?: unknown;
+  accountChecks: string[] = [];
   store?: Store;
   missingPath?: string;
   constructor(readonly installed = ['codex']) {}
@@ -157,6 +164,117 @@ test('changing a model resumes the same native thread and preserves earlier outp
   const timeline = (await service.detail(agent.id)).timeline!;
   assert.equal(timeline.entries.filter(e => e.item.type === 'user_message').length, 2);
   assert.ok(timeline.entries.some(e => e.item.text === '远程结果 🌏'));
+});
+
+test('Codex speed tiers come from the model catalog and apply to the thread and every turn', async t => {
+  const { service, ssh, request, store, hostId } = await fixture(t);
+  const tiers = async () => (await service.providers(hostId, request.cwd, true)).find(p => p.id === 'codex')!.models[0].serviceTiers;
+  ssh.speeds = { additionalSpeedTiers: ['fast'] };
+  assert.deepEqual(await tiers(), [{ id: 'fast', label: 'Fast' }], 'older CLIs only name their tiers');
+  ssh.speeds = { additionalSpeedTiers: ['fast'], serviceTiers: [{ id: 'priority', name: 'Fast', description: '1.5x speed, increased usage' }] };
+  assert.deepEqual(await tiers(), [{ id: 'priority', label: 'Fast' }]);
+  await assert.rejects(service.create({ ...request, serviceTier: 'ultrafast' }), /speed is unavailable/);
+  const agent = await service.create({ ...request, id: randomUUID(), serviceTier: 'priority' }); await tick();
+  assert.equal(ssh.live.sent.find(m => m.method === 'thread/start')?.params.serviceTier, 'priority');
+  assert.equal(ssh.live.sent.find(m => m.method === 'turn/start')?.params.serviceTier, 'priority');
+  assert.equal((await service.summary(agent.id)).serviceTier, 'priority');
+  ssh.live.finish(); await tick();
+  const thread = native(store, agent.id).sessionId;
+  await service.setModel(agent.id, request.model);
+  await service.send(agent.id, { id: randomUUID(), text: 'Continue at the configured speed' }, { interrupt: false }); await tick();
+  const resume = ssh.live.sent.find(m => m.method === 'thread/resume')!;
+  assert.equal(resume.params.threadId, thread);
+  assert.equal('serviceTier' in resume.params, false, 'the CLI configuration applies again');
+  assert.equal('serviceTier' in ssh.live.sent.find(m => m.method === 'turn/start')!.params, false);
+});
+
+test('Codex context comes from token reports, survives a detach and is restored on resume', async t => {
+  const { service, ssh, request, store } = await fixture(t);
+  const route = `${request.hostId}/codex/codex-remote`;
+  const agent = await service.create(request, { chat: { sessionId: 'chat-usage', route } }); await tick();
+  ssh.live.emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-remote', turnId: 'turn-remote', tokenUsage: { last: { totalTokens: 42_000 }, total: { totalTokens: 90_000 }, modelContextWindow: 258_000 } } });
+  assert.deepEqual((await service.usage('chat-usage', { route }))?.context, { used: 42_000, max: 258_000 });
+  assert.equal(store.snapshot().tasks[0].context, undefined, 'token reports are saved once per turn');
+  ssh.live.finish(); await tick(); await store.flush();
+  assert.deepEqual(store.snapshot().tasks[0].context, { used: 42_000, max: 258_000 });
+  await service.archive(agent.id);
+  assert.deepEqual((await service.usage('chat-usage', { route }))?.context, { used: 42_000, max: 258_000 });
+  await service.send(agent.id, { id: randomUUID(), text: 'Continue' }); await tick();
+  ssh.live.emit({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { last: { totalTokens: 50_000 }, modelContextWindow: 258_000 } } });
+  assert.deepEqual((await service.usage('chat-usage', { route }))?.context, { used: 50_000, max: 258_000 });
+});
+
+test('Claude context is read after start and each turn and follows assistant messages in between', async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const route = `${request.hostId}/claude/claude-remote`;
+  ssh.claudeContext = { totalTokens: 12_000, maxTokens: 200_000 };
+  const agent = await service.create(request, { chat: { sessionId: 'chat-claude', route } }); await tick();
+  assert.deepEqual((await service.usage('chat-claude', { route }))?.context, { used: 12_000, max: 200_000 });
+  ssh.live.emit({ type: 'assistant', parent_tool_use_id: null, message: { content: [], usage: { input_tokens: 5, cache_read_input_tokens: 20_000, cache_creation_input_tokens: 1000, output_tokens: 300 } } });
+  assert.deepEqual((await service.usage('chat-claude', { route }))?.context, { used: 21_305, max: 200_000 });
+  ssh.live.emit({ type: 'assistant', parent_tool_use_id: 'task-1', message: { content: [], usage: { input_tokens: 90_000 } } });
+  assert.equal((await service.usage('chat-claude', { route }))?.context?.used, 21_305, 'subagents have their own context window');
+  ssh.claudeContext = { totalTokens: 22_000, maxTokens: 200_000 };
+  ssh.live.finish(); await tick();
+  assert.deepEqual((await service.summary(agent.id)).status, 'idle');
+  assert.deepEqual((await service.usage('chat-claude', { route }))?.context, { used: 22_000, max: 200_000 });
+});
+
+test('ACP usage updates fill the ring', async t => {
+  const { service, ssh, request } = await fixture(t, 'grok');
+  const route = `${request.hostId}/grok/acp-remote`;
+  await service.create(request, { chat: { sessionId: 'chat-acp', route } }); await tick();
+  ssh.live.emit({ method: 'session/update', params: { sessionId: 'acp-session', update: { sessionUpdate: 'usage_update', used: 3000, size: 128_000 } } });
+  assert.deepEqual((await service.usage('chat-acp', { route }))?.context, { used: 3000, max: 128_000 });
+});
+
+test('plan limits are read through a running CLI or a prompt-free probe, cached until a turn ends', async t => {
+  const { service, ssh, request, hostId } = await fixture(t);
+  const route = `${hostId}/codex/codex-remote`, target = { hostId, provider: 'codex' };
+  const before = ssh.children.length;
+  const probed = await service.usage('chat-limits', { route, target, account: true });
+  assert.deepEqual(probed?.account?.windows, [{ id: 'codex:primary', label: 'Session', usedPercent: 18 }]);
+  assert.equal(probed?.account?.email, 'dev@example.com'); assert.equal(probed?.account?.plan, 'Plus');
+  assert.equal(ssh.children.length, before + 1); assert.ok(ssh.children.at(-1)!.stopped, 'the probe exits after reading');
+  assert.equal(ssh.children.at(-1)!.sent.some(m => m.method === 'turn/start' || m.method === 'thread/start'), false);
+  await service.usage('chat-limits', { route, target, account: true });
+  assert.equal(ssh.accountChecks.length, 1, 'cached for five minutes');
+  await service.create(request, { chat: { sessionId: 'chat-limits', route } }); await tick();
+  const children = ssh.children.length;
+  await service.usage('chat-limits', { route, account: true, refresh: true });
+  assert.equal(ssh.accountChecks.length, 2); assert.equal(ssh.children.length, children, 'a running session answers without a new process');
+  ssh.live.finish(); await tick();
+  await service.usage('chat-limits', { route, account: true });
+  assert.equal(ssh.accountChecks.length, 3, 'a finished turn changed the usage');
+});
+
+test('Claude plan limits come from its own /usage data on the SSH host', async t => {
+  const { service, ssh, hostId } = await fixture(t, 'claude');
+  ssh.claudeUsage = { subscription_type: 'pro', rate_limits: { five_hour: { utilization: 31, resets_at: '2026-10-26T22:50:00Z' }, seven_day: { utilization: 36 }, extra_usage: { is_enabled: false } } };
+  const report = await service.usage('chat-claude-limits', { route: `${hostId}/claude/claude-remote`, target: { hostId, provider: 'claude' }, account: true });
+  assert.deepEqual(report?.account?.windows.map(w => [w.label, w.usedPercent]), [['Session', 31], ['Weekly', 36]]);
+  assert.equal(report?.account?.plan, 'Pro'); assert.equal(report?.account?.email, 'dev@example.com'); assert.equal(report?.account?.extraUsage, false);
+  assert.deepEqual(ssh.children.at(-1)!.argv.slice(1), ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence']);
+  assert.equal(ssh.admissions.length, 0, 'no prompt is sent');
+});
+
+test('Codex MCP tool approvals become permission prompts; other elicitations are declined', async t => {
+  const { service, ssh, request } = await fixture(t);
+  const agent = await service.create(request); await tick();
+  const cli = ssh.live;
+  cli.emit({ id: 7, method: 'mcpServer/elicitation/request', params: { threadId: 'thread-remote', serverName: 'github', mode: 'form', message: 'Allow github to create an issue?', requestedSchema: { type: 'object', properties: {} } } });
+  const [permission] = (await service.detail(agent.id)).permissions;
+  assert.equal(permission.id, 'rpc-7'); assert.equal(permission.name, 'MCP · github'); assert.equal(permission.description, 'Allow github to create an issue?');
+  await service.respond(agent.id, 'rpc-7', { behavior: 'allow' });
+  assert.deepEqual(cli.sent.find(m => m.id === 7)!.result, { action: 'accept', content: {}, _meta: null });
+  cli.emit({ id: 8, method: 'mcpServer/elicitation/request', params: { threadId: 'thread-remote', serverName: 'github', mode: 'form', message: 'Allow again?', requestedSchema: { type: 'object', properties: {} } } });
+  await service.respond(agent.id, 'rpc-8', { behavior: 'deny' });
+  assert.deepEqual(cli.sent.find(m => m.id === 8)!.result, { action: 'decline', content: null, _meta: null });
+  cli.emit({ id: 9, method: 'mcpServer/elicitation/request', params: { threadId: 'thread-remote', serverName: 'auth', mode: 'url', message: 'Sign in', url: 'https://example.com', elicitationId: 'e1' } });
+  cli.emit({ id: 10, method: 'mcpServer/elicitation/request', params: { threadId: 'thread-remote', serverName: 'db', mode: 'form', message: 'Password?', requestedSchema: { type: 'object', properties: { password: { type: 'string' } }, required: ['password'] } } });
+  assert.equal(cli.sent.find(m => m.id === 9)!.result.action, 'decline');
+  assert.equal(cli.sent.find(m => m.id === 10)!.result.action, 'decline');
+  assert.equal((await service.detail(agent.id)).permissions.length, 0);
 });
 
 test('a non-resumable CLI refuses a model change without closing its live session', async t => {
@@ -411,6 +529,89 @@ test('mode changes release the idle session, and the next message resumes it wit
   assert.equal(ssh.admissions.length, 2);
 });
 
+test('Claude Auto is available for new sessions and is explicitly passed to the non-interactive CLI', async t => {
+  const { service, ssh, request, hostId } = await fixture(t, 'claude');
+  const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'claude')!;
+  assert.ok(provider.modes.some(m => m.id === 'auto'));
+  await service.create({ ...request, modeId: 'auto' });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'auto');
+  assert.equal(ssh.live.argv.includes('--dangerously-skip-permissions'), false);
+});
+
+test('pre-upgrade Claude sessions can select Auto and retain it across messages and reconnects', async t => {
+  const { service, ssh, request, store } = await fixture(t, 'claude');
+  const agent = await service.create(request), first = ssh.live;
+  const sessionId = first.argv[first.argv.indexOf('--session-id') + 1];
+  first.finish(); await tick();
+  await store.update(state => { state.tasks.find(task => task.id === agent.id)!.modes = [{ id: 'default', label: 'Ask before tools' }]; });
+  assert.ok((await service.summary(agent.id)).modes.some(m => m.id === 'auto'));
+  await service.setMode(agent.id, 'auto');
+  await service.send(agent.id, { id: randomUUID(), text: 'Continue with classifier checks' });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'auto');
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--resume') + 1], sessionId);
+  ssh.live.finish(); await tick();
+  ssh.live.exit(new Error('disconnected')); await service.retry(agent.id);
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'auto');
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--resume') + 1], sessionId);
+  assert.equal(store.snapshot().tasks[0].modeId, 'auto');
+});
+
+test('Claude inherits remote permission settings unless a mode is explicitly selected, including after resume', async t => {
+  const { service, ssh, request, hostId, store } = await fixture(t, 'claude');
+  const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'claude')!;
+  assert.equal(provider.defaultModeId, 'inherit');
+  const agent = await service.create(request), first = ssh.live;
+  assert.equal(first.argv.includes('--permission-mode'), false);
+  first.finish(); await tick();
+  await service.setMode(agent.id, 'acceptEdits');
+  await service.send(agent.id, { id: randomUUID(), text: 'Edit files' });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'acceptEdits');
+  ssh.live.finish(); await tick();
+  // A pre-upgrade task saved its choices without the inherit option.
+  await store.update(state => { const saved = state.tasks.find(task => task.id === agent.id)!; saved.modes = saved.modes!.filter(m => m.id !== 'inherit'); });
+  assert.ok((await service.summary(agent.id)).modes.some(m => m.id === 'inherit'));
+  await service.setMode(agent.id, 'inherit');
+  await service.send(agent.id, { id: randomUUID(), text: 'Use remote settings again' });
+  assert.equal(ssh.live.argv.includes('--permission-mode'), false);
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--resume') + 1], first.argv[first.argv.indexOf('--session-id') + 1]);
+});
+
+for (const destination of ['session', 'localSettings']) test(`Claude forwards explicitly selected ${destination} approval rules without broadening one-time approvals`, async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const agent = await service.create(request), cli = ssh.live;
+  const suggestion = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'pnpm test *' }], behavior: 'allow', destination };
+  const ask = (id: string) => cli.emit({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'pnpm test' }, permission_suggestions: [suggestion] } });
+  ask('once');
+  let permission = (await service.state(agent.id)).permissions[0];
+  assert.equal(permission.actions?.length, 3);
+  const remembered = permission.actions!.find(a => a.scope === (destination === 'session' ? 'session' : 'project'))!;
+  assert.ok(remembered);
+  assert.deepEqual(permission.detail, { input: { command: 'pnpm test' }, permissionSuggestions: [suggestion] });
+  await service.respond(agent.id, permission.id, { behavior: 'allow', selectedActionId: 'once' });
+  assert.deepEqual(cli.sent.find(m => m.response?.request_id === 'once')!.response.response, { behavior: 'allow', updatedInput: { command: 'pnpm test' } });
+  ask('remember'); permission = (await service.state(agent.id)).permissions[0];
+  await assert.rejects(service.respond(agent.id, permission.id, { behavior: 'allow', selectedActionId: 'not-offered' }), /Invalid permission action/);
+  await service.respond(agent.id, permission.id, { behavior: 'allow', selectedActionId: remembered.id, updatedPermissions: [{ type: 'setMode', mode: 'bypassPermissions' }] });
+  assert.deepEqual(cli.sent.find(m => m.response?.request_id === 'remember')!.response.response, { behavior: 'allow', updatedInput: { command: 'pnpm test' }, updatedPermissions: [suggestion] });
+});
+
+test('Claude does not offer persistent grants for suppressed, global, malformed or mode-changing suggestions', async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const agent = await service.create(request), cli = ssh.live;
+  const rule = { type: 'addRules', behavior: 'allow', destination: 'localSettings', rules: [{ toolName: 'Bash', ruleContent: 'pnpm test *' }] };
+  for (const [index, extra] of [
+    { suppress_always_allow_rule: true, permission_suggestions: [rule] },
+    { permission_suggestions: [{ ...rule, destination: 'userSettings' }] },
+    { permission_suggestions: [{ type: 'setMode', mode: 'bypassPermissions', destination: 'session' }] },
+    { permission_suggestions: [{ ...rule, rules: [] }, { ...rule, behavior: 'deny' }, { ...rule, rules: [null] }] },
+  ].entries()) {
+    cli.emit({ type: 'control_request', request_id: `invalid-${index}`, request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'pnpm test' }, ...extra } });
+    const permission = (await service.state(agent.id)).permissions[0];
+    assert.equal(permission.actions?.some(a => a.scope !== 'once' && a.behavior === 'allow') ?? false, false);
+    await service.respond(agent.id, permission.id, { behavior: 'deny' });
+  }
+});
+
 for (const provider of ['codex', 'dsh']) test(`${provider} completed sessions are reclaimed, and messaging one resumes it without replay`, async t => {
   const { service, ssh, request, store } = await fixture(t, provider);
   const agents = [];
@@ -577,7 +778,8 @@ for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigrav
     const reply: string[] = [];
     const done = (async () => { for await (const chunk of adapter.stream(options)) if (chunk.type === 'text-delta') reply.push(chunk.text); })();
     const count = ssh.admissions.length;
-    for (let i = 0; i < 1000 && ssh.admissions.length === count; i++) await tick();
+    // Bounded by time: a busy parallel test run can need far more than a fixed number of ticks.
+    for (const deadline = Date.now() + 10_000; Date.now() < deadline && ssh.admissions.length === count;) await tick();
     assert.equal(ssh.admissions.length, count + 1, 'one native prompt was admitted');
     ssh.live.finish(); await done;
     assert.equal(reply.join(''), '远程结果 🌏');
@@ -594,4 +796,16 @@ for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigrav
   const replay: string[] = [];
   for await (const chunk of resumed.stream(follow)) if (chunk.type === 'text-delta') replay.push(chunk.text);
   assert.equal(replay.join(''), '远程结果 🌏'); assert.equal(ssh.admissions.length, 2, 'completed output replays after restart without a new prompt');
+});
+
+test('JSONL frames report exact byte offsets for multi-byte text split anywhere', async () => {
+  const lines = ['{"text":"你好🌏"}', '{"text":"ascii"}', '{"n":3}'].map(line => Buffer.from(`${line}\n`));
+  const data = new Set<(data: Buffer) => void>();
+  const child: Child = { write() {}, stop() {}, onData: listener => { data.add(listener); }, onExit() {}, offset: 100 };
+  const peer = new JsonlPeer(child), frames: { start: number; end: number; text?: unknown }[] = [];
+  peer.onMessage((message, frame) => frames.push({ ...frame, text: message.text ?? message.n }));
+  for (const byte of Buffer.concat(lines)) for (const listener of data) listener(Buffer.from([byte]));
+  let at = 100;
+  assert.deepEqual(frames, lines.map((line, i) => ({ start: at, end: (at += line.length), text: ['你好🌏', 'ascii', 3][i] })));
+  assert.equal(peer.position, at);
 });

@@ -25,20 +25,37 @@ try {
   wait('document.querySelector(".dsh-translate-settings h2")?.textContent === "Translation API"');
   browser('snapshot', '-i');
   expect('document.querySelector("select").textContent.includes("Japanese") && document.body.textContent.includes("Fallback API URL")');
+  const draft = 'document.querySelector("[data-dsh-translate-draft]")';
+  const label = 'document.querySelector("[data-dsh-translate-label]").textContent';
+  const lock = 'document.querySelector("[data-dsh-translate-lock]")';
+  // Claude is locked to English by default: the badge shows and requests ask for English.
+  expect(`${draft}.dataset.dshTranslateTarget === "en" && ${lock}?.textContent === "EN" && ${draft}.title === "Translate draft to English (Alt/Option+T)"`);
   browser('click', '[data-dsh-translate-draft]');
-  wait('document.querySelector("[data-dsh-translate-draft]").textContent === "Undo"');
-  expect('document.querySelector("[data-composer-input]").value === "Hello world"');
+  wait(`${label} === "Undo"`);
+  expect('document.querySelector("[data-composer-input]").value === "Hello world" && window.fixture.lastTarget === "en"');
+  expect(`getComputedStyle(${lock}).display === "none"`);
   browser('click', '[data-dsh-browser-devtools=toggle]');
   const guest = 'document.querySelector("iframe").contentDocument';
   wait(`${guest}.querySelector(".dsh-bdt-title")?.textContent === "Page debugger"`);
   evaluate('window.fixture.setLocale("zh-CN")');
   wait('document.querySelector(".dsh-translate-settings h2").textContent === "翻译 API"');
   wait(`${guest}.querySelector(".dsh-bdt-title").textContent === "网页调试器"`);
-  expect('document.querySelector("[data-dsh-translate-draft]").textContent === "撤销"');
+  expect(`${label} === "撤销"`);
   expect('document.querySelector("[data-dsh-browser-devtools=toggle]").getAttribute("aria-label") === "关闭调试浮窗"');
   expect('document.querySelector("select").textContent.includes("日语") && document.body.textContent.includes("备用 API 地址")');
   browser('click', '[data-dsh-translate-draft]');
   expect('document.querySelector("[data-composer-input]").value === "你好世界"');
+  // Other models keep automatic direction until their keyword is configured.
+  evaluate('window.fixture.setModel("deepseek-official", "deepseek-flash")');
+  wait(`${draft}.dataset.dshTranslateTarget === "auto" && !${lock} && ${draft}.title === "翻译草稿（Alt/Option+T）"`);
+  browser('click', '[data-dsh-translate-draft]');
+  wait(`${label} === "撤销"`);
+  expect('window.fixture.lastTarget === "auto"');
+  browser('click', '[data-dsh-translate-draft]');
+  browser('fill', 'input[placeholder="claude, anthropic"]', 'claude, deepseek');
+  browser('click', '.dsh-translate-actions button:text-is("保存设置")');
+  wait(`${draft}.dataset.dshTranslateTarget === "en" && ${lock}?.textContent === "EN"`);
+  expect('JSON.parse(localStorage.getItem("dsh-translate.settings.v1")).englishLockModels === "claude, deepseek"');
   browser('fill', 'textarea:not([data-composer-input])', 'Test input');
   evaluate('window.fixture.fail = true');
   browser('click', '.dsh-translate-actions button:text-is("翻译")');
@@ -53,7 +70,7 @@ try {
   evaluate('window.fixture.setLocale("zh")');
   expect('document.querySelector(".dsh-translate-settings h2").textContent === "Translation API"');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors));
-  console.log('PASS: English fallback, live translation and guest debugger localization, target languages, fallback fields, undo state and localized errors');
+  console.log('PASS: English fallback, live translation and guest debugger localization, target languages, fallback fields, undo state, model English lock and localized errors');
 } finally {
   try { browser('close'); } catch {}
   await rm(temp, { recursive: true, force: true });

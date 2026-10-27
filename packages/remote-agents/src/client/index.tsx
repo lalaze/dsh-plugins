@@ -1,3 +1,4 @@
+import { XIcon } from '@phosphor-icons/react/dist/csr/X';
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { LocaleContext } from '@dsh-plugins/i18n';
@@ -8,12 +9,16 @@ import { HostManager } from './hosts.js';
 import { styles } from './styles.js';
 import { Sessions } from './sessions.js';
 import { installModelGroups } from './model-groups.js';
+import { ModelLabel } from './model-label.js';
+import { installCustomModelLabels } from './custom-model-label.js';
 import { installWorkspaceModels, type WorkspaceClient } from './workspace-models.js';
+import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './usage.js';
+import { symbols } from '@deepseek-ai/cordis';
 
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
   inject?(services: string[], factory: (scoped: Client) => void): unknown;
-  slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC): unknown };
+  slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC<any>): unknown };
 }
 function Settings({ openSessions }: { openSessions: () => void }) {
   useLocale();
@@ -43,7 +48,7 @@ function SessionDialog({ close, openChat, cwd }: { close: () => void; openChat: 
     return () => { element?.close(); document.body.style.overflow = overflow; if (focused instanceof HTMLElement) focused.focus(); };
   }, []);
   return createPortal(<dialog className="dsh-ra ra-dialog" ref={dialog} aria-label={ui('Remote sessions')} onCancel={close} onClose={close}>
-    <style>{styles}</style><div className="ra-dialog-bar"><span>{ui('Remote agents')}</span><button aria-label={ui('Close remote sessions')} onClick={close}>×</button></div>
+    <style>{styles}</style><div className="ra-dialog-bar"><span>{ui('Remote sessions')}</span><button aria-label={ui('Close remote sessions')} onClick={close}><XIcon size={19} /></button></div>
     <Sessions openChat={openChat} cwd={cwd} />
   </dialog>, document.body);
 }
@@ -63,7 +68,18 @@ export function apply(ctx: Client): void {
     const cwd = Object.values(sessions?.list?.getSnapshot()?.byId ?? {}).find(s => (s.retainedBy?.mainView ?? 0) > 0)?.cwd;
     return <><Settings openSessions={() => setVisible(true)} />{visible && <SessionDialog close={() => setVisible(false)} openChat={openChat} cwd={cwd} />}</>;
   };
-  ctx.slots.inject('settings.section', () => { ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, Surface); });
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, Surface));
   ctx.effect(installModelGroups);
+  // A native label contribution is a fallback; another plugin may already own priority 0.
+  ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({ name: 'conversation.input.model.label', id: 'remote-agents-model-label', priority: 50 }, ModelLabel));
+  ctx.effect(installCustomModelLabels);
+  ctx.effect(installUsageStyles);
+  ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
+    // Read through the service itself: this plugin's proxy would resolve dependencies from our context.
+    const service = (scoped as unknown as { modelDirectories: ModelDirectories }).modelDirectories;
+    setModelDirectories((service as unknown as Record<symbol, ModelDirectories | undefined>)[symbols.original] ?? service);
+    return () => setModelDirectories(undefined);
+  }));
+  ctx.slots.inject('conversation.input.right', () => ctx.slots.register({ name: 'conversation.input.right', id: 'remote-agents-usage', order: 50 }, UsageRing));
   ctx.inject?.(['modelDirectories', 'sessions', 'workspaces'], scoped => installWorkspaceModels(scoped as unknown as WorkspaceClient));
 }

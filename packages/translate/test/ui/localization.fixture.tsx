@@ -6,10 +6,18 @@ import { createLocaleFixture } from '../../../../scripts/locale-fixture.js';
 
 const locale = createLocaleFixture('en');
 const cleanups: Array<() => void> = [];
-const fixture = { setLocale: locale.setLocale, fail: false, requests: 0 };
+// The composer starts on a remote Claude model, which the default keywords lock to English.
+let models = { current: { provider: 'remote-cli-claude', model: 'p1/claude/sonnet' } };
+const modelListeners = new Set<() => void>();
+const modelStore = { getSnapshot: () => models, subscribe(listener: () => void) { modelListeners.add(listener); return () => { modelListeners.delete(listener); }; } };
+const fixture = {
+  setLocale: locale.setLocale, fail: false, requests: 0, lastTarget: '',
+  setModel(provider: string, model: string) { models = { current: { provider, model } }; for (const listener of modelListeners) listener(); },
+};
 Object.assign(window, { fixture });
-window.fetch = async () => {
+window.fetch = async (_input, init) => {
   fixture.requests++;
+  fixture.lastTarget = JSON.parse(String(init?.body ?? '{}')).target ?? '';
   return fixture.fail ? Response.json({ error: 'Enter a translation model first' }, { status: 400 })
     : Response.json({ translation: 'Hello world', target: 'en', model: 'fixture-model', detectedLanguage: 'zh-CN', note: null });
 };
@@ -22,9 +30,11 @@ const ctx = {
     if (spec.name === 'settings.section') Settings = component;
     else Composer = component;
   } },
+  inject: (_services: string[], setup: (scoped: never) => void) => setup({ ...ctx, modelDirectories: { directoryFor: () => ({ store: modelStore }) } } as never),
 };
 applyTranslation(ctx);
-createRoot(mount).render(<><Settings /><textarea data-composer-input aria-label="Draft" defaultValue="你好世界" /><Composer /></>);
+const ComposerSeat = Composer as React.FC<{ sessionId: string }>;
+createRoot(mount).render(<><Settings /><textarea data-composer-input aria-label="Draft" defaultValue="你好世界" /><ComposerSeat sessionId="session-1" /></>);
 
 // Execute the real serialized debugger in a separate page, as Electron's webview does.
 const container = document.createElement('div');

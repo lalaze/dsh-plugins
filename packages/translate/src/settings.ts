@@ -28,6 +28,17 @@ export function parseTranslationSettings(value: unknown): TranslationSettings {
   };
 }
 
+/**
+ * Whether composer drafts for this model always translate into English. Keywords are separated by commas or
+ * new lines and match the provider or model id case-insensitively, so `claude` covers remote Claude Code
+ * (`remote-cli-claude`) and gateway ids such as `anthropic/claude-sonnet-4.5`.
+ */
+export function locksDraftsToEnglish(keywords: string, selection: { provider: string; model: string } | null | undefined): boolean {
+  if (!selection) return false;
+  const id = `${selection.provider}/${selection.model}`.toLowerCase();
+  return keywords.split(/[,\n]/).some(keyword => { const value = keyword.trim().toLowerCase(); return value !== '' && id.includes(value); });
+}
+
 function validateUrl(value: string, invalid: string, protocol: string) {
   let url: URL;
   try { url = new URL(value); } catch { throw new Error(invalid); }

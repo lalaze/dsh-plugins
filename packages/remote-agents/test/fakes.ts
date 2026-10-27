@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import type { Backend } from '../src/backend.js';
-import { enabledProvidersOf, type Agent, type Cursor, type HostConfig, type PermissionAnswer, type Provider, type Task, type TaskInput, type TimelineEntry, type TimelinePage } from '../src/domain.js';
+import { enabledProvidersOf, type AccountUsage, type Agent, type Cursor, type HostConfig, type PermissionAnswer, type Provider, type Task, type TaskInput, type TimelineEntry, type TimelinePage } from '../src/domain.js';
 import { RemoteAgentsService } from '../src/service.js';
 import { Store } from '../src/store.js';
 import { messageTimeline } from '../src/history.js';
@@ -23,6 +23,8 @@ export class FakeRemote {
   home = '/home/builder';
   homeError?: string;
   discoveries = 0;
+  accountUsage: AccountUsage | null = null;
+  accountReads: { provider: string; cwd?: string; refresh: boolean }[] = [];
   store?: Store;
   created?: Task;
   onCreate?: (agent: Agent, task: Task) => void;
@@ -96,6 +98,7 @@ export class FakeRemote {
       if (!agent || agent.status === 'closed') return;
       this.detaches++; agent.status = 'closed'; agent.activeTurn = null; agent.pendingPermissions = [];
     },
+    account: async (provider, cwd, refresh) => { this.accountReads.push({ provider, cwd, refresh }); return structuredClone(this.accountUsage); },
     forget: async task => {
       this.forgets++;
       const agent = this.receipts.get(task.id);

@@ -11,7 +11,7 @@
 ```sh
 pnpm --filter dsh-translate check
 pnpm --filter dsh-translate pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-translate-0.1.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-translate-0.1.2.tgz"
 ```
 
 在 **设置 → 翻译** 填写接口地址、Key 和模型。Key 保存在当前浏览器配置中，只发送到填写的接口。单次翻译最多 5000 字符，同时最多处理 3 个请求。

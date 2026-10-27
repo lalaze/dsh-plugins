@@ -2,13 +2,24 @@ import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend, type Backend, type BackendFactory } from './backend.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
-import { busy, enabledProvidersOf, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task } from './domain.js';
+import { attachmentInput, inputModalitiesOf } from './domain.js';
+import { busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type Host, type HostConfig, type PermissionAnswer, type Task, type UsageReport } from './domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
-export interface CreateOptions { title?: string; origin?: Task['origin']; chat?: Task['chat'] }
+export interface UsageOptions {
+  /** The conversation's selected route; picks its CLI when the conversation used several. */
+  route?: string;
+  /** Machine and CLI of the selected route, for a conversation that has not started a session yet. */
+  target?: { hostId: string; provider: string };
+  /** Also read plan limits, which may contact the SSH host. */
+  account?: boolean;
+  refresh?: boolean;
+}
+export interface CreateOptions { title?: string; origin?: Task['origin']; chat?: Task['chat']; signal?: AbortSignal }
 export interface SendOptions {
   /** Interrupt a running turn. When false, a working agent rejects the message. */
   interrupt?: boolean;
+  signal?: AbortSignal;
 }
 export class RemoteAgentsService {
   private readonly connections = new Map<string, Connection>();
@@ -26,6 +37,24 @@ export class RemoteAgentsService {
         ...(catalog ? { modelsCheckedAt: catalog.checkedAt, modelCount: providers.filter(p => p.status === 'ready').reduce((n, p) => n + p.models.length, 0),
           providerErrors: providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) };
     });
+  }
+  /** Closed for a plugin reload or DSH shutdown; remote work must not be stopped then. */
+  get stopped(): boolean { return this.closed; }
+  /**
+   * Reattach persistent CLIs after a restart and finish queued relay cleanups. Runs in the
+   * background: hosts may be offline, and their sessions keep reconnecting until they return.
+   */
+  resume(): Promise<void> {
+    const tasks = this.store.tasks(t => !!t.relay);
+    return Promise.allSettled([
+      ...tasks.map(task => this.serial(task.id, async () => {
+        const backend = this.connection(task.hostId).backend;
+        if (task.native) { await backend.restore?.(task); return; }
+        // Interrupted before its native session existed: nothing can be resumed, so remove it.
+        await backend.detach(task);
+      }).catch(error => this.updateTask(task.id, next => { next.error = this.safeError(error); }).catch(() => {}))),
+      ...this.store.hosts().map(host => this.closed ? undefined : this.connection(host.id).backend.cleanup?.()),
+    ]).then(() => {});
   }
   onCatalogChange(listener: () => void): () => void { this.catalogListeners.add(listener); return () => this.catalogListeners.delete(listener); }
   private catalogChanged(): void { for (const listener of this.catalogListeners) listener(); }
@@ -125,6 +154,7 @@ export class RemoteAgentsService {
       // Recheck the SSH execution identity before each operation.
       const serverId = await current.backend.connect();
       if (serverId !== host.serverId) throw new RemoteError('Remote SSH machine identity changed', 409);
+      void current.backend.cleanup?.();
       return await action(current.backend, host);
     } catch (error) {
       current.status = 'error'; current.error = this.safeError(error);
@@ -154,9 +184,11 @@ export class RemoteAgentsService {
       id: task.id, hostId: task.hostId, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model,
       ...(task.chat ? { chatSessionId: task.chat.sessionId } : {}),
       ...(task.modeId ? { modeId: task.modeId } : {}), ...(task.thinkingOptionId ? { thinkingOptionId: task.thinkingOptionId } : {}),
-      modes: task.modes ?? [], title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
+      ...(task.serviceTier ? { serviceTier: task.serviceTier } : {}),
+      modes: permissionModes(task.provider, task.modes ?? []), title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
       archived: task.archived === true, delegated: task.origin === 'dsh', started: !!task.agentId, attached: !!live && live.status !== 'closed', status, pendingPermissions: pending,
       ...(error ? { error } : {}), ...(resumable !== undefined ? { resumable } : {}), ...(task.native?.sessionId ? { nativeSessionId: task.native.sessionId } : {}),
+      ...(live?.persistent ? { persistent: true } : {}), ...(live?.reconnecting && live.status !== 'closed' ? { reconnecting: true } : {}),
     };
   }
   async summary(id: string): Promise<AgentSummary> { const task = this.task(id); return this.summarize(task, await this.live(task)); }
@@ -178,11 +210,16 @@ export class RemoteAgentsService {
       this.host(id);
       // Forget local sessions and output without probing an unreachable SSH host.
       if (options.deleteAgents) for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id)) await this.delete(task.id);
+      // Give queued relay removals a short chance; an offline host never blocks removing it.
+      const queued = this.connections.get(id)?.backend.cleanup?.();
+      if (queued) await Promise.race([queued, new Promise(resolve => setTimeout(resolve, 5000).unref())]);
       await this.store.update(state => {
         // A concurrently created session still requires confirmation on the next attempt.
         if (state.tasks.some(t => t.hostId === id)) throw new RemoteError('Delete this host’s agents, including archived ones, before removing it', 409);
         state.hosts = state.hosts.filter(h => h.id !== id);
         state.mainChatProjects = state.mainChatProjects?.filter(p => p.hostId !== id);
+        state.relayCleanups = state.relayCleanups?.filter(c => c.hostId !== id);
+        if (!state.relayCleanups?.length) delete state.relayCleanups;
       });
       const connection = this.connections.get(id); this.connections.delete(id);
       await connection?.backend.close();
@@ -210,7 +247,7 @@ export class RemoteAgentsService {
       const existing = this.store.task(t => t.id === request.id);
       if (existing) {
         if (JSON.stringify(taskInput(existing)) !== JSON.stringify(request)) throw new RemoteError('This request ID belongs to a different agent', 409);
-        return existing.agentId ? this.summary(existing.id) : this.launch(existing);
+        return existing.agentId ? this.summary(existing.id) : this.launch(existing, options.signal);
       }
       return this.use(request.hostId, async (backend, host) => {
         if (!enabledProvidersOf(host).includes(request.provider)) throw new RemoteError('This CLI is disabled on this machine. Enable it in Settings → Remote agents.', 409);
@@ -219,8 +256,10 @@ export class RemoteAgentsService {
         if (!provider || provider.status !== 'ready') throw new RemoteError('The selected CLI is not ready in this remote project', 409);
         const model = provider.models.find(m => m.id === request.model);
         if (!model) throw new RemoteError('The selected model is unavailable on this host', 409);
-        if (request.modeId && !provider.modes.some(m => m.id === request.modeId)) throw new RemoteError('The selected mode is unavailable', 409);
+        if (request.attachments?.some(a => a.kind === 'image') && !inputModalitiesOf(provider.id, model).includes('image')) throw new RemoteError('This remote CLI does not support image input');
+        if (request.modeId && !permissionModes(provider.id, provider.modes).some(m => m.id === request.modeId)) throw new RemoteError('The selected mode is unavailable', 409);
         if (request.thinkingOptionId && !model.thinkingOptions?.some(m => m.id === request.thinkingOptionId)) throw new RemoteError('The selected thinking level is unavailable', 409);
+        if (request.serviceTier && !model.serviceTiers?.some(t => t.id === request.serviceTier)) throw new RemoteError('The selected speed is unavailable', 409);
         const now = new Date().toISOString();
         const task: Task = { ...request, serverId: host.serverId!, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), state: 'creating' };
         // Persist the exact execution intent and idempotency key before any remote mutation.
@@ -229,25 +268,25 @@ export class RemoteAgentsService {
           if (state.tasks.length >= 1000) throw new RemoteError('The remote agent registry is full. Delete archived agents first.');
           state.tasks.push(task);
         });
-        return this.launch(task);
+        return this.launch(task, options.signal);
       });
     });
   }
   /** Retry an interrupted start, or reattach a stopped session without replaying anything. */
-  async retry(id: string): Promise<AgentSummary> {
+  async retry(id: string, signal?: AbortSignal): Promise<AgentSummary> {
     const task = this.task(id);
-    if (!task.agentId) return this.create(taskInput(task));
+    if (!task.agentId) return this.create(taskInput(task), { signal });
     return this.serial(id, () => this.use(task.hostId, async backend => {
-      const agent = await backend.recover(this.task(id));
+      const agent = await backend.recover(this.task(id), signal);
       this.assertAgent(task, agent);
       await this.updateTask(id, next => { next.state = 'ready'; delete next.error; });
       return this.summary(id);
     }, task.serverId));
   }
-  private async launch(task: Task): Promise<AgentSummary> {
+  private async launch(task: Task, signal?: AbortSignal): Promise<AgentSummary> {
     try {
       await this.use(task.hostId, async backend => {
-        const agent = await backend.create(task);
+        const agent = await backend.create(task, signal);
         if (agent.provider !== task.provider) throw new Error('Created agent provider does not match the request');
         await this.updateTask(task.id, next => { next.agentId = agent.id; next.executionCwd = agent.cwd; next.state = 'ready'; delete next.error; });
       }, task.serverId);
@@ -291,11 +330,11 @@ export class RemoteAgentsService {
       await this.updateTask(id, next => { next.thinkingOptionId = thinkingOptionId; });
     });
   }
-  /** Change a model by resuming the same native session. Existing receipts keep their original namespace. */
-  async setModel(id: string, model: string, thinkingOptionId?: string, route?: string): Promise<void> {
+  /** Change a model or speed by resuming the same native session. Existing receipts keep their original namespace. */
+  async setModel(id: string, model: string, thinkingOptionId?: string, route?: string, serviceTier?: string): Promise<void> {
     return this.serial(id, async () => {
       const task = this.task(id);
-      if (task.model === model && task.thinkingOptionId === thinkingOptionId) return;
+      if (task.model === model && task.thinkingOptionId === thinkingOptionId && task.serviceTier === serviceTier) return;
       if (busy(await this.summary(id))) throw new RemoteError('Stop the agent before changing its model', 409);
       if (task.native?.resumable === false) throw new RemoteError('This CLI cannot resume with a different model. Start a new conversation.', 409);
       await this.use(task.hostId, async backend => {
@@ -303,13 +342,29 @@ export class RemoteAgentsService {
         const selected = provider?.models.find(m => m.id === model);
         if (!selected) throw new RemoteError('The selected model is unavailable on this host', 409);
         if (thinkingOptionId && !selected.thinkingOptions?.some(e => e.id === thinkingOptionId)) throw new RemoteError('The selected thinking level is unavailable', 409);
+        if (serviceTier && !selected.serviceTiers?.some(t => t.id === serviceTier)) throw new RemoteError('The selected speed is unavailable', 409);
         if (task.agentId) await backend.detach(task);
         await this.updateTask(id, next => {
-          next.model = model; next.thinkingOptionId = thinkingOptionId;
+          next.model = model; next.thinkingOptionId = thinkingOptionId; next.serviceTier = serviceTier;
           if (next.chat && route) { next.chat.receiptRoute ??= next.chat.route; next.chat.route = route; }
         });
       }, task.serverId);
     });
+  }
+  /** Context comes from local state; only plan limits are read from the SSH host, and they are cached. */
+  async usage(sessionId: string, options: UsageOptions = {}): Promise<UsageReport | null> {
+    const cli = (route: string) => route.split('/').slice(0, 2).join('/');
+    const task = this.store.tasks(t => t.chat?.sessionId === sessionId && (!options.route || cli(t.chat.route) === cli(options.route)))
+      .sort((a, b) => (b.updatedAt ?? b.createdAt).localeCompare(a.updatedAt ?? a.createdAt))[0];
+    const target = task ? { hostId: task.hostId, provider: task.provider } : options.target;
+    if (!target) return null;
+    const report: UsageReport = { provider: target.provider, context: task ? (await this.live(task))?.context ?? task.context ?? null : null };
+    if (!options.account) return report;
+    try {
+      const account = await this.use(target.hostId, backend => backend.account(target.provider, task ? task.executionCwd ?? task.cwd : undefined, options.refresh === true), task?.serverId);
+      if (account) report.account = account;
+    } catch (error) { report.account = { provider: target.provider, windows: [], checkedAt: new Date().toISOString(), error: this.safeError(error) }; }
+    return report;
   }
   async rename(id: string, title: string): Promise<AgentSummary> {
     return this.serial(id, async () => {
@@ -319,6 +374,7 @@ export class RemoteAgentsService {
   }
   async send(id: string, input: unknown, options: SendOptions = {}): Promise<AgentSummary> {
     const value = record(input), messageId = identifier(value.id), text = field(value.text, 'message', 100_000);
+    const attachments = value.attachments === undefined ? undefined : attachmentInput(value.attachments);
     return this.serial(id, async () => {
       const task = this.task(id);
       if (!task.agentId) throw new RemoteError('Retry starting this agent before sending a message', 409);
@@ -329,7 +385,7 @@ export class RemoteAgentsService {
         if (live.status === 'closed' && (live.resumable ?? task.native?.resumable) === false) throw new RemoteError('This CLI session has ended and cannot be resumed. Its output is kept.', 409);
         // Messaging an archived agent brings it back, as in Paseo.
         await this.updateTask(id, next => { next.updatedAt = new Date().toISOString(); delete next.archived; });
-        await backend.send(task.agentId!, text, messageId);
+        await backend.send(task.agentId!, text, messageId, attachments, options.signal);
         return this.summary(id);
       }, task.serverId);
     });
@@ -374,9 +430,14 @@ export class RemoteAgentsService {
     });
   }
   /** Soft delete: interrupt, release the CLI process and hide the agent. Output and the native session are kept. */
-  async archive(id: string, archived = true): Promise<AgentSummary> {
+  async archive(id: string, archived = true, options: { onlyIdle?: boolean } = {}): Promise<AgentSummary> {
     return this.serial(id, async () => {
       const task = this.task(id);
+      // A history row can become active between a dashboard poll and a bulk archive.
+      if (archived && options.onlyIdle) {
+        const latest = await this.summary(id);
+        if (busy(latest) || latest.status === 'error') throw new RemoteError('This session is active. Refresh before archiving.', 409);
+      }
       if (archived) await this.connection(task.hostId).backend.detach(task);
       await this.updateTask(id, next => { if (archived) next.archived = true; else delete next.archived; });
       return this.summary(id);
@@ -393,7 +454,7 @@ export class RemoteAgentsService {
   async setMode(id: string, modeId: string): Promise<AgentSummary> {
     return this.serial(id, async () => {
       const task = this.task(id);
-      if (!task.modes?.some(m => m.id === modeId)) throw new RemoteError('This mode is not available for this agent', 409);
+      if (!permissionModes(task.provider, task.modes ?? []).some(m => m.id === modeId)) throw new RemoteError('This mode is not available for this agent', 409);
       if (task.modeId === modeId) return this.summary(id);
       const live = await this.live(task);
       if (live && busy(this.summarize(task, live))) throw new RemoteError('Stop the agent before changing its mode', 409);

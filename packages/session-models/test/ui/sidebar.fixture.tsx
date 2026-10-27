@@ -32,7 +32,7 @@ body{margin:0;min-height:100vh;font:13px system-ui;background:linear-gradient(13
 .hoverStatus{color:#adb2b8;align-items:center;gap:8px;font-size:12px;line-height:20px;display:flex}
 `;
 
-interface Row { id: string; title: string; state: 'done' | 'warning' | 'error' | 'ongoing' | 'idle'; schedule?: boolean; archived?: boolean; selection?: [string, string] }
+interface Row { id: string; title: string; state: 'done' | 'warning' | 'error' | 'ongoing' | 'idle'; schedule?: boolean; archived?: boolean; wrapped?: boolean; remote?: boolean; selection?: [string, string] }
 const ROWS: Row[] = [
   { id: 'claude-done', title: 'Refactor the sync worker', state: 'done', selection: ['remote-cli-claude', 'p1/claude/sonnet'] },
   { id: 'openai-running', title: 'Generate the session title', state: 'ongoing', selection: ['remote-cli-codex', 'p1/codex/gpt-5.1-codex'] },
@@ -41,6 +41,10 @@ const ROWS: Row[] = [
   { id: 'qwen-schedule', title: 'Nightly report', state: 'idle', schedule: true, selection: ['dashscope', 'qwen3-coder-plus'] },
   { id: 'kimi-error', title: 'Failed run', state: 'error', selection: ['moonshot', 'kimi-k2'] },
   { id: 'generic-done', title: 'Local llama', state: 'done', selection: ['ollama', 'llama3.3'] },
+  // Host builds that wrap the status dot must still get the corner badge, not a dot over the logo.
+  { id: 'grok-wrapped', title: 'Install Git on this machine', state: 'done', wrapped: true, selection: ['remote-cli-grok', 'p1/grok/grok-4'] },
+  // An idle row shows the host's leading slot; another plugin's remote-session mark fills the whole cell there.
+  { id: 'openai-remote', title: 'Remote workspace chat', state: 'idle', remote: true, selection: ['remote-cli-codex', 'p1/codex/gpt-5.5'] },
   { id: 'unread-done', title: 'Never opened in this window', state: 'done' },
   { id: 'archived', title: 'Archived chat', state: 'done', archived: true, selection: ['anthropic', 'claude-opus-4-1'] },
 ];
@@ -52,8 +56,14 @@ function StateDot({ state }: { state: Row['state'] }) {
   return <span className="dot" data-state={state} style={{ width: 10, height: 10 }} aria-hidden="true" />;
 }
 function SessionRow({ row }: { row: Row }) {
-  const leading = row.state !== 'idle'
-    ? <><StateDot state={row.state} /><span className="vh">{row.state}</span></>
+  const status = <><StateDot state={row.state} /><span className="vh">{row.state}</span></>;
+  const remote = <div data-slot="sidebar.session.row.leading" style={{ display: 'contents' }}>
+    <span data-dsh-remote-mark="" role="img" aria-label="Remote session" style={{ width: 16, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: '#2fb36b' }} />
+    </span>
+  </div>;
+  const leading = row.remote ? remote : row.state !== 'idle'
+    ? row.wrapped ? <span className="mark">{status}</span> : status
     : row.schedule && <span className="mark" data-session-schedule-mark=""><svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg><span className="vh">1 task</span></span>;
   return <div className="sessionRow" data-row-key={`session:${row.id}`} role="treeitem" aria-description={row.archived ? 'Archived' : undefined}>
     <span className="slot">{!row.archived && leading}</span>

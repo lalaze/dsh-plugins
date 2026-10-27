@@ -60,6 +60,15 @@ const server = createServer(async (request, response) => {
         if (input.connectionError !== undefined) connectionError = input.connectionError || undefined;
         if (input.sshConfig) { sshConfig.hosts = input.sshConfig.hosts; sshConfig.warnings = input.sshConfig.warnings ?? []; }
         if (input.loseSend) remote.loseSend = true;
+        if (input.seedUsage) {
+          let [project] = new ChatProjects(service).hosts();
+          if (!project) { await service.addHost({ label: 'macmini', connection: 'ssh://macmini' }, { discoverModels: true }); [project] = new ChatProjects(service).hosts(); }
+          const route = 'macmini/codex/codex-model';
+          const task = store.snapshot().tasks.find(t => t.chat?.sessionId === 'fixture-conversation')
+            ?? await service.create({ id: randomUUID(), hostId: project.hostId, cwd: '/srv/macmini', provider: 'codex', model: 'remote-model', prompt: '用量演示' }, { chat: { sessionId: 'fixture-conversation', route } });
+          remote.live(task.id).context = input.seedUsage.context;
+          remote.accountUsage = input.seedUsage.account ?? null;
+        }
         if (input.seedSessions) {
           let project = new ChatProjects(service).hosts()[0];
           if (!project) {
@@ -74,9 +83,29 @@ const server = createServer(async (request, response) => {
           remote.append(live.id, { type: 'assistant_message', text: '测试检查完成，等待下一步。' });
           const pending = await service.create(request('审查构建脚本'), { title: '审查构建脚本', origin: 'dsh' });
           remote.live(pending.id).status = 'running';
-          remote.live(pending.id).pendingPermissions = [{ id: 'fixture-approval', name: 'Bash', kind: 'tool', title: '运行项目测试', detail: { command: 'pnpm test', cwd: project.cwd }, actions: [{ id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' }, { id: 'session', label: 'Allow for this session', behavior: 'allow', scope: 'session' }, { id: 'deny', label: 'Deny', behavior: 'deny' }] }];
+          remote.live(pending.id).pendingPermissions = [{ id: 'fixture-approval', name: 'Bash', kind: 'tool', title: '运行项目测试', detail: { command: 'pnpm test', cwd: project.cwd }, actions: [{ id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' }, { id: 'session', label: 'Allow for this session', behavior: 'allow', scope: 'session' }, { id: 'project', label: 'Always allow matching requests in this project', behavior: 'allow', scope: 'project' }, { id: 'deny', label: 'Deny', behavior: 'deny' }] }];
           await service.create(request('实现搜索功能'), { title: '实现搜索功能', chat: { sessionId: 'fixture-main-chat', route: `${project.id}/codex/remote-model` } });
         }
+        if (input.seedDesign && !store.snapshot().tasks.some(t => t.title === '修复登录状态同步')) {
+          const claude = remote.catalog.find(p => p.id === 'claude');
+          Object.assign(claude, { status: 'ready', models: [{ id: 'claude-demo', label: 'Claude Code' }], modes: [{ id: 'inherit', label: 'Remote CLI settings' }, { id: 'auto', label: 'Auto · safety checks' }] });
+          const dashboard = await service.addHost({ label: 'macmini', connection: 'ssh://macmini' }, { discoverModels: true });
+          const hostId = dashboard.hosts.find(h => h.label === 'macmini').id;
+          for (const [index, title] of ['修复登录状态同步', '检查构建脚本', '补全接口测试', '整理项目依赖', '搜索功能优化'].entries()) {
+            const task = await service.create({ id: randomUUID(), hostId, cwd: index > 3 ? '/Volumes/data/code/zeGame2' : '/Volumes/data/code/dsh-plugins', provider: 'claude', model: 'claude-demo', prompt: title }, { title });
+            const live = remote.live(task.id);
+            const timestamp = new Date(Date.now() - index * 5 * 60_000).toISOString();
+            await store.update(state => { state.tasks.find(t => t.id === task.id).updatedAt = timestamp; });
+            if (index === 0) {
+              remote.entries.set(live.id, []);
+              remote.append(live.id, { type: 'user_message', text: '检查登录后状态没有更新的问题，并补充测试。' });
+              remote.append(live.id, { type: 'assistant_message', text: '### 已找到原因\n\n登录状态未更新是由于前端在登录成功后未正确刷新用户信息，导致全局状态仍使用旧的会话数据。\n\n1. 登录接口已正确返回最新的用户信息，但未触发状态更新。\n2. 全局状态管理中缺少在登录成功后重新获取用户信息的逻辑。\n3. 已在 `src/auth/session.ts` 中添加登录成功后的状态刷新，并补充了相关测试。' });
+              for (const name of ['src/auth/session.ts', 'src/auth/store.ts', 'test/auth/session.test.ts', 'test/auth/login.test.ts']) remote.append(live.id, { type: 'tool_call', name, callId: name, status: 'completed', detail: '检查通过' });
+            }
+          }
+        }
+        // A persistent CLI whose SSH connection is being re-established.
+        if (input.relayState) for (const task of store.snapshot().tasks) Object.assign(remote.live(task.id), { persistent: true, ...(task.title === '审查构建脚本' ? { reconnecting: true } : {}) });
       }
       response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ creates: remote.creates, stops: remote.stops, sends: remote.sends, interrupts: remote.interrupts, detaches: remote.detaches, forgets: remote.forgets, answers: remote.answers, modelGroups: (await Promise.all(CHAT_PROVIDERS.map(async id => ({ ...adapter.providerInfo(id), models: await adapter.listModels(id) })))).filter(group => group.models.length), state: await service.snapshot(), tasks: store.snapshot().tasks })); return;
     }

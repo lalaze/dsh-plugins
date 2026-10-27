@@ -12,10 +12,11 @@ function browser(...args) {
 }
 const evaluate = source => browser('eval', '-b', Buffer.from(source).toString('base64')).result;
 const wait = source => {
-  try { return browser('wait', '--fn', source); }
+  // Return a boolean: some agent-browser versions cannot serialize a matched DOM element.
+  try { return browser('wait', '--fn', `!!(${source})`); }
   catch (error) { throw new Error(`Timed out waiting for ${source}\nPage: ${String(evaluate('[...document.querySelectorAll("[data-connection]")].map(o=>o.dataset.connection).join(",") + "\\n" + (document.querySelector(".ra-main")?.innerText ?? document.body.innerText)')).slice(0, 1500)}`, { cause: error }); }
 };
-const expect = source => { if (!evaluate(source)) throw new Error(`UI assertion failed: ${source}`); };
+const expect = source => { if (!evaluate(source)) throw new Error(`UI assertion failed: ${source}${process.env.DSH_UI_DEBUG ? `\n${evaluate(process.env.DSH_UI_DEBUG)}` : ''}`); };
 const state = () => evaluate('(async()=>await (await fetch("/__fixture")).json())()');
 const fixture = data => evaluate(`(async()=>await fetch("/__fixture",{method:"POST",body:${JSON.stringify(JSON.stringify(data))}}))()`);
 const chooseSsh = connection => {
@@ -35,10 +36,11 @@ try {
   browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', base);
   browser('set', 'viewport', '1440', '1000');
 
+  if (!process.argv.includes('--custom-labels-only')) {
   if (!process.argv.includes('--models-only')) {
   // Remote sessions are available only from settings.
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 1 && window.fixture.slots[0] === "settings.section:remote-agents"');
+  expect('window.fixture.slots.join() === "settings.section:remote-agents,conversation.input.model.label:remote-agents-model-label,conversation.input.right:remote-agents-usage"');
   expect('!document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   expect('!document.querySelector(".ra-chat-projects,[aria-label=项目名称],[aria-label=远程项目路径]")');
   wait('document.querySelector(".ra-ssh-options [data-connection=\\"ssh://build-box\\"]")');
@@ -121,19 +123,22 @@ try {
   wait('document.querySelector(".ra-settings [role=alert]")?.textContent.includes("模拟连接中断")');
   fixture({ failReads: false }); browser('click', 'button:text-is("重试")');
   wait('document.querySelector(".ra-hosts input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 1 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
+  expect('window.fixture.slots.length === 3 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
   console.log('PASS: settings load failure and retry; session entry remains in settings without a sidebar or composer launcher');
 
   fixture({ seedSessions: true });
   browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
-  expect('document.querySelectorAll(".ra-session-item").length === 3');
+  expect('document.querySelectorAll(".ra-session-item").length === 1');
+  image('sessions-overview');
   browser('fill', '[aria-label="搜索会话"]', 'no-such-session');
   expect('document.querySelectorAll(".ra-session-item").length === 0');
   browser('fill', '[aria-label="搜索会话"]', '');
-  browser('click', '.ra-filters button:text-is("待处理 (1)")');
   expect('document.querySelectorAll(".ra-session-item").length === 1');
   browser('click', '.ra-session-item'); wait('document.querySelector(".ra-permission")');
+  browser('click', 'button[aria-label="会话选项"]');
+  expect('document.querySelector("[aria-label=权限模式]").disabled');
+  browser('click', 'button[aria-label="会话选项"]');
   browser('set', 'viewport', '390', '844');
   expect('document.querySelector("dialog").scrollWidth <= innerWidth');
   image('sessions-mobile-approval');
@@ -142,13 +147,26 @@ try {
   if (state().answers.length || state().stops) throw new Error('Closing the panel resolved or stopped a pending approval');
   browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
   browser('click', '.ra-session-item:has-text("审查构建脚本")'); wait('document.querySelector(".ra-permission")');
-  browser('click', 'button:text-is("允许本次会话")');
+  browser('click', 'button:text-is("此项目始终允许匹配的请求")');
   wait('!document.querySelector(".ra-permission") && document.querySelector(".ra-output")?.textContent.includes("审批已通过")');
-  if (state().answers.at(-1)?.answer.selectedActionId !== 'session') throw new Error('Native session approval was not preserved');
+  if (state().answers.at(-1)?.answer.selectedActionId !== 'project') throw new Error('Native project approval was not preserved');
+  // A persistent session that lost SSH keeps its state and says it is reconnecting.
+  fixture({ relayState: true });
+  wait('document.querySelector(".ra-detail-heading .ra-badge")?.textContent === "正在重连" && document.querySelector(".ra-detail-heading").textContent.includes("SSH 连接已断开")');
+  image('sessions-reconnecting');
   browser('click', 'button:text-is("返回会话列表")');
   expect('document.querySelector(".ra-session-list").getBoundingClientRect().width > 0');
+  browser('click', '.ra-filters button:has-text("历史记录")');
+  wait('[...document.querySelectorAll(".ra-session-item")].some(item => item.textContent.includes("审查构建脚本") && item.textContent.includes("正在重连"))');
   browser('set', 'viewport', '1440', '1000');
   browser('click', '.ra-session-item:has-text("整理项目测试")'); wait('document.querySelector(".ra-output button")?.textContent === "加载更早的消息"');
+  browser('click', 'button[aria-label="会话选项"]');
+  browser('select', '[aria-label="权限模式"]', 'full-access');
+  wait('document.querySelector("[aria-label=权限模式]")?.value === "full-access" && !document.querySelector("[aria-label=权限模式]").disabled');
+  if (state().tasks.find(t => t.title === '整理项目测试').modeId !== 'full-access') throw new Error('The session permission mode was not saved');
+  browser('select', '[aria-label="权限模式"]', 'ask');
+  wait('document.querySelector("[aria-label=权限模式]")?.value === "ask" && !document.querySelector("[aria-label=权限模式]").disabled');
+  browser('click', 'button[aria-label="会话选项"]');
   expect('!document.querySelector(".ra-output").textContent.includes("最早的一条历史消息")');
   browser('click', 'button:text-is("加载更早的消息")');
   wait('document.querySelector(".ra-output").textContent.includes("最早的一条历史消息")');
@@ -158,24 +176,27 @@ try {
   browser('click', 'button:text-is("检查送达情况")');
   wait('document.querySelector(".ra-compose button")?.textContent === "发送" && document.querySelector(".ra-output").textContent.includes("已完成：补充错误恢复测试")');
   if (state().sends !== 1 || state().interrupts) throw new Error('A lost response resent or interrupted the task');
+  browser('click', 'button[aria-label="会话选项"]');
   browser('click', 'button:text-is("重命名")'); browser('fill', '[aria-label="会话标题"]', '恢复测试已完成'); browser('click', '.ra-rename button');
   wait('document.querySelector(".ra-detail-heading h2")?.textContent === "恢复测试已完成"');
   browser('set', 'media', 'dark'); image('sessions-dark');
   browser('set', 'media', 'light'); image('sessions-light');
-  browser('click', 'button:text-is("归档")'); wait('document.querySelector(".ra-detail-heading .ra-badge")?.textContent === "已归档"');
-  browser('click', '.ra-filters button:text-is("已归档")'); wait('document.querySelectorAll(".ra-session-item").length === 1');
+  browser('click', 'button:text-is("归档")'); wait('document.querySelector(".ra-detail-actions")?.textContent.includes("恢复")');
+  browser('click', '.ra-archive-link'); wait('document.querySelectorAll(".ra-session-item").length === 1');
   browser('click', 'button:text-is("恢复")'); wait('document.querySelectorAll(".ra-session-item").length === 0');
-  browser('click', '.ra-filters button:text-is("全部会话")');
+  browser('click', '.ra-filters button:has-text("历史记录")');
   browser('click', '.ra-session-item:has-text("实现搜索功能")'); wait('document.querySelector(".ra-compose-note")');
   expect('!document.querySelector("[aria-label=给智能体发消息]")');
   browser('click', 'button:text-is("在主对话打开")'); wait('!document.querySelector("dialog[open]")');
   expect('window.fixture.navigation.at(-1) === "fixture-main-chat"');
   browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-list-heading")');
   browser('click', '.ra-list-heading button'); wait('document.querySelector("[aria-label=会话机器] option")');
+  browser('select', '[aria-label="权限模式"]', 'full-access');
   browser('fill', '[aria-label="任务"]', '检查 API 的分页实现');
   browser('click', 'button:text-is("开始会话")'); wait('document.querySelector(".ra-detail-heading h2")?.textContent === "检查 API 的分页实现"');
   if (state().creates !== 4) throw new Error('Starting a session did not create exactly one agent');
   if (state().tasks.at(-1).cwd !== '/srv/main-chat') throw new Error('The session did not use the current DSH workspace path');
+  if (state().tasks.at(-1).modeId !== 'full-access') throw new Error('The new session did not use the selected permission mode');
   browser('set', 'viewport', '390', '844'); image('sessions-mobile-chat');
   expect('document.querySelector("dialog").scrollWidth <= innerWidth');
   evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".ra-compose textarea")?.getAttribute("aria-label") === "Message the agent"');
@@ -220,7 +241,7 @@ try {
   const visible = '[data-ra-model-option]:not([data-ra-model-hidden])';
   browser('set', 'viewport', '1440', '1000');
   wait('document.querySelector("[data-native-picker] button")');
-  expect('window.fixture.slots.length === 1');
+  expect('window.fixture.slots.length === 3');
   browser('click', trigger); wait('document.querySelector("[data-menu-material] > button")');
   image('model-groups-native-root');
   browser('click', rootModel); wait('document.querySelector("[data-ra-model-provider]")');
@@ -285,16 +306,19 @@ try {
   expect('!document.querySelector("[data-menu-material]").textContent.includes("ubuntu")');
   evaluate('window.fixture.workspace("ubuntu")');
   wait('document.querySelectorAll("[data-ra-model-provider]").length === 2');
-  expect('!document.querySelector("[data-native-picker] button").textContent.includes("macmini")');
+  expect('!document.querySelector("[data-native-picker] button").title.includes("macmini")');
   expect('!document.querySelector("[data-menu-material]").textContent.includes("macmini")');
   browser('click', heading('remote-cli-claude'));
   expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-claude] [data-ra-model-option]:not([data-ra-model-hidden])").length === 1');
-  browser('click', `${menu} button:has-text("Claude model · ubuntu")`); wait('!document.querySelector("[data-menu-material]")');
-  wait('document.querySelector("[data-native-picker] button").textContent.includes("ubuntu")');
+  // Rows keep the host as muted text; the composer caption shows only the model, with the host in its tooltip.
+  expect('document.querySelector(\'[data-menu-material] [data-model-id="ubuntu/claude/claude-model"] [data-ra-model-host]\').textContent === "ubuntu"');
+  browser('click', `${menu} button[title="Claude model · ubuntu"]`); wait('!document.querySelector("[data-menu-material]")');
+  wait('document.querySelector("[data-native-picker] button").title.includes("Claude model · ubuntu")');
+  expect('document.querySelector("[data-native-picker] [data-model-id]").textContent === "Claude model"');
   const rejected = evaluate('window.fixture.selectModel({provider:"remote-cli-codex",model:"macmini/codex/codex-model"})');
   if (rejected.ok !== false) throw new Error('Cross-machine selection was accepted');
   evaluate('window.fixture.workspace("local")');
-  wait('!document.querySelector("[data-native-picker] button").textContent.includes("ubuntu")');
+  wait('!document.querySelector("[data-native-picker] button").title.includes("ubuntu")');
   // With no current choice, the native trigger opens the model list directly.
   browser('click', trigger);
   wait('document.querySelectorAll("[data-ra-model-provider]").length === 1');
@@ -303,7 +327,22 @@ try {
   browser('press', 'Escape'); browser('press', 'Escape');
   evaluate('window.fixture.workspace("macmini")');
   browser('open', `${base}?workspace-reset`);
-  wait('document.querySelector("[data-native-picker] button").textContent.includes("macmini")');
+  wait('document.querySelector("[data-native-picker] button").title.includes("macmini")');
+  // The usage ring shows context fill; hovering opens the account's plan limits, as in Paseo.
+  const hours = h => new Date(Date.now() + h * 3600e3 + 60e3).toISOString();
+  fixture({ seedUsage: { context: { used: 169000, max: 1000000 }, account: { provider: 'codex', plan: 'Plus', email: 'dev@example.com', checkedAt: new Date().toISOString(), windows: [{ id: 'codex:primary', label: 'Session', usedPercent: 18, resetsAt: hours(4) }, { id: 'codex:secondary', label: 'Weekly', usedPercent: 35, resetsAt: hours(48) }] } } });
+  wait('document.querySelector(".ra-usage")?.getAttribute("aria-label") === "上下文窗口已使用 17%"');
+  browser('hover', '.ra-usage');
+  wait('document.querySelector(".ra-usage-card")?.textContent.includes("剩余 82%")');
+  expect('(()=>{const t=document.querySelector(".ra-usage-card").textContent;return t.includes("已使用 17%")&&t.includes("169k / 1m tokens")&&t.includes("Plus")&&t.includes("4h后重置")&&t.includes("剩余 65%")&&t.includes("2d后重置")&&t.includes("dev@example.com")})()');
+  expect('(()=>{const r=document.querySelector(".ra-usage-card").getBoundingClientRect(),b=document.querySelector(".ra-usage").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=b.top})()');
+  image('usage-ring-light'); browser('set', 'media', 'dark'); image('usage-ring-dark'); browser('set', 'media', 'light');
+  browser('press', 'Escape'); wait('!document.querySelector(".ra-usage-card")');
+  evaluate('window.fixture.picker.current({provider:"deepseek-account",model:"deepseek-model"})');
+  wait('!document.querySelector(".ra-usage")');
+  evaluate('window.fixture.picker.current({provider:"remote-cli-codex",model:"macmini/codex/codex-model",reasoningEffort:"medium"})');
+  wait('document.querySelector(".ra-usage")');
+  console.log('PASS: usage ring reports context, opens plan limits on hover and hides for non-remote models');
   browser('click', trigger); browser('click', rootModel); wait('document.querySelectorAll("[data-ra-model-provider]").length === 4');
   evaluate('window.fixture.disablePlugin()');
   expect('!document.querySelector("[data-ra-model-provider],[data-ra-model-hidden]")');
@@ -312,6 +351,33 @@ try {
   browser('press', 'Escape'); browser('press', 'Escape');
   const pickerErrors = browser('errors'); if (pickerErrors.errors?.length) throw new Error(JSON.stringify(pickerErrors.errors));
   console.log('PASS: official DSH rc.3 model menu, real slot registration, persisted provider folding, visible keyboard selection, search, native reasoning/errors, live catalogs, mobile and plugin disposal');
+  }
+
+  // The desktop's custom composer does not render conversation.input.model.label.
+  wait('window.fixture?.customModel');
+  evaluate('window.customModel = window.fixture.customModel()');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "Opus 5.5"');
+  expect('document.querySelector(".codexModelSelectTrigger").title === "Opus 5.5 · ubuntu-claude"');
+  expect('document.querySelector(".codexModelSelectTrigger").getAttribute("aria-label") === "Opus 5.5 · ubuntu-claude"');
+  expect('document.querySelector(".codexModelSelectEffort").textContent === "high" && document.querySelector(".codexModelSelectChevron")');
+  evaluate('window.customLabelNode = document.querySelector(".codexModelSelectLabel").firstChild');
+  browser('click', '.codexModelSelectTrigger'); expect('window.customModel.clicks() === 1');
+  evaluate('window.customModel.render("GPT-5.5 Fast · ubuntu-claude", "medium")');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "GPT-5.5 Fast"');
+  expect('document.querySelector(".codexModelSelectLabel").firstChild === window.customLabelNode');
+  expect('document.querySelector(".codexModelSelectEffort").textContent === "medium"');
+  evaluate('window.customModel.render("Other provider · variant")');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "Other provider · variant"');
+  evaluate('window.customModel.render("Auto · Fast · ubuntu-claude")');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "Auto · Fast"');
+  image('custom-model-caption');
+  evaluate('window.customModel.stop()');
+  expect('document.querySelector(".codexModelSelectLabel").textContent === "Auto · Fast · ubuntu-claude"');
+  evaluate('window.customModel.render("Opus 5.5 · ubuntu-claude")');
+  wait('document.querySelector(".codexModelSelectLabel")?.textContent === "Opus 5.5 · ubuntu-claude"');
+  evaluate('window.customModel.unmount()');
+  const customErrors = browser('errors'); if (customErrors.errors?.length) throw new Error(JSON.stringify(customErrors.errors));
+  console.log('PASS: captured custom composer omits known remote hosts, preserves text nodes, effort, tooltip and clicks, follows React updates and restores on unload');
 
 } finally {
   try { browser('close'); } catch {}

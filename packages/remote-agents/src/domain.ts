@@ -17,7 +17,15 @@ export interface HostConfig { id: string; label: string; connection: string; pas
 export interface SshConfigHost { alias: string; connection: string }
 export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
-export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string }
+/** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
+export function permissionModes(provider: string, modes: Choice[]): Choice[] {
+  if (provider !== 'claude') return modes;
+  const choices = modes.some(m => m.id === 'inherit') ? [...modes] : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
+  if (!choices.some(m => m.id === 'auto')) choices.splice(choices.findIndex(m => m.id === 'inherit') + 1, 0, { id: 'auto', label: 'Auto · safety checks' });
+  return choices;
+}
+/** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
+export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string; serviceTiers?: Choice[]; inputModalities?: ('text' | 'image')[] }
 export interface Provider {
   id: string;
   label: string;
@@ -29,12 +37,15 @@ export interface Provider {
   defaultModeId?: string | null;
 }
 export interface Cursor { epoch: string; seq: number }
+/** Relay output already reflected in the history: resume at byte `at`; `partial` restores Claude's streaming state. */
+export interface RelayPosition { id: string; at: number; partial?: true }
 export interface TimelineEntry {
   seqStart: number;
   seqEnd: number;
   timestamp: string;
   turnId?: string;
   item: Record<string, unknown> & { type: string };
+  relay?: RelayPosition;
 }
 export interface TimelinePage {
   epoch: string;
@@ -64,7 +75,7 @@ export interface Permission {
   description?: string;
   input?: Record<string, unknown>;
   detail?: unknown;
-  actions?: { id: string; label: string; behavior: 'allow' | 'deny'; scope?: 'once' | 'session' }[];
+  actions?: { id: string; label: string; behavior: 'allow' | 'deny'; scope?: 'once' | 'session' | 'project' }[];
 }
 export interface PermissionAnswer {
   behavior: 'allow' | 'deny';
@@ -72,6 +83,14 @@ export interface PermissionAnswer {
   answers?: Record<string, string>;
   message?: string;
 }
+/** Tokens held in one native session's context window. */
+export interface ContextUsage { used: number; max: number }
+/** One plan rate-limit window of a CLI account; `label` is English and localized by the client. */
+export interface QuotaWindow { id: string; label: string; usedPercent: number; resetsAt?: string }
+/** Plan limits of the account a CLI is signed in with on an SSH host, as that CLI reports them. */
+export interface AccountUsage { provider: string; plan?: string; email?: string; windows: QuotaWindow[]; extraUsage?: boolean; credits?: string; checkedAt: string; error?: string }
+/** What the composer usage ring shows for a DSH conversation bound to a remote CLI. */
+export interface UsageReport { provider: string; context: ContextUsage | null; account?: AccountUsage }
 /** Live state of one attached (or detached) native CLI session. */
 export interface Agent {
   id: string;
@@ -85,6 +104,11 @@ export interface Agent {
   lastError?: string;
   nativeSessionId?: string | null;
   resumable?: boolean;
+  context?: ContextUsage;
+  /** The CLI runs under a relay on the SSH host and survives DSH restarts and SSH interruptions. */
+  persistent?: boolean;
+  /** A persistent CLI whose SSH connection is being re-established. */
+  reconnecting?: boolean;
 }
 export interface TaskInput {
   id: string;
@@ -94,12 +118,20 @@ export interface TaskInput {
   model: string;
   modeId?: string;
   thinkingOptionId?: string;
+  serviceTier?: string;
   prompt: string;
+  attachments?: Attachment[];
 }
+/** Staged, content-addressed bytes. No host filesystem paths or base64 enter the registry. */
+export interface Attachment { sha256: string; name: string; bytes: number; kind: 'image' | 'file'; mediaType?: string }
+export interface NativeAttachment extends Attachment { path: string; data?: string }
+export const inputModalitiesOf = (provider: string, model: Model): ('text' | 'image')[] => model.inputModalities ?? (['claude', 'codex'].includes(provider) ? ['text', 'image'] : ['text']);
 /** Durable agent record. `id` is the client request ID, so retried creation is idempotent. */
 export interface Task extends TaskInput {
   /** Native DSH conversation binding, independent of background delegation. */
-  chat?: { sessionId: string; route: string; receiptRoute?: string; lastUserId?: string };
+  chat?: { sessionId: string; route: string; receiptRoute?: string; lastUserId?: string;
+    /** How much of a message's output reached the DSH conversation; the rest is shown with the next response. */
+    delivered?: { messageId: string; cursor: Cursor | null; done?: true } };
   serverId: string;
   title: string;
   createdAt: string;
@@ -111,7 +143,11 @@ export interface Task extends TaskInput {
   origin?: 'dsh';
   agentId?: string;
   executionCwd?: string;
-  native?: { protocol: NativeProtocol; sessionId: string; argv: string[]; resumable?: boolean; initialSent: boolean };
+  native?: { protocol: NativeProtocol; sessionId: string; argv: string[]; resumable?: boolean; initialSent: boolean; imageInput?: boolean };
+  /** A relay that may still run this task's CLI on the SSH host; restored after DSH restarts. */
+  relay?: { id: string };
+  /** Last reported context window fill, kept for a detached session. */
+  context?: ContextUsage;
   state: 'creating' | 'ready' | 'uncertain';
   error?: string;
 }
@@ -135,6 +171,7 @@ export interface AgentSummary {
   model: string;
   modeId?: string;
   thinkingOptionId?: string;
+  serviceTier?: string;
   modes: Choice[];
   title: string;
   createdAt: string;
@@ -150,6 +187,8 @@ export interface AgentSummary {
   error?: string;
   resumable?: boolean;
   nativeSessionId?: string;
+  persistent?: boolean;
+  reconnecting?: boolean;
 }
 export interface AgentState { agent: AgentSummary; permissions: Permission[] }
 export interface AgentDetail extends AgentState { timeline: TimelinePage | null }
@@ -183,9 +222,21 @@ export function taskInput(value: unknown): TaskInput {
     id: identifier(v.id), hostId: identifier(v.hostId), cwd: remotePath(v.cwd),
     provider: field(v.provider, 'provider', 200), model: field(v.model, 'model', 500),
     prompt: field(v.prompt, 'prompt', 100_000),
+    ...(v.attachments !== undefined ? { attachments: attachmentInput(v.attachments) } : {}),
     ...(v.modeId ? { modeId: field(v.modeId, 'mode', 200) } : {}),
     ...(v.thinkingOptionId ? { thinkingOptionId: field(v.thinkingOptionId, 'thinking level', 200) } : {}),
+    ...(v.serviceTier ? { serviceTier: field(v.serviceTier, 'speed', 200) } : {}),
   };
+}
+export function attachmentInput(value: unknown): Attachment[] {
+  if (!Array.isArray(value) || value.length > 100) throw new RemoteError('Up to 100 attachments can be sent at once');
+  return value.map(raw => {
+    const a = record(raw);
+    if (typeof a.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(a.sha256) || !Number.isSafeInteger(a.bytes) || Number(a.bytes) < 0 || !['image', 'file'].includes(String(a.kind))) throw new RemoteError('Invalid attachment');
+    if (a.kind === 'image' && !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(String(a.mediaType))) throw new RemoteError('Unsupported image format');
+    if (a.kind === 'image' && Number(a.bytes) > 5_000_000) throw new RemoteError('An image exceeds the 5 MB CLI input limit');
+    return { sha256: a.sha256, name: field(a.name, 'attachment name', 255), bytes: Number(a.bytes), kind: a.kind as Attachment['kind'], ...(a.kind === 'image' ? { mediaType: String(a.mediaType) } : {}) };
+  });
 }
 export function cursorInput(value: unknown): Cursor | undefined {
   if (value === undefined || value === null) return;

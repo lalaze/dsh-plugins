@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildTranslationPrompt, parseTranslationOutput, resolveTarget, translateSelection } from '../src/translate.js';
-import { defaultTranslationSettings } from '../src/settings.js';
+import { defaultTranslationSettings, locksDraftsToEnglish, parseTranslationSettings } from '../src/settings.js';
 
 const settings = { ...defaultTranslationSettings, apiUrl: 'http://127.0.0.1:9999/v1/chat/completions', model: 'qwen-local' };
 test('auto target chooses English for Chinese and Chinese otherwise', () => {
@@ -26,4 +26,16 @@ test('uses fallback after primary error', async () => {
   let calls = 0; const fallback = { ...settings, apiUrl: 'http://fallback.invalid', fallbackApiUrl: 'https://example.invalid', fallbackModel: 'backup' };
   const result = await translateSelection({ text: 'hello', target: 'zh-CN', settings: fallback }, async () => { calls++; return calls === 1 ? new Response('bad', { status: 503 }) : new Response(JSON.stringify({ choices: [{ message: { content: '你好' } }] }), { status: 200 }); });
   assert.equal(result.model, 'backup'); assert.equal(calls, 2);
+});
+test('drafts for Claude models lock to English by default, and the keywords are configurable', () => {
+  const keywords = defaultTranslationSettings.englishLockModels;
+  assert.equal(locksDraftsToEnglish(keywords, { provider: 'remote-cli-claude', model: 'p1/claude/sonnet' }), true);
+  assert.equal(locksDraftsToEnglish(keywords, { provider: 'anthropic', model: 'claude-opus-4-1' }), true);
+  assert.equal(locksDraftsToEnglish(keywords, { provider: 'openrouter', model: 'anthropic/claude-sonnet-4.5' }), true);
+  assert.equal(locksDraftsToEnglish(keywords, { provider: 'deepseek-official', model: 'deepseek-flash' }), false);
+  assert.equal(locksDraftsToEnglish(keywords, null), false);
+  assert.equal(locksDraftsToEnglish(' Codex ,\n gpt-5 ', { provider: 'remote-cli-codex', model: 'p1/codex/o3' }), true);
+  assert.equal(locksDraftsToEnglish(' , ', { provider: 'remote-cli-claude', model: 'p1/claude/sonnet' }), false);
+  assert.equal(parseTranslationSettings({}).englishLockModels, 'claude, anthropic');
+  assert.equal(parseTranslationSettings({ englishLockModels: '' }).englishLockModels, '');
 });

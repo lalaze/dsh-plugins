@@ -32,7 +32,10 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     const activated = live();
     return activated ? activated.header.cwd : stored?.cwd;
   };
-  ctx.effect(() => () => service.close());
+  // Close the store last: a reloaded plugin's new instance owns the state from then on.
+  ctx.effect(() => async () => { await service.close(); await store.close(); });
+  // Persistent CLIs kept running while DSH was away; reattach and catch up in the background.
+  void service.resume();
   ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, async (id, signal) => {
     const cwd = await sessionCwd(id), placement = await workspace.resolve(cwd, signal);
     return cwd === await sessionCwd(id) ? placement : { hostIds: [] };
@@ -46,6 +49,19 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     }, { global: true });
     const adapter = new RemoteCliAdapter(projects, { approval: host.approval, userQuestions: host.userQuestions,
       agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => steps.get(id)?.session.header.cwd ?? scoped.sessions.get(id)?.header.cwd,
+      userContent: (id, messageId) => (steps.get(id)?.session ?? scoped.sessions.get(id))?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user'))?.content,
+      attachments: {
+        image: async (ref, signal) => {
+          const storage = scoped.get('attachments');
+          if (!storage) throw new Error('The DSH attachment service is unavailable');
+          return storage.readImageRequest(ref, { width: Math.min(ref.width, 1568), height: Math.min(ref.height, 1568), maxBytes: 4 * 1024 * 1024 }, signal);
+        },
+        file: async function* (ref, signal) {
+          const storage = scoped.get('attachments');
+          if (!storage) throw new Error('The DSH attachment service is unavailable');
+          yield* storage.readFileStream(ref, signal);
+        },
+      },
       workspace: (cwd, signal) => workspace.resolve(cwd, signal) });
     const registration = scoped.llm.registerAdapter(CHAT_PROVIDERS, adapter);
     scoped.effect(() => projects.onChange(() => registration.replace(CHAT_PROVIDERS)));

@@ -29,6 +29,7 @@ export async function nativeModelFixture(modelDirectories = { directoryFor: (_id
   const register = core.register.bind(core) as (options: Record<string, unknown>, component: unknown) => () => void;
   register({ name: 'root', children: {
     'conversation.input.model': { kind: 'single', scope: 'session' },
+    'conversation.input.right': { kind: 'list', scope: 'session' },
     'settings.section': { kind: 'list', scope: 'root' },
     'sidebar.footer.action': { kind: 'list', scope: 'root' },
   } }, () => null);
@@ -49,6 +50,10 @@ export async function nativeModelFixture(modelDirectories = { directoryFor: (_id
   const Picker = entry.component as React.FC<Props>;
   return { core, Picker: () => {
     const props = (entry.inject as (id: string) => Omit<Props, 't' | 'renderSlot'>)('fixture-conversation');
-    return <Picker {...props} t={t} renderSlot={(_name, _owner, options) => options.fallback} />;
+    const renderSlot: Props['renderSlot'] = (name, owner, options) => {
+      const Label = core.entriesOfSlot(name as 'conversation.input.model.label')[0]?.component as React.FC<object> | undefined;
+      return Label ? <Label {...owner as object} /> : options.fallback;
+    };
+    return <Picker {...props} t={t} renderSlot={renderSlot} />;
   } };
 }
