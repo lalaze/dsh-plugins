@@ -1,4 +1,4 @@
-import type { AccountUsage, ContextUsage, NativeProtocol, QuotaWindow } from './domain.js';
+import type { AccountUsage, ContextUsage, NativeProtocol, QuotaWindow, TurnUsage } from './domain.js';
 import type { JsonlPeer } from './ssh.js';
 
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
@@ -11,6 +11,37 @@ export function contextUsage(used: unknown, max: unknown): ContextUsage | undefi
 }
 /** Codex `thread/tokenUsage/updated`: the last request's total is what the context window holds. */
 export const codexContext = (usage: any) => contextUsage(usage?.last?.totalTokens ?? usage?.last?.total_tokens, usage?.modelContextWindow ?? usage?.model_context_window);
+const optional = (key: keyof TurnUsage, value: number | undefined) => value ? { [key]: value } : {};
+/** Claude's `result.usage`: the whole turn, across every model call it made. */
+export function claudeTurnUsage(usage: any): TurnUsage | undefined {
+  const input = count(usage?.input_tokens), output = count(usage?.output_tokens);
+  if (input === undefined || output === undefined) return undefined;
+  return { inputTokens: input, outputTokens: output, ...optional('cacheReadTokens', count(usage?.cache_read_input_tokens)), ...optional('cacheWriteTokens', count(usage?.cache_creation_input_tokens)) };
+}
+/** Codex counters, whose input includes cached input. */
+function codexCounters(value: any) {
+  const pick = (camel: string, snake: string) => count(value?.[camel] ?? value?.[snake]) ?? 0;
+  return { input: pick('inputTokens', 'input_tokens'), cached: pick('cachedInputTokens', 'cached_input_tokens'), output: pick('outputTokens', 'output_tokens'), reasoning: pick('reasoningOutputTokens', 'reasoning_output_tokens'), total: pick('totalTokens', 'total_tokens') };
+}
+/** Codex reports running thread totals; a turn used the difference since the previous turn ended. */
+export function codexTurnUsage(total: any, before: any): TurnUsage | undefined {
+  if (!total) return undefined;
+  const now = codexCounters(total), then = codexCounters(before);
+  // A new or compacted thread restarts its counters; its total is then this turn's usage.
+  const base = Object.values(now).some((value, i) => value < Object.values(then)[i]) ? codexCounters(undefined) : then;
+  const input = now.input - base.input, cached = now.cached - base.cached, output = now.output - base.output;
+  if (input + output <= 0) return undefined;
+  return { inputTokens: Math.max(0, input - cached), outputTokens: output, ...optional('cacheReadTokens', cached), ...optional('reasoningTokens', now.reasoning - base.reasoning), ...optional('totalTokens', now.total - base.total) };
+}
+/** ACP's optional `PromptResponse.usage` for one prompt turn. */
+export function acpTurnUsage(usage: any): TurnUsage | undefined {
+  const input = count(usage?.inputTokens), output = count(usage?.outputTokens);
+  if (input === undefined || output === undefined) return undefined;
+  const read = count(usage?.cachedReadTokens), write = count(usage?.cachedWriteTokens), total = count(usage?.totalTokens);
+  // ACP leaves open whether input includes cached tokens; a total that adds up with them listed separately says it does not.
+  const separate = total !== undefined && input + output + (read ?? 0) + (write ?? 0) === total;
+  return { inputTokens: separate ? input : Math.max(0, input - (read ?? 0) - (write ?? 0)), outputTokens: output, ...optional('cacheReadTokens', read), ...optional('cacheWriteTokens', write), ...optional('reasoningTokens', count(usage?.thoughtTokens)), ...optional('totalTokens', count(usage?.totalTokens)) };
+}
 /** Claude API usage of one assistant message: everything sent plus what it generated. */
 export function claudeMessageTokens(usage: any): number | undefined {
   const parts = [usage?.input_tokens, usage?.cache_creation_input_tokens, usage?.cache_read_input_tokens, usage?.output_tokens].map(count);

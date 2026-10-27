@@ -188,6 +188,37 @@ test('Codex speed tiers come from the model catalog and apply to the thread and 
   assert.equal('serviceTier' in ssh.live.sent.find(m => m.method === 'turn/start')!.params, false);
 });
 
+test('finished turns record their token usage in the timeline and report it once', async t => {
+  for (const provider of ['claude', 'codex', 'grok']) {
+    const { service, ssh, request, store } = await fixture(t, provider);
+    const reports: { taskId: string; usage: unknown; failed: boolean }[] = [];
+    store.usageListeners.add((taskId, usage, turn) => reports.push({ taskId, usage, failed: turn.failed }));
+    const agent = await service.create(request); await tick();
+    const live = ssh.live;
+    if (provider === 'claude') live.emit({ type: 'result', subtype: 'success', usage: { input_tokens: 7, output_tokens: 90, cache_read_input_tokens: 4000 } });
+    if (provider === 'codex') {
+      live.emit({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { total: { inputTokens: 1000, cachedInputTokens: 600, outputTokens: 50, totalTokens: 1050 } } } });
+      live.emit({ method: 'turn/completed', params: { turn: { status: 'completed' } } });
+    }
+    if (provider === 'grok') live.reply(live.prompt!, { stopReason: 'end_turn', usage: { inputTokens: 30, outputTokens: 4, totalTokens: 34 } });
+    await tick();
+    const expected = provider === 'claude' ? { inputTokens: 7, outputTokens: 90, cacheReadTokens: 4000 } : provider === 'codex' ? { inputTokens: 400, outputTokens: 50, cacheReadTokens: 600, totalTokens: 1050 } : { inputTokens: 30, outputTokens: 4, totalTokens: 34 };
+    assert.deepEqual(reports, [{ taskId: agent.id, usage: expected, failed: false }], provider);
+    const entries = (await service.detail(agent.id)).timeline!.entries;
+    const at = types(entries).indexOf('usage');
+    assert.ok(at >= 0 && at < types(entries).indexOf('turn_end'), `${provider}: usage is recorded before the turn ends`);
+    assert.deepEqual(entries[at].item.usage, expected);
+    if (provider === 'codex') {
+      // The next turn reports only what it added to the thread's running totals.
+      await service.send(agent.id, { id: randomUUID(), text: 'Continue' }); await tick();
+      ssh.live.emit({ method: 'turn/started', params: { turn: { id: 'turn-2' } } });
+      ssh.live.emit({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { total: { inputTokens: 3000, cachedInputTokens: 2200, outputTokens: 80, totalTokens: 3080 } } } });
+      ssh.live.emit({ method: 'turn/completed', params: { turn: { status: 'completed' } } }); await tick();
+      assert.deepEqual(reports[1].usage, { inputTokens: 400, outputTokens: 30, cacheReadTokens: 1600, totalTokens: 2030 });
+    }
+  }
+});
+
 test('Codex context comes from token reports, survives a detach and is restored on resume', async t => {
   const { service, ssh, request, store } = await fixture(t);
   const route = `${request.hostId}/codex/codex-remote`;

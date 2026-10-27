@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { claudeAccountUsage, claudeMessageTokens, codexAccountUsage, codexContext } from '../src/usage.js';
+import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeTurnUsage, codexAccountUsage, codexContext, codexTurnUsage } from '../src/usage.js';
 import { formatReset, formatTokens } from '../src/client/usage.js';
 import { fixture } from './fakes.js';
 
@@ -79,4 +79,21 @@ test('a conversation reports the context of its selected CLI and reads plan limi
   const failed = await service.usage('dsh-chat', { route, account: true });
   assert.match(failed?.account?.error ?? '', /identity changed/);
   assert.deepEqual(failed?.account?.windows, []);
+});
+
+test('turn usage converts each CLI report into DSH token usage', () => {
+  assert.deepEqual(claudeTurnUsage({ input_tokens: 12, output_tokens: 340, cache_read_input_tokens: 9000, cache_creation_input_tokens: 800 }),
+    { inputTokens: 12, outputTokens: 340, cacheReadTokens: 9000, cacheWriteTokens: 800 });
+  assert.equal(claudeTurnUsage({ output_tokens: 3 }), undefined);
+  // Codex totals run across the thread and count cached input inside input.
+  const first = { inputTokens: 10_000, cachedInputTokens: 6_000, outputTokens: 500, reasoningOutputTokens: 200, totalTokens: 10_500 };
+  const second = { inputTokens: 25_000, cachedInputTokens: 18_000, outputTokens: 900, reasoningOutputTokens: 300, totalTokens: 25_900 };
+  assert.deepEqual(codexTurnUsage(first, undefined), { inputTokens: 4_000, outputTokens: 500, cacheReadTokens: 6_000, reasoningTokens: 200, totalTokens: 10_500 });
+  assert.deepEqual(codexTurnUsage(second, first), { inputTokens: 3_000, outputTokens: 400, cacheReadTokens: 12_000, reasoningTokens: 100, totalTokens: 15_400 });
+  assert.deepEqual(codexTurnUsage({ input_tokens: 100, output_tokens: 5, total_tokens: 105 }, second), { inputTokens: 100, outputTokens: 5, totalTokens: 105 }, 'a restarted thread counts from zero');
+  assert.equal(codexTurnUsage(first, first), undefined, 'no new tokens, no report');
+  // ACP: a total that adds up with cache listed separately means input excludes it.
+  assert.deepEqual(acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 50, totalTokens: 170 }), { inputTokens: 100, outputTokens: 20, cacheReadTokens: 50, totalTokens: 170 });
+  assert.deepEqual(acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 50, totalTokens: 120, thoughtTokens: 7 }), { inputTokens: 50, outputTokens: 20, cacheReadTokens: 50, reasoningTokens: 7, totalTokens: 120 });
+  assert.equal(acpTurnUsage(undefined), undefined);
 });

@@ -51,13 +51,13 @@ pnpm --filter dsh-remote-agents pack:plugin
 
 ## Installation
 
-Remote Agents **0.2.20** lists only the current workspace machine’s remote models, grouped by Claude, Codex and other CLIs, in DSH's model picker and main conversation. The Open sessions button in settings brings history, follow-ups and pending approvals together; delegation tools remain available. Build `dist/dsh-remote-agents-0.2.20.tgz` with `pnpm --filter dsh-remote-agents pack:plugin`. See [install and upgrade](packages/remote-agents/README.md#install-and-upgrade), including what changed from 0.1.x.
+Remote Agents **0.2.21** lists only the current workspace machine’s remote models, grouped by Claude, Codex and other CLIs, in DSH's model picker and main conversation. The Open sessions button in settings brings history, follow-ups and pending approvals together; delegation tools remain available. Build `dist/dsh-remote-agents-0.2.21.tgz` with `pnpm --filter dsh-remote-agents pack:plugin`. See [install and upgrade](packages/remote-agents/README.md#install-and-upgrade), including what changed from 0.1.x.
 
 Install an individual built archive into the desired DSH profile:
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.20.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.21.tgz"
 ```
 
 For Desktop, fully quit DSH and use the desktop application's bundled `dsh` command with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. For Web, restart the updated profile and refresh the browser. Plugins are not currently published to npm. The repository root is a private workspace; install individual plugin archives rather than the GitHub root.

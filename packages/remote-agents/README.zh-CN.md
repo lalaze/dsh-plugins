@@ -110,10 +110,12 @@ DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要�
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.20.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.21.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.20 升级：** 每轮结束时会记录本轮使用的 Token（Claude Code、Codex 及上报用量的 ACP CLI）。配合 `dsh-usage-stats` 0.1.3 或更新版本，可在**设置 → 使用量统计**的“远程智能体”来源中查看：主对话轮次经由 DSH 模型调用记录，DSH 分派的智能体和在“打开会话”中发送的轮次通过 `remote-agents/usage` 事件上报。更新前的轮次不会补录。更新后请重启 DSH。
 
 **从 0.2.19 升级：** **添加工作区**新增“远程机器”页签，可将已保存机器上的目录添加为 DSH 工作区。Codex 也新增“沿用远端 CLI 设置”，审批策略和沙箱改由远端 `~/.codex/config.toml` 决定；新的主对话以及 DSH 未指定模式启动的智能体，Claude 和 Codex 均默认使用该模式。已有会话保留原模式。更新后重启 DSH，并点击各机器旁的 **刷新模型**。
 

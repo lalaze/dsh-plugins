@@ -1,7 +1,7 @@
 import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type Task } from './domain.js';
+import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type Task, type TurnUsage } from './domain.js';
 
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup { hostId: string; relayId: string }
@@ -12,6 +12,8 @@ export class Store {
   /** The file content this instance last read or wrote; undefined when the file did not exist. */
   private saved?: string;
   private closed = false;
+  /** Listeners for the tokens each finished CLI turn used; the plugin forwards them to usage statistics. */
+  readonly usageListeners = new Set<(taskId: string, usage: TurnUsage, turn: { startedAt: string | null; failed: boolean }) => void>();
   constructor(private readonly path: string) {}
   get directory(): string { return dirname(this.path); }
   async open(): Promise<void> {

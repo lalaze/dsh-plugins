@@ -110,10 +110,12 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.20.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.21.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.20:** Each finished turn now records the tokens it used (Claude Code, Codex, and ACP CLIs that report usage). With `dsh-usage-stats` 0.1.3 or later, they appear under **Remote agents** in **Settings → Usage statistics**: main-chat turns through their DSH model call, delegated agents and turns sent from **Open sessions** through a `remote-agents/usage` event. Turns from before the update are not imported. Restart DSH after updating.
 
 **Upgrading from 0.2.19:** **Add workspace** gains a **Remote machine** tab that adds a saved machine's directory as a DSH workspace. Codex now also offers **Remote CLI settings**, which leaves approval policy and sandbox to `~/.codex/config.toml` on the remote machine. New main-chat conversations and agents DSH starts without an explicit mode use it for both Claude and Codex. Existing sessions keep their saved mode. Restart DSH and click **Refresh models** beside each machine after updating.
 

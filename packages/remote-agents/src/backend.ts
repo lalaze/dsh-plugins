@@ -250,7 +250,8 @@ done`}`, 15_000, { login: false });
   }
   private session(task: Task, peer: JsonlPeer, history: TaskHistory, relay?: RelayLink): CliSession {
     // A finished turn changed the account's usage; read it again when it is next shown.
-    return new CliSession(peer, task, history, this.store, { turnEnded: () => this.accounts.delete(task.provider), ...(relay ? { ended: () => void this.relayEnded(task.id, relay.id).catch(() => {}) } : {}) }, relay);
+    return new CliSession(peer, task, history, this.store, { turnEnded: () => this.accounts.delete(task.provider),
+      usage: (usage, turn) => { for (const listener of this.store.usageListeners) { try { listener(task.id, usage, turn); } catch { /* Statistics must not break a session. */ } } }, ...(relay ? { ended: () => void this.relayEnded(task.id, relay.id).catch(() => {}) } : {}) }, relay);
   }
   /**
    * Reattach to the relay still running this task's CLI. Needs no SSH connection: the link keeps

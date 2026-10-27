@@ -85,6 +85,8 @@ export interface PermissionAnswer {
   answers?: Record<string, string>;
   message?: string;
 }
+/** Tokens one CLI turn consumed, in DSH's `TokenUsage` shape: input excludes cache reads and writes; reasoning is part of output. */
+export interface TurnUsage { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number; totalTokens?: number }
 /** Tokens held in one native session's context window. */
 export interface ContextUsage { used: number; max: number }
 /** One plan rate-limit window of a CLI account; `label` is English and localized by the client. */

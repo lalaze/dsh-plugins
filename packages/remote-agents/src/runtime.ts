@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { questionsOf, type Agent, type ContextUsage, type NativeAttachment, type NativeProtocol, type Permission, type PermissionAnswer, type Task, type TimelineEntry } from './domain.js';
+import { questionsOf, type Agent, type ContextUsage, type TurnUsage, type NativeAttachment, type NativeProtocol, type Permission, type PermissionAnswer, type Task, type TimelineEntry } from './domain.js';
 import { JsonlPeer, type Frame, type WireMessage } from './ssh.js';
 import { RelayExit, RelayReleased, type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
 import type { Store } from './store.js';
 import { configureAcpSession } from './acp.js';
-import { claudeMessageTokens, codexContext, contextUsage } from './usage.js';
+import { acpTurnUsage, claudeMessageTokens, claudeTurnUsage, codexContext, codexTurnUsage, contextUsage } from './usage.js';
 
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
 const contentText = (content: unknown): string => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
@@ -20,6 +20,8 @@ export async function initializeAcp(peer: JsonlPeer): Promise<any> {
 }
 export interface SessionHooks {
   turnEnded?(): void;
+  /** Tokens a finished turn used, with when it started and whether it succeeded. */
+  usage?(usage: TurnUsage, turn: { startedAt: string | null; failed: boolean }): void;
   /** The CLI process ended or was terminated; a relay's remote files can be removed. */
   ended?(): void;
 }
@@ -37,6 +39,9 @@ export class CliSession {
   private activeMessage?: string;
   private confirmed = false;
   private partialText = false;
+  /** Codex running thread totals, now and when the current turn began. */
+  private codexTotal: unknown;
+  private codexBefore: unknown;
   private suspended = true;
   private intentionalClose = false;
   private diskFailed = false;
@@ -197,6 +202,12 @@ export class CliSession {
     this.tools.clear(); for (const done of this.stopWaiters) done(); this.stopWaiters.clear(); this.activeMessage = undefined;
   }
   private setContext(context: ContextUsage | undefined): void { if (context) this.agent.context = context; }
+  /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
+  private turnUsage(usage: TurnUsage | undefined, failed = false): void {
+    if (!usage || !this.activeMessage) return;
+    this.append({ type: 'usage', usage });
+    this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed });
+  }
   /** Persist once per turn rather than per token report. */
   private saveContext(): void {
     const context = this.agent.context, key = JSON.stringify(context ?? null);
@@ -246,7 +257,7 @@ export class CliSession {
     if (m.method && m.id !== undefined) { this.request(m); return; }
     if (m.id !== undefined && !m.method && this.activeMessage && String(m.id) === promptRequestId(this.activeMessage)) { this.promptResponse(m); return; }
     // Codex reports the resumed thread's usage while its history replay is still suppressed.
-    if (m.method === 'thread/tokenUsage/updated') this.setContext(codexContext(m.params?.tokenUsage));
+    if (m.method === 'thread/tokenUsage/updated') { this.setContext(codexContext(m.params?.tokenUsage)); this.codexTotal = m.params?.tokenUsage?.total ?? this.codexTotal; }
     if (this.suspended) return; // A resume can replay native history already present in our log.
     if (m.event === 'step_update') {
       const step = m.step_update ?? {}; this.confirm();
@@ -261,8 +272,8 @@ export class CliSession {
       if (result.status === 'SUCCESS') this.complete(); else this.fail(result.error || 'Antigravity turn failed');
     }
     const p = m.params ?? {};
-    if (m.method === 'turn/started') { this.confirm(); if (this.agent.activeTurn && p.turn?.id) this.agent.activeTurn.turnId = p.turn.id; }
-    if (m.method === 'turn/completed') { this.confirm(); if (p.turn?.status === 'failed') this.fail(p.turn.error?.message ?? 'Remote turn failed'); else this.complete(p.turn?.status === 'interrupted' ? 'canceled' : 'completed'); }
+    if (m.method === 'turn/started') { this.confirm(); this.codexBefore = this.codexTotal; if (this.agent.activeTurn && p.turn?.id) this.agent.activeTurn.turnId = p.turn.id; }
+    if (m.method === 'turn/completed') { this.confirm(); this.turnUsage(codexTurnUsage(this.codexTotal, this.codexBefore), p.turn?.status === 'failed'); this.codexBefore = this.codexTotal; if (p.turn?.status === 'failed') this.fail(p.turn.error?.message ?? 'Remote turn failed'); else this.complete(p.turn?.status === 'interrupted' ? 'canceled' : 'completed'); }
     if (m.method === 'item/agentMessage/delta') { this.confirm(); this.append({ type: 'assistant_message', text: String(p.delta ?? '') }); }
     if (m.method?.startsWith('item/reasoning/') && m.method.endsWith('Delta')) this.append({ type: 'reasoning', text: String(p.delta ?? '') });
     if (m.method === 'item/started' || m.method === 'item/completed') {
@@ -298,13 +309,13 @@ export class CliSession {
       this.partialText = false;
     }
     if (m.type === 'user') for (const block of list(m.message?.content)) if (block.type === 'tool_result') this.tool(String(block.tool_use_id), String(this.tools.get(String(block.tool_use_id))?.name ?? 'Tool'), block.is_error ? 'failed' : 'completed', contentText(block.content));
-    if (m.type === 'result') { this.confirm(); if (m.is_error || m.subtype !== 'success') this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed')); else this.complete(); void this.claudeContext(); }
+    if (m.type === 'result') { this.confirm(); this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success'); if (m.is_error || m.subtype !== 'success') this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed')); else this.complete(); void this.claudeContext(); }
   }
   /** Codex `turn/start` and ACP `session/prompt` responses for the active message. */
   private promptResponse(m: WireMessage): void {
     if (m.error) { this.fail(new Error(typeof m.error.message === 'string' ? m.error.message : JSON.stringify(m.error))); return; }
     // ACP acknowledges `session/cancel` by ending the prompt with `stopReason: cancelled`.
-    if (this.protocol() === 'acp') { this.confirm(); this.complete(m.result?.stopReason === 'cancelled' ? 'canceled' : 'completed'); return; }
+    if (this.protocol() === 'acp') { this.confirm(); this.turnUsage(acpTurnUsage(m.result?.usage)); this.complete(m.result?.stopReason === 'cancelled' ? 'canceled' : 'completed'); return; }
     if (m.result?.turn?.id && this.agent.activeTurn) this.agent.activeTurn.turnId = m.result.turn.id;
     this.confirm();
   }

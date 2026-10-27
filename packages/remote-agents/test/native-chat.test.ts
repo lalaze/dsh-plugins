@@ -117,6 +117,21 @@ test('streaming, retry and follow-ups reuse the bound CLI without repeating a pr
   assert.equal(store.snapshot().tasks[0].chat?.sessionId, first.sessionId);
 });
 
+test('turn token usage reaches DSH as a usage chunk, and the task counts as streaming only meanwhile', async t => {
+  const { adapter, options, remote, store } = await setup(t);
+  let during = false;
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'assistant_message', text: 'Done' });
+    remote.append(agent.id, { type: 'usage', usage: { inputTokens: 5, outputTokens: 40, cacheReadTokens: 900 } });
+  };
+  const chunks: StreamChunk[] = [];
+  for await (const chunk of adapter.stream(options())) { chunks.push(chunk); if (chunk.type === 'usage') during = adapter.streaming(store.snapshot().tasks[0].id); }
+  const usage = chunks.filter(c => c.type === 'usage');
+  assert.deepEqual(usage.map(c => c.type === 'usage' && c.usage), [{ inputTokens: 5, outputTokens: 40, cacheReadTokens: 900 }]);
+  assert.ok(chunks.indexOf(usage[0]) < chunks.findIndex(c => c.type === 'finish'));
+  assert.equal(during, true); assert.equal(adapter.streaming(store.snapshot().tasks[0].id), false);
+});
+
 test('native bindings survive restart and a lost follow-up receipt', async t => {
   const { adapter, options, remote, path, service } = await setup(t);
   const first = options(); await collect(adapter.stream(first));

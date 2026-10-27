@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
 import {
   createToolResultMessage, createUserMessage, LlmAdapter, LlmError, MessageId, ReasoningEffortId, ToolCallId,
-  type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk,
+  type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk, type TokenUsage,
 } from '@deepseek-ai/dsh-llm';
 import type { Session, SessionSeq } from '@deepseek-ai/dsh-session';
 import { busy, inputModalitiesOf, remotePath, type Cursor, type TimelineEntry } from './domain.js';
@@ -72,6 +72,9 @@ class NativeToolRows {
 
 export class RemoteCliAdapter extends LlmAdapter {
   private active = new Set<string>();
+  /** Tasks whose turn a DSH stream is following; its usage reaches statistics through that stream. */
+  private following = new Set<string>();
+  streaming(taskId: string): boolean { return this.following.has(taskId); }
   private controllers = new Set<AbortController>();
   private released = false;
   private auxiliaryDirectories = new Map<string, string>();
@@ -211,6 +214,8 @@ export class RemoteCliAdapter extends LlmAdapter {
           if (entry.item.type === 'tool_call') { yield* endBlock(); if (!rows.write(entry)) yield* textChunk('reasoning', `${entry.item.name ?? 'Tool'} · ${entry.item.status ?? ''}\n${typeof entry.item.detail === 'string' ? entry.item.detail : JSON.stringify(entry.item.detail ?? {})}\n`); }
           if (entry.item.type === 'error') { if (recovered) yield* textChunk('text', `\n\n${String(entry.item.message)}\n`); else throw new LlmError(String(entry.item.message), 'REMOTE_CLI_FAILED'); }
           if (entry.item.type === 'interrupted') interrupted = true;
+          // The latest report wins in DSH's accumulator; output caught up from an earlier turn is not this call's.
+          if (entry.item.type === 'usage' && !recovered && entry.item.usage && typeof entry.item.usage === 'object') yield { type: 'usage', usage: entry.item.usage as TokenUsage };
         }
         cursor = page.endCursor ?? cursor;
         await delivered(id, cursor);
@@ -249,7 +254,7 @@ export class RemoteCliAdapter extends LlmAdapter {
       }
     }.bind(this);
     if (this.active.has(sessionId)) throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
-    this.active.add(sessionId); this.controllers.add(controller);
+    this.active.add(sessionId); this.following.add(taskId); this.controllers.add(controller);
     try {
       const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
       if (!task) {
@@ -296,7 +301,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         if (reached && !settled) await delivered(reached.id, reached.cursor, false, true);
         if (admitted && !settled && !shutdown && service.store.task(t => t.id === taskId)) await service.stop(taskId);
       }
-      finally { try { rows.close(); } finally { this.active.delete(sessionId); this.controllers.delete(controller); } }
+      finally { try { rows.close(); } finally { this.active.delete(sessionId); this.following.delete(taskId); this.controllers.delete(controller); } }
     }
   }
 }
