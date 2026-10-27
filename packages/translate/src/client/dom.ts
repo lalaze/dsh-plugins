@@ -1,7 +1,8 @@
 import { loadSettings, translate } from './api.js';
 import { i18n, localizeError, ui } from './i18n.js';
 
-export const messageSelector = '[data-testid="assistant-message"], [data-testid="user-message"], [data-message-role="assistant"], [data-message-role="user"]';
+// DSH 0.2.x renders each chat item as a `conversation.chat.node` slot inside a keyed flow item; the rest cover other builds.
+export const messageSelector = '[data-slot="conversation.chat.node"], [data-chat-node-key], [data-testid="assistant-message"], [data-testid="user-message"], [data-message-role="assistant"], [data-message-role="user"]';
 const overlaySelector = '[data-dsh-translate-overlay]';
 
 function selectedMessage(selection: Selection): Element | null {
