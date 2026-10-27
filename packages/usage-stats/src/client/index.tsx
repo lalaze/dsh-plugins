@@ -138,7 +138,8 @@ export function Dashboard() {
   </section>;
 }
 export const name = 'dsh-usage-stats-client';
-export const inject = ['slots'];
+// The desktop language bridge initializes asynchronously; wait before registering UI.
+export const inject = ['slots', 'locale'];
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'usage-stats', order: 70, label: () => ui("Usage statistics") }, Dashboard));

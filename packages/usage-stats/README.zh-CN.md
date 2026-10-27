@@ -16,7 +16,7 @@
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter dsh-usage-stats check
 corepack pnpm --filter dsh-usage-stats pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.2.tgz"
 ```
 
 以上命令在仓库根目录执行。桌面端改用 `--profile desktop`，安装前完全退出 DSH，安装后重新打开；Web 端重启对应 profile 并刷新页面。Claude SSH 来源需另行安装该插件，建议使用 `0.1.7` 或更新版本，以保留远端失败结果返回的用量。
