@@ -61,6 +61,13 @@ function TranslateIcon() {
     <path d="M1.5 3.5h7M5 2v1.5M3 3.5c.6 2.4 2.1 4.2 4.4 5.4M7 3.5C6.4 6.1 4.7 8.3 2 9.5M8.5 14l3-7 3 7M9.6 11.6h3.8" />
   </svg>;
 }
+// A spinning ring shown in place of the icon while a translation is in flight.
+function SpinnerIcon() {
+  return <svg className="dsh-translate-spinner" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" aria-hidden="true">
+    <circle cx="8" cy="8" r="6" opacity={0.25} />
+    <path d="M14 8a6 6 0 0 0-6-6" />
+  </svg>;
+}
 function ComposerTranslateButton({ sessionId, inputActions, useInput }: ComposerSlotProps) {
   useLocale();
   const model = useCurrentModel(sessionId);
@@ -125,7 +132,7 @@ function ComposerTranslateButton({ sessionId, inputActions, useInput }: Composer
     data-dsh-translate-undo={state.phase === 'undo' ? state.original : undefined} data-dsh-translate-error={state.phase === 'error' ? state.error : undefined}
     className="dsh-translate-composer-button" title={title} aria-label={title} aria-busy={state.phase === 'busy'}
     disabled={state.phase === 'busy' || (hostDraft !== undefined && state.phase !== 'undo' && !hostDraft.trim())} onClick={() => void run()}>
-    <TranslateIcon />
+    {state.phase === 'busy' ? <SpinnerIcon /> : <TranslateIcon />}
   </button>;
 }
 export function apply(ctx: Client): void {

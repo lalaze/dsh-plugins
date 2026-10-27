@@ -4,8 +4,12 @@ const CSS = `
 .dsh-translate-composer-button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
 .dsh-translate-composer-button:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe))}
 .dsh-translate-composer-button:disabled{color:var(--dsw-alias-label-dimmed,currentColor);cursor:default}
+.dsh-translate-composer-button[data-dsh-translate-busy]{color:var(--dsw-alias-label-secondary,currentColor);cursor:progress}
 .dsh-translate-composer-button[data-dsh-translate-error]{color:var(--dsw-alias-state-error-primary,#e5484d)}
 .dsh-translate-composer-button svg{flex:none;width:14px;height:14px}
+.dsh-translate-spinner{animation:dsh-translate-spin .8s linear infinite}
+@keyframes dsh-translate-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.dsh-translate-spinner{animation-duration:2.4s}}
 `;
 
 export function installStyles(): () => void {
