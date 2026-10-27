@@ -1,11 +1,14 @@
 import { type Agent, type NativeAttachment, type NativeProtocol, type PermissionAnswer, type Task } from './domain.js';
 import { JsonlPeer } from './ssh.js';
+import { type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
 import type { Store } from './store.js';
 export declare function initializeCodex(peer: JsonlPeer): Promise<void>;
 export declare function initializeAcp(peer: JsonlPeer): Promise<any>;
 export interface SessionHooks {
     turnEnded?(): void;
+    /** The CLI process ended or was terminated; a relay's remote files can be removed. */
+    ended?(): void;
 }
 export declare class CliSession {
     readonly peer: JsonlPeer;
@@ -13,6 +16,7 @@ export declare class CliSession {
     readonly history: TaskHistory;
     private readonly store;
     private readonly hooks;
+    readonly relay?: RelayLink | undefined;
     readonly agent: Agent;
     /** Claude's signed-in account from `initialize`, used to label its plan limits. */
     account?: unknown;
@@ -27,18 +31,33 @@ export declare class CliSession {
     private admitting;
     private interrupting;
     private stopping;
+    private released;
+    private endedSent;
+    private restoring;
     private imageInput;
+    /** Items produced by the output line being processed, saved together with its relay offset. */
+    private batch?;
     private permissions;
     private tools;
     private stopWaiters;
-    constructor(peer: JsonlPeer, task: Task, history: TaskHistory, store: Store, hooks?: SessionHooks);
+    constructor(peer: JsonlPeer, task: Task, history: TaskHistory, store: Store, hooks?: SessionHooks, relay?: RelayLink | undefined);
     get alive(): boolean;
     /** A turn, approval or message admission is in progress. */
     get busy(): boolean;
     /** Only sessions that can be resumed later may be closed to free a connection slot. */
     get evictable(): boolean;
     private append;
+    private diskFailure;
+    private position;
+    /** Process one output line; its history items are saved in one write with the offset after it. */
+    private frame;
+    private write;
     initialize(protocol: NativeProtocol, argv: string[], resume?: boolean): Promise<void>;
+    /**
+     * Reattach to a relay that kept running: rebuild the open turn, its tools and its unanswered
+     * permission requests from the history, then resend saved answers (the relay drops duplicates).
+     */
+    restore(): Promise<void>;
     private protocol;
     send(text: string, messageId: string, attachments?: readonly NativeAttachment[]): Promise<void>;
     private confirm;
@@ -52,9 +71,16 @@ export declare class CliSession {
     private tool;
     private permission;
     respond(id: string, answer: PermissionAnswer): Promise<void>;
+    private resolved;
     private message;
+    /** Codex `turn/start` and ACP `session/prompt` responses for the active message. */
+    private promptResponse;
     private request;
     private claudeRequest;
     stop(): Promise<void>;
+    /** End the CLI process and the turn. */
     close(): void;
+    private ended;
+    /** Disconnect without affecting the CLI: a persistent session continues and is restored later. */
+    release(): void;
 }

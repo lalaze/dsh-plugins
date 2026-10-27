@@ -26,6 +26,27 @@ export class RemoteAgentsService {
                     providerErrors: providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) };
         });
     }
+    /** Closed for a plugin reload or DSH shutdown; remote work must not be stopped then. */
+    get stopped() { return this.closed; }
+    /**
+     * Reattach persistent CLIs after a restart and finish queued relay cleanups. Runs in the
+     * background: hosts may be offline, and their sessions keep reconnecting until they return.
+     */
+    resume() {
+        const tasks = this.store.tasks(t => !!t.relay);
+        return Promise.allSettled([
+            ...tasks.map(task => this.serial(task.id, async () => {
+                const backend = this.connection(task.hostId).backend;
+                if (task.native) {
+                    await backend.restore?.(task);
+                    return;
+                }
+                // Interrupted before its native session existed: nothing can be resumed, so remove it.
+                await backend.detach(task);
+            }).catch(error => this.updateTask(task.id, next => { next.error = this.safeError(error); }).catch(() => { }))),
+            ...this.store.hosts().map(host => this.closed ? undefined : this.connection(host.id).backend.cleanup?.()),
+        ]).then(() => { });
+    }
     onCatalogChange(listener) { this.catalogListeners.add(listener); return () => this.catalogListeners.delete(listener); }
     catalogChanged() { for (const listener of this.catalogListeners)
         listener(); }
@@ -152,6 +173,7 @@ export class RemoteAgentsService {
             const serverId = await current.backend.connect();
             if (serverId !== host.serverId)
                 throw new RemoteError('Remote SSH machine identity changed', 409);
+            void current.backend.cleanup?.();
             return await action(current.backend, host);
         }
         catch (error) {
@@ -193,6 +215,7 @@ export class RemoteAgentsService {
             modes: permissionModes(task.provider, task.modes ?? []), title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
             archived: task.archived === true, delegated: task.origin === 'dsh', started: !!task.agentId, attached: !!live && live.status !== 'closed', status, pendingPermissions: pending,
             ...(error ? { error } : {}), ...(resumable !== undefined ? { resumable } : {}), ...(task.native?.sessionId ? { nativeSessionId: task.native.sessionId } : {}),
+            ...(live?.persistent ? { persistent: true } : {}), ...(live?.reconnecting && live.status !== 'closed' ? { reconnecting: true } : {}),
         };
     }
     async summary(id) { const task = this.task(id); return this.summarize(task, await this.live(task)); }
@@ -221,12 +244,19 @@ export class RemoteAgentsService {
             if (options.deleteAgents)
                 for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id))
                     await this.delete(task.id);
+            // Give queued relay removals a short chance; an offline host never blocks removing it.
+            const queued = this.connections.get(id)?.backend.cleanup?.();
+            if (queued)
+                await Promise.race([queued, new Promise(resolve => setTimeout(resolve, 5000).unref())]);
             await this.store.update(state => {
                 // A concurrently created session still requires confirmation on the next attempt.
                 if (state.tasks.some(t => t.hostId === id))
                     throw new RemoteError('Delete this host’s agents, including archived ones, before removing it', 409);
                 state.hosts = state.hosts.filter(h => h.id !== id);
                 state.mainChatProjects = state.mainChatProjects?.filter(p => p.hostId !== id);
+                state.relayCleanups = state.relayCleanups?.filter(c => c.hostId !== id);
+                if (!state.relayCleanups?.length)
+                    delete state.relayCleanups;
             });
             const connection = this.connections.get(id);
             this.connections.delete(id);

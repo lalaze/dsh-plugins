@@ -10,6 +10,9 @@ export const chatProviderId = (cli) => `remote-cli-${cli}`;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
 export const CHAT_PROVIDERS = [CHAT_PROVIDER, ...Object.keys(CLI_NAMES).map(chatProviderId)];
 const hash = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+/** DSH aborts streams with a cancel cause; disposal is a shutdown, not a user's Stop. */
+const disposal = (reason) => !!reason && typeof reason === 'object' && ['disposed', 'released'].includes(String(reason.kind));
+const RELEASED = { kind: 'released' };
 const blockText = (content) => content.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n');
 /** A speed tier (Codex Fast) is a separate picker row: DSH model selections carry only a model and a reasoning effort. */
 export const chatModelId = (projectId, provider, model, serviceTier) => `${projectId}/${encodeURIComponent(provider)}/${encodeURIComponent(model)}${serviceTier ? `/${encodeURIComponent(serviceTier)}` : ''}`;
@@ -68,6 +71,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     pollMs;
     active = new Set();
     controllers = new Set();
+    released = false;
     auxiliaryDirectories = new Map();
     constructor(projects, host, pollMs = 150) {
         super();
@@ -120,8 +124,12 @@ export class RemoteCliAdapter extends LlmAdapter {
             ...(route.model.thinkingOptions?.length ? { reasoning: { efforts: route.model.thinkingOptions.map(o => ({ id: ReasoningEffortId(o.id), name: o.label })),
                     ...(route.model.defaultThinkingOptionId ? { defaultEffort: ReasoningEffortId(route.model.defaultThinkingOptionId) } : {}) } } : {}) };
     }
-    close() { for (const controller of this.controllers)
-        controller.abort(); }
+    /**
+     * Plugin unload or DSH shutdown: end local streams but leave remote turns running. A persistent
+     * CLI keeps working; the conversation shows its remaining output with the next response.
+     */
+    close() { this.released = true; for (const controller of this.controllers)
+        controller.abort(RELEASED); }
     async *stream(options) {
         if (options.purpose === 'session-title') {
             const title = options.messages.filter(m => m.role === 'user').map(m => blockText(m.content)).at(-1)?.replace(/\s+/g, ' ').slice(0, 80) || 'Remote CLI';
@@ -196,7 +204,7 @@ export class RemoteCliAdapter extends LlmAdapter {
             .map(m => `${m.role}: ${blockText(m.role === 'user' ? contentOf(m) : m.content)}`).filter(t => t.trim() !== 'user:' && t.trim() !== 'assistant:').join('\n\n');
         const prompt = previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt;
         const taskId = task?.id ?? messageId;
-        let admitted = false, settled = false, interrupted = false, index = 0, cursor;
+        let admitted = false, settled = false, index = 0;
         const rows = new NativeToolRows(this.host.step(sessionId), options);
         const questions = new Map();
         let permissionFailure, permissionNotice = false;
@@ -218,40 +226,20 @@ export class RemoteCliAdapter extends LlmAdapter {
             open.text += text;
             yield type === 'text' ? { type: 'text-delta', index: open.index, text } : { type: 'reasoning-delta', index: open.index, text };
         };
-        if (this.active.has(sessionId))
-            throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
-        this.active.add(sessionId);
-        this.controllers.add(controller);
-        try {
-            const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
-            if (!task) {
-                const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
-                // A newly selected route receives prior human/assistant context, never local DSH tool schemas or its system prompt.
-                admitted = true;
-                const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt, ...(attachments.length ? { attachments } : {}),
-                    // Old cached Claude catalogs must not override remote permissions.
-                    ...(provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) }, { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, signal });
-                if (!agent.started)
-                    throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
-            }
-            else {
-                // A receipt left by a failed HTTP/model response is replayed, never delivered again.
-                if (!task.agentId)
-                    await service.retry(task.id, signal);
-                const page = await service.messageTimeline(task.id, messageId);
-                if (!page.found) {
-                    const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
-                    await service.setModel(task.id, model.id, effort, options.model, serviceTier);
-                    admitted = true;
-                    await service.send(task.id, { id: messageId, text: prompt, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
-                }
-                else
-                    admitted = true;
-            }
-            const receipt = await service.messageTimeline(taskId, messageId);
-            if (!receipt.hasFollowingMessage)
-                await service.store.update(state => { const saved = state.tasks.find(t => t.id === taskId); if (saved?.chat)
-                    saved.chat.lastUserId = userId; });
+        // Record what reached this conversation, so output produced while DSH was away is shown later.
+        let savedAt = 0, reached;
+        const delivered = async (id, cursor, done = false, force = false) => {
+            if (!done)
+                reached = { id, cursor };
+            if (!done && !force && Date.now() - savedAt < 250)
+                return;
+            savedAt = Date.now();
+            await service.store.update(state => { const saved = state.tasks.find(t => t.id === taskId); if (saved?.chat)
+                saved.chat.delivered = { messageId: id, cursor: cursor ?? null, ...(done ? { done: true } : {}) }; }).catch(() => { });
+        };
+        /** Stream one message's output until its turn ends. A recovered turn reports failures as text. */
+        const follow = async function* (id, from, recovered) {
+            let cursor = from, interrupted = false;
             while (true) {
                 signal.throwIfAborted();
                 if (permissionFailure)
@@ -261,7 +249,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                     yield* textChunk('reasoning', 'Approval is still pending. Open Remote agents to respond, or stop this turn.\n');
                 }
                 // State first, history second: the idle flag can be set just before the final append settles.
-                const state = await service.state(taskId), page = await service.messageTimeline(taskId, messageId, cursor);
+                const state = await service.state(taskId), page = await service.messageTimeline(taskId, id, cursor);
                 if (!page.found)
                     throw new LlmError('Remote message delivery was not recorded. Retry without changing the message.', 'REMOTE_DELIVERY_UNKNOWN');
                 for (const entry of page.entries) {
@@ -274,16 +262,21 @@ export class RemoteCliAdapter extends LlmAdapter {
                         if (!rows.write(entry))
                             yield* textChunk('reasoning', `${entry.item.name ?? 'Tool'} · ${entry.item.status ?? ''}\n${typeof entry.item.detail === 'string' ? entry.item.detail : JSON.stringify(entry.item.detail ?? {})}\n`);
                     }
-                    if (entry.item.type === 'error')
-                        throw new LlmError(String(entry.item.message), 'REMOTE_CLI_FAILED');
+                    if (entry.item.type === 'error') {
+                        if (recovered)
+                            yield* textChunk('text', `\n\n${String(entry.item.message)}\n`);
+                        else
+                            throw new LlmError(String(entry.item.message), 'REMOTE_CLI_FAILED');
+                    }
                     if (entry.item.type === 'interrupted')
                         interrupted = true;
                 }
                 cursor = page.endCursor ?? cursor;
-                for (const [id, pending] of questions)
-                    if (!state.permissions.some(p => p.id === id)) {
+                await delivered(id, cursor);
+                for (const [key, pending] of questions)
+                    if (!state.permissions.some(p => p.id === key)) {
                         pending.abort();
-                        questions.delete(id);
+                        questions.delete(key);
                     }
                 for (const permission of state.permissions) {
                     if (questions.has(permission.id))
@@ -318,6 +311,8 @@ export class RemoteCliAdapter extends LlmAdapter {
                 if (page.hasNewer)
                     continue;
                 if (!busy(state.agent) || page.hasFollowingMessage || page.terminalStatus) {
+                    if (recovered)
+                        return interrupted || page.terminalStatus === 'canceled';
                     if (!page.deliveryConfirmed)
                         throw new LlmError('Remote message delivery was not confirmed. It will not be resent automatically; send a new message to continue.', 'REMOTE_DELIVERY_UNKNOWN');
                     if (page.terminalStatus === 'canceled')
@@ -330,11 +325,60 @@ export class RemoteCliAdapter extends LlmAdapter {
                         if (state.agent.status === 'error' || (state.agent.status === 'closed' && !interrupted))
                             throw new LlmError(state.agent.error ?? 'Remote CLI session ended', 'REMOTE_CLI_FAILED');
                     }
-                    settled = true;
-                    break;
+                    return interrupted;
                 }
                 await pause(this.pollMs, undefined, { signal });
             }
+        }.bind(this);
+        if (this.active.has(sessionId))
+            throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
+        this.active.add(sessionId);
+        this.controllers.add(controller);
+        try {
+            const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
+            if (!task) {
+                const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
+                // A newly selected route receives prior human/assistant context, never local DSH tool schemas or its system prompt.
+                admitted = true;
+                const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt, ...(attachments.length ? { attachments } : {}),
+                    // Old cached Claude catalogs must not override remote permissions.
+                    ...(provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) }, { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, signal });
+                if (!agent.started)
+                    throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
+            }
+            else {
+                // A receipt left by a failed HTTP/model response is replayed, never delivered again.
+                if (!task.agentId)
+                    await service.retry(task.id, signal);
+                const page = await service.messageTimeline(task.id, messageId);
+                if (!page.found) {
+                    // A previous response may have continued while DSH was closed: show the rest before this one.
+                    const previous = service.store.task(t => t.id === task.id)?.chat?.delivered;
+                    if (previous && !previous.done && previous.messageId !== messageId) {
+                        const rest = await service.messageTimeline(task.id, previous.messageId, previous.cursor ?? undefined).catch(() => undefined);
+                        if (rest?.found && (rest.entries.length || busy(await service.summary(task.id)))) {
+                            admitted = true;
+                            yield* textChunk('text', 'Output from the previous response, completed while DSH was disconnected:\n\n');
+                            yield* follow(previous.messageId, previous.cursor ?? undefined, true);
+                            yield* textChunk('text', '\n\n---\n\n');
+                        }
+                        await delivered(previous.messageId, undefined, true);
+                    }
+                    const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
+                    await service.setModel(task.id, model.id, effort, options.model, serviceTier);
+                    admitted = true;
+                    await service.send(task.id, { id: messageId, text: prompt, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
+                }
+                else
+                    admitted = true;
+            }
+            const receipt = await service.messageTimeline(taskId, messageId);
+            if (!receipt.hasFollowingMessage)
+                await service.store.update(state => { const saved = state.tasks.find(t => t.id === taskId); if (saved?.chat)
+                    saved.chat.lastUserId = userId; });
+            const interrupted = yield* follow(messageId, undefined, false);
+            settled = true;
+            await delivered(messageId, undefined, true);
             yield* endBlock();
             rows.close();
             yield { type: 'finish', reason: interrupted ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'The remote CLI turn was interrupted.' } } : { kind: 'stop' } };
@@ -342,8 +386,12 @@ export class RemoteCliAdapter extends LlmAdapter {
         finally {
             for (const pending of questions.values())
                 pending.abort();
+            // Only a user's Stop interrupts the remote turn. Shutdown and plugin reloads leave it running.
+            const shutdown = this.released || service.stopped || disposal(controller.signal.reason) || disposal(options.signal?.reason);
             try {
-                if (admitted && !settled && service.store.task(t => t.id === taskId))
+                if (reached && !settled)
+                    await delivered(reached.id, reached.cursor, false, true);
+                if (admitted && !settled && !shutdown && service.store.task(t => t.id === taskId))
                     await service.stop(taskId);
             }
             finally {

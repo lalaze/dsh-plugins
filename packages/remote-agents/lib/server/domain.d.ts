@@ -66,6 +66,12 @@ export interface Cursor {
     epoch: string;
     seq: number;
 }
+/** Relay output already reflected in the history: resume at byte `at`; `partial` restores Claude's streaming state. */
+export interface RelayPosition {
+    id: string;
+    at: number;
+    partial?: true;
+}
 export interface TimelineEntry {
     seqStart: number;
     seqEnd: number;
@@ -74,6 +80,7 @@ export interface TimelineEntry {
     item: Record<string, unknown> & {
         type: string;
     };
+    relay?: RelayPosition;
 }
 export interface TimelinePage {
     epoch: string;
@@ -167,6 +174,10 @@ export interface Agent {
     nativeSessionId?: string | null;
     resumable?: boolean;
     context?: ContextUsage;
+    /** The CLI runs under a relay on the SSH host and survives DSH restarts and SSH interruptions. */
+    persistent?: boolean;
+    /** A persistent CLI whose SSH connection is being re-established. */
+    reconnecting?: boolean;
 }
 export interface TaskInput {
     id: string;
@@ -201,6 +212,12 @@ export interface Task extends TaskInput {
         route: string;
         receiptRoute?: string;
         lastUserId?: string;
+        /** How much of a message's output reached the DSH conversation; the rest is shown with the next response. */
+        delivered?: {
+            messageId: string;
+            cursor: Cursor | null;
+            done?: true;
+        };
     };
     serverId: string;
     title: string;
@@ -219,6 +236,11 @@ export interface Task extends TaskInput {
         argv: string[];
         resumable?: boolean;
         initialSent: boolean;
+        imageInput?: boolean;
+    };
+    /** A relay that may still run this task's CLI on the SSH host; restored after DSH restarts. */
+    relay?: {
+        id: string;
     };
     /** Last reported context window fill, kept for a detached session. */
     context?: ContextUsage;
@@ -258,6 +280,8 @@ export interface AgentSummary {
     error?: string;
     resumable?: boolean;
     nativeSessionId?: string;
+    persistent?: boolean;
+    reconnecting?: boolean;
 }
 export interface AgentState {
     agent: AgentSummary;

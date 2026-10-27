@@ -36,6 +36,13 @@ export declare class RemoteAgentsService {
     constructor(store: Store, factory?: BackendFactory, readSshConfig?: typeof readSshConfigHosts);
     sshConfig(): Promise<import("./domain.js").SshConfigHosts>;
     hosts(): Host[];
+    /** Closed for a plugin reload or DSH shutdown; remote work must not be stopped then. */
+    get stopped(): boolean;
+    /**
+     * Reattach persistent CLIs after a restart and finish queued relay cleanups. Runs in the
+     * background: hosts may be offline, and their sessions keep reconnecting until they return.
+     */
+    resume(): Promise<void>;
     onCatalogChange(listener: () => void): () => void;
     private catalogChanged;
     /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */

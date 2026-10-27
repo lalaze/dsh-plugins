@@ -24,6 +24,10 @@ export interface Backend {
     forget(task: Task): Promise<void>;
     /** Plan limits of the account a CLI is signed in with; null when the CLI does not report them. */
     account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null>;
+    /** Reattach to a CLI still running under a relay, without waiting for SSH. */
+    restore?(task: Task): Promise<Agent | null>;
+    /** Stop and delete relays queued for removal on this host. */
+    cleanup?(): Promise<void>;
 }
 export type BackendFactory = (host: HostConfig) => Backend;
 export declare const CLI_PROVIDERS: ({
@@ -69,6 +73,9 @@ export declare class SshBackend implements Backend {
     private accounts;
     /** Tasks with an operation in flight; their sessions are never evicted. */
     private leases;
+    private relayClient?;
+    private ending;
+    private cleaning?;
     constructor(host: HostConfig, store: Store, transport?: SshTransport);
     private assertOpen;
     homeDirectory(): Promise<string>;
@@ -76,6 +83,20 @@ export declare class SshBackend implements Backend {
     private history;
     providers(cwd: string, refresh: boolean): Promise<Provider[]>;
     private task;
+    /** Hosts with Node.js 18+ run CLIs under a relay; others keep a direct SSH pipe. */
+    private relays;
+    /** Forget a relay locally and remove it remotely now, or once the host is reachable. */
+    private relayEnded;
+    /** Stop and delete relays queued for this host. Never blocks local deletion or archiving. */
+    cleanup(): Promise<void>;
+    /** A link to a relay, installing the current relay script on the host before attaching. */
+    private link;
+    private session;
+    /**
+     * Reattach to the relay still running this task's CLI. Needs no SSH connection: the link keeps
+     * reconnecting, and the turn, tools and pending permissions are rebuilt from the saved history.
+     */
+    restore(task: Task): Promise<Agent | null>;
     private lease;
     create(task: Task, signal?: AbortSignal): Promise<Agent>;
     recover(task: Task, signal?: AbortSignal): Promise<Agent>;
@@ -85,6 +106,8 @@ export declare class SshBackend implements Backend {
     timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage>;
     messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<MessageTimeline>;
     reply(id: string): Promise<string>;
+    /** A restored relay session once it is connected, or undefined when its CLI has ended. */
+    private reattach;
     /** The live session, resuming the saved native session when the process is gone. */
     private attached;
     send(id: string, text: string, messageId: string, attachments?: Attachment[], signal?: AbortSignal): Promise<void>;
@@ -95,5 +118,6 @@ export declare class SshBackend implements Backend {
     account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null>;
     /** Ask a running session of this CLI, or briefly start one without a prompt. */
     private readAccount;
+    /** Shutdown releases persistent sessions, which keep running and are restored on the next start. */
     close(): Promise<void>;
 }

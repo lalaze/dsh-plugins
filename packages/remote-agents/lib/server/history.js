@@ -40,19 +40,37 @@ export class TaskHistory {
             this.entries.push(entry);
         }
     }
-    append(item, turnId) {
-        const saved = structuredClone(item);
+    append(item, turnId, relay) { return this.appendBatch([{ item, turnId }], relay); }
+    /**
+     * One write for everything a CLI output line produced. Every entry records the relay byte
+     * offset after that line, so a restarted DSH resumes there without repeating or losing output.
+     */
+    appendBatch(items, relay) {
+        const saved = structuredClone(items), position = relay && structuredClone(relay);
         const next = this.queue.then(async () => {
             if (this.failure)
                 throw this.failure;
-            const seq = this.entries.length + 1;
-            const entry = { seqStart: seq, seqEnd: seq, timestamp: new Date().toISOString(), item: saved, ...(turnId ? { turnId } : {}) };
+            if (!saved.length)
+                return;
+            const timestamp = new Date().toISOString();
+            const entries = saved.map(({ item, turnId }, index) => ({ seqStart: this.entries.length + index + 1, seqEnd: this.entries.length + index + 1, timestamp, item, ...(turnId ? { turnId } : {}), ...(position ? { relay: position } : {}) }));
             await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
-            await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
-            this.entries.push(entry);
+            await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
+            this.entries.push(...entries);
         });
         this.queue = next.catch(error => { this.failure = error; });
         return next;
+    }
+    /** Where to resume reading a relay: after the last output line whose entries were saved. */
+    async checkpoint(relayId) {
+        await this.queue;
+        return structuredClone(this.entries.findLast(e => e.relay?.id === relayId)?.relay);
+    }
+    /** The latest submitted message and everything recorded after it. */
+    async turn() {
+        await this.queue;
+        const start = this.entries.findLastIndex(e => e.item.type === 'user_message');
+        return structuredClone(start < 0 ? { entries: this.entries } : { message: this.entries[start], entries: this.entries.slice(start + 1) });
     }
     async page(cursor, direction = 'before') {
         await this.queue;

@@ -6,6 +6,7 @@ import { TaskHistory } from './history.js';
 import { discoverAcpCatalog } from './acp.js';
 import { antigravityArguments, ANTIGRAVITY_NOTICE, ANTIGRAVITY_RUNNER, decodeAntigravityModels } from './antigravity.js';
 import { attachmentPrompt, transferAttachments } from './attachments.js';
+import { RelayClient, RelayLink } from './relay.js';
 import { readAccountUsage } from './usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -50,6 +51,9 @@ export class SshBackend {
     accounts = new Map();
     /** Tasks with an operation in flight; their sessions are never evicted. */
     leases = new Map();
+    relayClient;
+    ending = new Map();
+    cleaning;
     constructor(host, store, transport) {
         this.host = host;
         this.store = store;
@@ -185,6 +189,95 @@ export class SshBackend {
             throw new RemoteError('Remote agent not found', 404);
         return task;
     }
+    /** Hosts with Node.js 18+ run CLIs under a relay; others keep a direct SSH pipe. */
+    relays(reinstall = false) {
+        if (!this.transport.relays)
+            return Promise.resolve(undefined);
+        const cached = this.relayClient;
+        if (cached && !reinstall && Date.now() - cached.at < 60_000)
+            return cached.value;
+        const value = RelayClient.open(this.transport);
+        this.relayClient = { at: Date.now(), value };
+        value.then(client => { if (client && this.relayClient?.value === value)
+            this.relayClient.at = Infinity; }, () => { if (this.relayClient?.value === value)
+            this.relayClient = undefined; });
+        return value;
+    }
+    /** Forget a relay locally and remove it remotely now, or once the host is reachable. */
+    relayEnded(taskId, relayId) {
+        const ending = (async () => {
+            await (await this.histories.get(taskId)?.catch(() => undefined))?.flush().catch(() => { });
+            await this.store.update(state => {
+                const saved = state.tasks.find(t => t.id === taskId);
+                if (saved?.relay?.id === relayId)
+                    delete saved.relay;
+                state.relayCleanups = [...(state.relayCleanups ?? []).filter(c => c.relayId !== relayId), { hostId: this.host.id, relayId }];
+            });
+            void this.cleanup();
+        })().finally(() => { if (this.ending.get(taskId) === ending)
+            this.ending.delete(taskId); });
+        this.ending.set(taskId, ending);
+        return ending;
+    }
+    /** Stop and delete relays queued for this host. Never blocks local deletion or archiving. */
+    cleanup() {
+        if (this.cleaning || this.closed || !this.store.relayCleanups(this.host.id).length)
+            return this.cleaning ?? Promise.resolve();
+        const cleaning = (async () => {
+            const ids = this.store.relayCleanups(this.host.id).map(c => c.relayId);
+            const relay = await this.relays();
+            if (!relay || this.closed)
+                return;
+            // A relay whose CLI could not be confirmed stopped stays queued for the next attempt.
+            const removed = await relay.remove(ids);
+            // After a shutdown the next instance owns the state; it retries the queued removal, which is idempotent.
+            if (this.closed)
+                return;
+            await this.store.update(state => {
+                state.relayCleanups = state.relayCleanups?.filter(c => c.hostId !== this.host.id || !removed.includes(c.relayId));
+                if (!state.relayCleanups?.length)
+                    delete state.relayCleanups;
+            });
+        })().catch(() => { }).finally(() => { this.cleaning = undefined; });
+        this.cleaning = cleaning;
+        return cleaning;
+    }
+    /** A link to a relay, installing the current relay script on the host before attaching. */
+    link(id, offset, onState) {
+        return new RelayLink(this.transport, id, offset, async (reinstall) => {
+            this.assertOpen();
+            if (!await this.relays(reinstall))
+                throw new Error('Node.js 18 or newer is no longer available on this SSH host');
+        }, onState);
+    }
+    session(task, peer, history, relay) {
+        // A finished turn changed the account's usage; read it again when it is next shown.
+        return new CliSession(peer, task, history, this.store, { turnEnded: () => this.accounts.delete(task.provider), ...(relay ? { ended: () => void this.relayEnded(task.id, relay.id).catch(() => { }) } : {}) }, relay);
+    }
+    /**
+     * Reattach to the relay still running this task's CLI. Needs no SSH connection: the link keeps
+     * reconnecting, and the turn, tools and pending permissions are rebuilt from the saved history.
+     */
+    async restore(task) {
+        this.assertOpen();
+        const existing = this.sessions.get(task.id);
+        if (existing?.alive)
+            return structuredClone(existing.agent);
+        if (!task.relay || !task.native)
+            return null;
+        const history = await this.history(task.id);
+        const at = (await history.checkpoint(task.relay.id))?.at ?? 0;
+        this.assertOpen();
+        let session;
+        const link = this.link(task.relay.id, at, state => { if (session)
+            session.agent.reconnecting = !state.connected; });
+        session = this.session({ ...task, executionCwd: task.executionCwd ?? task.cwd }, new JsonlPeer(link), history, link);
+        await session.restore();
+        session.agent.reconnecting = true;
+        this.sessions.set(task.id, session);
+        link.open();
+        return structuredClone(session.agent);
+    }
     lease(id) {
         this.leases.set(id, (this.leases.get(id) ?? 0) + 1);
         let released = false;
@@ -221,6 +314,19 @@ export class SshBackend {
     async open(task, resume, signal) {
         if (!CLI_PROVIDERS.some(provider => provider.id === task.provider))
             throw new Error('This CLI provider is no longer supported. Saved output remains available.');
+        const saved = this.store.task(t => t.id === task.id) ?? task;
+        if (saved.relay && saved.native) {
+            // The CLI may still be running remotely: reattach instead of starting or resuming another one.
+            const restored = await this.reattach(saved);
+            if (restored) {
+                const history = await this.history(task.id);
+                if (!resume && !(await history.hasMessage(task.id))) {
+                    const attachments = await transferAttachments(this.transport, this.store.directory, task.id, task.id, restored.agent.cwd, task.attachments ?? [], signal);
+                    await restored.send(attachmentPrompt(task.prompt, attachments), task.id, attachments);
+                }
+                return structuredClone(restored.agent);
+            }
+        }
         this.sessions.get(task.id)?.close();
         let profile;
         if (resume) {
@@ -253,9 +359,36 @@ export class SshBackend {
             this.sessions.delete(idle[0]);
         }
         const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : argv;
-        // A finished turn changed the account's usage; read it again when it is next shown.
-        const session = new CliSession(new JsonlPeer(this.transport.start(profile.cwd, launch)), { ...task, executionCwd: profile.cwd }, history, this.store, { turnEnded: () => this.accounts.delete(task.provider) });
+        const relay = await this.relays();
+        this.assertOpen();
+        signal?.throwIfAborted();
+        let link;
+        if (relay) {
+            // Record the relay before it exists, so an interrupted start is cleaned up rather than leaked.
+            const relayId = randomUUID(), previous = this.store.task(t => t.id === task.id)?.relay;
+            await this.store.update(state => {
+                const saved = state.tasks.find(t => t.id === task.id);
+                if (!saved)
+                    throw new RemoteError('Remote agent was deleted', 409);
+                saved.relay = { id: relayId };
+                if (previous)
+                    state.relayCleanups = [...(state.relayCleanups ?? []), { hostId: this.host.id, relayId: previous.id }];
+            });
+            if (previous)
+                void this.cleanup();
+            try {
+                await relay.launch(relayId, profile.cwd, launch);
+            }
+            catch (error) {
+                await this.relayEnded(task.id, relayId).catch(() => { });
+                throw error;
+            }
+            link = this.link(relayId, 0, state => { if (this.sessions.get(task.id)?.relay === link)
+                this.sessions.get(task.id).agent.reconnecting = !state.connected; });
+        }
+        const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch)), history, link);
         this.sessions.set(task.id, session);
+        link?.open();
         try {
             await session.initialize(profile.protocol, argv, resume);
             this.assertOpen();
@@ -277,9 +410,22 @@ export class SshBackend {
     async timeline(id, cursor, direction) { return (await this.history(this.task(id).id)).page(cursor, direction); }
     async messageTimeline(id, messageId, cursor) { return (await this.history(this.task(id).id)).messagePage(messageId, cursor); }
     async reply(id) { return (await this.history(this.task(id).id)).lastReply(); }
+    /** A restored relay session once it is connected, or undefined when its CLI has ended. */
+    async reattach(task) {
+        if (!this.sessions.get(task.id)?.alive)
+            await this.restore(task);
+        const session = this.sessions.get(task.id);
+        // An idle CLI may have ended while DSH was away; then the native session is resumed instead.
+        if (session?.relay)
+            await session.relay.ready(30_000).catch(() => { });
+        if (session?.alive)
+            return session;
+        await this.ending.get(task.id);
+    }
     /** The live session, resuming the saved native session when the process is gone. */
     async attached(task) {
-        const session = this.sessions.get(task.id);
+        const saved = this.store.task(t => t.id === task.id) ?? task;
+        const session = saved.relay && saved.native ? await this.reattach(saved) : this.sessions.get(task.id);
         if (session?.alive)
             return session;
         if (task.native?.resumable === false)
@@ -317,12 +463,17 @@ export class SshBackend {
     }
     async detach(task) {
         const session = this.sessions.get(task.id);
-        if (!session)
-            return;
-        if (session.alive && session.busy)
-            await session.stop();
-        session.close();
-        this.sessions.delete(task.id);
+        if (session) {
+            // Interrupting needs a connection; an unreachable relay is stopped by its queued cleanup instead.
+            if (session.alive && session.busy && (!session.relay || session.relay.connected))
+                await session.stop();
+            session.close();
+            this.sessions.delete(task.id);
+        }
+        const relay = this.store.task(t => t.id === task.id)?.relay;
+        if (relay)
+            await this.relayEnded(task.id, relay.id);
+        await this.ending.get(task.id);
     }
     async forget(task) {
         await this.detach(task);
@@ -372,13 +523,14 @@ export class SshBackend {
             peer.close();
         }
     }
+    /** Shutdown releases persistent sessions, which keep running and are restored on the next start. */
     async close() {
         this.closed = true;
         for (const probe of this.probes)
             probe.close();
         for (const session of this.sessions.values())
-            session.close();
-        await Promise.allSettled([...this.starting.values()]);
+            session.release();
+        await Promise.allSettled([...this.starting.values(), ...this.ending.values()]);
         this.probes.clear();
         this.sessions.clear();
         for (const history of this.histories.values())

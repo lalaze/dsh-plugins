@@ -28,6 +28,7 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     private readonly pollMs;
     private active;
     private controllers;
+    private released;
     private auxiliaryDirectories;
     constructor(projects: ChatProjects, host: ChatHost, pollMs?: number);
     providerInfo(provider: string): {
@@ -45,6 +46,10 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     listModels(provider: string): Promise<LlmModelInfo[]>;
     private route;
     resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
+    /**
+     * Plugin unload or DSH shutdown: end local streams but leave remote turns running. A persistent
+     * CLI keeps working; the conversation shows its remaining output with the next response.
+     */
     close(): void;
     stream(options: GenerateOptions): AsyncGenerator<StreamChunk>;
 }

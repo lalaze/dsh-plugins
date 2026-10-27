@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { StringDecoder } from 'node:string_decoder';
+import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { field, remotePath, RemoteError } from './domain.js';
@@ -60,6 +60,7 @@ export function connectionInput(value) {
 }
 export class OpenSshTransport {
     binary;
+    relays = true;
     args;
     constructor(connection, binary = 'ssh') {
         this.binary = binary;
@@ -93,6 +94,10 @@ case "\${dsh_login_shell##*/}" in
 esac
 exec /bin/sh -c ${quote(REMOTE_PATH + script)}
 `;
+        return this.spawnRemote(command);
+    }
+    /** Runs a POSIX shell command on the SSH host. */
+    spawnRemote(command) {
         return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     }
     exec(script, timeout = 20_000) {
@@ -177,7 +182,7 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
                 child.kill('SIGTERM');
         }
     }
-    start(cwd, argv) {
+    start(cwd, argv, options = {}) {
         const process = this.spawn(`cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
         let stderr = '', exited;
         const data = new Set(), exits = new Set();
@@ -186,7 +191,7 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
             listener(error); };
         process.stdout.on('data', chunk => { for (const listener of data)
             listener(chunk); });
-        process.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
+        process.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); options.stderr?.(chunk); });
         process.stdin.on('error', error => end(error));
         process.on('error', end);
         process.on('close', code => end(new Error(stderr.trim() || `Remote CLI exited (${code})`)));
@@ -200,63 +205,81 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
         };
     }
 }
+const FRAME_LIMIT = 64_000_000;
 /** JSONL supports native Codex, ACP JSON-RPC and Claude's control frames. */
 export class JsonlPeer {
     child;
+    /** Request IDs stay unique across reconnections: a replayed response can never answer a newer request. */
+    prefix = `dsh-${randomUUID().slice(0, 8)}`;
     nextId = 0;
     pending = new Map();
     listeners = new Set();
     exits = new Set();
     ended;
+    processed;
     constructor(child) {
         this.child = child;
-        const decoder = new StringDecoder('utf8');
-        let buffer = '';
+        // Split on bytes: a newline never occurs inside a UTF-8 sequence, so offsets stay exact.
+        this.processed = child.offset ?? 0;
+        let parts = [], size = 0;
         child.onData(data => {
-            buffer += decoder.write(data);
-            if (buffer.length > 64_000_000) {
-                this.finish(new Error('Remote CLI frame exceeded output limit'));
-                child.stop();
-                return;
-            }
-            let index;
-            while ((index = buffer.indexOf('\n')) >= 0) {
-                const line = buffer.slice(0, index);
-                buffer = buffer.slice(index + 1);
-                let message;
-                try {
-                    message = JSON.parse(line);
-                }
-                catch {
-                    continue;
-                }
-                if (!message || typeof message !== 'object' || Array.isArray(message))
-                    continue;
-                const key = message.type === 'control_response' ? String(message.response?.request_id) : message.id !== undefined && !message.method ? String(message.id) : undefined;
-                const request = key ? this.pending.get(key) : undefined;
-                if (request && key) {
-                    this.pending.delete(key);
-                    clearTimeout(request.timer);
-                    const error = message.error ?? (message.response?.subtype === 'error' ? { message: message.response.error } : null);
-                    if (error)
-                        request.reject(new Error(typeof error.message === 'string' ? error.message : JSON.stringify(error)));
-                    else
-                        request.resolve(message.type === 'control_response' ? message.response?.response : message.result);
-                }
-                else
-                    for (const listener of this.listeners) {
-                        try {
-                            listener(message);
-                        }
-                        catch (error) {
-                            this.finish(error instanceof Error ? error : new Error(String(error)));
-                            child.stop();
-                            return;
-                        }
+            let index = 0;
+            while (index < data.length && !this.ended) {
+                const newline = data.indexOf(10, index);
+                if (newline < 0) {
+                    parts.push(data.subarray(index));
+                    size += data.length - index;
+                    if (size > FRAME_LIMIT) {
+                        this.finish(new Error('Remote CLI frame exceeded output limit'));
+                        child.stop();
                     }
+                    return;
+                }
+                const line = parts.length ? Buffer.concat([...parts, data.subarray(index, newline)]) : data.subarray(index, newline);
+                parts = [];
+                size = 0;
+                index = newline + 1;
+                const frame = { start: this.processed, end: this.processed + line.length + 1 };
+                this.dispatch(line.toString('utf8'), frame);
+                this.processed = frame.end;
             }
         });
         child.onExit(error => this.finish(error));
+    }
+    /** Byte offset after the last dispatched line. */
+    get position() { return this.processed; }
+    dispatch(line, frame) {
+        let message;
+        try {
+            message = JSON.parse(line);
+        }
+        catch {
+            return;
+        }
+        if (!message || typeof message !== 'object' || Array.isArray(message))
+            return;
+        const key = message.type === 'control_response' ? String(message.response?.request_id) : message.id !== undefined && !message.method ? String(message.id) : undefined;
+        const request = key ? this.pending.get(key) : undefined;
+        if (request && key) {
+            this.pending.delete(key);
+            clearTimeout(request.timer);
+            const error = message.error ?? (message.response?.subtype === 'error' ? { message: message.response.error } : null);
+            if (error)
+                request.reject(new Error(typeof error.message === 'string' ? error.message : JSON.stringify(error)));
+            else
+                request.resolve(message.type === 'control_response' ? message.response?.response : message.result);
+        }
+        else
+            for (const listener of this.listeners) {
+                try {
+                    listener(message, frame);
+                }
+                catch (error) {
+                    this.finish(error instanceof Error ? error : new Error(String(error)));
+                    this.child.stop();
+                    return;
+                }
+            }
     }
     get alive() { return !this.ended; }
     onMessage(listener) { this.listeners.add(listener); }
@@ -277,14 +300,14 @@ export class JsonlPeer {
                 failed(this.ended);
         });
     }
-    send(message) { if (this.ended)
-        throw this.ended; this.child.write(`${JSON.stringify(message)}\n`); }
+    send(message, inputId) { if (this.ended)
+        throw this.ended; this.child.write(`${JSON.stringify(message)}\n`, inputId); }
     request(method, params = {}, timeout = 20_000) {
-        const id = `dsh-${++this.nextId}`;
+        const id = `${this.prefix}-${++this.nextId}`;
         return this.wait(id, { jsonrpc: '2.0', id, method, params }, timeout);
     }
     control(request, timeout = 20_000) {
-        const request_id = `dsh-${++this.nextId}`;
+        const request_id = `${this.prefix}-${++this.nextId}`;
         return this.wait(request_id, { type: 'control_request', request_id, request }, timeout);
     }
     wait(id, message, timeout) {
