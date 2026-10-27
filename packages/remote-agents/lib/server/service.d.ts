@@ -1,7 +1,19 @@
 import { type BackendFactory } from './backend.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
-import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type Host, type Task } from './domain.js';
+import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type Host, type Task, type UsageReport } from './domain.js';
+export interface UsageOptions {
+    /** The conversation's selected route; picks its CLI when the conversation used several. */
+    route?: string;
+    /** Machine and CLI of the selected route, for a conversation that has not started a session yet. */
+    target?: {
+        hostId: string;
+        provider: string;
+    };
+    /** Also read plan limits, which may contact the SSH host. */
+    account?: boolean;
+    refresh?: boolean;
+}
 export interface CreateOptions {
     title?: string;
     origin?: Task['origin'];
@@ -60,8 +72,10 @@ export declare class RemoteAgentsService {
     reply(id: string): Promise<string>;
     messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<import("./domain.js").MessageTimeline>;
     setThinking(id: string, thinkingOptionId?: string): Promise<void>;
-    /** Change a model by resuming the same native session. Existing receipts keep their original namespace. */
-    setModel(id: string, model: string, thinkingOptionId?: string, route?: string): Promise<void>;
+    /** Change a model or speed by resuming the same native session. Existing receipts keep their original namespace. */
+    setModel(id: string, model: string, thinkingOptionId?: string, route?: string, serviceTier?: string): Promise<void>;
+    /** Context comes from local state; only plan limits are read from the SSH host, and they are cached. */
+    usage(sessionId: string, options?: UsageOptions): Promise<UsageReport | null>;
     rename(id: string, title: string): Promise<AgentSummary>;
     send(id: string, input: unknown, options?: SendOptions): Promise<AgentSummary>;
     stop(id: string): Promise<void>;

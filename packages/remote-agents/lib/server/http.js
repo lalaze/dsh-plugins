@@ -1,4 +1,4 @@
-import { cursorInput, field, identifier, record, remotePath, RemoteError } from './domain.js';
+import { cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError } from './domain.js';
 import { ChatProjects } from './chat-projects.js';
 export function createHandler(service, projects = new ChatProjects(service), workspace) {
     return async (request) => {
@@ -32,6 +32,20 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'hostCatalogs':
                     result = projects.hosts();
                     break;
+                case 'usage': {
+                    const route = input.model === undefined ? undefined : field(input.model, 'model', 1000);
+                    const [projectId, cli] = route?.split('/') ?? [], project = projects.routes().find(p => p.id === projectId);
+                    let provider;
+                    try {
+                        provider = cli === undefined ? undefined : decodeURIComponent(cli);
+                    }
+                    catch {
+                        provider = undefined;
+                    }
+                    const target = project && provider && Object.hasOwn(PROVIDER_LABELS, provider) ? { hostId: project.hostId, provider } : undefined;
+                    result = await service.usage(field(input.sessionId, 'session ID', 256), { route, target, account: input.account === true, refresh: input.refresh === true });
+                    break;
+                }
                 case 'discoverHost':
                     result = await service.discoverHost(hostId());
                     break;

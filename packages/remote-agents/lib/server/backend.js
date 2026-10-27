@@ -6,6 +6,7 @@ import { TaskHistory } from './history.js';
 import { discoverAcpCatalog } from './acp.js';
 import { antigravityArguments, ANTIGRAVITY_NOTICE, ANTIGRAVITY_RUNNER, decodeAntigravityModels } from './antigravity.js';
 import { attachmentPrompt, transferAttachments } from './attachments.js';
+import { readAccountUsage } from './usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 export { connectionInput } from './ssh.js';
@@ -18,6 +19,7 @@ export const CLI_PROVIDERS = [
     { id: 'codebuddy', label: PROVIDER_LABELS.codebuddy, command: 'codebuddy', protocol: 'acp', args: ['--acp'] },
 ];
 const SESSION_LIMIT = 8;
+const ACCOUNT_TTL = 300_000;
 const list = (value) => Array.isArray(value) ? value : [];
 /** Claude's `list_models` control response: `supportedEffortLevels` holds per-model reasoning choices. */
 export function claudeModels(result) {
@@ -26,6 +28,13 @@ export function claudeModels(result) {
         inputModalities: ['text', 'image'],
         thinkingOptions: list(m.supportedEffortLevels ?? m.efforts).filter((e) => typeof e === 'string').map(id => ({ id, label: id })),
     }));
+}
+/** Codex speed tiers. `serviceTiers` carries request IDs such as `priority`; older CLIs only list `additionalSpeedTiers` names. */
+export function codexServiceTiers(model) {
+    const tiers = Array.isArray(model.serviceTiers)
+        ? model.serviceTiers.filter(t => typeof t?.id === 'string' && t.id).map(t => ({ id: t.id, label: typeof t.name === 'string' && t.name ? t.name : t.id }))
+        : list(model.additionalSpeedTiers).filter((id) => typeof id === 'string' && !!id).map(id => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
+    return tiers.length ? tiers : undefined;
 }
 export class SshBackend {
     host;
@@ -38,6 +47,7 @@ export class SshBackend {
     sessions = new Map();
     histories = new Map();
     starting = new Map();
+    accounts = new Map();
     /** Tasks with an operation in flight; their sessions are never evicted. */
     leases = new Map();
     constructor(host, store, transport) {
@@ -125,7 +135,7 @@ export class SshBackend {
                     let cursor;
                     for (let page = 0; page < 20; page++) {
                         const result = await peer.request('model/list', { limit: 100, ...(cursor ? { cursor } : {}) });
-                        models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']), isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })) })));
+                        models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']), isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })), serviceTiers: codexServiceTiers(m) })));
                         cursor = result?.nextCursor;
                         if (!cursor)
                             break;
@@ -243,7 +253,8 @@ export class SshBackend {
             this.sessions.delete(idle[0]);
         }
         const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : argv;
-        const session = new CliSession(new JsonlPeer(this.transport.start(profile.cwd, launch)), { ...task, executionCwd: profile.cwd }, history, this.store);
+        // A finished turn changed the account's usage; read it again when it is next shown.
+        const session = new CliSession(new JsonlPeer(this.transport.start(profile.cwd, launch)), { ...task, executionCwd: profile.cwd }, history, this.store, { turnEnded: () => this.accounts.delete(task.provider) });
         this.sessions.set(task.id, session);
         try {
             await session.initialize(profile.protocol, argv, resume);
@@ -319,6 +330,47 @@ export class SshBackend {
         this.histories.delete(task.id);
         await (await history.catch(() => new TaskHistory(this.store.directory, task.id))).remove();
         await rm(join(this.store.directory, 'attachments', task.id), { recursive: true, force: true });
+    }
+    async account(provider, cwd, refresh) {
+        this.assertOpen();
+        const definition = CLI_PROVIDERS.find(p => p.id === provider);
+        if (definition?.protocol !== 'codex' && definition?.protocol !== 'claude')
+            return null;
+        const cached = this.accounts.get(provider);
+        if (cached && !refresh && Date.now() - cached.at < ACCOUNT_TTL)
+            return cached.value;
+        const value = this.readAccount(definition, cwd);
+        this.accounts.set(provider, { at: Date.now(), value });
+        value.catch(() => { if (this.accounts.get(provider)?.value === value)
+            this.accounts.delete(provider); });
+        return value;
+    }
+    /** Ask a running session of this CLI, or briefly start one without a prompt. */
+    async readAccount(definition, cwd) {
+        const live = [...this.sessions.values()].find(s => s.alive && s.task.provider === definition.id && s.agent.status !== 'initializing');
+        if (live)
+            return readAccountUsage(live.peer, definition.protocol, live.account);
+        const path = await this.transport.exec(`printf '%s' "$(command -v ${quote(definition.command)} 2>/dev/null || true)"`);
+        this.assertOpen();
+        if (!path.startsWith('/'))
+            throw new Error(`${definition.label} is not installed on this SSH host`);
+        const argv = definition.protocol === 'claude' ? [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'] : [path, ...definition.args];
+        const peer = new JsonlPeer(this.transport.start(cwd ?? await this.homeDirectory(), argv));
+        this.probes.add(peer);
+        try {
+            peer.onMessage(message => { if (message.method && message.id !== undefined)
+                peer.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Usage checks do not execute tools' } }); });
+            if (definition.protocol === 'codex') {
+                await initializeCodex(peer);
+                return await readAccountUsage(peer, 'codex');
+            }
+            const init = await peer.control({ subtype: 'initialize' });
+            return await readAccountUsage(peer, 'claude', init?.account);
+        }
+        finally {
+            this.probes.delete(peer);
+            peer.close();
+        }
     }
     async close() {
         this.closed = true;

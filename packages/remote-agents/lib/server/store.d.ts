@@ -18,6 +18,7 @@ export declare class Store {
     chatProjects(): ChatProject[];
     /** A copy of one saved agent record, without cloning the whole registry. */
     task(predicate: (task: Task) => boolean): Task | undefined;
+    tasks(predicate: (task: Task) => boolean): Task[];
     /** Serialize read/modify/atomic-rename, including concurrent HTTP requests. */
     update(change: (next: State) => void): Promise<void>;
     flush(): Promise<void>;

@@ -45,9 +45,11 @@ export interface Choice {
 }
 /** Older saved Claude catalogs also need a way to return to the remote CLI's settings. */
 export declare function permissionModes(provider: string, modes: Choice[]): Choice[];
+/** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
 export interface Model extends Choice {
     thinkingOptions?: Choice[];
     defaultThinkingOptionId?: string;
+    serviceTiers?: Choice[];
     inputModalities?: ('text' | 'image')[];
 }
 export interface Provider {
@@ -119,6 +121,35 @@ export interface PermissionAnswer {
     answers?: Record<string, string>;
     message?: string;
 }
+/** Tokens held in one native session's context window. */
+export interface ContextUsage {
+    used: number;
+    max: number;
+}
+/** One plan rate-limit window of a CLI account; `label` is English and localized by the client. */
+export interface QuotaWindow {
+    id: string;
+    label: string;
+    usedPercent: number;
+    resetsAt?: string;
+}
+/** Plan limits of the account a CLI is signed in with on an SSH host, as that CLI reports them. */
+export interface AccountUsage {
+    provider: string;
+    plan?: string;
+    email?: string;
+    windows: QuotaWindow[];
+    extraUsage?: boolean;
+    credits?: string;
+    checkedAt: string;
+    error?: string;
+}
+/** What the composer usage ring shows for a DSH conversation bound to a remote CLI. */
+export interface UsageReport {
+    provider: string;
+    context: ContextUsage | null;
+    account?: AccountUsage;
+}
 /** Live state of one attached (or detached) native CLI session. */
 export interface Agent {
     id: string;
@@ -135,6 +166,7 @@ export interface Agent {
     lastError?: string;
     nativeSessionId?: string | null;
     resumable?: boolean;
+    context?: ContextUsage;
 }
 export interface TaskInput {
     id: string;
@@ -144,6 +176,7 @@ export interface TaskInput {
     model: string;
     modeId?: string;
     thinkingOptionId?: string;
+    serviceTier?: string;
     prompt: string;
     attachments?: Attachment[];
 }
@@ -187,6 +220,8 @@ export interface Task extends TaskInput {
         resumable?: boolean;
         initialSent: boolean;
     };
+    /** Last reported context window fill, kept for a detached session. */
+    context?: ContextUsage;
     state: 'creating' | 'ready' | 'uncertain';
     error?: string;
 }
@@ -207,6 +242,7 @@ export interface AgentSummary {
     model: string;
     modeId?: string;
     thinkingOptionId?: string;
+    serviceTier?: string;
     modes: Choice[];
     title: string;
     createdAt: string;

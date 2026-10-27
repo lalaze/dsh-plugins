@@ -1,4 +1,4 @@
-import type { Agent, Attachment, Cursor, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
+import type { AccountUsage, Agent, Attachment, Choice, Cursor, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
 import { type SshTransport } from './ssh.js';
 import type { Store } from './store.js';
 export { connectionInput } from './ssh.js';
@@ -22,6 +22,8 @@ export interface Backend {
     detach(task: Task): Promise<void>;
     /** Detach and delete saved output. */
     forget(task: Task): Promise<void>;
+    /** Plan limits of the account a CLI is signed in with; null when the CLI does not report them. */
+    account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null>;
 }
 export type BackendFactory = (host: HostConfig) => Backend;
 export declare const CLI_PROVIDERS: ({
@@ -51,6 +53,8 @@ export declare const CLI_PROVIDERS: ({
 })[];
 /** Claude's `list_models` control response: `supportedEffortLevels` holds per-model reasoning choices. */
 export declare function claudeModels(result: unknown): Model[];
+/** Codex speed tiers. `serviceTiers` carries request IDs such as `priority`; older CLIs only list `additionalSpeedTiers` names. */
+export declare function codexServiceTiers(model: Record<string, unknown>): Choice[] | undefined;
 export declare class SshBackend implements Backend {
     private readonly host;
     private readonly store;
@@ -62,6 +66,7 @@ export declare class SshBackend implements Backend {
     private sessions;
     private histories;
     private starting;
+    private accounts;
     /** Tasks with an operation in flight; their sessions are never evicted. */
     private leases;
     constructor(host: HostConfig, store: Store, transport?: SshTransport);
@@ -87,5 +92,8 @@ export declare class SshBackend implements Backend {
     respond(id: string, requestId: string, answer: PermissionAnswer): Promise<void>;
     detach(task: Task): Promise<void>;
     forget(task: Task): Promise<void>;
+    account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null>;
+    /** Ask a running session of this CLI, or briefly start one without a prompt. */
+    private readAccount;
     close(): Promise<void>;
 }

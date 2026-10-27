@@ -50,6 +50,7 @@ export function taskInput(value) {
         ...(v.attachments !== undefined ? { attachments: attachmentInput(v.attachments) } : {}),
         ...(v.modeId ? { modeId: field(v.modeId, 'mode', 200) } : {}),
         ...(v.thinkingOptionId ? { thinkingOptionId: field(v.thinkingOptionId, 'thinking level', 200) } : {}),
+        ...(v.serviceTier ? { serviceTier: field(v.serviceTier, 'speed', 200) } : {}),
     };
 }
 export function attachmentInput(value) {

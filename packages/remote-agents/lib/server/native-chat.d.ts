@@ -20,7 +20,8 @@ export interface ChatHost extends Partial<ToolHost> {
     userContent?(sessionId: NonNullable<GenerateOptions['sessionId']>, messageId: string): readonly ContentBlock[] | undefined;
     attachments?: AttachmentAccess;
 }
-export declare const chatModelId: (projectId: string, provider: string, model: string) => string;
+/** A speed tier (Codex Fast) is a separate picker row: DSH model selections carry only a model and a reasoning effort. */
+export declare const chatModelId: (projectId: string, provider: string, model: string, serviceTier?: string) => string;
 export declare class RemoteCliAdapter extends LlmAdapter {
     readonly projects: ChatProjects;
     private readonly host;

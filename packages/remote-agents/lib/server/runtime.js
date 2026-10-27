@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { questionsOf } from './domain.js';
 import { configureAcpSession } from './acp.js';
+import { claudeMessageTokens, codexContext, contextUsage } from './usage.js';
 const list = (value) => Array.isArray(value) ? value : [];
 const contentText = (content) => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
 export async function initializeCodex(peer) {
@@ -18,8 +19,12 @@ export class CliSession {
     task;
     history;
     store;
+    hooks;
     agent;
+    /** Claude's signed-in account from `initialize`, used to label its plan limits. */
+    account;
     nativeId = '';
+    savedContext = '';
     activeMessage;
     confirmed = false;
     partialText = false;
@@ -33,12 +38,14 @@ export class CliSession {
     permissions = new Map();
     tools = new Map();
     stopWaiters = new Set();
-    constructor(peer, task, history, store) {
+    constructor(peer, task, history, store, hooks = {}) {
         this.peer = peer;
         this.task = task;
         this.history = history;
         this.store = store;
-        this.agent = { id: task.agentId ?? task.id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'initializing', pendingPermissions: [] };
+        this.hooks = hooks;
+        this.agent = { id: task.agentId ?? task.id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'initializing', pendingPermissions: [], ...(task.context ? { context: { ...task.context } } : {}) };
+        this.savedContext = JSON.stringify(task.context ?? null);
         peer.onMessage(message => { try {
             this.message(message);
         }
@@ -65,7 +72,8 @@ export class CliSession {
         if (protocol === 'codex') {
             await initializeCodex(this.peer);
             const mode = this.task.modeId ?? 'workspace-write';
-            const params = { cwd: this.agent.cwd, model: this.task.model, approvalPolicy: mode === 'full-access' ? 'never' : 'on-request', sandbox: mode === 'read-only' ? 'read-only' : mode === 'full-access' ? 'danger-full-access' : 'workspace-write' };
+            // Without a selected tier, Codex applies its configured one; a resumed thread does not restore an earlier tier.
+            const params = { cwd: this.agent.cwd, model: this.task.model, ...(this.task.serviceTier ? { serviceTier: this.task.serviceTier } : {}), approvalPolicy: mode === 'full-access' ? 'never' : 'on-request', sandbox: mode === 'read-only' ? 'read-only' : mode === 'full-access' ? 'danger-full-access' : 'workspace-write' };
             let response;
             const method = resume ? 'thread/resume' : 'thread/start';
             const binding = resume ? { threadId: this.task.native.sessionId } : {};
@@ -99,7 +107,7 @@ export class CliSession {
         }
         else {
             this.nativeId = this.task.native?.sessionId ?? argv[argv.indexOf('--session-id') + 1];
-            await this.peer.control({ subtype: 'initialize' });
+            this.account = (await this.peer.control({ subtype: 'initialize' }))?.account;
         }
         if (typeof this.nativeId !== 'string' || !this.nativeId)
             throw new Error('Remote CLI did not return a native session ID');
@@ -112,6 +120,8 @@ export class CliSession {
         this.agent.nativeSessionId = this.nativeId;
         this.agent.status = 'idle';
         this.suspended = false;
+        if (protocol === 'claude')
+            void this.claudeContext();
     }
     protocol() { return this.store.task(t => t.id === this.task.id).native.protocol; }
     async send(text, messageId, attachments = []) {
@@ -135,7 +145,7 @@ export class CliSession {
             this.agent.status = 'running';
             this.agent.activeTurn = { turnId: randomUUID(), startedAt: new Date().toISOString() };
             if (protocol === 'codex') {
-                void this.peer.request('turn/start', { threadId: this.nativeId, cwd: this.agent.cwd, model: this.task.model, input: [{ type: 'text', text }, ...images.map(a => ({ type: 'localImage', path: a.path }))], ...(this.task.thinkingOptionId ? { effort: this.task.thinkingOptionId } : {}) }).then(result => { if (this.activeMessage !== messageId)
+                void this.peer.request('turn/start', { threadId: this.nativeId, cwd: this.agent.cwd, model: this.task.model, input: [{ type: 'text', text }, ...images.map(a => ({ type: 'localImage', path: a.path }))], ...(this.task.thinkingOptionId ? { effort: this.task.thinkingOptionId } : {}), ...(this.task.serviceTier ? { serviceTier: this.task.serviceTier } : {}) }).then(result => { if (this.activeMessage !== messageId)
                     return; if (result?.turn?.id && this.agent.activeTurn)
                     this.agent.activeTurn.turnId = result.turn.id; this.confirm(); }).catch(error => { if (this.activeMessage === messageId)
                     this.fail(error); });
@@ -161,6 +171,8 @@ export class CliSession {
         this.append({ type: 'delivery', clientMessageId: this.activeMessage });
     }
     complete(toolStatus = 'completed') {
+        this.saveContext();
+        this.hooks.turnEnded?.();
         this.agent.status = 'idle';
         this.agent.activeTurn = null;
         this.agent.pendingPermissions = [];
@@ -175,6 +187,26 @@ export class CliSession {
             done();
         this.stopWaiters.clear();
         this.activeMessage = undefined;
+    }
+    setContext(context) { if (context)
+        this.agent.context = context; }
+    /** Persist once per turn rather than per token report. */
+    saveContext() {
+        const context = this.agent.context, key = JSON.stringify(context ?? null);
+        if (!context || key === this.savedContext)
+            return;
+        this.savedContext = key;
+        void this.store.update(state => { const task = state.tasks.find(t => t.id === this.task.id); if (task)
+            task.context = { ...context }; }).catch(() => { });
+    }
+    /** Claude reports its exact context breakdown on request, including after compaction. */
+    async claudeContext() {
+        try {
+            const usage = await this.peer.control({ subtype: 'get_context_usage' });
+            this.setContext(contextUsage(usage?.totalTokens, usage?.maxTokens));
+            this.saveContext();
+        }
+        catch { /* Older Claude Code versions do not report context usage. */ }
     }
     fail(error) {
         if (this.intentionalClose)
@@ -213,6 +245,9 @@ export class CliSession {
             this.request(m);
             return;
         }
+        // Codex reports the resumed thread's usage while its history replay is still suppressed.
+        if (m.method === 'thread/tokenUsage/updated')
+            this.setContext(codexContext(m.params?.tokenUsage));
         if (this.suspended)
             return; // A resume can replay native history already present in our log.
         if (m.event === 'step_update') {
@@ -273,6 +308,8 @@ export class CliSession {
         if (m.method === 'session/update') {
             const update = p.update ?? {};
             this.confirm();
+            if (update.sessionUpdate === 'usage_update')
+                this.setContext(contextUsage(update.used, update.size));
             if (update.sessionUpdate === 'agent_message_chunk' || update.sessionUpdate === 'agent_thought_chunk')
                 this.append({ type: update.sessionUpdate === 'agent_message_chunk' ? 'assistant_message' : 'reasoning', text: update.content?.type === 'text' ? String(update.content.text ?? '') : '' });
             if (update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update') {
@@ -294,6 +331,10 @@ export class CliSession {
         }
         if (m.type === 'assistant') {
             this.confirm();
+            // Subagent messages run in their own context window.
+            const used = m.parent_tool_use_id ? undefined : claudeMessageTokens(m.message?.usage);
+            if (used !== undefined && this.agent.context)
+                this.setContext({ used, max: this.agent.context.max });
             for (const block of list(m.message?.content)) {
                 if (block.type === 'text' && !this.partialText)
                     this.append({ type: 'assistant_message', text: String(block.text ?? '') });
@@ -312,6 +353,7 @@ export class CliSession {
                 this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed'));
             else
                 this.complete();
+            void this.claudeContext();
         }
     }
     request(m) {
@@ -332,6 +374,15 @@ export class CliSession {
             const decisions = list(p.availableDecisions).filter(d => typeof d === 'string');
             const choices = decisions.length ? decisions : ['accept', 'decline'];
             this.permission(id, { kind: 'tool', name: m.method.includes('commandExecution') ? 'Bash' : 'Edit', description: p.reason, detail: p, actions: choices.map(decision => ({ id: decision, label: { accept: 'Allow once', acceptForSession: 'Allow for this session', decline: 'Deny', cancel: 'Cancel' }[decision] ?? decision, behavior: decision.startsWith('accept') ? 'allow' : 'deny' })) }, answer => reply({ decision: answer.selectedActionId ?? (answer.behavior === 'allow' ? 'accept' : 'decline') }));
+        }
+        else if (m.method === 'mcpServer/elicitation/request') {
+            // MCP tool approvals are forms without required fields; links and data entry cannot be answered here.
+            const required = p.requestedSchema?.required;
+            if (p.mode === 'url' || (Array.isArray(required) && required.length)) {
+                reply({ action: 'decline', content: null, _meta: null });
+                return;
+            }
+            this.permission(id, { kind: 'tool', name: `MCP · ${String(p.serverName ?? 'server')}`, title: `MCP approval: ${String(p.serverName ?? 'server')}`, description: typeof p.message === 'string' ? p.message : undefined, detail: p }, answer => reply({ action: answer.behavior === 'allow' ? 'accept' : 'decline', content: answer.behavior === 'allow' ? {} : null, _meta: null }));
         }
         else
             this.peer.send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: `Client method not supported: ${m.method}` } });
