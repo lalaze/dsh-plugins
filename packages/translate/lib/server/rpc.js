@@ -1,4 +1,5 @@
 export const MAX_SOURCE_LENGTH = 5000;
+export const MAX_CONTEXT_LENGTH = 1000;
 export const targetLanguages = ['auto', 'zh-CN', 'en', 'ja', 'ko', 'fr', 'de', 'es', 'ru'];
 export function parseTranslationRequest(value) {
     if (!value || typeof value !== 'object')
@@ -9,5 +10,6 @@ export function parseTranslationRequest(value) {
     const target = record.target === undefined ? 'auto' : record.target;
     if (typeof target !== 'string' || !targetLanguages.includes(target))
         throw new Error('Unsupported target language');
-    return { text: record.text.trim(), target: target, settings: record.settings };
+    const context = typeof record.context === 'string' ? record.context.trim().slice(0, MAX_CONTEXT_LENGTH) : '';
+    return { text: record.text.trim(), target: target, ...(context ? { context } : {}), settings: record.settings };
 }

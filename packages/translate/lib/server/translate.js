@@ -5,7 +5,11 @@ const targetLabels = { 'zh-CN': 'Simplified Chinese', en: 'English', ja: 'Japane
 const cjkCharacter = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 export function resolveTarget(text, requested) { if (requested !== 'auto')
     return requested; const cjk = [...text].filter(c => cjkCharacter.test(c)).length; const otherWords = text.match(/[\p{L}\p{N}]+/gu)?.map(word => [...word].filter(c => !cjkCharacter.test(c)).length).filter(Boolean).length ?? 0; return cjk > 0 && cjk >= otherWords ? 'en' : 'zh-CN'; }
-export function buildTranslationPrompt(text, target) { return `Translate the following segment into ${targetLabels[target]}, without additional explanation.\n\n${text}`; }
+export function buildTranslationPrompt(text, target, context) {
+    if (context)
+        return `Translate the word or phrase below into ${targetLabels[target]} in the sense it has in the context. Reply with the translation only, without additional explanation.\n\nContext: ${context}\n\nWord or phrase: ${text}`;
+    return `Translate the following segment into ${targetLabels[target]}, without additional explanation.\n\n${text}`;
+}
 export function parseTranslationOutput(raw) {
     const trimmed = raw.trim();
     if (!trimmed)
@@ -74,7 +78,7 @@ finally {
     clearTimeout(timeout);
 } }
 function describeError(error) { return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, ' ').slice(0, 300); }
-export async function translateSelection(input, fetchImpl = globalThis.fetch, recordUsage = () => { }) { const settings = validateTranslationSettings(input.settings); const target = resolveTarget(input.text, input.target ?? 'auto'); const prompt = buildTranslationPrompt(input.text, target); const primary = { apiUrl: settings.apiUrl, apiKey: settings.apiKey, model: settings.model, kind: 'primary' }; try {
+export async function translateSelection(input, fetchImpl = globalThis.fetch, recordUsage = () => { }) { const settings = validateTranslationSettings(input.settings); const target = resolveTarget(input.text, input.target ?? 'auto'); const prompt = buildTranslationPrompt(input.text, target, input.context); const primary = { apiUrl: settings.apiUrl, apiKey: settings.apiKey, model: settings.model, kind: 'primary' }; try {
     const content = await requestTranslation(primary, prompt, fetchImpl, recordUsage);
     return { ...parseTranslationOutput(content), target, model: primary.model };
 }
