@@ -64,6 +64,7 @@ test('native sidebar claims only verified remote sessions, invalidates workspace
   assert.deepEqual(files.guide!.map(({ id, commandId, order, icon }) => ({ id, commandId, order, icon })), [{ id: 'workspace', commandId: 'workspace.files', order: 10, icon: NativeIcon }]);
   assert.equal((files.title as () => string)(), 'Files');
   assert.equal(types.get('remote-agents/workspace')!.guide?.length, 1, 'Remote workspace is offered in a remote conversation');
+  assert.equal(typeof types.get('remote-agents/workspace')!.guide![0]!.icon, 'function', 'Remote workspace has its own artwork, not the placeholder cube');
   assert.equal(shell(), launcher, 'New terminal opens the remote shell in a remote conversation');
   // A local conversation gets DSH's own Workspace files back, and no Remote workspace entry.
   await show('local');

@@ -19,6 +19,13 @@ type Entry = { cwd: string; target?: WorkspaceTarget; check: number };
 /** DSH's own Workspace files type: its kind, which ⌘P opens, and its guide entry's id. */
 const FILES_KIND = 'files', FILES_GUIDE = 'workspace';
 const REMOTE_ANCHOR = /(?:^|[/\\])remote-workspaces[/\\]/;
+/** Guide artwork in DSH's fixed-palette style beside Workspace files and New terminal: a remote machine's server stack. */
+const RemoteWorkspaceArtwork = ({ size = 36, className }: { size?: number; className?: string }) => (
+  <svg width={size} height={size} className={className} aria-hidden="true" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path fillRule="evenodd" clipRule="evenodd" d="M9.5 7.5H26.5A2.5 2.5 0 0 1 29 10V14A2.5 2.5 0 0 1 26.5 16.5H9.5A2.5 2.5 0 0 1 7 14V10A2.5 2.5 0 0 1 9.5 7.5ZM11.75 10.75A1.25 1.25 0 1 0 11.75 13.25A1.25 1.25 0 1 0 11.75 10.75ZM15.5 11H22.5V13H15.5Z" fill="#5BD1B2" />
+    <path fillRule="evenodd" clipRule="evenodd" d="M9.5 19.5H26.5A2.5 2.5 0 0 1 29 22V26A2.5 2.5 0 0 1 26.5 28.5H9.5A2.5 2.5 0 0 1 7 26V22A2.5 2.5 0 0 1 9.5 19.5ZM11.75 22.75A1.25 1.25 0 1 0 11.75 25.25A1.25 1.25 0 1 0 11.75 22.75ZM15.5 23H22.5V25H15.5Z" fill="#2FAE8E" />
+  </svg>
+);
 /**
  * Uses the native right-sidebar extension contract; local sessions keep their original viewers.
  * While the conversation in view is a verified remote workspace, this plugin takes over DSH's Workspace files
@@ -64,7 +71,7 @@ export function installWorkspaceSidebar(ctx: Client): void {
       };
       const explorerType = (guide: boolean): TabDefinition => ({
         id: explorer, kind: explorer, title: () => ui('Remote workspace'),
-        ...guide ? { guide: [{ id: 'remote-workspace', order: 55, title: () => ui('Remote workspace'), description: () => ui('Sync, tunnels and remote DSH') }] } : {},
+        ...guide ? { guide: [{ id: 'remote-workspace', order: 55, title: () => ui('Remote workspace'), description: () => ui('Sync, tunnels and remote DSH'), icon: RemoteWorkspaceArtwork }] } : {},
       });
       // Keep the native entry's title, icon, position and shortcut, so Workspace files looks the same in a remote conversation.
       const filesType = (): TabDefinition => {
