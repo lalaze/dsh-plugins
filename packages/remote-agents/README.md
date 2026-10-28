@@ -136,6 +136,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.28:** Provider groups fold again when the Codex subscription plugin (`dsh-codex-subscription`) replaces the model menu. That menu shows no provider ids, so its groups remember their folding by provider name. Refresh the client after updating.
+
 **Upgrading from 0.2.27:** In a conversation on a remote workspace, the right sidebar's **Workspace files** and ⌘P open the remote files, and **Remote workspace** is listed there only in remote conversations. Local conversations keep DSH's own Workspace files. Refresh the client after updating.
 
 **Upgrading from 0.2.26:** Adds the integrated **Remote workspace** panel (files, commands, sync, tunnels and remote DSH) and a `remote_workspace` tool for DSH models; see [Integrated workspace tools](#integrated-workspace-tools). Machines saved in dsh-remote can be imported from **Settings → Remote agents**. Restart DSH and refresh the client after updating.
