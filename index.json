@@ -27,6 +27,19 @@
       },
       "versions": [
         {
+          "version": "0.2.27",
+          "publishTimestamp": 1793168753,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "280b09fc4ed77e97cd7e286de74d963b3ede1f6f",
+            "path": "packages/remote-agents"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
+        {
           "version": "0.2.26",
           "publishTimestamp": 1793154009,
           "source": {
@@ -364,6 +377,19 @@
       },
       "versions": [
         {
+          "version": "0.1.1",
+          "publishTimestamp": 1793168753,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "280b09fc4ed77e97cd7e286de74d963b3ede1f6f",
+            "path": "packages/workspace-tags"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.3 <0.3.0"
+          }
+        },
+        {
           "version": "0.1.0",
           "publishTimestamp": 1793116065,
           "source": {
@@ -528,8 +554,8 @@
         "zh": "DSH 浏览器调试浮窗"
       },
       "description": {
-        "en": "Chrome-style Elements, Console and Network debugger docked under DSH Sidebar Browser pages",
-        "zh": "停靠在 Sidebar Browser 页面下方的 Chrome 风格元素、控制台和网络调试器"
+        "en": "Chrome-style Elements, Console and Network debugger, docked or in a separate Chrome/Edge window",
+        "zh": "Chrome 风格元素、控制台和网络调试器，支持底部停靠及 Chrome/Edge 独立窗口"
       },
       "author": "lalaze",
       "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/browser-devtools",
@@ -544,6 +570,19 @@
         ]
       },
       "versions": [
+        {
+          "version": "0.3.0",
+          "publishTimestamp": 1793168753,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "280b09fc4ed77e97cd7e286de74d963b3ede1f6f",
+            "path": "packages/browser-devtools"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
         {
           "version": "0.2.0",
           "publishTimestamp": 1793122755,
@@ -594,6 +633,19 @@
         ]
       },
       "versions": [
+        {
+          "version": "0.1.9",
+          "publishTimestamp": 1793168753,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "280b09fc4ed77e97cd7e286de74d963b3ede1f6f",
+            "path": "packages/translate"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
         {
           "version": "0.1.8",
           "publishTimestamp": 1793096087,
