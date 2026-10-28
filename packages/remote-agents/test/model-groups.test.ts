@@ -23,26 +23,34 @@ const group = (name: string, rows: readonly [label: string, checked: boolean, id
 const surface = (list: string) => `<div data-menu-material="translucent">${list}</div>`;
 const groupNamed = (name: string) => [...document.querySelectorAll<HTMLElement>('[data-menu-group]')].find(element => element.textContent?.includes(name))!;
 const hidden = (element: HTMLElement) => [...element.querySelectorAll('button')].map(row => row.hasAttribute('data-ra-model-hidden'));
+/** Scroll events the window sees in capture, as the Codex menu's placement listener does. */
+const scrolls = () => { const seen: EventTarget[] = []; window.addEventListener('scroll', event => seen.push(event.target!), true); return seen; };
 
 test('folds the Codex subscription menu, whose rows carry no provider ids', () => {
   document.body.innerHTML = surface(`<div class="codexModelSelectGroups scrollable" role="menu">${
     group('OpenAI Codex', [['GPT-5', true], ['GPT-5 mini', false]])}${group('DeepSeek', [['DeepSeek chat', false]])}</div>`);
+  const placements = scrolls();
   dispose = installModelGroups();
   const codex = groupNamed('OpenAI Codex'), deepseek = groupNamed('DeepSeek');
   assert.equal(codex.dataset.raModelProvider, 'name:OpenAI Codex');
   assert.equal(deepseek.dataset.raModelProvider, 'name:DeepSeek');
   assert.deepEqual(hidden(codex), [false, false], 'the group holding the selection opens');
   assert.deepEqual(hidden(deepseek), [true], 'other groups start folded');
+  assert.deepEqual(placements, [document.querySelector('.codexModelSelectGroups')], 'folding asks the menu to place itself again');
   const heading = deepseek.querySelector<HTMLElement>('[data-menu-group-heading]')!;
   assert.equal(heading.getAttribute('role'), 'button');
   heading.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
   assert.deepEqual(hidden(deepseek), [false]);
+  assert.equal(placements.length, 2);
 });
 
 test('keeps keying native rows by provider id', () => {
   document.body.innerHTML = surface(`<div id="r1-models" role="menu">${group('Codex', [['Codex model', false, ['remote-cli-codex', 'm']]])}</div>`);
+  const placements = scrolls();
   dispose = installModelGroups();
   assert.equal(groupNamed('Codex').dataset.raModelProvider, 'remote-cli-codex');
+  assert.deepEqual(hidden(groupNamed('Codex')), [true]);
+  assert.deepEqual(placements, [], 'the native menu measures itself');
 });
 
 test('leaves other radio menus with group headings alone', () => {

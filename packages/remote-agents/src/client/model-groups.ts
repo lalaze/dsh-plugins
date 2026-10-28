@@ -6,7 +6,8 @@ const ROW = 'button[role="menuitemradio"]';
 const HEADING = '[data-menu-group-heading]';
 // DSH's model list, and dsh-codex-subscription's replacement for it. That plugin registers its model
 // seat without the label child slot, so its rows render bare model names with no provider id.
-const MODEL_LIST = '[role="menu"][id$="-models"], [role="menu"].codexModelSelectGroups';
+const CODEX_LIST = '[role="menu"].codexModelSelectGroups';
+const MODEL_LIST = `[role="menu"][id$="-models"], ${CODEX_LIST}`;
 let memory: Record<string, boolean> = {};
 /**
  * A group's folding key: the provider id its rows' model labels carry. Rows that carry no label ids
@@ -28,14 +29,21 @@ function readGroups(): Record<string, boolean> {
   } catch { /* Use in-memory preferences when storage is unavailable. */ }
   return memory;
 }
+// Foldable headings read as rows: the options' height and inset, a drawn chevron, and a count pill.
+// The extra [data-menu-group] outranks DSH's heading class and the Codex menu's heading background.
+const HEADING_ROW = '[data-menu-group][data-ra-model-provider]>[data-menu-group-heading]';
+const CHEVRON = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/12px no-repeat`;
 const styles = `
 [data-ra-model-hidden]{display:none!important}
-[data-ra-model-provider]>[data-menu-group-heading]{display:flex;align-items:center;gap:7px;cursor:pointer;outline-offset:-2px}
-[data-ra-model-provider]>[data-menu-group-heading]:before{content:'›';display:inline-block;font-size:16px;line-height:12px;transform:rotate(0deg)}
-[data-ra-model-provider]>[aria-expanded=true]:before{transform:rotate(90deg)}
-[data-ra-model-provider]>[data-menu-group-heading]:after{content:attr(data-ra-model-count);margin-left:auto;font-size:11px;opacity:.65;font-variant-numeric:tabular-nums}
-[data-ra-model-provider]>[data-menu-group-heading]:focus-visible{outline:2px solid var(--dsw-focus-ring-color,#517ee8)}
-[data-ra-model-provider]>[aria-disabled=true]{cursor:default}
+${HEADING_ROW}{display:flex;align-items:center;gap:8px;box-sizing:border-box;min-height:32px;padding:0 7px;border-radius:var(--dsw-radius-md,8px);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:600;line-height:18px;cursor:pointer;outline-offset:-2px}
+${HEADING_ROW}:before{content:'';flex:none;width:12px;height:12px;background:var(--dsw-alias-label-tertiary);-webkit-mask:${CHEVRON};mask:${CHEVRON};transition:transform 150ms ease}
+${HEADING_ROW}[aria-expanded=true]{color:var(--dsw-alias-label-primary)}
+${HEADING_ROW}[aria-expanded=true]:before{transform:rotate(90deg)}
+${HEADING_ROW}:after{content:attr(data-ra-model-count);flex:none;min-width:20px;height:18px;margin-left:auto;padding:0 6px;box-sizing:border-box;border-radius:9px;background:color-mix(in srgb,currentColor 12%,transparent);font-size:11px;font-weight:500;line-height:18px;text-align:center;font-variant-numeric:tabular-nums}
+@media (hover:hover){${HEADING_ROW}:not([aria-disabled=true]):hover{box-shadow:inset 0 0 0 100vmax var(--dsw-alias-interactive-bg-hover,#8882);color:var(--dsw-alias-label-primary)}}
+${HEADING_ROW}:focus-visible{outline:2px solid var(--dsw-focus-ring-color,#517ee8)}
+${HEADING_ROW}[aria-disabled=true]{cursor:default}
+${HEADING_ROW}[aria-disabled=true]:before{opacity:.4}
 [data-ra-model-provider] button[data-ra-model-option]{background:transparent}
 [data-ra-model-provider] button[data-ra-model-active]:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,#8882)}
 `;
@@ -62,6 +70,7 @@ export function installModelGroups(): () => void {
     const query = menu.element.querySelector('input')?.value.trim() ?? '';
     if (query !== menu.query) { menu.query = query; menu.active = undefined; }
     const preferences = readGroups();
+    let resized = false;
     for (const group of menu.groups.values()) {
       const selected = group.rows.some(row => row.getAttribute('aria-checked') === 'true');
       const collapsed = !query && (preferences[group.provider] ?? !selected);
@@ -71,9 +80,13 @@ export function installModelGroups(): () => void {
       setAttribute(group.heading, 'data-ra-model-count', String(group.rows.length));
       for (const row of group.rows) {
         setAttribute(row, 'data-ra-model-option', '');
+        if (row.hasAttribute('data-ra-model-hidden') !== collapsed) resized = true;
         setAttribute(row, 'data-ra-model-hidden', collapsed ? '' : null);
       }
     }
+    // The Codex menu places itself from its height when it renders, and again on scroll. Folding
+    // changes that height, so replay the scroll its list sends anyway for the menu to place itself again.
+    if (resized) menu.element.querySelector(CODEX_LIST)?.dispatchEvent(new Event('scroll'));
     const rows = visibleRows(menu);
     highlight(menu, rows.includes(menu.active!) ? menu.active : rows.find(row => row.hasAttribute('data-highlighted')) ?? rows.find(row => row.getAttribute('aria-checked') === 'true') ?? rows[0]);
   };
