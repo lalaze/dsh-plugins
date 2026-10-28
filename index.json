@@ -584,6 +584,19 @@
       },
       "versions": [
         {
+          "version": "0.6.0",
+          "publishTimestamp": 1793174177,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "22d2e88ced8bf876dbdc503c80b9258267b48963",
+            "path": "packages/browser-devtools"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        },
+        {
           "version": "0.5.0",
           "publishTimestamp": 1793172990,
           "source": {
