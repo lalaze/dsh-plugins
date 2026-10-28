@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AccountUsage, ContextUsage, HostConfig, NativeProtocol, QuotaWindow, Task, TokenUsage, TokenUsageBreakdown, TurnUsage } from './domain.js';
+import type { AccountUsage, ContextUsage, FinishedTurn, HostConfig, NativeProtocol, QuotaWindow, Task, TokenUsage, TokenUsageBreakdown, TurnUsage } from './domain.js';
 import type { JsonlPeer } from './ssh.js';
 
 const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
@@ -19,12 +19,15 @@ export interface RemoteUsageRecord {
   purpose: 'conversation' | 'delegation' | 'remote-session'; status: 'completed' | 'error'; durationMs: number; usage: TurnUsage;
   host?: string; workspace?: string;
 }
-/** Providers match the `remote-cli-<cli>` chat routes; sessions are the DSH conversation, or the agent for other turns. */
-export function remoteUsageRecord(task: Task, hosts: readonly HostConfig[], usage: TurnUsage, turn: { startedAt: string | null; failed: boolean }, now = Date.now()): RemoteUsageRecord {
+/**
+ * Providers match the `remote-cli-<cli>` chat routes; sessions are the DSH conversation, or the agent for other turns.
+ * The model is the one the CLI reported running, or the task's selection when it named none.
+ */
+export function remoteUsageRecord(task: Task, hosts: readonly HostConfig[], usage: TurnUsage, turn: FinishedTurn, now = Date.now()): RemoteUsageRecord {
   const started = turn.startedAt ? Date.parse(turn.startedAt) : NaN, host = hosts.find(h => h.id === task.hostId);
   return {
     id: randomUUID(), startedAt: new Date(Number.isFinite(started) ? started : now).toISOString(),
-    provider: `remote-cli-${task.provider}`, model: task.model, sessionId: task.chat?.sessionId ?? `remote-agent:${task.id}`,
+    provider: `remote-cli-${task.provider}`, model: turn.model ?? task.model, sessionId: task.chat?.sessionId ?? `remote-agent:${task.id}`,
     purpose: task.chat ? 'conversation' : task.origin === 'dsh' ? 'delegation' : 'remote-session', status: turn.failed ? 'error' : 'completed',
     durationMs: Number.isFinite(started) ? Math.max(0, now - started) : 0, usage,
     ...(host ? { host: host.label } : {}), workspace: task.executionCwd ?? task.cwd,

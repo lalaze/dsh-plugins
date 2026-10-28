@@ -139,4 +139,6 @@ test('usage records name the CLI, host and remote directory, and tell conversati
   assert.equal(delegated.purpose, 'delegation'); assert.equal(delegated.status, 'error'); assert.equal(delegated.sessionId, 'remote-agent:t1');
   assert.equal(delegated.workspace, '/srv/app'); assert.equal('host' in delegated, false); assert.equal(delegated.durationMs, 0);
   assert.equal(remoteUsageRecord({ ...chat, chat: undefined } as unknown as Task, hosts, usage, { startedAt: null, failed: false }).purpose, 'remote-session');
+  // Claude's `opus` alias is recorded as the model that ran.
+  assert.equal(remoteUsageRecord({ ...chat, provider: 'claude', model: 'opus' } as unknown as Task, hosts, usage, { startedAt: null, failed: false, model: 'claude-opus-5-5' }).model, 'claude-opus-5-5');
 });

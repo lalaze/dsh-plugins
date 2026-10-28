@@ -191,11 +191,17 @@ test('Codex speed tiers come from the model catalog and apply to the thread and 
 test('finished turns record their token usage in the timeline and report it once', async t => {
   for (const provider of ['claude', 'codex', 'grok']) {
     const { service, ssh, request, store } = await fixture(t, provider);
-    const reports: { taskId: string; usage: unknown; failed: boolean }[] = [];
-    store.usageListeners.add((taskId, usage, turn) => reports.push({ taskId, usage, failed: turn.failed }));
+    const reports: { taskId: string; usage: unknown; failed: boolean; model?: string }[] = [];
+    store.usageListeners.add((taskId, usage, turn) => reports.push({ taskId, usage, failed: turn.failed, model: turn.model }));
     const agent = await service.create(request); await tick();
     const live = ssh.live;
-    if (provider === 'claude') live.emit({ type: 'result', subtype: 'success', usage: { input_tokens: 7, output_tokens: 90, cache_read_input_tokens: 4000 } });
+    if (provider === 'claude') {
+      // The picker's alias resolves to a full model ID; subagents and Claude's own notices do not name the turn's model.
+      live.emit({ type: 'assistant', parent_tool_use_id: null, message: { model: 'claude-opus-5-5', content: [{ type: 'text', text: 'Looking' }] } });
+      live.emit({ type: 'assistant', parent_tool_use_id: 'task-1', message: { model: 'claude-haiku-5-5', content: [{ type: 'text', text: 'Searching' }] } });
+      live.emit({ type: 'assistant', parent_tool_use_id: null, message: { model: '<synthetic>', content: [{ type: 'text', text: 'Notice' }] } });
+      live.emit({ type: 'result', subtype: 'success', usage: { input_tokens: 7, output_tokens: 90, cache_read_input_tokens: 4000 } });
+    }
     if (provider === 'codex') {
       live.emit({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { total: { inputTokens: 1000, cachedInputTokens: 600, outputTokens: 50, totalTokens: 1050 } } } });
       live.emit({ method: 'turn/completed', params: { turn: { status: 'completed' } } });
@@ -203,7 +209,7 @@ test('finished turns record their token usage in the timeline and report it once
     if (provider === 'grok') live.reply(live.prompt!, { stopReason: 'end_turn', usage: { inputTokens: 30, outputTokens: 4, totalTokens: 34 } });
     await tick();
     const expected = provider === 'claude' ? { inputTokens: 7, outputTokens: 90, cacheReadTokens: 4000 } : provider === 'codex' ? { inputTokens: 400, outputTokens: 50, cacheReadTokens: 600, totalTokens: 1050 } : { inputTokens: 30, outputTokens: 4, totalTokens: 34 };
-    assert.deepEqual(reports, [{ taskId: agent.id, usage: expected, failed: false }], provider);
+    assert.deepEqual(reports, [{ taskId: agent.id, usage: expected, failed: false, model: provider === 'claude' ? 'claude-opus-5-5' : undefined }], provider);
     const entries = (await service.detail(agent.id)).timeline!.entries;
     const at = types(entries).indexOf('usage');
     assert.ok(at >= 0 && at < types(entries).indexOf('turn_end'), `${provider}: usage is recorded before the turn ends`);
@@ -215,6 +221,12 @@ test('finished turns record their token usage in the timeline and report it once
       ssh.live.emit({ method: 'thread/tokenUsage/updated', params: { tokenUsage: { total: { inputTokens: 3000, cachedInputTokens: 2200, outputTokens: 80, totalTokens: 3080 } } } });
       ssh.live.emit({ method: 'turn/completed', params: { turn: { status: 'completed' } } }); await tick();
       assert.deepEqual(reports[1].usage, { inputTokens: 400, outputTokens: 30, cacheReadTokens: 1600, totalTokens: 2030 });
+    }
+    if (provider === 'claude') {
+      // A turn that names no model leaves the record to the task's selection.
+      await service.send(agent.id, { id: randomUUID(), text: 'Continue' }); await tick();
+      ssh.live.emit({ type: 'result', subtype: 'success', usage: { input_tokens: 3, output_tokens: 5 } }); await tick();
+      assert.equal(reports[1].model, undefined);
     }
   }
 });

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { questionsOf, type Agent, type ContextUsage, type TurnUsage, type NativeAttachment, type NativeProtocol, type Permission, type PermissionAnswer, type Task, type TimelineEntry, type TokenUsage } from './domain.js';
+import { questionsOf, type Agent, type ContextUsage, type FinishedTurn, type TurnUsage, type NativeAttachment, type NativeProtocol, type Permission, type PermissionAnswer, type Task, type TimelineEntry, type TokenUsage } from './domain.js';
 import { JsonlPeer, type Frame, type WireMessage } from './ssh.js';
 import { RelayExit, RelayReleased, type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
@@ -20,8 +20,8 @@ export async function initializeAcp(peer: JsonlPeer): Promise<any> {
 }
 export interface SessionHooks {
   turnEnded?(): void;
-  /** Tokens a finished turn used, with when it started and whether it succeeded. */
-  usage?(usage: TurnUsage, turn: { startedAt: string | null; failed: boolean }): void;
+  /** Tokens a finished turn used, with when it started, whether it succeeded and the model that ran. */
+  usage?(usage: TurnUsage, turn: FinishedTurn): void;
   /** The CLI process ended or was terminated; a relay's remote files can be removed. */
   ended?(): void;
 }
@@ -39,6 +39,8 @@ export class CliSession {
   private activeMessage?: string;
   private confirmed = false;
   private partialText = false;
+  /** The model Claude's main thread answered with this turn: aliases such as `opus` resolve to a full model ID. */
+  private turnModel?: string;
   /** Codex running thread totals, now and when the current turn began. */
   private codexTotal: unknown;
   private codexBefore: unknown;
@@ -200,7 +202,7 @@ export class CliSession {
     this.append({ type: 'delivery', clientMessageId: this.activeMessage });
   }
   private complete(toolStatus = 'completed'): void {
-    this.saveUsage(); this.hooks.turnEnded?.();
+    this.saveUsage(); this.hooks.turnEnded?.(); this.turnModel = undefined;
     this.agent.status = 'idle'; this.agent.activeTurn = null; this.agent.pendingPermissions = []; this.permissions.clear();
     for (const [callId, detail] of this.tools) if (detail.status === 'running') this.append({ ...detail, type: 'tool_call', callId, status: toolStatus });
     if (this.activeMessage) this.append({ type: 'turn_end', clientMessageId: this.activeMessage, status: toolStatus });
@@ -211,7 +213,7 @@ export class CliSession {
   private turnUsage(usage: TurnUsage | undefined, failed = false): void {
     if (!usage || !this.activeMessage) return;
     this.append({ type: 'usage', usage });
-    this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed });
+    this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed, ...(this.turnModel ? { model: this.turnModel } : {}) });
   }
   private setTokenUsage(usage: TokenUsage | undefined): void { this.agent.tokenUsage = usage; this.saveUsage(); }
   /** Save request snapshots as they arrive, including during long tool loops and resume. */
@@ -317,6 +319,8 @@ export class CliSession {
       const used = m.parent_tool_use_id ? undefined : claudeMessageTokens(m.message?.usage);
       if (used !== undefined && this.agent.context) this.setContext({ used, max: this.agent.context.max });
       if (!m.parent_tool_use_id && m.message?.usage !== undefined) this.setTokenUsage(claudeTokenUsage(m.message.usage));
+      // Claude's own notices, such as API errors, are `<synthetic>` messages.
+      if (!m.parent_tool_use_id && typeof m.message?.model === 'string' && m.message.model && !m.message.model.startsWith('<')) this.turnModel = m.message.model;
       for (const block of list(m.message?.content)) {
         if (block.type === 'text' && !this.partialText) this.append({ type: 'assistant_message', text: String(block.text ?? '') });
         if (block.type === 'tool_use') this.tool(String(block.id), String(block.name), 'running', block.input);

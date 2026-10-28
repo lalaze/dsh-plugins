@@ -107,6 +107,8 @@ export interface PermissionAnswer {
 }
 /** Tokens one CLI turn consumed, in DSH's `TokenUsage` shape: input excludes cache reads and writes; reasoning is part of output. */
 export interface TurnUsage { inputTokens: number; outputTokens: number; cacheReadTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number; totalTokens?: number }
+/** A finished turn: when it started, whether it failed and, when the CLI named it, the model that ran rather than the picker's alias. */
+export interface FinishedTurn { startedAt: string | null; failed: boolean; model?: string }
 /** Tokens held in one native session's context window. */
 export interface ContextUsage { used: number; max: number }
 /** Input includes cache reads and writes. Missing counters mean unreported, not zero. */
