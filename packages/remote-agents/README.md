@@ -136,6 +136,10 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.30:** Model menu group headings are now as tall as the model rows, with a chevron that turns when a group opens, a count pill and a hover highlight. The Codex subscription menu places itself again after a group folds or unfolds. Refresh the client after updating.
+
+**Upgrading from 0.2.29:** Images that a remote CLI references by workspace path now show in native chat replies. Each image is copied to the DSH host under the plugin's state directory (`chat-images/`). Replies saved before the update still show alt text.
+
 **Upgrading from 0.2.28:** Provider groups fold again when the Codex subscription plugin (`dsh-codex-subscription`) replaces the model menu. That menu shows no provider ids, so its groups remember their folding by provider name. Refresh the client after updating.
 
 **Upgrading from 0.2.27:** In a conversation on a remote workspace, the right sidebar's **Workspace files** and ⌘P open the remote files, and **Remote workspace** is listed there only in remote conversations. Local conversations keep DSH's own Workspace files. Refresh the client after updating.

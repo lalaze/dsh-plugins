@@ -6,6 +6,7 @@ import { RemoteAgentsService } from './service.js';
 import { createHandler } from './http.js';
 import { delegationTools } from './tools.js';
 import { ChatProjects } from './chat-projects.js';
+import { CHAT_IMAGE_LIMIT } from './chat-images.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import { WorkspaceAccess } from './workspace-access.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
@@ -119,6 +120,10 @@ export async function apply(ctx, config = {}) {
                         throw new Error('The DSH attachment service is unavailable');
                     yield* storage.readFileStream(ref, signal);
                 },
+            },
+            image: async (id, path, signal) => {
+                const file = await files.operate(id, { op: 'stat', path }, signal);
+                return file.size <= CHAT_IMAGE_LIMIT ? files.download(id, path, file.revision, signal) : undefined;
             },
             workspace: (cwd, signal) => workspace.resolve(cwd, signal) });
         const registration = scoped.llm.registerAdapter(CHAT_PROVIDERS, adapter);

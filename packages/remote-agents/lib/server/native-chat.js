@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
+import { join } from 'node:path';
 import { createToolResultMessage, createUserMessage, LlmAdapter, LlmError, MessageId, ReasoningEffortId, ToolCallId, } from '@deepseek-ai/dsh-llm';
 import { busy, inputModalitiesOf, presetMode, remotePath } from './domain.js';
 import { restoreFiles, stageAttachments } from './attachments.js';
+import { ChatImageLinks, saveChatImage } from './chat-images.js';
 import { decidePermission } from './tools.js';
 export const CHAT_PROVIDER = 'remote-cli';
 const CLI_NAMES = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
@@ -250,6 +252,11 @@ export class RemoteCliAdapter extends LlmAdapter {
             open.text += text;
             yield type === 'text' ? { type: 'text-delta', index: open.index, text } : { type: 'reasoning-delta', index: open.index, text };
         };
+        // Remote CLIs name images by workspace path; the DSH chat can only show files on the DSH host.
+        const images = new ChatImageLinks(async (path) => {
+            const data = await this.host.image?.(sessionId, path, signal);
+            return data && saveChatImage(join(service.store.directory, 'chat-images'), path, data);
+        });
         // Record what reached this conversation, so output produced while DSH was away is shown later.
         let savedAt = 0, reached;
         const delivered = async (id, cursor, done = false, force = false) => {
@@ -263,6 +270,11 @@ export class RemoteCliAdapter extends LlmAdapter {
         };
         /** Stream one message's output until its turn ends. A recovered turn reports failures as text. */
         const follow = async function* (id, from, recovered) {
+            const interrupted = yield* timeline(id, from, recovered);
+            yield* textChunk('text', images.flush());
+            return interrupted;
+        };
+        const timeline = async function* (id, from, recovered) {
             let cursor = from, interrupted = false;
             while (true) {
                 signal.throwIfAborted();
@@ -277,8 +289,11 @@ export class RemoteCliAdapter extends LlmAdapter {
                 if (!page.found)
                     throw new LlmError('Remote message delivery was not recorded. Retry without changing the message.', 'REMOTE_DELIVERY_UNKNOWN');
                 for (const entry of page.entries) {
-                    if (entry.item.type === 'assistant_message')
-                        yield* textChunk('text', String(entry.item.text ?? ''));
+                    if (entry.item.type === 'assistant_message') {
+                        yield* textChunk('text', await images.push(String(entry.item.text ?? '')));
+                        continue;
+                    }
+                    yield* textChunk('text', images.flush());
                     if (entry.item.type === 'reasoning')
                         yield* textChunk('reasoning', String(entry.item.text ?? ''));
                     if (entry.item.type === 'tool_call') {
