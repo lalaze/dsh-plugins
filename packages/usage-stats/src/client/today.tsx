@@ -41,7 +41,8 @@ export function TodayBadge({ details }: { details?: ComponentType }) {
     return () => { alive = false; clearInterval(timer); };
   }, [headerBadge]);
   if (!headerBadge || !totals) return null;
-  const value = new Intl.NumberFormat(formatLocale(), { notation: 'compact', maximumFractionDigits: 2 }).format(totals.totalTokens);
+  // Two or three significant digits, such as 980万 or 9.8M; the tooltip has the exact count.
+  const value = new Intl.NumberFormat(formatLocale(), { notation: 'compact' }).format(totals.totalTokens);
   const missing = totals.requests - totals.withUsage;
   const title = [ui("Today: {0} tokens in {1} requests", { 0: totals.totalTokens.toLocaleString(formatLocale()), 1: totals.requests.toLocaleString(formatLocale()) }),
     missing > 0 ? ui("* {0} requests returned no usage", { 0: missing.toLocaleString(formatLocale()) }) : '', stale ? ui("Could not refresh; showing the last value") : ''].filter(Boolean).join('\n');

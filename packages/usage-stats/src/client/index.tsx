@@ -54,14 +54,14 @@ function attention(data: UsageReport): string[] {
   return [data.failedWrites > 0 ? ui("{0} records could not be saved. Statistics may be incomplete. Check DSH logs and disk permissions.", { 0: number(data.failedWrites) }) : '',
     missing > 0 ? ui("{0} requests returned no usage. Token totals only include reported data.", { 0: number(missing) }) : ''].filter(Boolean);
 }
-/** The period's total in large type, its exact value and request count, then input and output. */
+/** The period's total in large type, its request count, then input and output; the exact total is in the tooltip. */
 function Headline({ data, onPartial }: { data: UsageReport; onPartial: () => void }) {
   const t = data.totals, notes = attention(data);
   const input = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens;
   return <article className="us-hero" aria-label={ui("Recorded usage")}>
     <div className="us-hero-head"><span>{ui("Recorded usage")}</span>{notes.length > 0 && <button type="button" className="us-partial" title={notes.join('\n')} onClick={onPartial}>{ui("Partial records")}</button>}</div>
     <div className="us-hero-total"><strong className="us-number" title={number(t.totalTokens)}>{compact(t.totalTokens)}</strong><span>{ui("tokens")}</span></div>
-    <p className="us-hero-exact us-number">{ui("{0} tokens · {1} requests", { 0: number(t.totalTokens), 1: number(t.requests) })}</p>
+    <p className="us-hero-exact us-number">{ui("{0} requests", { 0: number(t.requests) })}</p>
     <div className="us-hero-split">
       <div><span>{ui("Input · incl. cache")}</span><b className="us-number" title={number(input)}>{compact(input)}</b><small>{ui("Cache reads {0} · {1} of input", { 0: compact(t.cacheReadTokens), 1: t.withUsage ? percent(t.cacheReadTokens, input) : '—' })}</small></div>
       <div><span>{ui("Output · incl. reasoning")}</span><b className="us-number" title={number(t.outputTokens)}>{compact(t.outputTokens)}</b>{t.reasoningTokens > 0 && <small>{ui("Reasoning {0}", { 0: compact(t.reasoningTokens) })}</small>}</div>

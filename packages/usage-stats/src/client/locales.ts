@@ -4,7 +4,6 @@ export const zh = {
   "Recorded usage": "已记录消耗",
   "Partial records": "部分记录",
   "tokens": "Token",
-  "{0} tokens · {1} requests": "{0} Token · {1} 次调用",
   "Input · incl. cache": "输入 · 含缓存",
   "Output · incl. reasoning": "输出 · 含推理",
   "Cache reads {0} · {1} of input": "缓存读取 {0} · 占输入 {1}",

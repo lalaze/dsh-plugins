@@ -26,7 +26,7 @@ try {
   const file = join(temp, 'index.html'); await writeFile(file, html);
   browser(...(executable ? ['--executable-path', executable] : []), '--allow-file-access', 'open', pathToFileURL(file).href);
   const total = 'document.querySelector(".us-hero-total strong")';
-  const requests = n => `document.querySelector(".us-hero-exact")?.textContent.endsWith(" ${n} 次调用")`;
+  const requests = n => `document.querySelector(".us-hero-exact")?.textContent === "${n} 次调用"`;
   const rows = 'document.querySelectorAll(".us-breakdown li").length';
   const list = 'document.querySelector(".us-breakdown")?.textContent';
   const tab = label => `[aria-label="分组方式"] button:text-is("${label}")`;
@@ -40,7 +40,7 @@ try {
   expect('document.documentElement.scrollWidth <= innerWidth');
   evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".us-title h2").textContent === "使用量统计"');
   browser('set', 'viewport', '1120', '900');
-  expect(`${requests(3)} && ${total}.textContent === "83" && document.querySelector(".us-hero-exact").textContent === "83 Token · 3 次调用"`);
+  expect(`${requests(3)} && ${total}.textContent === "83" && ${total}.title === "83"`);
   expect('document.querySelectorAll(".us-bar-hit").length === 2 && document.querySelector(".us-range").textContent.startsWith("全部记录 · ")');
   expect(`${list}.includes("Claude Code") && document.querySelector(".us-row-name").textContent === "deepseek"`);
   // The failed remote turn returned no usage: the headline is marked partial and links to what needs attention.
