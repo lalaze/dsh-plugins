@@ -47,7 +47,7 @@ export function TodayBadge({ details }: { details?: ComponentType }) {
     missing > 0 ? ui("* {0} requests returned no usage", { 0: missing.toLocaleString(formatLocale()) }) : '', stale ? ui("Could not refresh; showing the last value") : ''].filter(Boolean).join('\n');
   return <><style>{CSS}</style><button type="button" className="us-today" title={title} aria-label={title} data-stale={stale || undefined}
     {...(details ? { 'aria-haspopup': 'dialog' as const, 'aria-expanded': open, onClick: () => setOpen(true) } : {})}>
-    <i aria-hidden="true" />{ui("Today's usage")} {value}{missing > 0 && <sup aria-hidden="true">*</sup>}
+    <i aria-hidden="true" />{value}{missing > 0 && <sup aria-hidden="true">*</sup>}
   </button>
     {open && details && <UsageDialog Details={details} onClose={() => setOpen(false)} />}
   </>;

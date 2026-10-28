@@ -125,8 +125,9 @@ function Sources({ data, open, onToggle, anchor }: { data: UsageReport; open: bo
 export function Dashboard() {
   useLocale();
   const [groupBy, setGroupBy] = useState<Dimension>('provider');
-  const [from, setFrom] = useState(''); const [to, setTo] = useState('');
-  const [period, setPeriod] = useState<Period>('all');
+  // Opens on today, the total the header pill shows.
+  const [from, setFrom] = useState(() => dateRange('today').from); const [to, setTo] = useState(() => dateRange('today').to);
+  const [period, setPeriod] = useState<Period>('today');
   const [provider, setProvider] = useState(''); const [model, setModel] = useState(''); const [sessionId, setSessionId] = useState('');
   const [data, setData] = useState<UsageReport>(); const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0); const [loading, setLoading] = useState(true);
@@ -176,7 +177,7 @@ export function Dashboard() {
     setPeriod(value);
     if (value !== 'custom') { const range = dateRange(value); setFrom(range.from); setTo(range.to); }
   };
-  const reset = () => { setProvider(''); setModel(''); setSessionId(''); choosePeriod('all'); };
+  const reset = () => { setProvider(''); setModel(''); setSessionId(''); choosePeriod('today'); };
   const showAttention = () => { setSourcesOpen(true); requestAnimationFrame(() => sources.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); };
   const filterCount = [provider, model, sessionId].filter(Boolean).length;
   const select = (label: string, value: string, set: (value: string) => void, options: string[]) => <label className="us-field">{label}<select aria-label={label} value={value} onChange={e => set(e.target.value)}><option value="">{ui("All {0}", { 0: label })}</option>{options.map(v => <option key={v} value={v}>{v}</option>)}</select></label>;

@@ -30,6 +30,10 @@ try {
   const rows = 'document.querySelectorAll(".us-breakdown li").length';
   const list = 'document.querySelector(".us-breakdown")?.textContent';
   const tab = label => `[aria-label="分组方式"] button:text-is("${label}")`;
+  // The dashboard opens on today, the header pill's total, without first reading all records.
+  wait('document.querySelector("[aria-label=时间范围] button[aria-pressed=true]")?.textContent === "今天" && window.fixture.requests.length > 0');
+  expect('window.fixture.requests.every(url => { const p = new URL(url).searchParams; return p.get("from") && p.get("from") === p.get("to"); })');
+  browser('click', '[aria-label="时间范围"] button:text-is("全部")');
   wait(`${rows} === 2`); // By provider: deepseek and Claude Code.
   evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".us-title h2").textContent === "Usage statistics"');
   browser('set', 'viewport', '390', '844');
@@ -144,7 +148,7 @@ try {
   if (process.env.DSH_TEST_SCREENSHOT) browser('screenshot', '--full', process.env.DSH_TEST_SCREENSHOT);
   const errors = browser('errors');
   if (errors.errors?.length) throw new Error(JSON.stringify(errors));
-  console.log('PASS: headline totals and partial-records link, category tabs driving the breakdown/CSV without refetching, expandable rows and show-all, trend/category independence, date presets and local-midnight rollover, session/date filters, CSV contents, empty state, error recovery, light/dark and mobile width');
+  console.log('PASS: opening on today, headline totals and partial-records link, category tabs driving the breakdown/CSV without refetching, expandable rows and show-all, trend/category independence, date presets and local-midnight rollover, session/date filters, CSV contents, empty state, error recovery, light/dark and mobile width');
 } finally {
   try { browser('close'); } catch {}
   await rm(temp, { recursive: true, force: true });
