@@ -64,7 +64,7 @@ export function installWorkspaceSidebar(ctx: Client): void {
       };
       const explorerType = (guide: boolean): TabDefinition => ({
         id: explorer, kind: explorer, title: () => ui('Remote workspace'),
-        ...guide ? { guide: [{ id: 'remote-workspace', order: 55, title: () => ui('Remote workspace'), description: () => ui('Commands, sync, tunnels and remote DSH') }] } : {},
+        ...guide ? { guide: [{ id: 'remote-workspace', order: 55, title: () => ui('Remote workspace'), description: () => ui('Sync, tunnels and remote DSH') }] } : {},
       });
       // Keep the native entry's title, icon, position and shortcut, so Workspace files looks the same in a remote conversation.
       const filesType = (): TabDefinition => {
@@ -98,12 +98,13 @@ export function installWorkspaceSidebar(ctx: Client): void {
         scoped.slots.inject('sidebar.right.pane.tab', () => {
           type Props = { sessionId: string; useTabInfo(): { tab: { navigation: { address: string } } } };
           const useCwd = (id: string) => React.useSyncExternalStore(listener => sessions.list.subscribe(listener), () => sessions.list.getSnapshot()?.byId?.[id]?.cwd);
-          const Explorer: React.FC<Props> = ({ sessionId }) => { const cwd = useCwd(sessionId); return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} /></>; };
+          // Workspace files already shows the remote files, so Remote workspace keeps the other tools unless that view is unavailable.
+          const Explorer: React.FC<Props> = ({ sessionId }) => { const cwd = useCwd(sessionId); return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} tools={live.files ? ['sync', 'tunnels', 'web'] : undefined} /></>; };
           const Files: React.FC<Props> = ({ sessionId }) => { const cwd = useCwd(sessionId); return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} tools={['files']} /></>; };
           const File: React.FC<Props> = props => {
             const parsed = workspaceFileAddress(props.useTabInfo().tab.navigation.address);
             const id = parsed?.sessionId ?? props.sessionId, cwd = useCwd(id);
-            return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([parsed, cwd])} sessionId={id} initialPath={parsed?.path} /></>;
+            return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([parsed, cwd])} sessionId={id} initialPath={parsed?.path} tools={['files']} /></>;
           };
           const disposers = [[explorer, Explorer], [files, Files], [file, File]].map(([key, component]) =>
             scoped.slots.register({ name: 'sidebar.right.pane.tab', key: key as string }, component as React.FC<Props>));
