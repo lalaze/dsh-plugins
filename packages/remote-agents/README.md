@@ -38,7 +38,7 @@ Use DSH's **Add workspace** to work on a directory of a saved machine. With mach
 
 ### Integrated workspace tools
 
-Open **Settings → Remote agents → Remote workspace**, or **Remote workspace** in the native right sidebar. The panel follows the current conversation's verified machine and directory. No separate `dsh-remote` installation or second machine registry is required.
+In a conversation on a remote workspace, the right sidebar's **Workspace files** (and its shortcut, ⌘P on macOS) opens the remote files instead of the empty local anchor, and **Remote workspace** there opens all the tools below. In local conversations, Workspace files is DSH's own and Remote workspace is not listed. The tools are also in **Settings → Remote agents → Remote workspace**. They follow the current conversation's verified machine and directory. No separate `dsh-remote` installation or second machine registry is required.
 
 - **Files:** browse directories, create files/folders, search text, edit UTF-8 files, rename/delete files, and upload/download binary files. Saving checks the file's SHA-256 revision and refuses stale edits; **Reload file** fetches the latest version. The editor limit is 256 KiB and the transfer limit is 50 MiB per file. File operations stay inside the verified remote workspace and reject symlinks that escape it. Native session file links open the remote editor after the active workspace has been verified.
 - **Commands and terminal:** run a command in the workspace with separate stdout/stderr, exit status, a 30-second timeout and bounded output. For interactive programs or longer jobs, choose **Remote workspace** in the native terminal's shell menu. Commands and terminals use the remote account's normal privileges. A missing or invalid binding fails explicitly.
@@ -135,6 +135,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.27:** In a conversation on a remote workspace, the right sidebar's **Workspace files** and ⌘P open the remote files, and **Remote workspace** is listed there only in remote conversations. Local conversations keep DSH's own Workspace files. Refresh the client after updating.
 
 **Upgrading from 0.2.26:** Adds the integrated **Remote workspace** panel (files, commands, sync, tunnels and remote DSH) and a `remote_workspace` tool for DSH models; see [Integrated workspace tools](#integrated-workspace-tools). Machines saved in dsh-remote can be imported from **Settings → Remote agents**. Restart DSH and refresh the client after updating.
 
