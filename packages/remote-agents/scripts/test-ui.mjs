@@ -444,6 +444,30 @@ try {
   browser('press', 'Escape'); browser('press', 'Escape');
   const pickerErrors = browser('errors'); if (pickerErrors.errors?.length) throw new Error(JSON.stringify(pickerErrors.errors));
   console.log('PASS: official DSH rc.3 model menu, real slot registration, persisted provider folding, visible keyboard selection, search, native reasoning/errors, live catalogs, mobile and plugin disposal');
+
+  // Some DSH builds render model rows without label ids; folding then keys each group by its heading.
+  const byName = name => `[data-ra-model-provider="name:${name}"]`;
+  const openNoIds = () => {
+    browser('open', `${base}?no-model-ids`);
+    wait('document.querySelector("[data-native-picker] button")'); browser('click', trigger); browser('click', rootModel);
+    wait('document.querySelectorAll("[data-ra-model-provider]").length === 4');
+  };
+  openNoIds();
+  expect('!document.querySelector("[data-menu-material] [data-provider-id]")');
+  expect('[...document.querySelectorAll("[data-ra-model-provider]")].every(g => g.dataset.raModelProvider === "name:" + g.querySelector(":scope > [data-menu-group-heading]").textContent)');
+  expect(`document.querySelector('${byName('Codex')} > [data-menu-group-heading]').getAttribute("aria-expanded") === "true"`);
+  expect(`document.querySelector('${byName('CodeBuddy Code')} > [data-menu-group-heading]').getAttribute("aria-expanded") === "false"`);
+  expect(`document.querySelectorAll('${byName('CodeBuddy Code')} ${visible}').length === 0`);
+  browser('click', `${byName('CodeBuddy Code')} > [data-menu-group-heading]`);
+  expect(`document.querySelectorAll('${byName('CodeBuddy Code')} ${visible}').length === 24`);
+  browser('press', 'Escape'); browser('press', 'Escape');
+  openNoIds();
+  expect(`document.querySelector('${byName('CodeBuddy Code')} > [data-menu-group-heading]').getAttribute("aria-expanded") === "true"`);
+  browser('click', `${byName('CodeBuddy Code')} > [data-menu-group-heading]`);
+  expect(`document.querySelectorAll('${byName('CodeBuddy Code')} ${visible}').length === 0`);
+  browser('press', 'Escape'); browser('press', 'Escape');
+  const noIdErrors = browser('errors'); if (noIdErrors.errors?.length) throw new Error(JSON.stringify(noIdErrors.errors));
+  console.log('PASS: model rows without label ids fold by provider name and keep the choice across reloads');
   }
 
   // The desktop's custom composer does not render conversation.input.model.label.

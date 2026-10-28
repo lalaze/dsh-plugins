@@ -4,7 +4,20 @@ const STORAGE_KEY = 'dsh-remote-agents:model-groups:v1';
 const CHANGE_EVENT = 'dsh-remote-model-groups';
 const ROW = 'button[role="menuitemradio"]';
 const HEADING = '[data-menu-group-heading]';
+const MODEL_LIST = '[role="menu"][id$="-models"]';
 let memory: Record<string, boolean> = {};
+/**
+ * A group's folding key: the provider id its rows' model labels carry. DSH builds whose rows carry no
+ * label ids (0.2.0, some desktop builds) key the group by its heading, but only inside the model list.
+ */
+function providerKey(element: HTMLElement, heading: HTMLElement, rows: readonly HTMLButtonElement[]): string | undefined {
+  const ids = new Set(rows.map(row => row.querySelector<HTMLElement>('[data-provider-id][data-model-id]')?.dataset.providerId));
+  if (ids.size !== 1) return undefined;
+  const [id] = ids;
+  if (id) return id;
+  const name = heading.textContent?.trim();
+  return name && element.parentElement?.matches(MODEL_LIST) ? `name:${name}` : undefined;
+}
 function readGroups(): Record<string, boolean> {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '{}');
@@ -118,10 +131,9 @@ export function installModelGroups(): () => void {
     const found = new Set<HTMLElement>();
     for (const element of Array.from(document.querySelectorAll<HTMLElement>('[data-menu-material] [data-menu-group]'))) {
       const heading = element.querySelector<HTMLElement>(`:scope > ${HEADING}`), rows = Array.from(element.querySelectorAll<HTMLButtonElement>(`:scope > ${ROW}`));
-      const labels = rows.map(row => row.querySelector<HTMLElement>('[data-provider-id][data-model-id]'));
-      const provider = labels[0]?.dataset.providerId;
+      const provider = heading && providerKey(element, heading, rows);
       // Leave unrelated menus and unknown future markup untouched.
-      if (!heading || !provider || !labels.every(label => label?.dataset.providerId === provider)) continue;
+      if (!heading || !provider) continue;
       const surface = element.closest<HTMLElement>('[data-menu-material]'); if (!surface) continue;
       const menu = menus.get(surface) ?? attachMenu(surface); found.add(element);
       let group = menu.groups.get(element);

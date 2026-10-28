@@ -55,6 +55,10 @@ const cleanups: (() => void)[] = [];
 // DSH's own native picker occupies both holes at the default priority; this plugin must shadow it.
 const NativeFlow: React.FC = () => <span data-native-flow />;
 for (const name of ['conversation.hero.workspace.directoryFlow', 'sidebar.workspaces.directoryFlow']) (native.core.register as (spec: Record<string, unknown>, component: unknown) => unknown)({ name }, NativeFlow);
+// Some DSH builds render menu rows without model-label ids; strip them before the plugin's own observer runs.
+if (new URLSearchParams(location.search).has('no-model-ids')) new MutationObserver(() => {
+  for (const label of Array.from(document.querySelectorAll('[data-menu-material] [data-provider-id]'))) { label.removeAttribute('data-provider-id'); label.removeAttribute('data-model-id'); }
+}).observe(document.body, { childList: true, subtree: true });
 apply(context);
 const flowEntry = native.core.entriesOfSlot('sidebar.workspaces.directoryFlow' as Parameters<typeof native.core.entriesOfSlot>[0])[0];
 flow.owner = flowEntry?.component === NativeFlow ? 'native' : 'remote-agents';
