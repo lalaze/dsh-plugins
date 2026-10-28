@@ -118,6 +118,22 @@ test('streaming, retry and follow-ups reuse the bound CLI without repeating a pr
   assert.equal(store.snapshot().tasks[0].chat?.sessionId, first.sessionId);
 });
 
+test('remote workspace images in replies are copied to the DSH host so the chat can show them', async t => {
+  const requested: string[] = [];
+  const { adapter, options, remote, store } = await setup(t, { image: async (_id, path) => { requested.push(path); return Buffer.from('image bytes'); } });
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'assistant_message', text: 'See ![Before](shots/' });
+    remote.append(agent.id, { type: 'assistant_message', text: 'before.png) and ![Site](https://example.com/a.png)' });
+    remote.append(agent.id, { type: 'reasoning', text: 'Done' });
+    remote.append(agent.id, { type: 'assistant_message', text: ' ![unfinished' });
+  };
+  const reply = text(await collect(adapter.stream(options())));
+  const local = /!\[Before\]\(<([^>]+)>\)/.exec(reply)?.[1];
+  assert.ok(local?.startsWith(`${store.directory.replace(/\\/g, '/')}/chat-images/`), reply);
+  assert.equal(reply, `See ![Before](<${local}>) and ![Site](https://example.com/a.png) ![unfinished`);
+  assert.deepEqual(requested, ['shots/before.png']);
+});
+
 test('turn token usage is not reported to DSH, whose usage chunks describe the conversation context', async t => {
   const { adapter, options, remote } = await setup(t);
   remote.onCreate = agent => {

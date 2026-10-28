@@ -8,6 +8,7 @@ import { RemoteAgentsService } from './service.js';
 import { createHandler } from './http.js';
 import { delegationTools, type ToolDefinition, type ToolHost } from './tools.js';
 import { ChatProjects } from './chat-projects.js';
+import { CHAT_IMAGE_LIMIT } from './chat-images.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import type { Session } from '@deepseek-ai/dsh-session';
 import type { DshPermission } from './domain.js';
@@ -115,6 +116,10 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
           if (!storage) throw new Error('The DSH attachment service is unavailable');
           yield* storage.readFileStream(ref, signal);
         },
+      },
+      image: async (id, path, signal) => {
+        const file = await files.operate(id, { op: 'stat', path }, signal) as { revision: string; size: number };
+        return file.size <= CHAT_IMAGE_LIMIT ? files.download(id, path, file.revision, signal) : undefined;
       },
       workspace: (cwd, signal) => workspace.resolve(cwd, signal) });
     const registration = scoped.llm.registerAdapter(CHAT_PROVIDERS, adapter);
