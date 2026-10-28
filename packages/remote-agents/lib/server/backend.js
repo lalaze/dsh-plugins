@@ -170,7 +170,7 @@ done`}`, 15_000, { login: false });
                         if (!cursor)
                             break;
                     }
-                    modes = permissionModes('codex', [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]);
+                    modes = permissionModes('codex', [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'auto-review', label: 'Workspace write · auto review' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]);
                     defaultModeId = 'inherit';
                 }
                 else if (definition.protocol === 'claude') {
