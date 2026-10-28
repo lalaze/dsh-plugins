@@ -32,6 +32,8 @@ export interface WorkspaceRuntime {
 }
 /** DSH's home directory, which holds dsh-remote's workspace folders under `remote-workspaces`. */
 export declare const dshHome: () => string;
+/** dsh-oh-my-claude's state directory, which holds its workspace bindings and placeholder folders. */
+export declare const omcStateDir: () => string;
 export declare const under: (root: string, path: string) => boolean;
 export declare const sameEndpoint: (a: Endpoint, b: Endpoint) => boolean;
 /** Resolve SSH aliases locally; do not start a CLI or connect merely to list models. */

@@ -7,6 +7,8 @@ import { remotePath } from './domain.js';
 import { connectionInput } from './ssh.js';
 /** DSH's home directory, which holds dsh-remote's workspace folders under `remote-workspaces`. */
 export const dshHome = () => process.env.DSH_HOME?.trim() || join(homedir(), '.dsh');
+/** dsh-oh-my-claude's state directory, which holds its workspace bindings and placeholder folders. */
+export const omcStateDir = () => process.env.DSH_OMC_STATE_DIR || join(homedir(), '.local', 'state', 'dsh-oh-my-claude');
 export const under = (root, path) => { const r = relative(root, path); return r === '' || r !== '..' && !r.startsWith(`..${sep}`) && !isAbsolute(r); };
 const normalizeHost = (host) => host.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
 export const sameEndpoint = (a, b) => normalizeHost(a.host) === normalizeHost(b.host) && a.username === b.username && a.port === b.port;
@@ -45,7 +47,7 @@ export class WorkspaceAccess {
         this.hosts = hosts;
         this.options = options;
         this.home = options.home ?? dshHome();
-        this.omc = options.omc ?? (process.env.DSH_OMC_STATE_DIR || join(homedir(), '.local', 'state', 'dsh-oh-my-claude'));
+        this.omc = options.omc ?? omcStateDir();
     }
     async binding(cwd) {
         const local = resolve(cwd), root = resolve(this.home, 'remote-workspaces');

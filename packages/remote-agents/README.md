@@ -33,7 +33,7 @@ Model catalogs are saved per machine on the DSH server and shared between client
 Use DSH's **Add workspace** to work on a directory of a saved machine. With machines saved, it opens a dialog with two tabs: **This computer** uses the system folder picker as before, and **Remote machine** browses the selected machine's directories over SSH. Choose a folder and **Use this folder** to add it; the remote models of that machine are then available in its conversations. Without saved machines, **Add workspace** opens the system folder picker directly.
 
 - The dialog remembers the last tab and each machine's last folder. Paths may start with `~/`. Hidden folders are listed after **Show hidden folders**.
-- Files stay on the remote machine. DSH records the workspace as a local anchor under `$DSH_HOME/remote-workspaces/`, in the same format as the dsh-remote plugin. Use the **Remote workspace** panel for live files and select **Remote workspace** in the native terminal's shell menu for an interactive SSH terminal. The default local Files view and local shells still refer to the anchor.
+- Files stay on the remote machine. DSH records the workspace as a local anchor under `$DSH_HOME/remote-workspaces/`, in the same format as the dsh-remote plugin. Use the **Remote workspace** panel for live files and select **Remote workspace** in the native terminal's shell menu for an interactive SSH terminal. DSH remembers that choice for **New terminal** in every conversation; outside a remote workspace it opens your local shell instead, though the tab is still titled **Remote workspace**. The default local Files view and local shells still refer to the anchor.
 - If dsh-remote is also installed, its **Add workspace** dialog takes precedence.
 
 ### Integrated workspace tools
@@ -135,6 +135,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.36:** **New terminal** remembers the shell you last chose in every conversation, so after you choose **Remote workspace** once, local conversations used to fail with `Select a verified remote workspace before using this shell.` Outside a remote workspace that shell now opens your local shell instead and says so on its first line; the tab is still titled **Remote workspace**. Restart DSH after updating.
 
 **Upgrading from 0.2.35:** Remote workspace files, search, sync and commands no longer need Node.js on the SSH host. They run with its shell and standard tools, plus `sha256sum`, `shasum` or `openssl`, so a host without Node.js, such as a Docker host with a standalone Codex, no longer fails with `node: not found`. The `remote_workspace` tool for DSH models now follows the conversation's DSH permission: **Full access** and **Auto review** run changes and commands without asking (before, Full access rejected every one), and **Workspace Write** asks only before commands. A command that times out now stops everything it started. Remote CLIs and remote DSH still need Node.js 18+. Restart DSH and refresh the client after updating.
 
