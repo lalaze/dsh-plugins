@@ -19,6 +19,8 @@ export interface WorkspaceRuntime {
 }
 /** DSH's home directory, which holds dsh-remote's workspace folders under `remote-workspaces`. */
 export const dshHome = () => process.env.DSH_HOME?.trim() || join(homedir(), '.dsh');
+/** dsh-oh-my-claude's state directory, which holds its workspace bindings and placeholder folders. */
+export const omcStateDir = () => process.env.DSH_OMC_STATE_DIR || join(homedir(), '.local', 'state', 'dsh-oh-my-claude');
 export const under = (root: string, path: string) => { const r = relative(root, path); return r === '' || r !== '..' && !r.startsWith(`..${sep}`) && !isAbsolute(r); };
 const normalizeHost = (host: string) => host.replace(/^\[|\]$/g, '').replace(/\.$/, '').toLowerCase();
 export const sameEndpoint = (a: Endpoint, b: Endpoint) => normalizeHost(a.host) === normalizeHost(b.host) && a.username === b.username && a.port === b.port;
@@ -49,7 +51,7 @@ export class WorkspaceAccess {
     home?: string; omc?: string; endpoint?: typeof sshEndpoint; runtime?: () => WorkspaceRuntime | undefined;
   } = {}) {
     this.home = options.home ?? dshHome();
-    this.omc = options.omc ?? (process.env.DSH_OMC_STATE_DIR || join(homedir(), '.local', 'state', 'dsh-oh-my-claude'));
+    this.omc = options.omc ?? omcStateDir();
   }
   private async binding(cwd: string): Promise<Binding | undefined> {
     const local = resolve(cwd), root = resolve(this.home, 'remote-workspaces');

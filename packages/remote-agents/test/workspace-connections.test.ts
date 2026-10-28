@@ -54,7 +54,7 @@ test('tunnel startup, stop, saved definitions and host removal are independent o
   assert.ok(reverse.includes('-R')); assert.ok(reverse.includes('127.0.0.1:38081:127.0.0.1:3000')); assert.equal(reverse.at(-1), 'jump-alias');
 });
 
-test('native terminal launcher resolves the workspace and refuses an invalid binding without running SSH', async t => {
+test('native terminal launcher resolves the workspace, refuses an invalid binding and opens the local shell elsewhere', async t => {
   if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }
   const f = await fixture(t), modules = join(f.directory, 'modules'), bin = join(f.directory, 'bin'), capture = join(f.directory, 'ssh-args.json');
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
@@ -73,5 +73,13 @@ test('native terminal launcher resolves the workspace and refuses an invalid bin
   assert.ok(args.includes('-tt')); assert.ok(args.includes('builder@build-box')); assert.equal(args.at(-1), 'cd \'/srv/app\' && exec "${SHELL:-/bin/sh}" -l');
   await writeFile(join(anchor, '.dsh-remote-meta.json'), '{}');
   await assert.rejects(promisify(execFile)(launcher, [], { cwd: anchor, env }), /valid remote workspace binding/);
+  const omc = join(f.directory, 'omc'), placeholder = join(omc, 'remote-workspaces', 'removed'); await mkdir(placeholder, { recursive: true });
+  await assert.rejects(promisify(execFile)(launcher, [], { cwd: placeholder, env: { ...env, DSH_OMC_STATE_DIR: omc } }), /verified remote workspace/);
+  // The DSH-wide remembered shell also opens local conversations, which get the local shell instead of SSH.
+  const local = join(f.directory, 'project'), shell = join(bin, 'local-shell'); await mkdir(local);
+  await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
+  const { stderr } = await promisify(execFile)(launcher, [], { cwd: local, env: { ...env, SHELL: shell, DSH_OMC_STATE_DIR: omc } });
+  assert.match(stderr, /Not a remote workspace/);
+  assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
   cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);
 });
