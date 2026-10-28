@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-auth-cookie-cleanup
+      name: dsh-auth-cookie-cleanup
+      config: {}
