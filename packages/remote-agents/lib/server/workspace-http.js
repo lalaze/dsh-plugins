@@ -15,8 +15,10 @@ export async function workspaceAction(features, action, input, signal) {
     if (action === 'importLegacyMachine')
         return features.migration.import(field(input.id, 'saved machine ID', 200));
     const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
-    if (action === 'workspaceTarget')
-        return features.files.target(sessionId, signal, expected);
+    if (action === 'workspaceTarget') {
+        const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
+        return shell ? { ...target, terminalShell: shell } : target;
+    }
     if (action === 'workspaceFiles')
         return features.files.operate(sessionId, input.operation, signal, expected);
     if (action === 'workspaceSync') {

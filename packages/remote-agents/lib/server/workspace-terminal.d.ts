@@ -6,4 +6,7 @@ export declare function installWorkspaceTerminal(controller: {
     config?: {
         shellCandidates?: string[];
     };
-}, directory: string, stateFile: string, modules?: URL): Promise<() => void>;
+}, directory: string, stateFile: string, modules?: URL): Promise<{
+    shell?: string;
+    dispose(): void;
+}>;

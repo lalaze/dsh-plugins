@@ -33,7 +33,7 @@
 使用 DSH 的**添加工作区**即可在已保存机器的目录中工作。保存了机器后，它会打开一个包含两个标签页的对话框：**本机**与以前一样使用系统文件夹选择器，**远程机器**通过 SSH 浏览所选机器的目录。选好文件夹后点击**使用此文件夹**即可添加，之后该工作区的对话可以使用这台机器的远程模型。没有保存任何机器时，**添加工作区**会直接打开系统文件夹选择器。
 
 - 对话框会记住上次使用的标签页，以及每台机器上次打开的文件夹。路径可以用 `~/` 开头。勾选**显示隐藏文件夹**后会列出隐藏文件夹。
-- 文件保留在远程机器上。DSH 在 `$DSH_HOME/remote-workspaces/` 下用本地占位目录记录工作区，格式与 dsh-remote 插件相同。使用「远程工作区」面板访问实时文件，并在原生终端的 Shell 菜单选择 **Remote workspace** 打开交互式 SSH 终端。DSH 会在所有对话中记住这个选择，直接点「新建终端」即可打开；不在远程工作区时改为打开本地 Shell，但标签标题仍显示 **Remote workspace**。默认本地文件视图和本地 Shell 仍指向占位目录。
+- 文件保留在远程机器上。DSH 在 `$DSH_HOME/remote-workspaces/` 下用本地占位目录记录工作区，格式与 dsh-remote 插件相同。使用「远程工作区」面板访问实时文件，并在原生终端的 Shell 菜单选择 **Remote workspace** 打开交互式 SSH 终端。在远程对话中直接点「新建终端」就会打开它：插件在远程对话显示时把它设为 DSH 记住的 Shell，离开后换回你原来用的 Shell。在本地对话中选择它会打开本地 Shell，但标签标题仍显示 **Remote workspace**。默认本地文件视图和本地 Shell 仍指向占位目录。
 - 如果同时安装了 dsh-remote，将优先使用它的**添加工作区**对话框。
 
 ### 集成的工作区工具
@@ -135,6 +135,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.37 升级：** 在远程对话中，「新建终端」及其快捷键现在直接打开远程工作区的 SSH 终端，不再打开本地 Shell，也无需在 Shell 菜单中选择 **Remote workspace**。回到本地对话后，仍打开你原来使用的 Shell。更新后重启 DSH 并刷新客户端。
 
 **从 0.2.36 升级：** 「新建终端」在所有对话中沿用上次选择的 Shell，因此选过一次 **Remote workspace** 后，本地对话会报错 `Select a verified remote workspace before using this shell.`。现在不在远程工作区时，它会改为打开本地 Shell，并在第一行注明；标签标题仍显示 **Remote workspace**。更新后重启 DSH。
 

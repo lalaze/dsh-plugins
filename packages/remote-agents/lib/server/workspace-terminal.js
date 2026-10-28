@@ -8,7 +8,7 @@ import { quote } from './ssh.js';
 export async function installWorkspaceTerminal(controller, directory, stateFile, modules = new URL('./', import.meta.url)) {
     const candidates = controller.config?.shellCandidates;
     if (!Array.isArray(candidates))
-        return () => { };
+        return { dispose: () => { } };
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const script = join(directory, 'remote-workspace.mjs'), launcher = join(directory, process.platform === 'win32' ? 'Remote workspace.cmd' : 'Remote workspace');
     const source = `import { spawn } from 'node:child_process';
@@ -52,6 +52,6 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
     if (!candidates.includes(launcher))
         candidates.push(launcher);
     // Leave the launcher on disk until the next boot: an already open native terminal may still start it.
-    return () => { const index = candidates.indexOf(launcher); if (index >= 0)
-        candidates.splice(index, 1); };
+    return { shell: launcher, dispose: () => { const index = candidates.indexOf(launcher); if (index >= 0)
+            candidates.splice(index, 1); } };
 }

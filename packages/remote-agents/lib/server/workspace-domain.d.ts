@@ -1,8 +1,10 @@
 /** Shared, browser-safe workspace contracts. Paths are relative to a verified workspace. */
+/** `terminalShell` is the Remote workspace launcher path, as listed in DSH's terminal shell menu. */
 export interface WorkspaceTarget {
     hostId: string;
     label: string;
     cwd: string;
+    terminalShell?: string;
 }
 export interface WorkspaceEntry {
     name: string;
