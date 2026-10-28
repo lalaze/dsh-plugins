@@ -122,6 +122,12 @@ describe('sections', () => {
     }
     expect(workspaceActivity([sid('parent')], list, statuses({ child: { running: true } }))).toEqual({ running: true, waiting: false, completed: false })
   })
+
+  it('leaves subagent children out of the activity of the bucket holding them', () => {
+    const list = sessionState([summary('loose'), summary('child', { origin: 'subagent', running: true })])
+    const now = statuses({ child: { running: true, pendingInteraction: approval('child') } })
+    expect(workspaceActivity([sid('loose'), sid('child')], list, now)).toEqual({ running: false, waiting: false, completed: false })
+  })
 })
 
 describe('tag runtime', () => {

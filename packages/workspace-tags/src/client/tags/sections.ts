@@ -69,9 +69,11 @@ export function statusSections(groups: readonly GroupNode[], activityOf: (group:
 
 /**
  * Activity across every member Session, including folded ones, with the same
- * status sources the Session rows use. An unread completion counts only on a
- * Session that has a row to open: archived Sessions cannot be opened and
- * subagent Sessions have no row, so theirs could never be read.
+ * status sources the Session rows use. Subagent children count through their
+ * parent; the Ungrouped bucket's members include them, and would otherwise
+ * show it running alongside the parent's Workspace. An unread completion
+ * counts only on a Session that has a row to open: archived Sessions cannot
+ * be opened, so theirs could never be read.
  */
 export function workspaceActivity(
   sessionIds: readonly SessionId[],
@@ -83,10 +85,11 @@ export function workspaceActivity(
   let waiting = false
   let completed = false
   for (const id of sessionIds) {
+    if (list.byId[id]?.origin === 'subagent') continue
     const status = statuses.get(id)
     if (visiblePendingKind(status?.pendingInteraction?.kind) !== undefined) waiting = true
     else if ((status?.running ?? list.byId[id]?.running) === true || runningChildCount(list, id, statuses) > 0) running = true
-    else if (status?.completionUnread === true && !archived.has(id) && list.byId[id]?.origin !== 'subagent') completed = true
+    else if (status?.completionUnread === true && !archived.has(id)) completed = true
   }
   return { running, waiting, completed }
 }
