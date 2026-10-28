@@ -1,6 +1,6 @@
 {
   "name": "dsh-usage-stats",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Local model usage statistics for DeepSeek Harness",
   "type": "module",
   "main": "lib/server/index.js",
