@@ -337,6 +337,19 @@ test('a host that cannot keep the CLI running after DSH quits fails the response
   await assert.rejects(collect(adapter.stream(options())), (error: Error) => error.message === RELAY_UNAVAILABLE['missing-node']);
 });
 
+test('after a failed start is fixed, a new message starts the CLI with it instead of replaying the failed prompt', async t => {
+  const { remote, adapter, options, service } = await setup(t);
+  remote.onCreate = () => { throw new Error(RELAY_UNAVAILABLE['missing-node']); };
+  const first = user('hello');
+  await assert.rejects(collect(adapter.stream(options('hello', { messages: [first] }))), /Node\.js was not found/);
+  // Once Node.js is installed, replaying the first prompt would keep the CLI busy and reject this message.
+  remote.onCreate = agent => remote.append(agent.id, { type: 'assistant_message', text: 'Hi' });
+  remote.onSend = () => assert.fail('the new message must start the CLI, not follow a replayed prompt');
+  await collect(adapter.stream(options('hello again', { messages: [first, user('hello again')] })));
+  assert.match(remote.created!.prompt, /user: hello\n\nCurrent user request:\nhello again$/);
+  assert.equal(service.store.snapshot().tasks.length, 1);
+});
+
 test('new Codex chats use the remote CLI permission config instead of forcing workspace write', async t => {
   const { remote, adapter, options } = await setup(t);
   await collect(adapter.stream(options('Use remote permissions')));
