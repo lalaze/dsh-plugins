@@ -136,6 +136,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.38:** Quitting DSH or reloading the plugin while a remote model is answering no longer marks the response **failed** with `The operation was aborted`. The response ends with a note that the remote CLI is still working. When you open the conversation again, it catches up by itself: a **Remote CLI output produced while DSH was disconnected** notice is followed by the output produced meanwhile, and the response follows the remote turn until it finishes. Nothing is sent to the remote CLI again. Responses cut off before this update still show as failed; they catch up the same way. Restart DSH after updating.
+
 **Upgrading from 0.2.37:** In a remote conversation, **New terminal** and its shortcut now open an SSH terminal in the remote workspace instead of your local shell, without choosing **Remote workspace** from the shell menu. Back in a local conversation they open the shell you used before. Restart DSH and refresh the client after updating.
 
 **Upgrading from 0.2.36:** **New terminal** remembers the shell you last chose in every conversation, so after you choose **Remote workspace** once, local conversations used to fail with `Select a verified remote workspace before using this shell.` Outside a remote workspace that shell now opens your local shell instead and says so on its first line; the tab is still titled **Remote workspace**. Restart DSH after updating.

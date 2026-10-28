@@ -136,6 +136,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
 
+**从 0.2.38 升级：** 远程模型回复过程中退出 DSH 或重新加载插件，不会再把这条回复标记为**失败**并显示 `The operation was aborted`，而是正常结束，并注明远程 CLI 仍在运行。再次打开该对话时会自动同步：先出现一条 **Remote CLI output produced while DSH was disconnected** 提示，随后显示断开期间的输出，并跟随远程回合直到结束。不会再向远程 CLI 发送任何内容。更新前被截断的回复仍显示为失败，但同样会自动同步。更新后重启 DSH。
+
 **从 0.2.37 升级：** 在远程对话中，「新建终端」及其快捷键现在直接打开远程工作区的 SSH 终端，不再打开本地 Shell，也无需在 Shell 菜单中选择 **Remote workspace**。回到本地对话后，仍打开你原来使用的 Shell。更新后重启 DSH 并刷新客户端。
 
 **从 0.2.36 升级：** 「新建终端」在所有对话中沿用上次选择的 Shell，因此选过一次 **Remote workspace** 后，本地对话会报错 `Select a verified remote workspace before using this shell.`。现在不在远程工作区时，它会改为打开本地 Shell，并在第一行注明；标签标题仍显示 **Remote workspace**。更新后重启 DSH。
