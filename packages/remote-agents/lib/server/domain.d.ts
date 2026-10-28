@@ -143,6 +143,12 @@ export interface TurnUsage {
     reasoningTokens?: number;
     totalTokens?: number;
 }
+/** A finished turn: when it started, whether it failed and, when the CLI named it, the model that ran rather than the picker's alias. */
+export interface FinishedTurn {
+    startedAt: string | null;
+    failed: boolean;
+    model?: string;
+}
 /** Tokens held in one native session's context window. */
 export interface ContextUsage {
     used: number;

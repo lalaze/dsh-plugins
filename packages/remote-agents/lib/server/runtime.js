@@ -34,6 +34,8 @@ export class CliSession {
     activeMessage;
     confirmed = false;
     partialText = false;
+    /** The model Claude's main thread answered with this turn: aliases such as `opus` resolve to a full model ID. */
+    turnModel;
     /** Codex running thread totals, now and when the current turn began. */
     codexTotal;
     codexBefore;
@@ -274,6 +276,7 @@ export class CliSession {
     complete(toolStatus = 'completed') {
         this.saveUsage();
         this.hooks.turnEnded?.();
+        this.turnModel = undefined;
         this.agent.status = 'idle';
         this.agent.activeTurn = null;
         this.agent.pendingPermissions = [];
@@ -296,7 +299,7 @@ export class CliSession {
         if (!usage || !this.activeMessage)
             return;
         this.append({ type: 'usage', usage });
-        this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed });
+        this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed, ...(this.turnModel ? { model: this.turnModel } : {}) });
     }
     setTokenUsage(usage) { this.agent.tokenUsage = usage; this.saveUsage(); }
     /** Save request snapshots as they arrive, including during long tool loops and resume. */
@@ -474,6 +477,9 @@ export class CliSession {
                 this.setContext({ used, max: this.agent.context.max });
             if (!m.parent_tool_use_id && m.message?.usage !== undefined)
                 this.setTokenUsage(claudeTokenUsage(m.message.usage));
+            // Claude's own notices, such as API errors, are `<synthetic>` messages.
+            if (!m.parent_tool_use_id && typeof m.message?.model === 'string' && m.message.model && !m.message.model.startsWith('<'))
+                this.turnModel = m.message.model;
             for (const block of list(m.message?.content)) {
                 if (block.type === 'text' && !this.partialText)
                     this.append({ type: 'assistant_message', text: String(block.text ?? '') });

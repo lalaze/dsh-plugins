@@ -136,6 +136,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.41:** Claude Code turns are recorded in usage statistics under the model that answered, so a model chosen by its alias, such as `opus`, appears as its full model ID, such as `claude-opus-5-5`, under **By model**. Turns recorded earlier keep the alias. Restart DSH after updating.
+
 **Upgrading from 0.2.40:** In the **Remote workspace** window opened from Settings, Escape in the file search box clears the search instead of closing the window.
 
 **Upgrading from 0.2.39:** The **Commands** tab is gone from the remote workspace panel; use **New terminal**, which opens the remote shell in a remote conversation. In a remote conversation, **Remote workspace** in the sidebar now holds sync, tunnels and remote DSH, while **Workspace files** holds the files. The file editor saves with ⌘/Ctrl+S, can be closed, opens new files right away and lets you browse folders with unsaved edits. **Add and start** starts a new tunnel, and **Start remote DSH** connects in the same step. In a narrow panel the file list fills the space until a file is open.

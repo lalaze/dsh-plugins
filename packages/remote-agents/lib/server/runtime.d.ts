@@ -1,4 +1,4 @@
-import { type Agent, type TurnUsage, type NativeAttachment, type NativeProtocol, type PermissionAnswer, type Task } from './domain.js';
+import { type Agent, type FinishedTurn, type TurnUsage, type NativeAttachment, type NativeProtocol, type PermissionAnswer, type Task } from './domain.js';
 import { JsonlPeer } from './ssh.js';
 import { type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
@@ -7,11 +7,8 @@ export declare function initializeCodex(peer: JsonlPeer): Promise<void>;
 export declare function initializeAcp(peer: JsonlPeer): Promise<any>;
 export interface SessionHooks {
     turnEnded?(): void;
-    /** Tokens a finished turn used, with when it started and whether it succeeded. */
-    usage?(usage: TurnUsage, turn: {
-        startedAt: string | null;
-        failed: boolean;
-    }): void;
+    /** Tokens a finished turn used, with when it started, whether it succeeded and the model that ran. */
+    usage?(usage: TurnUsage, turn: FinishedTurn): void;
     /** The CLI process ended or was terminated; a relay's remote files can be removed. */
     ended?(): void;
 }
@@ -30,6 +27,8 @@ export declare class CliSession {
     private activeMessage?;
     private confirmed;
     private partialText;
+    /** The model Claude's main thread answered with this turn: aliases such as `opus` resolve to a full model ID. */
+    private turnModel?;
     /** Codex running thread totals, now and when the current turn began. */
     private codexTotal;
     private codexBefore;
