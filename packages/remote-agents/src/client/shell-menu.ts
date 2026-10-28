@@ -1,13 +1,15 @@
 import { TERMINAL_LAUNCHER } from '../workspace-domain.js';
 
 // DSH's New terminal shell menu ends at its chevron and spreads left over the card's icon and text.
-// Recognized by the Remote workspace item, it opens below the chevron instead; other DSH menus keep their placement.
+// Recognized by its chevron in the guide card, or else by the Remote workspace item, it opens below the chevron instead;
+// other DSH menus keep their placement. The chevron matters: the menu first opens with only a loading row.
 const MARK = 'data-ra-shell-menu', GAP = 4, MARGIN = 8;
 // A stylesheet !important outranks the inline left/top DSH keeps writing, without fighting its renders.
 // An opening animation grows from the corner at the trigger, not the one DSH chose for its own placement.
 const styles = `[${MARK}]{left:var(--ra-shell-menu-left)!important;top:var(--ra-shell-menu-top)!important;right:auto!important;bottom:auto!important;transform-origin:var(--ra-shell-menu-origin)!important}`;
 
-const isShellMenu = (menu: Element) => [...menu.querySelectorAll('[role="menuitem"]')].some(item => item.textContent?.trim() === TERMINAL_LAUNCHER);
+const isShellMenu = (menu: Element, trigger: Element | undefined) => !!trigger?.closest('[data-sidebar-right-guide-entry]')
+  || [...menu.querySelectorAll('[role="menuitem"]')].some(item => item.textContent?.trim() === TERMINAL_LAUNCHER);
 
 /** The menu's trigger: the element carrying the anchor name the menu names, else the open menu button. */
 function triggerOf(menu: HTMLElement): HTMLElement | undefined {
@@ -45,7 +47,7 @@ export function installShellMenu(): () => void {
   const update = () => {
     frame = undefined;
     for (const menu of open) if (!menu.isConnected) open.delete(menu);
-    for (const menu of document.querySelectorAll<HTMLElement>('[role="menu"][data-menu-material]')) if (!open.has(menu) && isShellMenu(menu)) open.add(menu);
+    for (const menu of document.querySelectorAll<HTMLElement>('[role="menu"][data-menu-material]')) if (!open.has(menu) && isShellMenu(menu, triggerOf(menu))) open.add(menu);
     for (const menu of open) { const trigger = triggerOf(menu); if (trigger) placeShellMenu(menu, trigger); }
   };
   const schedule = () => { if (frame === undefined) frame = requestAnimationFrame(update); };

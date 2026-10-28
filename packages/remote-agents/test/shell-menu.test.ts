@@ -60,6 +60,17 @@ test('a new shell menu is placed before the browser paints it', async () => {
   assert.equal(shell.style.getPropertyValue('--ra-shell-menu-origin'), 'top left');
 });
 
+test('the shell menu is placed while it still lists only the loading row', async () => {
+  dispose = installShellMenu();
+  await frame();
+  const card = document.createElement('div'); card.dataset.sidebarRightGuideEntry = 'terminal';
+  card.append(trigger(330)); document.body.append(card);
+  const shell = menu(['Loading shells…']);
+  document.body.append(shell);
+  await Promise.resolve();
+  assert.equal(shell.style.getPropertyValue('--ra-shell-menu-left'), '410px', 'the chevron in the terminal card identifies the menu before its shells arrive');
+});
+
 test('the shell menu opens above when only that side fits, and stays inside the viewport', async () => {
   dispose = installShellMenu();
   trigger(740);
