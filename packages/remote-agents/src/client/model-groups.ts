@@ -33,8 +33,14 @@ function readGroups(): Record<string, boolean> {
 // The extra [data-menu-group] outranks DSH's heading class and the Codex menu's heading background.
 const HEADING_ROW = '[data-menu-group][data-ra-model-provider]>[data-menu-group-heading]';
 const CHEVRON = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M4.5 2.5 8 6l-3.5 3.5' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/12px no-repeat`;
+// DSH's model search (its Input: a span around the searchbox, inside the search row) is shorter than the
+// options under it and sits against the menu's top edge; give it an option's height, text and some room above.
+const SEARCH = 'input[role="searchbox"][aria-controls$="-models"]';
 const styles = `
 [data-ra-model-hidden]{display:none!important}
+div:has(>span>${SEARCH}){margin-top:6px}
+span:has(>${SEARCH}){box-sizing:border-box;min-height:34px;align-items:center}
+${SEARCH}{font-size:13px!important;line-height:18px!important}
 ${HEADING_ROW}{display:flex;align-items:center;gap:8px;box-sizing:border-box;min-height:32px;padding:0 7px;border-radius:var(--dsw-radius-md,8px);color:var(--dsw-alias-label-secondary);font-size:13px;font-weight:600;line-height:18px;cursor:pointer;outline-offset:-2px}
 ${HEADING_ROW}:before{content:'';flex:none;width:12px;height:12px;background:var(--dsw-alias-label-tertiary);-webkit-mask:${CHEVRON};mask:${CHEVRON};transition:transform 150ms ease}
 ${HEADING_ROW}[aria-expanded=true]{color:var(--dsw-alias-label-primary)}
