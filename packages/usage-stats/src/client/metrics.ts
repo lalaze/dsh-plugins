@@ -2,9 +2,14 @@ import type { UsageGroup } from '../domain.js';
 
 const DAY = 86_400_000;
 const iso = (time: number) => new Date(time).toISOString().slice(0, 10);
+const pad = (value: number) => String(value).padStart(2, '0');
+/** Today in the viewer's time zone, the day the dashboard and the header pill both count. */
+export const localDay = (now = new Date()) => `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+/** Minutes east of UTC, the API's `tz`, so its day boundaries match `localDay`. */
+export const localOffset = (now = new Date()) => String(-now.getTimezoneOffset());
 export function dateRange(preset: 'today' | '7d' | '30d' | 'all', now = new Date()): { from: string; to: string } {
   if (preset === 'all') return { from: '', to: '' };
-  const today = Date.parse(now.toISOString().slice(0, 10));
+  const today = Date.parse(localDay(now));
   return { from: iso(today - (preset === '7d' ? 6 : preset === '30d' ? 29 : 0) * DAY), to: iso(today) };
 }
 export interface TrendBucket { from: string; to: string; tokens: number; requests: number }

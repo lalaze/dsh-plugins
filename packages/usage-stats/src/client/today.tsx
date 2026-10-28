@@ -2,12 +2,10 @@ import React, { useEffect, useState, type ComponentType } from 'react';
 import type { Totals, UsageReport } from '../domain.js';
 import { UsageDialog } from './dialog.js';
 import { formatLocale, ui, useLocale } from './i18n.js';
+import { localDay, localOffset } from './metrics.js';
 import { usePreferences } from './preferences.js';
 
 const REFRESH_MS = 10_000;
-const pad = (value: number) => String(value).padStart(2, '0');
-/** Today in the viewer's time zone, not UTC like the dashboard's date presets. */
-const localDay = (now: Date) => `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
 const CSS = `.us-today{display:inline-flex;align-items:center;gap:6px;flex:none;height:22px;padding:0 9px;border:1px solid color-mix(in srgb,currentColor 14%,transparent);border-radius:999px;background:color-mix(in srgb,currentColor 5%,transparent);color:inherit;font:inherit;font-size:12px;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:pointer;-webkit-app-region:no-drag}
 .us-today:hover,.us-today[aria-expanded=true]{background:color-mix(in srgb,currentColor 10%,transparent)}
 .us-today:focus-visible{outline:2px solid var(--dsw-focus-ring-color,#517ee8);outline-offset:2px}
@@ -30,7 +28,7 @@ export function TodayBadge({ details }: { details?: ComponentType }) {
     let alive = true;
     const load = async () => {
       const now = new Date(), day = localDay(now);
-      const query = new URLSearchParams({ from: day, to: day, tz: String(-now.getTimezoneOffset()), groupBy: 'day' });
+      const query = new URLSearchParams({ from: day, to: day, tz: localOffset(now), groupBy: 'day' });
       try {
         const response = await fetch(`/api/usage-stats?${query}`, { credentials: 'same-origin', cache: 'no-store' });
         if (!response.ok) throw new Error(String(response.status));

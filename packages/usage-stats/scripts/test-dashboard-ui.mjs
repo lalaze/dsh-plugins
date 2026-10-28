@@ -77,8 +77,8 @@ try {
   wait('window.fixture.requests.at(-1).includes("from=") && document.querySelector("[aria-label=时间范围] button[aria-pressed=true]").textContent === "近 7 天"');
   browser('click', '[aria-label="时间范围"] button:text-is("全部")');
   wait(`${count}?.textContent === "3"`);
-  // Move the browser clock across UTC midnight without waiting a real day.
-  evaluate(`window.fixture.now = '2026-10-21T23:59:59Z'; window.fixture.NativeDate = Date;
+  // Move the browser clock across local midnight without waiting a real day; times without `Z` are local.
+  evaluate(`window.fixture.now = '2026-10-21T23:59:59'; window.fixture.NativeDate = Date;
     window.Date = class extends window.fixture.NativeDate {
       constructor(...args) { super(...(args.length ? args : [window.fixture.now])); }
       static now() { return new window.fixture.NativeDate(window.fixture.now).getTime(); }
@@ -86,21 +86,21 @@ try {
   const hasRange = (from, to) => `new URL(window.fixture.requests.at(-1)).searchParams.get('from') === '${from}' && new URL(window.fixture.requests.at(-1)).searchParams.get('to') === '${to}'`;
   browser('click', '[aria-label="时间范围"] button:text-is("今天")');
   wait(hasRange('2026-10-21', '2026-10-21'));
-  evaluate("window.fixture.now = '2026-10-22T00:00:01Z'");
+  evaluate("window.fixture.now = '2026-10-22T00:00:01'");
   browser('click', 'button:has-text("刷新")');
   wait(hasRange('2026-10-22', '2026-10-22'));
   wait(`${count}?.textContent === "0"`);
   browser('click', '[aria-label="时间范围"] button:text-is("近 7 天")');
   wait(hasRange('2026-10-16', '2026-10-22'));
-  evaluate("window.fixture.now = '2026-10-23T00:00:01Z'");
+  evaluate("window.fixture.now = '2026-10-23T00:00:01'");
   wait(hasRange('2026-10-17', '2026-10-23')); // Exercise the automatic poll.
   browser('click', '[aria-label="时间范围"] button:text-is("近 30 天")');
   wait(hasRange('2026-09-24', '2026-10-23'));
-  evaluate("window.fixture.now = '2026-10-24T00:00:01Z'");
+  evaluate("window.fixture.now = '2026-10-24T00:00:01'");
   browser('click', 'button:has-text("刷新")');
   wait(hasRange('2026-09-25', '2026-10-24'));
   browser('click', '[aria-label="时间范围"] button:text-is("自定义")');
-  evaluate("window.fixture.now = '2026-10-25T00:00:01Z'; window.fixture.requests = []");
+  evaluate("window.fixture.now = '2026-10-25T00:00:01'; window.fixture.requests = []");
   browser('click', 'button:has-text("刷新")');
   wait('window.fixture.requests.length > 0');
   expect(hasRange('2026-09-25', '2026-10-24'));
@@ -132,7 +132,7 @@ try {
   if (process.env.DSH_TEST_SCREENSHOT) browser('screenshot', '--full', process.env.DSH_TEST_SCREENSHOT);
   const errors = browser('errors');
   if (errors.errors?.length) throw new Error(JSON.stringify(errors));
-  console.log('PASS: dashboard totals, category tabs driving breakdown/details/CSV without refetching, trend/category independence, date presets and UTC rollover, session/date filters, CSV contents, empty state, error recovery, light/dark and mobile width');
+  console.log('PASS: dashboard totals, category tabs driving breakdown/details/CSV without refetching, trend/category independence, date presets and local-midnight rollover, session/date filters, CSV contents, empty state, error recovery, light/dark and mobile width');
 } finally {
   try { browser('close'); } catch {}
   await rm(temp, { recursive: true, force: true });
