@@ -4,11 +4,14 @@ const STORAGE_KEY = 'dsh-remote-agents:model-groups:v1';
 const CHANGE_EVENT = 'dsh-remote-model-groups';
 const ROW = 'button[role="menuitemradio"]';
 const HEADING = '[data-menu-group-heading]';
-const MODEL_LIST = '[role="menu"][id$="-models"]';
+// DSH's model list, and dsh-codex-subscription's replacement for it. That plugin registers its model
+// seat without the label child slot, so its rows render bare model names with no provider id.
+const MODEL_LIST = '[role="menu"][id$="-models"], [role="menu"].codexModelSelectGroups';
 let memory: Record<string, boolean> = {};
 /**
- * A group's folding key: the provider id its rows' model labels carry. DSH builds whose rows carry no
- * label ids (0.2.0, some desktop builds) key the group by its heading, but only inside the model list.
+ * A group's folding key: the provider id its rows' model labels carry. Rows that carry no label ids
+ * (DSH 0.2.0, some desktop builds, the Codex subscription menu) key the group by its heading, but only
+ * inside a model list.
  */
 function providerKey(element: HTMLElement, heading: HTMLElement, rows: readonly HTMLButtonElement[]): string | undefined {
   const ids = new Set(rows.map(row => row.querySelector<HTMLElement>('[data-provider-id][data-model-id]')?.dataset.providerId));
