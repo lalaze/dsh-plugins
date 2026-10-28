@@ -5,7 +5,11 @@ import { identifier, record, remotePath, field, taskInput, providerSelection, Re
 
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup { hostId: string; relayId: string }
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[] }
+/**
+ * `chatEfforts` maps a native chat model route to the reasoning effort its last conversation turn used;
+ * `chatFast` lists the DSH conversations whose Codex turns run at the Fast speed.
+ */
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[] }
 export class Store {
   private state: State = { version: 1, hosts: [], tasks: [] };
   private writes = Promise.resolve();
@@ -52,13 +56,20 @@ export class Store {
         if (!Array.isArray(project.providers) || !project.providers.every(p => p && typeof p.id === 'string' && Array.isArray(p.models) && Array.isArray(p.modes))) throw new Error('Invalid saved chat project catalog');
       }
     }
+    if (value.chatEfforts !== undefined && !Object.values(record(value.chatEfforts)).every(effort => typeof effort === 'string')) throw new Error('Invalid saved reasoning efforts');
+    if (value.chatFast !== undefined && (!Array.isArray(value.chatFast) || !value.chatFast.every(id => typeof id === 'string'))) throw new Error('Invalid saved Fast conversations');
     this.state = { version: 1, hosts: value.hosts as HostConfig[], tasks: value.tasks as Task[], ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects as ChatProject[] } : {}),
-      ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}) };
+      ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
+      ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
   hosts(): HostConfig[] { return structuredClone(this.state.hosts); }
   chatProjects(): ChatProject[] { return structuredClone(this.state.mainChatProjects ?? []); }
+  /** The reasoning effort a native chat model route last used, if any. */
+  /** Whether a DSH conversation's Codex turns use the Fast speed. */
+  chatFast(sessionId: string): boolean { return this.state.chatFast?.includes(sessionId) ?? false; }
+  chatEffort(route: string): string | undefined { return Object.hasOwn(this.state.chatEfforts ?? {}, route) ? this.state.chatEfforts![route] : undefined; }
   relayCleanups(hostId: string): RelayCleanup[] { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }
   /** A copy of one saved agent record, without cloning the whole registry. */
   task(predicate: (task: Task) => boolean): Task | undefined { const found = this.state.tasks.find(predicate); return found && structuredClone(found); }

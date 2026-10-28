@@ -124,6 +124,8 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
       workspace: (cwd, signal) => workspace.resolve(cwd, signal) });
     const registration = scoped.llm.registerAdapter(CHAT_PROVIDERS, adapter);
     scoped.effect(() => projects.onChange(() => registration.replace(CHAT_PROVIDERS)));
+    // A model's remembered reasoning effort is its advertised default; DSH reloads the catalog on replace.
+    scoped.effect(() => adapter.onModelInfoChange(() => registration.replace(CHAT_PROVIDERS)));
     scoped.effect(() => () => adapter.close());
   });
   // Native conversation routes and settings also work without the delegation tool registry.

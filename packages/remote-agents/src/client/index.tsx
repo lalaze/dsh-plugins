@@ -13,6 +13,7 @@ import { ModelLabel } from './model-label.js';
 import { installCustomModelLabels } from './custom-model-label.js';
 import { installWorkspaceModels, type WorkspaceClient } from './workspace-models.js';
 import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './usage.js';
+import { FastToggle } from './fast.js';
 import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDirectories } from './workspace-flow.js';
 import { symbols } from '@deepseek-ai/cordis';
 import { WorkspacePanel } from './workspace.js';
@@ -89,6 +90,8 @@ export function apply(ctx: Client): void {
     return () => setModelDirectories(undefined);
   }));
   ctx.slots.inject('conversation.input.right', () => ctx.slots.register({ name: 'conversation.input.right', id: 'remote-agents-usage', order: 50 }, UsageRing));
+  // Codex's Fast switch sits after the permission control, before the translate button (order 60).
+  ctx.slots.inject('conversation.input.left', () => ctx.slots.register({ name: 'conversation.input.left', id: 'remote-agents-fast', order: 10 }, FastToggle));
   ctx.inject?.(['modelDirectories', 'sessions', 'workspaces'], scoped => installWorkspaceModels(scoped as unknown as WorkspaceClient));
   // Add workspace gains a Remote machine tab. Ahead of DSH's own picker (0), behind dsh-remote's (-100) when both are installed.
   const Flow = workspaceFlow(() => (ctx.get as ((name: string) => unknown) | undefined)?.('uiWorkspace') as LocalDirectories | undefined);

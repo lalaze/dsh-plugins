@@ -46,6 +46,8 @@ export function presetMode(provider: string, modes: Choice[], permission: DshPer
 }
 /** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
 export interface Model extends Choice { thinkingOptions?: Choice[]; defaultThinkingOptionId?: string; serviceTiers?: Choice[]; inputModalities?: ('text' | 'image')[] }
+/** The tier the Fast switch selects: Codex names it `priority` or `fast`; otherwise the model's only extra tier. */
+export const fastTierOf = (model: Pick<Model, 'serviceTiers'>): Choice | undefined => model.serviceTiers?.find(t => /^(?:priority|fast)$/i.test(t.id) || /^fast$/i.test(t.label)) ?? (model.serviceTiers?.length === 1 ? model.serviceTiers[0] : undefined);
 export interface Provider {
   id: string;
   label: string;

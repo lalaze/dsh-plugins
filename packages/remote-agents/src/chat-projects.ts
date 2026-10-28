@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { enabledProvidersOf, field, identifier, record, remotePath, RemoteError, type ChatProject } from './domain.js';
+import { enabledProvidersOf, fastTierOf, field, identifier, record, remotePath, RemoteError, type ChatProject, type Choice } from './domain.js';
 import type { RemoteAgentsService } from './service.js';
 
 /** Saved, explicitly discovered catalogs let the native model picker work without opening SSH. */
@@ -15,6 +15,25 @@ export class ChatProjects {
     return () => { this.listeners.delete(listener); off(); };
   }
   private changed(): void { for (const listener of this.listeners) listener(); }
+  /** The Fast tier a native chat model route offers; a route saved with a tier names the same model. */
+  fastTier(route: string): Choice | undefined {
+    const [projectId, cli, model] = route.split('/').map(part => { try { return decodeURIComponent(part); } catch { return ''; } });
+    const selected = this.routes().find(p => p.id === projectId)?.providers.find(p => p.id === cli && p.status === 'ready')?.models.find(m => m.id === model);
+    return selected && fastTierOf(selected);
+  }
+  /** Whether a conversation's model offers Fast, and whether the conversation has it on. */
+  speed(sessionId: string, route: string): { available: boolean; enabled: boolean } {
+    return { available: !!this.fastTier(route), enabled: this.service.store.chatFast(sessionId) };
+  }
+  /** Turn Fast on or off for a conversation's next turns; a turn already running keeps its speed. */
+  async setFast(sessionId: string, enabled: boolean): Promise<{ enabled: boolean }> {
+    if (this.service.store.chatFast(sessionId) !== enabled) await this.service.store.update(state => {
+      const rest = (state.chatFast ?? []).filter(id => id !== sessionId);
+      if (enabled) rest.push(sessionId);
+      if (rest.length) state.chatFast = rest; else delete state.chatFast;
+    });
+    return { enabled };
+  }
   async add(input: unknown): Promise<ChatProject[]> {
     const value = record(input), hostId = identifier(value.hostId), cwd = remotePath(value.cwd), label = field(value.label, 'project name', 100);
     const providers = await this.service.providers(hostId, cwd, true);

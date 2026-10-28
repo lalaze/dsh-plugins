@@ -39,6 +39,8 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'discoverHost': result = await service.discoverHost(hostId()); break;
         case 'setHostProviders': result = await service.setHostProviders(hostId(), input.providers); break;
         case 'chatProjects': result = projects.list(); break;
+        case 'chatSpeed': result = projects.speed(field(input.sessionId, 'session ID', 256), field(input.model, 'model', 1000)); break;
+        case 'setChatSpeed': result = await projects.setFast(field(input.sessionId, 'session ID', 256), input.fast === true); break;
         case 'addChatProject': result = await projects.add(input.project); break;
         case 'refreshChatProject': result = await projects.refresh(identifier(input.projectId)); break;
         case 'removeChatProject': result = await projects.remove(identifier(input.projectId)); break;

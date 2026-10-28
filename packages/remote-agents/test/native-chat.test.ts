@@ -11,7 +11,7 @@ import { RemoteAgentsService } from '../src/service.js';
 import { TaskHistory } from '../src/history.js';
 import { createHandler } from '../src/http.js';
 import { fixture } from './fakes.js';
-import { RELAY_UNAVAILABLE, type DshPermission } from '../src/domain.js';
+import { fastTierOf, RELAY_UNAVAILABLE, type DshPermission } from '../src/domain.js';
 
 const CODEX_PROVIDER = chatProviderId('codex');
 const user = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } });
@@ -436,23 +436,38 @@ test('switching models within a CLI retains the conversation and its old message
   await collect(adapter.stream(options('Back to first model'))); assert.equal(remote.creates, 1); assert.equal(remote.sends, 2);
 });
 
-test('Codex speed tiers are separate picker rows that start, switch and leave Fast on the same conversation', async t => {
+test('Codex Fast is a per-conversation switch on one model row; routes saved with a tier still run Fast', async t => {
   const { adapter, options, remote, store, projects, project } = await setup(t);
   remote.catalog[0].models[0].serviceTiers = [{ id: 'priority', label: 'Fast' }]; await projects.refresh(project.id);
   const models = await adapter.listModels(CODEX_PROVIDER);
-  assert.deepEqual(models.map(m => m.name), ['Remote model · Build server', 'Remote model Fast · Build server']);
+  assert.deepEqual(models.map(m => m.name), ['Remote model · Build server'], 'no separate Fast row');
+  const normal = options().model, session = options().sessionId!;
+  assert.deepEqual(projects.speed(session, normal), { available: true, enabled: false });
+  assert.deepEqual(projects.speed(session, chatModelId(project.id, 'codex', 'other-model')), { available: false, enabled: false });
+  await projects.setFast(session, true);
+  await collect(adapter.stream(options('Go fast')));
+  assert.equal(remote.created?.serviceTier, 'priority');
+  await projects.setFast(session, false);
+  await collect(adapter.stream(options('Back to the configured speed')));
+  assert.equal(remote.creates, 1); assert.equal(remote.detaches, 1);
+  assert.equal(store.snapshot().tasks[0].serviceTier, undefined); assert.equal(store.snapshot().chatFast, undefined);
+  // A conversation saved on the old Fast row keeps running Fast until the client moves it to the switch.
   const fast = chatModelId(project.id, 'codex', 'remote-model', 'priority');
-  assert.equal(models[1].id, fast);
   assert.deepEqual((await adapter.resolveModel(CODEX_PROVIDER, fast)).reasoning?.efforts.map(e => e.id), ['high']);
   await assert.rejects(adapter.resolveModel(CODEX_PROVIDER, chatModelId(project.id, 'codex', 'remote-model', 'flex')), /unavailable/);
   await assert.rejects(adapter.resolveModel(CODEX_PROVIDER, `${fast}/extra`), /unavailable/);
-  await collect(adapter.stream(options('Go fast', { model: fast })));
-  assert.equal(remote.created?.serviceTier, 'priority');
-  await collect(adapter.stream(options('Back to the configured speed')));
-  assert.equal(remote.creates, 1); assert.equal(remote.detaches, 1);
-  assert.equal(store.snapshot().tasks[0].serviceTier, undefined);
+  assert.deepEqual(projects.speed(session, fast), { available: true, enabled: false });
   await collect(adapter.stream(options('Fast again', { model: fast })));
   assert.equal(store.snapshot().tasks[0].serviceTier, 'priority'); assert.equal(remote.detaches, 2);
+  assert.equal(store.chatFast('another-conversation'), false, 'the switch belongs to one conversation');
+});
+
+test('the Fast switch picks Codex’s priority or fast tier, or a model’s only extra tier', () => {
+  assert.equal(fastTierOf({ serviceTiers: [{ id: 'flex', label: 'Flex' }, { id: 'priority', label: 'Fast' }] })?.id, 'priority');
+  assert.equal(fastTierOf({ serviceTiers: [{ id: 'fast', label: 'Fast' }] })?.id, 'fast');
+  assert.equal(fastTierOf({ serviceTiers: [{ id: 'turbo', label: 'Turbo' }] })?.id, 'turbo');
+  assert.equal(fastTierOf({ serviceTiers: [{ id: 'flex', label: 'Flex' }, { id: 'scale', label: 'Scale' }] }), undefined);
+  assert.equal(fastTierOf({}), undefined);
 });
 
 test('native tool cards produce a valid DSH session lifecycle and never request DSH tool dispatch', async t => {
@@ -486,6 +501,25 @@ test('text-only input, auxiliary calls and unavailable routes never start an uni
   assert.equal(text(await collect(adapter.stream(options(framed, { purpose: 'session-title' })))), 'Fix the login bug');
 
   assert.equal(remote.creates, 0);
+});
+
+test('each remote model defaults to the reasoning effort its last conversation turn used', async t => {
+  const { adapter, options, remote, projects, project, store, path } = await setup(t);
+  remote.catalog[0].models[0].thinkingOptions!.push({ id: 'low', label: 'Low' }); remote.catalog[0].models[0].defaultThinkingOptionId = 'high';
+  await projects.refresh(project.id);
+  let refreshes = 0; adapter.onModelInfoChange(() => refreshes++);
+  const route = options().model, effortOf = async () => (await adapter.resolveModel(CODEX_PROVIDER, route)).reasoning?.defaultEffort;
+  assert.equal(await effortOf(), 'high', 'the CLI default before any turn');
+  await collect(adapter.stream(options('Quick question', { reasoningEffort: ReasoningEffortId('low') }))); await pause(20);
+  assert.equal(await effortOf(), 'low'); assert.equal(refreshes, 1, 'DSH is told to reload the catalog');
+  await collect(adapter.stream(options('Another', { reasoningEffort: ReasoningEffortId('low') }))); await pause(20);
+  assert.equal(refreshes, 1, 'an unchanged effort does not reload the catalog');
+  await collect(adapter.stream(options('Summarize', { purpose: 'compaction', reasoningEffort: ReasoningEffortId('high') }))); await pause(20);
+  assert.equal(await effortOf(), 'low', 'compaction does not change the remembered effort');
+  const reopened = new Store(path); await reopened.open(); assert.equal(reopened.chatEffort(route), 'low', 'it survives a restart');
+  remote.catalog[0].models[0].thinkingOptions = [{ id: 'high', label: 'High' }]; await projects.refresh(project.id);
+  assert.equal(await effortOf(), 'high', 'an effort the model no longer offers falls back to its default');
+  assert.equal(store.chatEffort('constructor'), undefined);
 });
 
 test('compaction uses a disposable CLI session and preserves the live conversation binding', async t => {

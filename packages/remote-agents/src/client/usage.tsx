@@ -4,9 +4,9 @@ import { PROVIDER_LABELS, type AccountUsage, type TokenUsage, type TokenUsageBre
 import { api } from './api.js';
 import { localizeError, ui, useLocale } from './i18n.js';
 
-interface Selection { provider: string; model: string }
+export interface Selection { provider: string; model: string; reasoningEffort?: string }
 interface ModelStore { getSnapshot(): { current: Selection | null } | undefined; subscribe(listener: () => void): () => void }
-export interface ModelDirectories { directoryFor(sessionId: string): { store: ModelStore } }
+export interface ModelDirectories { directoryFor(sessionId: string): { store: ModelStore; select?(selection: Selection): Promise<unknown> } }
 
 const POLL_MS = 5000, CLOSE_DELAY_MS = 150;
 /** CLIs whose account reports plan limits through its own protocol. */
@@ -17,8 +17,14 @@ const remote = (provider: string) => provider === 'remote-cli' || provider.start
 let directories: ModelDirectories | undefined;
 const directoryListeners = new Set<() => void>();
 export const setModelDirectories = (value: ModelDirectories | undefined) => { directories = value; for (const listener of directoryListeners) listener(); };
+/** Switch a conversation's model through DSH's own selector, as a pick in the model menu would. */
+export async function selectModel(sessionId: string, selection: Selection): Promise<void> {
+  const directory = directories?.directoryFor(sessionId);
+  if (!directory?.select) throw new Error('Model selection is unavailable');
+  await directory.select(selection);
+}
 const subscribeDirectories = (listener: () => void) => { directoryListeners.add(listener); return () => { directoryListeners.delete(listener); }; };
-function useCurrentModel(sessionId: string | undefined): Selection | null {
+export function useCurrentModel(sessionId: string | undefined): Selection | null {
   const resolver = useSyncExternalStore(subscribeDirectories, () => directories);
   const store = useMemo(() => {
     if (!resolver || !sessionId) return undefined;
