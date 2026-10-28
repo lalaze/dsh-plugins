@@ -95,7 +95,7 @@ function date(value) {
     if (value === null || value === '')
         return undefined;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value)
-        throw new Error("Date must be a valid YYYY-MM-DD (UTC)");
+        throw new Error("Date must be a valid YYYY-MM-DD");
     return value;
 }
 export function parseQuery(url) {
