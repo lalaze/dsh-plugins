@@ -14,6 +14,16 @@ import { decidePermission, type ToolHost } from './tools.js';
 import type { WorkspacePlacement } from './workspace-access.js';
 
 export const CHAT_PROVIDER = 'remote-cli';
+/** Wakes a conversation whose remote turn outlived DSH, so the missed output streams in without a new message. */
+export const SYNC_SOURCE = 'remote-cli-sync';
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap { 'remote-cli-sync': { readonly kind: 'remote-cli-sync'; readonly form: 'notice'; readonly summary: string } }
+}
+/** The parts of a live DSH agent that a catch-up wake needs. */
+export interface SyncAgent {
+  readonly session: Pick<Session, 'id' | 'requestHeader'>;
+  send(message: ReturnType<typeof createUserMessage>, target: 'next-turn', wakeup: boolean): void;
+}
 const CLI_NAMES: Readonly<Record<string, string>> = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
 export const chatProviderId = (cli: string) => `remote-cli-${cli}`;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
@@ -89,7 +99,7 @@ class NativeToolRows {
     this.session.append('tool/result', { ...this.step, message: createToolResultMessage({ callId: call.id, content: [{ type: 'text', text }], isError }) }, { surfaceOp: 'append', sourceEventSeqs: [call.seq] });
     this.calls.delete(key); this.finished.add(key);
   }
-  close(): void { for (const key of this.calls.keys()) this.finish(key, 'Remote tool did not finish before this response ended.', true); }
+  close(text = 'Remote tool did not finish before this response ended.', isError = true): void { for (const key of this.calls.keys()) this.finish(key, text, isError); }
 }
 
 export class RemoteCliAdapter extends LlmAdapter {
@@ -98,6 +108,7 @@ export class RemoteCliAdapter extends LlmAdapter {
   private released = false;
   private auxiliaryDirectories = new Map<string, string>();
   private modelInfoListeners = new Set<() => void>();
+  private woken = new Set<string>();
   constructor(readonly projects: ChatProjects, private readonly host: ChatHost, private readonly pollMs = 150) { super(); }
   override providerInfo(provider: string) {
     const cli = Object.keys(CLI_NAMES).find(id => chatProviderId(id) === provider);
@@ -153,6 +164,29 @@ export class RemoteCliAdapter extends LlmAdapter {
    * CLI keeps working; the conversation shows its remaining output with the next response.
    */
   close(): void { this.released = true; for (const controller of this.controllers) controller.abort(RELEASED); }
+  /** The conversation's remote task when its last response ended before all its output reached DSH. */
+  private unsynced(sessionId: string, route: string) {
+    const service = this.projects.service;
+    const task = service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route === route)
+      ?? service.store.task(t => t.chat?.sessionId === sessionId && route.startsWith(`${t.chat.route.split('/').slice(0, 2).join('/')}/`));
+    return task?.agentId && task.chat?.delivered && !task.chat.delivered.done ? task : undefined;
+  }
+  /**
+   * Wake a conversation whose last remote response was cut off when DSH quit or reloaded the plugin. Its turn
+   * streams the output produced meanwhile and waits for the remote turn to finish. Only a conversation still
+   * routed to a remote CLI is woken: another model would answer the notice instead.
+   */
+  sync(agent: SyncAgent): boolean {
+    const config = agent.session.requestHeader()?.config;
+    if (this.released || !config || !CHAT_PROVIDERS.includes(config.provider) || this.active.has(agent.session.id)) return false;
+    const task = this.unsynced(agent.session.id, config.model), pending = task?.chat?.delivered;
+    if (!task || !pending || this.woken.has(`${task.id}:${pending.messageId}`)) return false;
+    this.woken.add(`${task.id}:${pending.messageId}`);
+    const summary = 'Remote CLI output produced while DSH was disconnected';
+    agent.send(createUserMessage({ source: { kind: SYNC_SOURCE, form: 'notice', summary },
+      content: [{ type: 'text', text: `${summary}. It is shown below; no new request was sent to the remote CLI.` }] }), 'next-turn', true);
+    return true;
+  }
   override async *stream(options: GenerateOptions): AsyncGenerator<StreamChunk> {
     if (options.purpose === 'session-title') {
       const title = sessionTitleOf(options.messages.filter(m => m.role === 'user').map(m => blockText(m.content)).at(-1) ?? '');
@@ -175,6 +209,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     }
     const sessionId = options.sessionId;
     if (!sessionId) throw new LlmError('Select a remote CLI in a DSH conversation to use it.', 'SESSION_REQUIRED');
+    const final = options.messages.at(-1), sync = final?.role === 'user' && final.source?.kind === SYNC_SOURCE;
     if (this.active.has(sessionId)) throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
     const { project, provider, model, serviceTier: routeTier } = this.route(options.provider, options.model), service = this.projects.service;
     // A route saved with a tier keeps it; otherwise the conversation's lightning switch picks the Fast tier.
@@ -203,7 +238,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     const userId = lastUser.id ?? hash(JSON.stringify(options.messages));
     // A CLI that never started left only its first prompt. A new message starts afresh with that prompt as
     // context; retrying it would run the stale prompt first and reject this message as busy.
-    if (task && !task.agentId && !this.active.has(sessionId) && task.id !== hash(hash(sessionId, task.chat?.receiptRoute ?? task.chat?.route ?? options.model), userId)) {
+    if (!sync && task && !task.agentId && !this.active.has(sessionId) && task.id !== hash(hash(sessionId, task.chat?.receiptRoute ?? task.chat?.route ?? options.model), userId)) {
       await service.delete(task.id); task = undefined;
     }
     const binding = hash(sessionId, task?.chat?.receiptRoute ?? task?.chat?.route ?? options.model);
@@ -307,6 +342,16 @@ export class RemoteCliAdapter extends LlmAdapter {
     if (this.active.has(sessionId)) throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
     this.active.add(sessionId); this.controllers.add(controller);
     try {
+      if (sync) {
+        // A catch-up turn only shows what the remote CLI did meanwhile; it never sends anything.
+        const pending = task && service.store.task(t => t.id === task!.id)?.chat?.delivered;
+        if (pending && !pending.done) {
+          admitted = true;
+          yield* follow(pending.messageId, pending.cursor ?? undefined, true);
+          settled = true; await delivered(pending.messageId, undefined, true);
+        } else { settled = true; yield* textChunk('text', 'The remote CLI produced no further output.'); }
+        yield* endBlock(); rows.close(); yield { type: 'finish', reason: { kind: 'stop' } }; return;
+      }
       const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
       if (!task) {
         const composerMode = presetMode(provider.id, provider.modes, this.host.permission?.(sessionId));
@@ -349,6 +394,13 @@ export class RemoteCliAdapter extends LlmAdapter {
       const interrupted = yield* follow(messageId, undefined, false);
       settled = true; await delivered(messageId, undefined, true);
       yield* endBlock(); rows.close(); yield { type: 'finish', reason: interrupted ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'The remote CLI turn was interrupted.' } } : { kind: 'stop' } };
+    } catch (error) {
+      // DSH unloads the plugin before its turn loop on quit or reload. The remote turn keeps running and its output
+      // catches up once DSH reattaches (see sync), so end this turn normally instead of recording a failure.
+      if (!admitted || settled || options.signal?.aborted || !this.released && !service.stopped) throw error;
+      yield* textChunk('text', images.flush()); yield* endBlock(); rows.close('Still running on the remote CLI; its result appears when DSH reconnects.', false);
+      yield* textChunk('text', `${index ? '\n\n' : ''}DSH disconnected while the remote CLI was still working. It keeps running, and its output appears here when DSH reconnects.`);
+      yield* endBlock(); yield { type: 'finish', reason: { kind: 'stop' } };
     } finally {
       for (const pending of questions.values()) pending.abort();
       // Only a user's Stop interrupts the remote turn. Shutdown and plugin reloads leave it running.

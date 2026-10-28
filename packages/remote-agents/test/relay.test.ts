@@ -194,7 +194,7 @@ test('a relay started by an interrupted initialization is removed, and retrying 
   assert.equal((await h.lines('prompts.log')).length, 1);
 });
 
-test('native DSH conversations: shutdown leaves the turn running; the next message shows missed output, and a retry replays all of it', async t => {
+test('native DSH conversations: shutdown leaves the turn running; it catches up by itself, the next message shows missed output, and a retry replays all of it', async t => {
   const { ChatProjects } = await import('../src/chat-projects.js');
   const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/native-chat.js');
   const { createUserMessage } = await import('@deepseek-ai/dsh-llm');
@@ -205,22 +205,37 @@ test('native DSH conversations: shutdown leaves the turn running; the next messa
     workspace: async cwd => ({ hostIds: [h.hostId], cwd }), approval: { request: async () => 'allowed-once' }, userQuestions: { ask: async () => ({ answers: [] }) } }, 10);
   const user = (text: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] });
   const options = (session: string, messages: ReturnType<typeof user>[]) => ({ provider: chatProviderId('codex'), model: chatModelId(h.hostId, 'codex', 'fake-model'), sessionId: SessionId(session), messages });
-  const first = user('gate'), retried = user('gate');
+  const first = user('gate'), retried = user('gate'), synced = user('gate');
   const adapter = chat(h.first.service);
   const read = async (stream: AsyncGenerator<{ type: string; text?: string }>, until: string) => {
     let text = '';
     for (;;) { const { value, done } = await stream.next(); if (done) throw new Error('stream ended early'); if (value.type === 'text-delta') text += value.text; if (text.includes(until)) return text; }
   };
-  const streams = [adapter.stream(options('conversation-one', [first])), adapter.stream(options('conversation-two', [retried]))];
+  const streams = [adapter.stream(options('conversation-one', [first])), adapter.stream(options('conversation-two', [retried])), adapter.stream(options('conversation-three', [synced]))];
   for (const stream of streams) assert.equal(await read(stream, 'waiting'), 'waiting 🌏 ');
   adapter.close();
-  for (const stream of streams) await assert.rejects(stream.next());
+  for (const stream of streams) {
+    let rest = '', finish: unknown;
+    for await (const chunk of stream) { if (chunk.type === 'text-delta') rest += chunk.text; if (chunk.type === 'finish') finish = (chunk as { reason?: unknown }).reason; }
+    assert.match(rest, /^\n\nDSH disconnected while the remote CLI was still working/); assert.deepEqual(finish, { kind: 'stop' }, 'shutdown does not fail the DSH turn');
+  }
   await h.first.service.close();
-  assert.equal((await h.lines('prompts.log')).length, 2);
+  assert.equal((await h.lines('prompts.log')).length, 3);
   await h.gate();
 
   const next = await h.open(); await next.service.resume();
   const restarted = chat(next.service);
+  // DSH opens the third conversation: it wakes once, with a notice, and only while it is routed to the remote CLI.
+  const sent: ReturnType<typeof user>[] = [];
+  const agent = (session: string, provider = chatProviderId('codex')) => ({ session: { id: SessionId(session), requestHeader: () => ({ config: { provider, model: chatModelId(h.hostId, 'codex', 'fake-model') } }) as never },
+    send: (message: ReturnType<typeof user>) => { sent.push(message); } });
+  assert.equal(restarted.sync(agent('conversation-three', 'deepseek')), false, 'another model would answer the notice');
+  assert.equal(restarted.sync(agent('conversation-three')), true); assert.equal(restarted.sync(agent('conversation-three')), false, 'woken once');
+  assert.deepEqual(sent[0].source, { kind: 'remote-cli-sync', form: 'notice', summary: 'Remote CLI output produced while DSH was disconnected' });
+  let caught = '', caughtFinish: unknown;
+  for await (const chunk of restarted.stream(options('conversation-three', [synced, sent[0]]))) { if (chunk.type === 'text-delta') caught += chunk.text; if (chunk.type === 'finish') caughtFinish = chunk.reason; }
+  assert.equal(caught, 'after-gate 你好', 'only the missed output, without resending anything'); assert.deepEqual(caughtFinish, { kind: 'stop' });
+  assert.equal(restarted.sync(agent('conversation-three')), false, 'nothing left to catch up');
   let text = '', finish: unknown;
   for await (const chunk of restarted.stream(options('conversation-one', [first, user('stream 2')]))) { if (chunk.type === 'text-delta') text += chunk.text; if (chunk.type === 'finish') finish = chunk.reason; }
   assert.equal(text, 'Output from the previous response, completed while DSH was disconnected:\n\nafter-gate 你好\n\n---\n\nc0🌏 c1🌏 ');
@@ -229,7 +244,7 @@ test('native DSH conversations: shutdown leaves the turn running; the next messa
   for await (const chunk of restarted.stream(options('conversation-two', [retried]))) if (chunk.type === 'text-delta') replay += chunk.text;
   assert.equal(replay, 'waiting 🌏 after-gate 你好', 'retrying the interrupted response replays its whole receipt');
   const prompts = await h.lines('prompts.log');
-  assert.equal(prompts.length, 3, 'nothing was resent or interrupted');
+  assert.equal(prompts.length, 4, 'nothing was resent or interrupted');
 });
 
 test('relay links deliver large payloads once, drop partial frames and keep exact UTF-8 byte offsets', async t => {

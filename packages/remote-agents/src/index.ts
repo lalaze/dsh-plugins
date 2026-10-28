@@ -9,7 +9,7 @@ import { createHandler } from './http.js';
 import { delegationTools, type ToolDefinition, type ToolHost } from './tools.js';
 import { ChatProjects } from './chat-projects.js';
 import { CHAT_IMAGE_LIMIT } from './chat-images.js';
-import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
+import { CHAT_PROVIDERS, RemoteCliAdapter, type SyncAgent } from './native-chat.js';
 import type { Session } from '@deepseek-ai/dsh-session';
 import type { DshPermission } from './domain.js';
 import { WorkspaceAccess, type WorkspaceRuntime } from './workspace-access.js';
@@ -27,6 +27,8 @@ declare module '@deepseek-ai/cordis' {
   interface Events {
     /** Every finished remote CLI turn: main-chat replies, delegated agents and turns sent from the sessions panel. */
     'remote-agents/usage'(record: RemoteUsageRecord): void;
+    /** Emitted by DSH's agent registry for each new or resumed conversation agent. */
+    'agent/created'(payload: { agent: SyncAgent }): undefined | Promise<undefined>;
   }
 }
 
@@ -77,7 +79,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     if (task) ctx.emit('remote-agents/usage', remoteUsageRecord(task, store.hosts(), usage, turn));
   });
   // Persistent CLIs kept running while DSH was away; reattach and catch up in the background.
-  void service.resume();
+  const resumed = service.resume();
   ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, placement, workspaces, features) });
   ctx.connection.fetch.register({ path: '/api/remote-agents/files', methods: ['GET', 'POST'], requestBody: 'streaming', fetch: workspaceTransferHandler(files) });
   ctx.inject(['terminalController'], scoped => {
@@ -96,7 +98,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
       } });
   });
   ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
-    const host = scoped as unknown as ToolHost & { agents: { get(id: string): unknown } };
+    const host = scoped as unknown as ToolHost & { agents: { get(id: string): unknown; list?(): SyncAgent[] } };
     const steps = new Map<string, { session: Session; turn: number; step: number }>();
     scoped.on('session/event', (session, event) => {
       if (event.type === 'step/start') steps.set(session.id, { session, ...event.data });
@@ -128,6 +130,11 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     // A model's remembered reasoning effort is its advertised default; DSH reloads the catalog on replace.
     scoped.effect(() => adapter.onModelInfoChange(() => registration.replace(CHAT_PROVIDERS)));
     scoped.effect(() => () => adapter.close());
+    // A response cut off by quitting DSH or reloading the plugin catches up by itself once its CLI is reattached:
+    // when DSH opens the conversation, or right away for conversations already open.
+    const wake = (agent: SyncAgent) => { void resumed.then(() => adapter.sync(agent)).catch(() => {}); };
+    scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
+    for (const agent of host.agents.list?.() ?? []) wake(agent);
   });
   // Native conversation routes and settings also work without the delegation tool registry.
   ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {

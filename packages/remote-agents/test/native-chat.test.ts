@@ -275,7 +275,9 @@ test('closing a stream early stops remote work; disposing the adapter or DSH shu
   shutdown.abort({ kind: 'disposed' });
   await assert.rejects(collect(disposed)); assert.equal(remote.stops, 1, 'a DSH disposal cause is not a user Stop');
   const running = adapter.stream(options('Another conversation', { sessionId: SessionId('second') })); await running.next(); adapter.close();
-  await assert.rejects(collect(running), /abort/i); assert.equal(remote.stops, 1, 'plugin unload releases the stream only');
+  const released = await collect(running); assert.equal(remote.stops, 1, 'plugin unload releases the stream only');
+  assert.deepEqual(released.at(-1), { type: 'finish', reason: { kind: 'stop' } }, 'a released turn is not a failure');
+  assert.match(text(released), /^Working\n\nDSH disconnected while the remote CLI was still working/);
   assert.equal([...remote.agents.values()].filter(a => a.status === 'running').length, 2);
 });
 
