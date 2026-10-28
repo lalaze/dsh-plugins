@@ -3,10 +3,15 @@ import { api, requestId } from './api.js';
 import { ui, localizeError, useLocale } from './i18n.js';
 import { TUNNEL_ACCESS_HOST, type SyncResult, type Tunnel, type WorkspaceEntry, type WorkspaceFile, type WorkspaceTarget } from '../workspace-domain.js';
 
-export function WorkspacePanel({ sessionId, initialPath }: { sessionId?: string; initialPath?: string }) {
+const TOOLS = { files: 'Files', commands: 'Commands', sync: 'Sync', tunnels: 'Tunnels', web: 'Remote DSH' } as const;
+export type WorkspaceTool = keyof typeof TOOLS;
+const ALL_TOOLS = Object.keys(TOOLS) as WorkspaceTool[];
+
+/** The remote workspace tools; `tools` narrows them, and a single tool shows without the tool tabs. */
+export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { sessionId?: string; initialPath?: string; tools?: readonly WorkspaceTool[] }) {
   useLocale();
   const [target, setTarget] = useState<WorkspaceTarget>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState('files'), [path, setPath] = useState(''), [entries, setEntries] = useState<WorkspaceEntry[]>([]);
+  const [tab, setTab] = useState<WorkspaceTool>(tools[0] ?? 'files'), [path, setPath] = useState(''), [entries, setEntries] = useState<WorkspaceEntry[]>([]);
   const [selected, setSelected] = useState<string>(), [file, setFile] = useState<WorkspaceFile>(), [draft, setDraft] = useState('');
   // Rename, delete and download need only the revision; text editing additionally needs readable content.
   const [info, setInfo] = useState<{ path: string; revision: string; size: number }>(), [readOnly, setReadOnly] = useState('');
@@ -79,7 +84,7 @@ export function WorkspacePanel({ sessionId, initialPath }: { sessionId?: string;
     <header><h2>{ui('Remote workspace')}</h2>{target && <p className="ra-mono">{target.label}:{target.cwd}</p>}</header>
     {error && <div className="ra-banner" role="alert">{error}{selected && <button disabled={busy} onClick={() => void run(() => open(selected))}>{ui('Reload file')}</button>}</div>}
     {!sessionId ? <p>{ui('Select a verified remote workspace first.')}</p> : !target ? <p role="status">{ui(error ? 'Select a verified remote workspace first.' : 'Loading workspace…')}</p> : <>
-      <nav className="ra-workspace-tabs" aria-label={ui('Workspace tools')}>{[['files', 'Files'], ['commands', 'Commands'], ['sync', 'Sync'], ['tunnels', 'Tunnels'], ['web', 'Remote DSH']].map(([key, label]) => <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{ui(label)}</button>)}</nav>
+      {tools.length > 1 && <nav className="ra-workspace-tabs" aria-label={ui('Workspace tools')}>{tools.map(key => <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{ui(TOOLS[key])}</button>)}</nav>}
       {tab === 'files' && <div className="ra-workspace-files">
         <aside><div className="ra-actions"><button disabled={busy || !path} onClick={() => { if (canNavigate()) setPath(path.split('/').slice(0, -1).join('/')); }}>{ui('Up')}</button><span className="ra-mono">/{path}</span><button disabled={busy} onClick={() => void run(reload)}>{ui('Refresh')}</button></div>
           <form className="ra-workspace-create" onSubmit={event => { event.preventDefault(); void run(async () => {
