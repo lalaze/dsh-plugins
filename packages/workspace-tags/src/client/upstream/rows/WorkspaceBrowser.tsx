@@ -494,13 +494,14 @@ function SessionTree({
     && workspaceDrag.over.half === 'before'
   // workspace-tags: a Workspace may sit in several sections, so sections turn
   // off Workspace reordering and row motion (both assume one row per key).
+  const archivedSet = new Set(rowState.archivedSessionIds)
   const sections = tagging === undefined || tagging.mode === null
     ? undefined
     : browserSections(tagging.mode, rootGroups, tagging.state, (group) => {
       const members = group.workspaceId === undefined
         ? ungroupedSessionIds
         : workspaces.find(workspace => workspace.workspaceId === group.workspaceId)?.sessionIds ?? []
-      return workspaceActivity(members, list, statuses)
+      return workspaceActivity(members, list, statuses, archivedSet)
     })
   const tagT = asTagTranslate(t)
 

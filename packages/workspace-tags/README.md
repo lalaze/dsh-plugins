@@ -7,7 +7,7 @@ Supports English and Simplified Chinese, following DSH’s language setting with
 `dsh-workspace-tags` adds colored tags to the workspaces in the DeepSeek Harness sidebar, and two more **Group by** choices in the sidebar’s view options:
 
 - **Tag**: one section per tag, in name order, then **Untagged**. A workspace with several tags appears under each of them.
-- **Status**: **Running** (an agent in the workspace is executing), **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), then **Idle**. A workspace with both running and waiting sessions appears in both, and the sections follow live as agents start and stop.
+- **Status**: **Running** (an agent in the workspace is executing), **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Completed** (a session finished and you have not opened it yet), then **Idle**. Each status has its own icon. A workspace with sessions in several states appears in each of those sections, and the sections follow live as agents start and stop.
 
 Right-click a workspace, or choose **Tags…** in its **⋯** menu, to tick its tags, create a tag (name and color) that is added to that workspace, or open **Manage tags…** to rename, recolor or delete tags. A workspace’s tags show as small dots at the end of its row in every grouping mode. Sections fold, and the Group by choice and folded sections are remembered per browser. Inside a section, workspaces keep the sidebar’s order; drag workspaces into order under Workspace grouping, since a workspace can appear in several sections.
 

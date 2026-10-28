@@ -86,18 +86,33 @@ describe('sections', () => {
     ])
   })
 
-  it('groups by what Sessions are doing; waiting on the user is its own state', () => {
-    const list = sessionState([summary('a1'), summary('a2'), summary('b1', { running: true }), summary('c1'), summary('d1')])
-    const now = statuses({ a1: { running: true }, a2: { running: true, pendingInteraction: approval('a2') }, c1: { pendingInteraction: approval('c1') } })
-    const members: Record<string, string[]> = { alpha: ['a1', 'a2'], beta: ['b1'], gamma: ['c1'], delta: ['d1'] }
-    expect(workspaceActivity(members.alpha!.map(sid), list, now)).toEqual({ running: true, waiting: true })
-    expect(workspaceActivity([sid('b1')], list, now)).toEqual({ running: true, waiting: false })
-    expect(workspaceActivity([sid('c1')], list, now)).toEqual({ running: false, waiting: true })
-    const sections = statusSections(['alpha', 'beta', 'gamma', 'delta'].map(group),
+  it('groups by what Sessions are doing; waiting on the user and unread completions are their own states', () => {
+    const list = sessionState(['a1', 'a2', 'b1', 'b2', 'c1', 'd1', 'e1'].map(id => summary(id, id === 'b1' ? { running: true } : {})))
+    const now = statuses({
+      a1: { running: true }, a2: { running: true, pendingInteraction: approval('a2') }, b2: { completionUnread: true },
+      c1: { pendingInteraction: approval('c1') }, d1: { completionUnread: true },
+    })
+    const members: Record<string, string[]> = { alpha: ['a1', 'a2'], beta: ['b1', 'b2'], gamma: ['c1'], delta: ['d1'], epsilon: ['e1'] }
+    expect(workspaceActivity(members.alpha!.map(sid), list, now)).toEqual({ running: true, waiting: true, completed: false })
+    expect(workspaceActivity(members.beta!.map(sid), list, now)).toEqual({ running: true, waiting: false, completed: true })
+    expect(workspaceActivity([sid('c1')], list, now)).toEqual({ running: false, waiting: true, completed: false })
+    const sections = statusSections(['alpha', 'beta', 'gamma', 'delta', 'epsilon'].map(group),
       g => workspaceActivity(members[g.key]!.map(sid), list, now))
     expect(sections.map(section => [section.kind, section.groups.map(g => g.key)])).toEqual([
-      ['running', ['alpha', 'beta']], ['waiting', ['alpha', 'gamma']], ['idle', ['delta']],
+      ['running', ['alpha', 'beta']], ['waiting', ['alpha', 'gamma']], ['completed', ['beta', 'delta']], ['idle', ['epsilon']],
     ])
+  })
+
+  it('counts an unread completion only where it can be read', () => {
+    const list = sessionState([summary('open'), summary('archived'), summary('child', { origin: 'subagent' }), summary('again')])
+    const done = statuses({ open: { completionUnread: true }, archived: { completionUnread: true }, child: { completionUnread: true }, again: { running: true, completionUnread: true } })
+    expect(workspaceActivity([sid('open')], list, done).completed).toBe(true)
+    // An archived Session cannot be opened and a subagent has no row, so neither would ever leave Completed.
+    expect(workspaceActivity([sid('archived'), sid('child')], list, done, new Set([sid('archived')])).completed).toBe(false)
+    // A Session running again counts as running only.
+    expect(workspaceActivity([sid('again')], list, done)).toEqual({ running: true, waiting: false, completed: false })
+    // Opening the Session clears the flag, and the Workspace is idle.
+    expect(workspaceActivity([sid('open')], list, statuses({ open: { completionUnread: false } }))).toEqual({ running: false, waiting: false, completed: false })
   })
 
   it('counts running subagents of a member Session as running', () => {
@@ -105,7 +120,7 @@ describe('sections', () => {
       ...sessionState([summary('parent'), summary('child', { origin: 'subagent' })]),
       projectionsBySession: { [sid('parent')]: { values: { subagentCatalog: [{ id: sid('child') }] } } } as unknown as SessionListState['projectionsBySession'],
     }
-    expect(workspaceActivity([sid('parent')], list, statuses({ child: { running: true } }))).toEqual({ running: true, waiting: false })
+    expect(workspaceActivity([sid('parent')], list, statuses({ child: { running: true } }))).toEqual({ running: true, waiting: false, completed: false })
   })
 })
 
@@ -161,10 +176,10 @@ describe('WorkspaceBrowser with tags', () => {
       requestSearch: controls.search, requestAddWorkspace: controls.add, closeAddWorkspace: controls.closeAdd,
       setDirectoryBusy: controls.directoryBusy, requestSessionRename: controls.rename,
       wide: true, expandSidebar: vi.fn(),
-      useSessions: hook(sessionState([summary('a1'), summary('b1', { running: true }), summary('c1')])),
-      useSessionStatus: hook(statuses({ c1: { pendingInteraction: approval('c1') } })),
+      useSessions: hook(sessionState([summary('a1'), summary('b1', { running: true }), summary('c1'), summary('d1')])),
+      useSessionStatus: hook(statuses({ c1: { pendingInteraction: approval('c1') }, d1: { completionUnread: true } })),
       useSessionRetainInfo: () => undefined, usePanelInfo,
-      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1']), workspace('beta', ['b1']), workspace('gamma', ['c1'])])),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1']), workspace('beta', ['b1']), workspace('gamma', ['c1']), workspace('delta', ['d1'])])),
       ...allowAllAccess,
       useStore: bindSnapshotSelector(store), actions: store.actions,
       startSession: vi.fn(), open: vi.fn(),
@@ -188,22 +203,31 @@ describe('WorkspaceBrowser with tags', () => {
   const sectionNames = () => screen.queryAllByRole('group').filter(node => node.hasAttribute('data-section-key'))
     .map(node => [node.getAttribute('aria-label'), workspaceNames(node)])
   const workspaceNames = (root: HTMLElement) => within(root).queryAllByRole('treeitem')
-    .filter(row => row.getAttribute('aria-expanded') !== null).map(row => row.textContent?.match(/alpha|beta|gamma/)?.[0])
+    .filter(row => row.getAttribute('aria-expanded') !== null).map(row => row.textContent?.match(/alpha|beta|gamma|delta/)?.[0])
 
   it('offers Tag and Status beside the stock Group by choices and switches between them', async () => {
     const { runtime, store } = await mount()
     fireEvent.click(screen.getByRole('button', { name: 'View options' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /^Tag/ }))
     expect(runtime.view.getSnapshot().mode).toBe('tag')
-    expect(sectionNames()).toEqual([['Client', ['alpha', 'beta']], ['Urgent', ['alpha']], ['Untagged', ['gamma']]])
+    expect(sectionNames()).toEqual([['Client', ['alpha', 'beta']], ['Urgent', ['alpha']], ['Untagged', ['gamma', 'delta']]])
     fireEvent.click(screen.getByRole('button', { name: 'View options' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /^Status/ }))
-    expect(sectionNames()).toEqual([['Running', ['beta']], ['Waiting for you', ['gamma']], ['Idle', ['alpha']]])
+    expect(sectionNames()).toEqual([['Running', ['beta']], ['Waiting for you', ['gamma']], ['Completed', ['delta']], ['Idle', ['alpha']]])
     fireEvent.click(screen.getByRole('button', { name: 'View options' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /^In one list/ }))
     expect(runtime.view.getSnapshot().mode).toBeNull()
     expect(store.getSnapshot().groupBy).toBe('flat')
     expect(sectionNames()).toEqual([])
+  })
+
+  it('leaves a Workspace whose only unread completion is archived in Idle', async () => {
+    const { runtime } = await mount({
+      useSessions: hook(sessionState([summary('a1'), summary('d1')])),
+      useWorkspaces: hook({ ...workspaceState([workspace('alpha', ['a1']), workspace('delta', ['d1'])]), archivedSessionIds: [sid('d1')] }),
+    })
+    act(() => { runtime.setMode('status') })
+    expect(sectionNames()).toEqual([['Idle', ['alpha', 'delta']]])
   })
 
   it('folds sections and keeps Workspace rows out of drag reordering while sectioned', async () => {
@@ -213,7 +237,7 @@ describe('WorkspaceBrowser with tags', () => {
     expect(workspaceRow('alpha').map(row => row.getAttribute('draggable'))).toEqual(['false', 'false'])
     fireEvent.click(screen.getByRole('button', { name: /Client/ }))
     expect(runtime.view.getSnapshot().collapsed).toEqual({ 'tag:client': true })
-    expect(sectionNames()).toEqual([['Client', []], ['Urgent', ['alpha']], ['Untagged', ['gamma']]])
+    expect(sectionNames()).toEqual([['Client', []], ['Urgent', ['alpha']], ['Untagged', ['gamma', 'delta']]])
   })
 
   it('shows tag dots and opens the tag menu from a right-click or the row menu', async () => {

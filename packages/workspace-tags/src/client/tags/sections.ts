@@ -10,7 +10,7 @@ import type { TagState, WorkspaceTag } from '../../shared/tags.ts'
 import { runningChildCount, visiblePendingKind, type GroupNode } from '../upstream/tree.ts'
 import type { SectionMode } from './contract.ts'
 
-export type SectionKind = 'tag' | 'untagged' | 'running' | 'waiting' | 'idle'
+export type SectionKind = 'tag' | 'untagged' | 'running' | 'waiting' | 'completed' | 'idle'
 
 export interface BrowserSection {
   /** Stable across renders: `tag:<id>`, `untagged`, or `status:<kind>`. */
@@ -20,8 +20,11 @@ export interface BrowserSection {
   groups: readonly GroupNode[]
 }
 
-/** What a Workspace's Sessions are doing; a Session waiting on the user counts only as waiting. */
-export interface WorkspaceActivity { running: boolean; waiting: boolean }
+/**
+ * What a Workspace's Sessions are doing. Each Session counts once, in this
+ * order: waiting on the user, running, finished but not yet opened.
+ */
+export interface WorkspaceActivity { running: boolean; waiting: boolean; completed: boolean }
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
@@ -46,36 +49,46 @@ export function tagSections(groups: readonly GroupNode[], state: TagState): Brow
   return sections
 }
 
-/** Running first, then waiting for the user, then idle. */
+/** Running first, then waiting for the user, then finished and unread, then idle. */
 export function statusSections(groups: readonly GroupNode[], activityOf: (group: GroupNode) => WorkspaceActivity): BrowserSection[] {
   const running: GroupNode[] = []
   const waiting: GroupNode[] = []
+  const completed: GroupNode[] = []
   const idle: GroupNode[] = []
   for (const group of groups) {
     const activity = activityOf(group)
     if (activity.running) running.push(group)
     if (activity.waiting) waiting.push(group)
-    if (!activity.running && !activity.waiting) idle.push(group)
+    if (activity.completed) completed.push(group)
+    if (!activity.running && !activity.waiting && !activity.completed) idle.push(group)
   }
-  return ([['running', running], ['waiting', waiting], ['idle', idle]] as const)
+  return ([['running', running], ['waiting', waiting], ['completed', completed], ['idle', idle]] as const)
     .filter(([, members]) => members.length > 0)
     .map(([kind, members]) => ({ key: `status:${kind}`, kind, groups: members }))
 }
 
 /**
- * Activity across every member Session, including folded and archived ones,
- * with the same status sources the Session rows use.
+ * Activity across every member Session, including folded ones, with the same
+ * status sources the Session rows use. An unread completion counts only on a
+ * Session that has a row to open: archived Sessions cannot be opened and
+ * subagent Sessions have no row, so theirs could never be read.
  */
-export function workspaceActivity(sessionIds: readonly SessionId[], list: SessionListState, statuses: SessionStatusSnapshot): WorkspaceActivity {
+export function workspaceActivity(
+  sessionIds: readonly SessionId[],
+  list: SessionListState,
+  statuses: SessionStatusSnapshot,
+  archived: ReadonlySet<SessionId> = new Set(),
+): WorkspaceActivity {
   let running = false
   let waiting = false
+  let completed = false
   for (const id of sessionIds) {
     const status = statuses.get(id)
     if (visiblePendingKind(status?.pendingInteraction?.kind) !== undefined) waiting = true
     else if ((status?.running ?? list.byId[id]?.running) === true || runningChildCount(list, id, statuses) > 0) running = true
-    if (running && waiting) break
+    else if (status?.completionUnread === true && !archived.has(id) && list.byId[id]?.origin !== 'subagent') completed = true
   }
-  return { running, waiting }
+  return { running, waiting, completed }
 }
 
 export function browserSections(

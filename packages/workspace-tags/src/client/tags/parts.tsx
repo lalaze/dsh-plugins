@@ -2,7 +2,10 @@
 import { useSyncExternalStore, type ReactNode } from 'react'
 import clsx from 'clsx'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
-import { IconGaugeOutlineRegular, IconTriangleRightFillRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import {
+  IconCheckCircleOutlineRegular, IconDarkOutlineRegular, IconPlayOutlineRegular, IconTriangleRightFillRegular,
+  IconWarningOutlineRegular,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import { emptyTagState, type TagColor, type TagState, type WorkspaceTag } from '../../shared/tags.ts'
 import type { TagRuntime, TagSnapshot, TagViewState } from './contract.ts'
 import type { BrowserSection } from './sections.ts'
@@ -54,7 +57,19 @@ export function workspaceTags(state: TagState, workspaceId: string | undefined):
   return (state.assignments[workspaceId] ?? []).flatMap(id => byId.get(id) ?? [])
 }
 
-const statusLabel = { running: 'tags.section.running', waiting: 'tags.section.waiting', idle: 'tags.section.idle' } as const
+const statusLabel = {
+  running: 'tags.section.running', waiting: 'tags.section.waiting', completed: 'tags.section.completed', idle: 'tags.section.idle',
+} as const
+
+/** A glyph per status, so the sections differ by shape and not only by hue. */
+const statusIcon = {
+  running: IconPlayOutlineRegular, waiting: IconWarningOutlineRegular, completed: IconCheckCircleOutlineRegular, idle: IconDarkOutlineRegular,
+} as const
+
+function StatusIcon({ kind }: { kind: keyof typeof statusIcon }) {
+  const Icon = statusIcon[kind]
+  return <Icon size={16} className={css[kind]} />
+}
 
 /** One Tag or Status section: a fold header over its Workspace groups. */
 export function SectionBlock({ section, collapsed, onToggle, t, children }: {
@@ -71,12 +86,12 @@ export function SectionBlock({ section, collapsed, onToggle, t, children }: {
     ? <TagDot color={section.tag!.color} />
     : section.kind === 'untagged'
       ? <span className={clsx(css.dot, css.hollow)} aria-hidden="true" />
-      : <span className={clsx(css.statusIcon, css[section.kind])} aria-hidden="true"><IconGaugeOutlineRegular size={14} /></span>
+      : <StatusIcon kind={section.kind} />
   return (
     <div className={css.section} role="group" aria-label={label} data-section-key={section.key}>
       <button type="button" className={css.sectionHeader} aria-expanded={!collapsed} onClick={onToggle}>
         <IconTriangleRightFillRegular className={clsx(css.sectionArrow, !collapsed && css.sectionArrowOpen)} />
-        {marker}
+        <span className={css.sectionMarker} aria-hidden="true">{marker}</span>
         <span className={css.sectionLabel}>{label}</span>
         <span className={css.sectionCount}>{section.groups.length}</span>
       </button>

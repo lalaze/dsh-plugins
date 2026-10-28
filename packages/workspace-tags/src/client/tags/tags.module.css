@@ -82,8 +82,8 @@
 
 .sectionArrow {
   flex: none;
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
   transition: transform 150ms var(--ds-ease-in-out, ease);
 }
 
@@ -104,13 +104,25 @@
   font-variant-numeric: tabular-nums;
 }
 
-.statusIcon {
+/* The Workspace rows' 16px icon slot, so tag dots and status icons line up. */
+.sectionMarker {
   display: inline-flex;
   flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.sectionMarker .dot {
+  width: 10px;
+  height: 10px;
 }
 
 .running { color: var(--dsw-alias-state-business-primary); }
 .waiting { color: var(--dsw-alias-state-warn-primary); }
+/* The Session rows' green "done" dot. */
+.completed { color: var(--dsw-alias-state-success-primary); }
 .idle { color: var(--dsw-alias-label-tertiary); }
 
 /* Zero-size anchor: the tag menu places itself from the request's rect. */
