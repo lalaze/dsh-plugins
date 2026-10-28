@@ -17,6 +17,15 @@ export class RemoteAgentsService {
         this.factory = factory ?? (host => new SshBackend(host, store));
     }
     async sshConfig() { return this.readSshConfig(); }
+    /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
+    async withWorkspace(hostId, verify, action) {
+        return this.use(hostId, async (backend) => {
+            await verify();
+            if (!backend.workspaceFiles)
+                throw new RemoteError('Remote workspace files are unavailable on this host', 501);
+            return action(backend.workspaceFiles);
+        });
+    }
     hosts() {
         return this.store.hosts().map(({ password, catalog, ...host }) => {
             const enabled = enabledProvidersOf(host), providers = catalog?.providers.filter(p => enabled.includes(p.id)) ?? [];
@@ -301,7 +310,7 @@ export class RemoteAgentsService {
             if (existing) {
                 if (JSON.stringify(taskInput(existing)) !== JSON.stringify(request))
                     throw new RemoteError('This request ID belongs to a different agent', 409);
-                return existing.agentId ? this.summary(existing.id) : this.launch(existing, options.signal);
+                return existing.agentId ? this.summary(existing.id) : this.launch(existing, options.signal, options.beforeStart);
             }
             return this.use(request.hostId, async (backend, host) => {
                 if (!enabledProvidersOf(host).includes(request.provider))
@@ -321,6 +330,7 @@ export class RemoteAgentsService {
                     throw new RemoteError('The selected thinking level is unavailable', 409);
                 if (request.serviceTier && !model.serviceTiers?.some(t => t.id === request.serviceTier))
                     throw new RemoteError('The selected speed is unavailable', 409);
+                await options.beforeStart?.();
                 const now = new Date().toISOString();
                 const task = { ...request, serverId: host.serverId, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), state: 'creating' };
                 // Persist the exact execution intent and idempotency key before any remote mutation.
@@ -331,7 +341,7 @@ export class RemoteAgentsService {
                         throw new RemoteError('The remote agent registry is full. Delete archived agents first.');
                     state.tasks.push(task);
                 });
-                return this.launch(task, options.signal);
+                return this.launch(task, options.signal, options.beforeStart);
             });
         });
     }
@@ -347,9 +357,10 @@ export class RemoteAgentsService {
             return this.summary(id);
         }, task.serverId));
     }
-    async launch(task, signal) {
+    async launch(task, signal, beforeStart) {
         try {
             await this.use(task.hostId, async (backend) => {
+                await beforeStart?.();
                 const agent = await backend.create(task, signal);
                 if (agent.provider !== task.provider)
                     throw new Error('Created agent provider does not match the request');

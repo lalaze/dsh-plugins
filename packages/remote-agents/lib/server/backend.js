@@ -10,6 +10,7 @@ import { RelayClient, RelayLink } from './relay.js';
 import { readAccountUsage } from './usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { WorkspaceFiles } from './workspace-files.js';
 export { connectionInput } from './ssh.js';
 export const CLI_PROVIDERS = [
     { id: 'claude', label: PROVIDER_LABELS.claude, command: 'claude', protocol: 'claude', args: [] },
@@ -41,6 +42,7 @@ export function codexServiceTiers(model) {
 export class SshBackend {
     host;
     store;
+    workspaceFiles;
     transport;
     closed = false;
     probes = new Set();
@@ -61,6 +63,7 @@ export class SshBackend {
         this.host = host;
         this.store = store;
         this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection));
+        this.workspaceFiles = new WorkspaceFiles(this.transport);
     }
     assertOpen() { if (this.closed)
         throw new Error('SSH agent backend has stopped'); }

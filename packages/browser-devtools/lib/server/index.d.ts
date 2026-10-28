@@ -1,2 +1,4 @@
+import type { Context } from '@deepseek-ai/cordis';
 export declare const name = "dsh-browser-devtools";
-export declare function apply(): void;
+export declare const inject: string[];
+export declare function apply(ctx: Context): void;

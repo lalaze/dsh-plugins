@@ -96,6 +96,40 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
 `;
         return this.spawnRemote(command);
     }
+    async transfer(script, options) {
+        options.signal?.throwIfAborted();
+        const child = this.spawn(script), chunks = [];
+        let size = 0, stderr = '', failure;
+        const stop = () => child.kill('SIGTERM');
+        const timer = setTimeout(() => { failure = new Error('SSH transfer timed out'); stop(); }, 300_000);
+        options.signal?.addEventListener('abort', stop, { once: true });
+        child.stdout.on('data', (data) => { size += data.length; if (size > options.maxBytes) {
+            failure = new Error('SSH transfer exceeds its size limit');
+            stop();
+        }
+        else
+            chunks.push(data); });
+        child.stderr.on('data', data => { stderr = (stderr + data).slice(-4000); });
+        const completed = new Promise((accept, reject) => {
+            child.on('error', reject);
+            child.on('close', code => failure ? reject(failure) : code === 0 ? accept() : reject(new Error(stderr.trim() || `SSH transfer failed (${code})`)));
+        });
+        try {
+            await Promise.all([completed, pipeline(Readable.from(options.input ?? []), child.stdin, { signal: options.signal })]);
+            options.signal?.throwIfAborted();
+            return Buffer.concat(chunks);
+        }
+        catch (error) {
+            stop();
+            await completed.catch(() => { });
+            options.signal?.throwIfAborted();
+            throw error;
+        }
+        finally {
+            clearTimeout(timer);
+            options.signal?.removeEventListener('abort', stop);
+        }
+    }
     /** Runs a POSIX shell command on the SSH host. */
     spawnRemote(command) {
         return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });

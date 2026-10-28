@@ -1,7 +1,7 @@
 {
   "name": "dsh-browser-devtools",
-  "version": "0.2.0",
-  "description": "A Chrome-style debugger docked under DSH Desktop sidebar browser tabs",
+  "version": "0.3.0",
+  "description": "Page debugger for DSH Desktop with docked and separate Chrome/Edge windows",
   "type": "module",
   "main": "lib/server/index.js",
   "types": "lib/server/index.d.ts",
@@ -45,6 +45,18 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-sidebar-browser"
       ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
     }
   }
 }

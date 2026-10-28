@@ -1,9 +1,11 @@
 import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, Task, TimelinePage } from './domain.js';
 import { type SshTransport } from './ssh.js';
 import type { Store } from './store.js';
+import { WorkspaceFiles } from './workspace-files.js';
 export { connectionInput } from './ssh.js';
 /** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
 export interface Backend {
+    workspaceFiles?: WorkspaceFiles;
     connect(): Promise<string>;
     close(): Promise<void>;
     homeDirectory(): Promise<string>;
@@ -66,6 +68,7 @@ export declare function codexServiceTiers(model: Record<string, unknown>): Choic
 export declare class SshBackend implements Backend {
     private readonly host;
     private readonly store;
+    readonly workspaceFiles: WorkspaceFiles;
     private readonly transport;
     private closed;
     private readonly probes;

@@ -25,6 +25,12 @@ export interface SshTransport {
     upload?(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
     /** Commands run in a POSIX shell where a detached relay can outlive the connection. */
     readonly relays?: boolean;
+    /** Bounded binary transfer through the same verified SSH connection settings. */
+    transfer?(script: string, options: {
+        input?: AsyncIterable<Uint8Array>;
+        maxBytes: number;
+        signal?: AbortSignal;
+    }): Promise<Buffer>;
 }
 export declare class OpenSshTransport implements SshTransport {
     private readonly binary;
@@ -32,6 +38,11 @@ export declare class OpenSshTransport implements SshTransport {
     private readonly args;
     constructor(connection: string, binary?: string);
     private spawn;
+    transfer(script: string, options: {
+        input?: AsyncIterable<Uint8Array>;
+        maxBytes: number;
+        signal?: AbortSignal;
+    }): Promise<Buffer>;
     /** Runs a POSIX shell command on the SSH host. */
     protected spawnRemote(command: string): ChildProcessWithoutNullStreams;
     exec(script: string, timeout?: number, options?: {

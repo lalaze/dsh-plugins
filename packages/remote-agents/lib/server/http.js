@@ -1,6 +1,7 @@
-import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError } from './domain.js';
+import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './domain.js';
 import { ChatProjects } from './chat-projects.js';
-export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces) {
+import { workspaceAction } from './workspace-http.js';
+export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
         try {
@@ -10,10 +11,10 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 return new Response(null, { status: 405, headers: { ...headers, Allow: 'GET, POST' } });
             if (request.headers.get('X-DSH-Remote-Agents') !== '1' || !request.headers.get('content-type')?.startsWith('application/json'))
                 throw new RemoteError('Use the remote agents client to submit requests', 403);
-            if (Number(request.headers.get('content-length')) > 256_000)
+            if (Number(request.headers.get('content-length')) > 2_000_000)
                 throw new RemoteError('Request is too large', 413);
             const text = await request.text();
-            if (Buffer.byteLength(text) > 256_000)
+            if (Buffer.byteLength(text) > 2_000_000)
                 throw new RemoteError('Request is too large', 413);
             let raw;
             try {
@@ -26,6 +27,21 @@ export function createHandler(service, projects = new ChatProjects(service), wor
             const hostId = () => identifier(input.hostId), agentId = () => identifier(input.agentId);
             let result;
             switch (action) {
+                case 'legacyMachines':
+                case 'importLegacyMachine':
+                case 'workspaceTarget':
+                case 'workspaceFiles':
+                case 'workspaceSync':
+                case 'workspaceTunnels':
+                case 'addWorkspaceTunnel':
+                case 'startWorkspaceTunnel':
+                case 'stopWorkspaceTunnel':
+                case 'removeWorkspaceTunnel': {
+                    if (!features)
+                        throw new RemoteError('Remote workspaces are unavailable', 501);
+                    result = await workspaceAction(features, action, input, request.signal);
+                    break;
+                }
                 case 'workspaceModels':
                     result = workspace ? await workspace(field(input.sessionId, 'session ID', 256), request.signal) : { hostIds: [] };
                     break;
@@ -70,9 +86,12 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'addHost':
                     result = await service.addHost(input.host, { discoverModels: true });
                     break;
-                case 'removeHost':
-                    result = await service.removeHost(hostId(), { deleteAgents: input.deleteAgents === true });
+                case 'removeHost': {
+                    const id = hostId();
+                    result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true });
+                    await features?.tunnels.removeHost(id);
                     break;
+                }
                 case 'connect':
                     result = await service.connect(hostId());
                     break;
@@ -91,6 +110,22 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'create':
                     result = await service.create(input.agent, input.title === undefined ? {} : { title: field(input.title, 'title', 100) });
                     break;
+                case 'createWorkspaceSession': {
+                    if (!workspace)
+                        throw new RemoteError('Remote workspaces are unavailable', 501);
+                    const sessionId = field(input.sessionId, 'session ID', 256), agent = taskInput(input.agent);
+                    const beforeStart = async () => {
+                        request.signal.throwIfAborted();
+                        const placement = await workspace(sessionId, request.signal);
+                        if (!placement.hostIds.includes(agent.hostId) || !placement.cwd || placement.cwd !== agent.cwd) {
+                            throw new RemoteError('This remote model does not belong to the current workspace machine. Select a matching workspace and model.', 409);
+                        }
+                    };
+                    await beforeStart();
+                    result = await service.create(agent, { signal: request.signal, beforeStart,
+                        ...(input.title === undefined ? {} : { title: field(input.title, 'title', 100) }) });
+                    break;
+                }
                 case 'agent': {
                     if (input.direction !== undefined && input.direction !== 'before' && input.direction !== 'after')
                         throw new RemoteError('Invalid timeline direction');

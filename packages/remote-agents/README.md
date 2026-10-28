@@ -33,8 +33,28 @@ Model catalogs are saved per machine on the DSH server and shared between client
 Use DSH's **Add workspace** to work on a directory of a saved machine. With machines saved, it opens a dialog with two tabs: **This computer** uses the system folder picker as before, and **Remote machine** browses the selected machine's directories over SSH. Choose a folder and **Use this folder** to add it; the remote models of that machine are then available in its conversations. Without saved machines, **Add workspace** opens the system folder picker directly.
 
 - The dialog remembers the last tab and each machine's last folder. Paths may start with `~/`. Hidden folders are listed after **Show hidden folders**.
-- Files stay on the remote machine. DSH records the workspace as an empty local folder under `$DSH_HOME/remote-workspaces/`, in the same format as the dsh-remote plugin, so workspaces created by either plugin keep working. DSH's own Files panel and terminal show that local folder, not the remote one.
+- Files stay on the remote machine. DSH records the workspace as a local anchor under `$DSH_HOME/remote-workspaces/`, in the same format as the dsh-remote plugin. Use the **Remote workspace** panel for live files and select **Remote workspace** in the native terminal's shell menu for an interactive SSH terminal. The default local Files view and local shells still refer to the anchor.
 - If dsh-remote is also installed, its **Add workspace** dialog takes precedence.
+
+### Integrated workspace tools
+
+Open **Settings → Remote agents → Remote workspace**, or **Remote workspace** in the native right sidebar. The panel follows the current conversation's verified machine and directory. No separate `dsh-remote` installation or second machine registry is required.
+
+- **Files:** browse directories, create files/folders, search text, edit UTF-8 files, rename/delete files, and upload/download binary files. Saving checks the file's SHA-256 revision and refuses stale edits; **Reload file** fetches the latest version. The editor limit is 256 KiB and the transfer limit is 50 MiB per file. File operations stay inside the verified remote workspace and reject symlinks that escape it. Native session file links open the remote editor after the active workspace has been verified.
+- **Commands and terminal:** run a command in the workspace with separate stdout/stderr, exit status, a 30-second timeout and bounded output. For interactive programs or longer jobs, choose **Remote workspace** in the native terminal's shell menu. Commands and terminals use the remote account's normal privileges. A missing or invalid binding fails explicitly.
+- **Sync:** preview **Pull remote → local mirror** or **Push local mirror → remote**, then **Apply preview**. A three-way content comparison preserves files changed on both sides as conflicts. The preview lists copies and deletions; changes to that plan require another preview. Git, dependency/build directories, plugin metadata and symbolic links are skipped. Sync is explicit and does not run while an agent edits files unless you request it.
+- **Tunnels:** save local or reverse SSH forwards and start/stop/remove them. Local forwards bind to `0.0.0.0`; **Open** uses this machine's Tailscale address. Reverse listeners use remote loopback. Definitions survive restart but must be started again. Closing DSH stops tunnels without stopping persistent coding agents.
+- **Remote DSH:** start an isolated remote `dsh web` instance, or enter an existing remote loopback login URL, then connect over SSH and open it locally. Starting requires a compatible `dsh` on the remote login PATH; this feature does not install DSH. Managed data lives under `~/.dsh-remote-agents/web-ui/<port>/home`. **Stop managed instance** stops only the process recorded for this workspace. Closing its tunnel leaves the remote instance running. Login tokens are not saved in tunnel definitions.
+
+Ordinary DSH models also receive a **`remote_workspace`** tool for session-scoped file access and commands, plus guidance to read remote `AGENTS.md`. File mutations and commands request native DSH approval. Remote CLI models continue using their own native tools and approval modes.
+
+### Moving from dsh-remote
+
+In **Settings → Remote agents**, expand **Import machines from dsh-remote**. Import reuses SSH aliases, skips already registered endpoints, starts with no CLIs enabled, and leaves the old registry, current-machine selection and workspace metadata untouched. Enable the CLIs you need afterward. Existing compatible workspaces continue to work.
+
+This implementation supports **Linux/macOS remote hosts with Node.js 18+ and system OpenSSH key/SSH-agent authentication**. Passwords, keychain secrets and native-only authentication/proxy settings are not copied. Move such connection settings into `~/.ssh/config` and load encrypted keys into your SSH agent first. Native Windows remote workspaces, password/OTP authentication and automatic remote DSH installation are not included.
+
+After importing, use **Test connection** and verify live files, terminal and models before uninstalling `dsh-remote`. Keep `$DSH_HOME/remote-workspaces/` and its metadata. The plugin can coexist with `dsh-remote` during migration; uninstalling the old plugin is a separate action.
 
 ## Unified remote sessions
 
@@ -46,7 +66,7 @@ Choose **Permission mode** when creating a session or while an existing session 
 
 Native DSH approvals remain one-time grants. When Claude supplies matching allow-rule suggestions, its pending request in this panel also offers session or project approval. Review **Details** before selecting one: project approval sends only those native rules to the remote `.claude/settings.local.json`, so matching requests can be approved in future sessions. The plugin does not create global allow rules or save a one-time approval as a lasting grant. Requests without a suitable suggestion continue to offer one-time approval.
 
-- **Create:** choose a saved machine, CLI and model, then describe the task. The current DSH workspace path is used on that machine.
+- **Create:** select a remote DSH workspace, then choose its machine's CLI and model and describe the task. The session uses the verified remote directory, translating local workspace anchors. Creation rechecks the workspace so a changed directory or machine cannot use a stale selection.
 - **History and follow-ups:** read streaming output, expandable reasoning and tool details, and load earlier history. Send follow-ups to background agents here; use **Open in main chat** for bound conversations so their native DSH history stays consistent.
 - **Approvals:** the sidebar counts sessions needing attention. Dismissing a native DSH approval keeps the request pending; respond in the session panel using the CLI's actual permission choices or question form. **Stop** explicitly interrupts the turn.
 - **Manage:** rename remote records, archive and restore them. Use **Archive listed history** to archive the current search results in History. Each session is checked again before archiving so newly active sessions and pending approvals are skipped. Archiving preserves history and ends the CLI process. These actions affect the remote record, not the native DSH conversation's title or archive state.
@@ -115,6 +135,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.26:** Adds the integrated **Remote workspace** panel (files, commands, sync, tunnels and remote DSH) and a `remote_workspace` tool for DSH models; see [Integrated workspace tools](#integrated-workspace-tools). Machines saved in dsh-remote can be imported from **Settings → Remote agents**. Restart DSH and refresh the client after updating.
 
 **Upgrading from 0.2.25:** Provider groups in the model menu fold again in DSH builds whose model rows carry no model ids, such as the Desktop app: those groups remember their folding by provider name. Groups that already folded keep their saved choices. Refresh the client after updating.
 

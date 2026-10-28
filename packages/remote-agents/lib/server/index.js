@@ -10,6 +10,13 @@ import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import { WorkspaceAccess } from './workspace-access.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { remoteUsageRecord } from './usage.js';
+import { WorkspaceService } from './workspace-service.js';
+import { WorkspaceTunnels } from './workspace-tunnels.js';
+import { WorkspaceMigration } from './workspace-migration.js';
+import { workspaceTransferHandler } from './workspace-http.js';
+import { installWorkspaceTerminal } from './workspace-terminal.js';
+import { workspaceTools } from './workspace-tools.js';
+import { dshHome, under } from './workspace-access.js';
 export const name = 'dsh-remote-agents';
 export const inject = ['connection'];
 const stateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', name);
@@ -32,8 +39,16 @@ export async function apply(ctx, config = {}) {
         const activated = live();
         return activated ? activated.header.cwd : stored?.cwd;
     };
+    const placement = async (id, signal) => {
+        const cwd = await sessionCwd(id), value = await workspace.resolve(cwd, signal);
+        return cwd === await sessionCwd(id) ? value : { hostIds: [] };
+    };
+    const files = new WorkspaceService(service, placement, sessionCwd);
+    const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
+    await tunnels.open();
+    const features = { files, tunnels, migration: new WorkspaceMigration(service) };
     // Close the store last: a reloaded plugin's new instance owns the state from then on.
-    ctx.effect(() => async () => { await service.close(); await store.close(); });
+    ctx.effect(() => async () => { await tunnels.close(); await service.close(); await store.close(); });
     // Every finished turn is announced for usage statistics. Main chat does not report usage to DSH: a CLI turn's total
     // spans many model calls and would misstate the conversation's context size.
     store.usageListeners.add((taskId, usage, turn) => {
@@ -43,10 +58,26 @@ export async function apply(ctx, config = {}) {
     });
     // Persistent CLIs kept running while DSH was away; reattach and catch up in the background.
     void service.resume();
-    ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, async (id, signal) => {
-            const cwd = await sessionCwd(id), placement = await workspace.resolve(cwd, signal);
-            return cwd === await sessionCwd(id) ? placement : { hostIds: [] };
-        }, workspaces) });
+    ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, placement, workspaces, features) });
+    ctx.connection.fetch.register({ path: '/api/remote-agents/files', methods: ['GET', 'POST'], requestBody: 'streaming', fetch: workspaceTransferHandler(files) });
+    ctx.inject(['terminalController'], scoped => {
+        let disposed = false, cleanup;
+        void installWorkspaceTerminal(scoped.get('terminalController'), join(store.directory, 'terminal'), join(store.directory, 'state.json'))
+            .then(dispose => { if (disposed)
+            dispose();
+        else
+            cleanup = dispose; })
+            .catch(error => scoped.get('logger')?.warn?.(`Remote workspace terminal unavailable: ${String(error)}`));
+        scoped.effect(() => () => { disposed = true; cleanup?.(); });
+    });
+    ctx.inject(['systemPrompt'], scoped => {
+        scoped.get('systemPrompt').section({ name: 'remote-agents-workspace', order: 88,
+            text: ({ agent }) => {
+                const cwd = agent?.session?.header?.cwd;
+                return cwd && under(join(dshHome(), 'remote-workspaces'), cwd)
+                    ? 'Remote workspace: the local directory is an anchor, not the project files. Use remote_workspace to list, read, search, edit and run commands in this conversation’s verified remote directory. Read remote AGENTS.md before making changes. Local filesystem and shell tools act on the DSH host; do not use them for remote project work.' : '';
+            } });
+    });
     ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
         const host = scoped;
         const steps = new Map();
@@ -98,6 +129,8 @@ export async function apply(ctx, config = {}) {
     ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {
         const host = scoped;
         for (const tool of delegationTools(host, service))
+            host.tools.register(tool);
+        for (const tool of workspaceTools(files, host))
             host.tools.register(tool);
     });
 }

@@ -1,6 +1,7 @@
 import { type BackendFactory } from './backend.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
+import type { WorkspaceFiles } from './workspace-files.js';
 import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type Task, type UsageReport } from './domain.js';
 export interface UsageOptions {
     /** The conversation's selected route; picks its CLI when the conversation used several. */
@@ -19,6 +20,8 @@ export interface CreateOptions {
     origin?: Task['origin'];
     chat?: Task['chat'];
     signal?: AbortSignal;
+    /** Recheck a workspace-bound request after discovery and immediately before CLI execution. */
+    beforeStart?(): Promise<void>;
 }
 export interface SendOptions {
     /** Interrupt a running turn. When false, a working agent rejects the message. */
@@ -35,6 +38,8 @@ export declare class RemoteAgentsService {
     private readonly factory;
     constructor(store: Store, factory?: BackendFactory, readSshConfig?: typeof readSshConfigHosts);
     sshConfig(): Promise<import("./domain.js").SshConfigHosts>;
+    /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
+    withWorkspace<T>(hostId: string, verify: () => Promise<void>, action: (files: WorkspaceFiles) => Promise<T>): Promise<T>;
     hosts(): Host[];
     /** Closed for a plugin reload or DSH shutdown; remote work must not be stopped then. */
     get stopped(): boolean;
