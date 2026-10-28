@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { quote } from './ssh.js';
+import { TERMINAL_LAUNCHER } from './workspace-domain.js';
 
 /**
  * Native terminal keeps its PTY, resizing and keyboard handling; the selected shell runs SSH.
@@ -10,7 +11,7 @@ export async function installWorkspaceTerminal(controller: { config?: { shellCan
   const candidates = controller.config?.shellCandidates;
   if (!Array.isArray(candidates)) return { dispose: () => {} };
   await mkdir(directory, { recursive: true, mode: 0o700 });
-  const script = join(directory, 'remote-workspace.mjs'), launcher = join(directory, process.platform === 'win32' ? 'Remote workspace.cmd' : 'Remote workspace');
+  const script = join(directory, 'remote-workspace.mjs'), launcher = join(directory, process.platform === 'win32' ? `${TERMINAL_LAUNCHER}.cmd` : TERMINAL_LAUNCHER);
   const source = `import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';

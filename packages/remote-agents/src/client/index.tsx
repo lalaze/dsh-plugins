@@ -18,6 +18,7 @@ import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDire
 import { symbols } from '@deepseek-ai/cordis';
 import { WorkspacePanel } from './workspace.js';
 import { installWorkspaceSidebar } from './workspace-sidebar.js';
+import { installShellMenu } from './shell-menu.js';
 
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -83,6 +84,7 @@ export function apply(ctx: Client): void {
   ctx.effect(installCustomModelLabels);
   ctx.effect(installUsageStyles);
   installWorkspaceSidebar(ctx);
+  ctx.effect(installShellMenu);
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     // Read through the service itself: this plugin's proxy would resolve dependencies from our context.
     const service = (scoped as unknown as { modelDirectories: ModelDirectories }).modelDirectories;
