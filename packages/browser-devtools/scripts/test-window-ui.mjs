@@ -68,7 +68,7 @@ try {
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
   await browser('click', '[aria-label="关闭网页调试器"]');
   await until(() => closed === 1 && !owner.opened);
-  assert.equal(guest.window[AGENT_KEY], undefined);
+  assert.ok(guest.window[AGENT_KEY], 'the page keeps recording after the window closes');
   console.log('Chrome UI passed: DOM/styles, $0, console, network and request details, theme/locale, resize and close.');
   await browser('close');
 

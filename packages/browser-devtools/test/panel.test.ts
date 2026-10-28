@@ -2,7 +2,7 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
-import { AGENT_KEY } from '../src/client/guest.js';
+import { AGENT_KEY, commandScript, type Poll } from '../src/client/guest.js';
 import { category, DebuggerPanel, timingPhases, type PanelView } from '../src/client/panel.js';
 
 const PAGE = `<!doctype html><html><head><style>.card{color:green}</style></head><body><main class="card">Card</main><p>Text</p></body></html>`;
@@ -81,14 +81,18 @@ test('page console output appears in the Console tab and repeats collapse into a
   panel.close();
 });
 
-test('close removes the panel, detaches the page agent and reports it', async t => {
+test('close removes the panel and stops picking, but the page agent keeps recording', async t => {
   const { guest, panel, until, closed, text } = setup(t);
   await panel.open();
   await until(() => text().includes('<main'), 'the tree');
-  assert.ok((guest.window as unknown as Record<string, unknown>)[AGENT_KEY]);
+  const poll = () => guest.window.eval(commandScript('poll')) as Poll;
+  panel.root.querySelector<HTMLButtonElement>('[aria-label="Select an element in the page to inspect it"]')!.click();
+  await until(() => poll().picking, 'picking to start');
   panel.root.querySelector<HTMLButtonElement>('[aria-label="Close page debugger"]')!.click();
   assert.equal(panel.root.isConnected, false); assert.equal(closed(), 1); assert.equal(panel.opened, false);
-  await until(() => (guest.window as unknown as Record<string, unknown>)[AGENT_KEY] === undefined, 'the agent to detach');
+  await until(() => !poll().picking, 'picking to stop');
+  assert.ok((guest.window as unknown as Record<string, unknown>)[AGENT_KEY], 'the agent stays for the next window');
+  assert.equal(guest.window.document.querySelector('dsh-browser-devtools-overlay'), null);
 });
 
 test('a non-web page shows a message', async t => {
@@ -135,7 +139,7 @@ test('a resource known only from timing says what was not recorded', async t => 
   (panel as unknown as { network: unknown[] }).network = [{ seq: 99, url: 'https://cdn.test/app.js', method: 'GET', type: 'script', status: 0, failed: false, size: -1, cached: false, start: 1, duration: 2 }];
   (panel as unknown as { renderNetwork(): void }).renderNetwork();
   click(panel.root.querySelector('tr[data-seq="99"] td'));
-  await until(() => text().includes('Headers are only recorded'), 'the missing-details note');
+  await until(() => text().includes('Headers are only recorded for Fetch and XHR requests made after the page finished loading.'), 'the missing-details note');
   click(tab('Response'));
   assert.ok(text().includes('Response bodies are only recorded'));
 });

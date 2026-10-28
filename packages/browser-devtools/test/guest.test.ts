@@ -195,3 +195,22 @@ test('a page without TextDecoder still records the response text', async () => {
   const [entry] = command<Poll>('poll')!.network;
   assert.equal((await settled(() => command<RequestDetail>('request', { seq: entry.seq }))).body?.text, 'plain text');
 });
+
+test('a long backlog is polled in bounded batches, and release stops picking without detaching', () => {
+  const { window, run, command } = page();
+  run(agentScript());
+  window.eval(`for (let i = 0; i < 400; i++) console.log(String(i).padEnd(1000, '.'))`);
+  let since = 0, polls = 0, seen = 0;
+  for (;;) {
+    const { logs } = command<Poll>('poll', { log: since })!;
+    if (!logs.length) break;
+    assert.ok(JSON.stringify(logs).length < 200_000, 'each batch stays well under the reply limit');
+    seen += logs.length; since = logs.at(-1)!.seq; polls++;
+  }
+  assert.equal(seen, 400); assert.ok(polls > 1);
+  command('pick', { on: true });
+  assert.equal(command<Poll>('poll')!.picking, true);
+  assert.equal(command('release'), true);
+  assert.equal(command<Poll>('poll')!.picking, false);
+  assert.ok((window as unknown as Record<string, unknown>)[AGENT_KEY], 'the agent keeps recording');
+});

@@ -1,4 +1,4 @@
-import { agentScript, commandScript, detachScript, evaluateScript, type LogEntry, type NetworkEntry, type NodeSummary, type Poll, type Preview, type RequestDetail, type Styles, type Timing } from './guest.js';
+import { agentScript, commandScript, evaluateScript, type LogEntry, type NetworkEntry, type NodeSummary, type Poll, type Preview, releaseScript, type RequestDetail, type Styles, type Timing } from './guest.js';
 import { ui } from './i18n.js';
 
 /** The part of Electron's webview tag the panel uses. */
@@ -264,7 +264,7 @@ export class DebuggerPanel {
     clearInterval(this.timer); this.timer = undefined;
     this.view.removeEventListener('did-navigate', this.navigated);
     this.view.removeEventListener('dom-ready', this.loaded);
-    void this.exec(detachScript());
+    void this.exec(releaseScript());
     this.root.remove();
     this.reset(); this.status = 'idle';
     this.closed();
@@ -827,7 +827,7 @@ export class DebuggerPanel {
       this.pair(ui('Status Code'), h(doc, 'span', {}, entry.status || entry.failed ? h(doc, 'span', { class: 'dsh-bdt-dot', 'data-tone': tone }) : null, status)),
       detail?.responseUrl ? this.pair(ui('Response URL'), detail.responseUrl) : null,
     ]);
-    if (!detail?.requestHeaders) return [general, this.note(ui('Headers are only recorded for Fetch and XHR requests made while the debugger is connected.'))];
+    if (!detail?.requestHeaders) return [general, this.note(ui('Headers are only recorded for Fetch and XHR requests made after the page finished loading.'))];
     const rows = (list: Array<[string, string]>) => [...list].sort((a, b) => a[0].localeCompare(b[0])).map(([name, value]) => this.pair(name, value));
     let crossOrigin = false;
     try { crossOrigin = new URL(entry.url).origin !== new URL(this.view.getURL()).origin; } catch { /* Not a URL. */ }
@@ -867,7 +867,7 @@ export class DebuggerPanel {
         : detail?.bodyNote === 'binary' ? ui('Only text responses are shown.')
         : detail?.bodyNote === 'dropped' ? ui('This response was dropped to save memory.')
         : detail?.bodyNote === 'empty' || body ? ui('This request has no response data available.')
-        : ui('Response bodies are only recorded for Fetch and XHR requests made while the debugger is connected.');
+        : ui('Response bodies are only recorded for Fetch and XHR requests made after the page finished loading.');
       return [this.note(entry.failed && !detail?.error ? ui('This request has no response data available.') : reason)];
     }
     const notes = [

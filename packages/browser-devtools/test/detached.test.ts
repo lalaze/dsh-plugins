@@ -61,7 +61,7 @@ test('separate window: Elements, $0, console, network, navigation, theme, locale
   locale = 'en'; await until(() => text().includes('Console'), 'locale restored');
   doc.querySelector<HTMLButtonElement>('[aria-label="Close page debugger"]')!.click();
   await until(() => !owner.opened && closed === 1, 'window close reflected in DSH');
-  assert.equal((guest.window as unknown as Record<string, unknown>)[AGENT_KEY], undefined);
+  assert.ok((guest.window as unknown as Record<string, unknown>)[AGENT_KEY], 'the page keeps recording for the next window');
 });
 
 test('navigation while exchange is in flight discards the old command before executing it', async t => {

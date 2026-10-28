@@ -1,7 +1,7 @@
 /** Global the page agent installs itself under, inside the inspected page. */
 export const AGENT_KEY = '__DSH_BROWSER_DEVTOOLS__';
 /** Bump when the agent's protocol changes, so a page keeps no stale agent. */
-export const AGENT_VERSION = 3;
+export const AGENT_VERSION = 4;
 
 export interface LogEntry { seq: number; level: 'log' | 'info' | 'warn' | 'error' | 'debug'; text: string; time: number }
 export interface NetworkEntry {
@@ -508,6 +508,19 @@ export function guestAgent(key: string, version: number): boolean {
     };
   };
 
+  // Entries recorded since the page loaded can outgrow one reply; hand them out in bounded batches.
+  const after = (list: any[], since: number, budget: number) => {
+    const batch: any[] = [];
+    let size = 0;
+    for (const entry of list) {
+      if (entry.seq <= since) continue;
+      size += (entry.text?.length ?? 0) + (entry.url?.length ?? 0) + 100;
+      if (batch.length && (size > budget || batch.length >= 300)) break;
+      batch.push(entry);
+    }
+    return batch;
+  };
+
   page[key] = {
     version,
     selected: () => selected,
@@ -515,7 +528,7 @@ export function guestAgent(key: string, version: number): boolean {
     detach() { for (const undo of restore.splice(0).reverse()) { try { undo(); } catch { /* Page replaced it. */ } } if (page[key]?.version === version) delete page[key]; },
     run(command: string, arg: any): unknown {
       if (command === 'poll') {
-        const result: Poll = { logs: logs.filter(e => e.seq > (arg?.log ?? 0)), network: network.filter(e => e.seq > (arg?.network ?? 0)), picking, ...(picked ? { picked } : {}) };
+        const result: Poll = { logs: after(logs, arg?.log ?? 0, 150_000), network: after(network, arg?.network ?? 0, 80_000), picking, ...(picked ? { picked } : {}) };
         picked = undefined;
         return result;
       }
@@ -524,6 +537,8 @@ export function guestAgent(key: string, version: number): boolean {
       if (command === 'highlight') { highlight(arg?.id ? nodeOf(arg.id) : null); return true; }
       if (command === 'select') { selected = arg?.id ? nodeOf(arg.id) ?? null : null; return true; }
       if (command === 'pick') { picking = Boolean(arg?.on); if (!picking) highlight(null); return picking; }
+      // A debugger window closed; keep recording, but leave nothing on screen.
+      if (command === 'release') { picking = false; picked = undefined; highlight(null); overlayHost.remove(); return true; }
       if (command === 'request') return describe(Number(arg?.seq));
       if (command === 'clear') {
         if (arg === 'console') logs.length = 0;
@@ -544,6 +559,8 @@ export const agentScript = () => `(()=>{const __name=f=>f;return(${guestAgent.to
 /** A short command for an installed agent; `null` means the page has no current agent. */
 export const commandScript = (command: string, arg?: unknown) =>
   `(()=>{const a=window[${JSON.stringify(AGENT_KEY)}];return a&&a.version===${AGENT_VERSION}?a.run(${JSON.stringify(command)},${JSON.stringify(arg ?? null)}):null})()`;
+/** Ends a debugger session: stops picking and hides the highlight, but the agent keeps recording. */
+export const releaseScript = () => commandScript('release');
 /** Removes the agent and restores what it wrapped. */
 export const detachScript = () => `(()=>{const a=window[${JSON.stringify(AGENT_KEY)}];if(a&&a.detach)a.detach();return true})()`;
 /**

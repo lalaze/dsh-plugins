@@ -1,4 +1,5 @@
 import { DetachedDebugger, type DetachedState, type Inspectable } from './detached.js';
+import { agentScript, detachScript } from './guest.js';
 import { i18n, ui } from './i18n.js';
 
 const selector = 'webview[data-sidebar-browser-frame="webview"]';
@@ -87,6 +88,10 @@ export function installDevTools(doc: Document): () => void {
         if (description.textContent !== message) description.textContent = message;
       };
       const detached = new DetachedDebugger(doc, view as HTMLElement & Inspectable, next => { state = next; render(); });
+      // Record each page from load, so a debugger opened later already has its requests and logs.
+      // Electron defers executeJavaScript until the main frame stops loading, so requests made
+      // during the initial load are only known from resource timing.
+      const record = () => { if (ready()) void (view as Inspectable).executeJavaScript(agentScript(), false).catch(() => {}); };
       const pageEvents = ['dom-ready', 'did-navigate', 'did-stop-loading'];
       const click = (event: Event) => {
         event.preventDefault(); event.stopPropagation();
@@ -94,14 +99,16 @@ export function installDevTools(doc: Document): () => void {
       };
       const dismissClick = () => { detached.dismiss(); button.focus(); };
       for (const event of pageEvents) view.addEventListener(event, render);
+      view.addEventListener('dom-ready', record);
       button.addEventListener('click', click);
       dismiss.addEventListener('click', dismissClick);
       toolbar.append(button);
       toolbar.after(notice);
-      render();
+      render(); record();
       entries.set(element, { toolbar, button, notice, render, dispose() {
         detached.dispose();
         for (const event of pageEvents) view.removeEventListener(event, render);
+        view.removeEventListener('dom-ready', record);
         button.removeEventListener('click', click);
         dismiss.removeEventListener('click', dismissClick);
         button.remove(); notice.remove();
@@ -120,7 +127,11 @@ export function installDevTools(doc: Document): () => void {
     stopped = true;
     unsubscribe();
     observer.disconnect();
-    for (const entry of entries.values()) entry.dispose();
+    for (const [view, entry] of entries) {
+      entry.dispose();
+      // The plugin is going away: give each open page back its own fetch, XHR and console.
+      if (view.isConnected) void (view as unknown as Inspectable).executeJavaScript(detachScript(), false).catch(() => {});
+    }
     entries.clear(); style.remove();
   };
 }

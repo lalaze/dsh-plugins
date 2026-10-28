@@ -1,5 +1,5 @@
 import { activeLocale } from './i18n.js';
-import { detachScript } from './guest.js';
+import { releaseScript } from './guest.js';
 import type { Command, PageState, Reply, SessionKey } from '../protocol.js';
 
 /** The small subset of Electron's webview tag used by the client plugin. */
@@ -99,9 +99,9 @@ export class DetachedDebugger {
     clearTimeout(this.timer); this.replies = [];
     this.emit({ opened: false, busy: false });
     if (key) {
-      // Begin detach before allowing a new window to attach to the same document.
-      const detach = this.view.executeJavaScript(detachScript(), false).catch(() => {});
-      await Promise.all([detach, this.request({ action: 'close', ...key }).catch(() => {})]);
+      // The page agent keeps recording for the next window; only this session's picking and highlight end.
+      const release = this.view.executeJavaScript(releaseScript(), false).catch(() => {});
+      await Promise.all([release, this.request({ action: 'close', ...key }).catch(() => {})]);
     }
   }
   dispose(): void {
