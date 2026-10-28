@@ -5,6 +5,7 @@ import type { Dimension, UsageReport, Totals } from '../domain.js';
 import { compact, dateRange, trendBuckets } from './metrics.js';
 import { styles } from './styles.js';
 import { TodayBadge } from './today.js';
+import { UsageSettings } from './settings.js';
 
 interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -156,16 +157,19 @@ export function Dashboard() {
     </>}
   </section>;
 }
+// The header pill and the Settings section both open this dashboard in a modal window.
+const TodayWithDashboard = () => <TodayBadge details={Dashboard} />;
+const SettingsWithDashboard = () => <UsageSettings details={Dashboard} />;
 export const name = 'dsh-usage-stats-client';
 // The desktop language bridge initializes asynchronously; wait before registering UI.
 export const inject = ['slots', 'locale'];
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
-  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'usage-stats', order: 70, label: () => ui("Usage statistics") }, Dashboard));
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'usage-stats', order: 70, label: () => ui("Usage statistics") }, SettingsWithDashboard));
   // Today's total at the right of the conversation header, after the overflow menu (order 0) and before the corner.
   // A host that rejects the entry keeps the rest of the plugin working.
   ctx.slots.inject('conversation.session.header.utilities', () => {
-    try { return ctx.slots.register({ name: 'conversation.session.header.utilities', id: 'usage-stats-today', order: 100, label: () => ui("Today's usage") }, TodayBadge); }
+    try { return ctx.slots.register({ name: 'conversation.session.header.utilities', id: 'usage-stats-today', order: 100, label: () => ui("Today's usage") }, TodayWithDashboard); }
     catch (error) { console.warn('[dsh-usage-stats] Could not show today\'s usage in the conversation header', error); return undefined; }
   });
 }
