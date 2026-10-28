@@ -6,9 +6,9 @@ import { quote } from './ssh.js';
  * Native terminal keeps its PTY, resizing and keyboard handling; the selected shell runs SSH.
  * DSH remembers one shell for every conversation, so outside a remote workspace the launcher opens the local shell.
  */
-export async function installWorkspaceTerminal(controller: { config?: { shellCandidates?: string[] } }, directory: string, stateFile: string, modules = new URL('./', import.meta.url)): Promise<() => void> {
+export async function installWorkspaceTerminal(controller: { config?: { shellCandidates?: string[] } }, directory: string, stateFile: string, modules = new URL('./', import.meta.url)): Promise<{ shell?: string; dispose(): void }> {
   const candidates = controller.config?.shellCandidates;
-  if (!Array.isArray(candidates)) return () => {};
+  if (!Array.isArray(candidates)) return { dispose: () => {} };
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const script = join(directory, 'remote-workspace.mjs'), launcher = join(directory, process.platform === 'win32' ? 'Remote workspace.cmd' : 'Remote workspace');
   const source = `import { spawn } from 'node:child_process';
@@ -51,5 +51,5 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
     : `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${quote(process.execPath)} ${quote(script)}\n`, { mode: 0o700 });
   if (!candidates.includes(launcher)) candidates.push(launcher);
   // Leave the launcher on disk until the next boot: an already open native terminal may still start it.
-  return () => { const index = candidates.indexOf(launcher); if (index >= 0) candidates.splice(index, 1); };
+  return { shell: launcher, dispose: () => { const index = candidates.indexOf(launcher); if (index >= 0) candidates.splice(index, 1); } };
 }

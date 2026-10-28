@@ -11,6 +11,7 @@ import { WorkspaceMigration } from '../src/workspace-migration.js';
 import { WorkspaceTunnels, tunnelArguments } from '../src/workspace-tunnels.js';
 import { installWorkspaceTerminal } from '../src/workspace-terminal.js';
 import { ensureAnchor } from '../src/remote-workspaces.js';
+import { workspaceAction, type WorkspaceFeatures } from '../src/workspace-http.js';
 
 test('legacy import preserves aliases, skips duplicate endpoints and never returns or copies secrets', async t => {
   const f = await fixture(t), dir = join(f.directory, 'remote-workspaces'); await mkdir(dir);
@@ -65,8 +66,8 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await writeFile(join(bin, 'ssh'), `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv.includes('-G'))process.stdout.write('hostname build-box\\nuser builder\\nport 22\\n');else fs.writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify(process.argv.slice(2)));\n`); await chmod(join(bin, 'ssh'), 0o700);
   const anchor = await ensureAnchor(f.directory, { host: 'build-box', username: 'builder', port: 22 }, '/srv/app');
   const controller = { config: { shellCandidates: ['/bin/sh'] } };
-  const cleanup = await installWorkspaceTerminal(controller, join(f.directory, 'terminal'), f.path, pathToFileURL(modules + '/')); t.after(cleanup);
-  const launcher = controller.config.shellCandidates[1];
+  const { shell: launcher, dispose: cleanup } = await installWorkspaceTerminal(controller, join(f.directory, 'terminal'), f.path, pathToFileURL(modules + '/')); t.after(cleanup);
+  assert.ok(launcher); assert.equal(controller.config.shellCandidates[1], launcher);
   const env = { ...process.env, DSH_HOME: f.directory, DSH_TERMINAL_CAPTURE: capture, PATH: `${bin}:${process.env.PATH}` };
   await promisify(execFile)(launcher, [], { cwd: anchor, env });
   const args: string[] = JSON.parse(await readFile(capture, 'utf8'));
@@ -82,4 +83,12 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   assert.match(stderr, /Not a remote workspace/);
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
   cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);
+});
+
+test('the workspace target names the Remote workspace shell once it is installed', async () => {
+  const terminal: { shell?: string } = {}, signal = new AbortController().signal;
+  const features = { files: { target: async () => ({ hostId: 'host-test', label: 'Box', cwd: '/srv/app' }) }, terminal } as unknown as WorkspaceFeatures;
+  assert.deepEqual(await workspaceAction(features, 'workspaceTarget', { sessionId: 'session' }, signal), { hostId: 'host-test', label: 'Box', cwd: '/srv/app' });
+  terminal.shell = '/dsh/terminal/Remote workspace';
+  assert.deepEqual(await workspaceAction(features, 'workspaceTarget', { sessionId: 'session' }, signal), { hostId: 'host-test', label: 'Box', cwd: '/srv/app', terminalShell: '/dsh/terminal/Remote workspace' });
 });

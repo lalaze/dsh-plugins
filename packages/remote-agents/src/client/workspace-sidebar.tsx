@@ -3,6 +3,7 @@ import { api } from './api.js';
 import { ui } from './i18n.js';
 import { styles } from './styles.js';
 import { WorkspacePanel } from './workspace.js';
+import { preferTerminalShell } from './terminal-preference.js';
 import type { Client } from './index.js';
 import type { WorkspaceTarget } from '../workspace-domain.js';
 
@@ -57,6 +58,10 @@ export function installWorkspaceSidebar(ctx: Client): void {
         const inView = Object.entries(sessions.list.getSnapshot()?.byId ?? {}).filter(([, session]) => (session.retainedBy?.mainView ?? 0) > 0);
         return inView.length > 0 && inView.every(([id]) => !!cache.get(id)?.target);
       };
+      const remoteShell = () => {
+        const [id] = Object.entries(sessions.list.getSnapshot()?.byId ?? {}).find(([, session]) => (session.retainedBy?.mainView ?? 0) > 0) ?? [];
+        return id === undefined ? undefined : cache.get(id)?.target?.terminalShell;
+      };
       const explorerType = (guide: boolean): TabDefinition => ({
         id: explorer, kind: explorer, title: () => ui('Remote workspace'),
         ...guide ? { guide: [{ id: 'remote-workspace', order: 55, title: () => ui('Remote workspace'), description: () => ui('Commands, sync, tunnels and remote DSH') }] } : {},
@@ -75,6 +80,8 @@ export function installWorkspaceSidebar(ctx: Client): void {
         const remote = remoteInView();
         if (remote === shown) return;
         shown = remote;
+        // New terminal opens the remote shell in a remote conversation and the user's own shell elsewhere.
+        preferTerminalShell(remote ? remoteShell() : undefined);
         live.files?.(); live.files = undefined;
         live.explorer?.(); live.explorer = tabs.register(explorerType(remote));
         if (remote) try { live.files = tabs.register(filesType()); } catch (error) { console.warn('Remote workspace files view unavailable', error); }
@@ -106,7 +113,7 @@ export function installWorkspaceSidebar(ctx: Client): void {
       warm();
       return () => {
         disposed = true; off(); for (const c of controllers) c.abort(); window.removeEventListener('remote-agents-updated', changed);
-        live.files?.(); live.explorer?.(); offFile?.();
+        live.files?.(); live.explorer?.(); offFile?.(); preferTerminalShell(undefined);
       };
     });
   });

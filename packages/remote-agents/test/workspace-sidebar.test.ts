@@ -13,11 +13,17 @@ test('native sidebar claims only verified remote sessions, invalidates workspace
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
   t.after(() => { if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow); else Reflect.deleteProperty(globalThis, 'window'); });
+  const storage = new Map<string, string>([['dsh.terminal.shell', '/bin/zsh']]), previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); }, removeItem: (key: string) => { storage.delete(key); },
+  } });
+  t.after(() => { if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage); else Reflect.deleteProperty(globalThis, 'localStorage'); });
+  const shell = () => storage.get('dsh.terminal.shell'), launcher = '/dsh/storages/dsh-remote-agents/terminal/Remote workspace';
   let cwd = '/dsh/remote-workspaces/box/app', inView = 'remote';
   const listeners = new Set<() => void>(), effects: (() => void)[] = [], requested: string[] = [];
   t.mock.method(globalThis, 'fetch', async (_input: RequestInfo | URL, init?: RequestInit) => {
     const { sessionId } = JSON.parse(String(init?.body)); requested.push(sessionId);
-    return sessionId === 'remote' && cwd.includes('remote-workspaces') ? Response.json({ hostId: 'host-test', label: 'Box', cwd: '/srv/app' }) : Response.json({ error: 'not remote' }, { status: 409 });
+    return sessionId === 'remote' && cwd.includes('remote-workspaces') ? Response.json({ hostId: 'host-test', label: 'Box', cwd: '/srv/app', terminalShell: launcher }) : Response.json({ error: 'not remote' }, { status: 409 });
   });
   // The registry in force: DSH's own Workspace files type, plus whatever the plugin registers on top.
   const NativeIcon = () => null;
@@ -58,17 +64,27 @@ test('native sidebar claims only verified remote sessions, invalidates workspace
   assert.deepEqual(files.guide!.map(({ id, commandId, order, icon }) => ({ id, commandId, order, icon })), [{ id: 'workspace', commandId: 'workspace.files', order: 10, icon: NativeIcon }]);
   assert.equal((files.title as () => string)(), 'Files');
   assert.equal(types.get('remote-agents/workspace')!.guide?.length, 1, 'Remote workspace is offered in a remote conversation');
+  assert.equal(shell(), launcher, 'New terminal opens the remote shell in a remote conversation');
   // A local conversation gets DSH's own Workspace files back, and no Remote workspace entry.
   await show('local');
   assert.equal(types.has('remote-agents/files'), false);
   assert.equal(types.get('remote-agents/workspace')!.guide, undefined);
+  assert.equal(shell(), '/bin/zsh', 'and the user\'s own shell elsewhere');
   await show('remote');
   assert.equal(types.has('remote-agents/files'), true);
+  assert.equal(shell(), launcher);
+  // A shell chosen in the menu of a remote conversation stays remembered after leaving it.
+  storage.set('dsh.terminal.shell', '/bin/bash'); await show('local'); assert.equal(shell(), '/bin/bash');
+  await show('remote'); assert.equal(shell(), launcher); await show('local'); assert.equal(shell(), '/bin/bash');
+  await show('remote');
   assert.deepEqual(requested, ['remote'], 'switching back reuses the verified workspace');
   // A workspace that is no longer remote releases the takeover.
   cwd = '/local/changed'; for (const listener of listeners) listener(); await setImmediate();
   assert.equal(claim('dsh-resource://file/session/remote/src/a.ts'), false);
   assert.equal(types.has('remote-agents/files'), false);
+  assert.equal(shell(), '/bin/bash');
+  cwd = '/dsh/remote-workspaces/box/app'; await show('remote'); assert.equal(shell(), launcher);
   for (const dispose of effects.reverse()) dispose();
+  assert.equal(shell(), '/bin/bash', 'unloading the plugin gives back the user\'s shell');
   assert.equal(listeners.size, 0); assert.equal(types.size, 0); assert.equal(slots.size, 0);
 });

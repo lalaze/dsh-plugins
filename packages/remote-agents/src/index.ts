@@ -66,7 +66,8 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   const files = new WorkspaceService(service, placement, sessionCwd);
   const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
   await tunnels.open();
-  const features = { files, tunnels, migration: new WorkspaceMigration(service) };
+  const terminal: { shell?: string } = {};
+  const features = { files, tunnels, migration: new WorkspaceMigration(service), terminal };
   // Close the store last: a reloaded plugin's new instance owns the state from then on.
   ctx.effect(() => async () => { await tunnels.close(); await service.close(); await store.close(); });
   // Every finished turn is announced for usage statistics. Main chat does not report usage to DSH: a CLI turn's total
@@ -82,7 +83,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   ctx.inject(['terminalController'], scoped => {
     let disposed = false, cleanup: (() => void) | undefined;
     void installWorkspaceTerminal(scoped.get('terminalController'), join(store.directory, 'terminal'), join(store.directory, 'state.json'))
-      .then(dispose => { if (disposed) dispose(); else cleanup = dispose; })
+      .then(({ shell, dispose }) => { if (disposed) dispose(); else { cleanup = () => { delete terminal.shell; dispose(); }; terminal.shell = shell; } })
       .catch(error => scoped.get('logger')?.warn?.(`Remote workspace terminal unavailable: ${String(error)}`));
     scoped.effect(() => () => { disposed = true; cleanup?.(); });
   });

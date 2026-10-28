@@ -5,7 +5,8 @@ import type { WorkspaceService } from './workspace-service.js';
 import { revision, workspacePath } from './workspace-service.js';
 import type { WorkspaceTunnels } from './workspace-tunnels.js';
 
-export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; migration: WorkspaceMigration }
+/** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
+export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; migration: WorkspaceMigration; terminal?: { shell?: string } }
 export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   if (value === undefined) return;
   if (!value || typeof value !== 'object') throw new RemoteError('Invalid workspace target');
@@ -16,7 +17,10 @@ export async function workspaceAction(features: WorkspaceFeatures, action: strin
   if (action === 'legacyMachines') return features.migration.list();
   if (action === 'importLegacyMachine') return features.migration.import(field(input.id, 'saved machine ID', 200));
   const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
-  if (action === 'workspaceTarget') return features.files.target(sessionId, signal, expected);
+  if (action === 'workspaceTarget') {
+    const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
+    return shell ? { ...target, terminalShell: shell } : target;
+  }
   if (action === 'workspaceFiles') return features.files.operate(sessionId, input.operation, signal, expected);
   if (action === 'workspaceSync') {
     if (input.direction !== 'pull' && input.direction !== 'push') throw new RemoteError('Invalid sync direction');
