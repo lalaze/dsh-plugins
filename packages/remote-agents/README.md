@@ -136,6 +136,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.34:** The **Remote workspace** panel has a new layout: tabs for its tools, cards with consistent controls, a tunnel list with status dots and icon actions, and a file browser with icons and a clickable path. Its features are unchanged. Refresh the client after updating.
+
 **Upgrading from 0.2.33:** Codex Fast is now a lightning button in the composer toolbar instead of a separate **Fast** entry in the model menu. It is saved per conversation; new conversations start with it off. A conversation still on an old **Fast** entry moves to the model's entry with the lightning on. Each remote model also remembers the reasoning effort its last message used, so the effort survives switching models and restarts. Refresh the client after updating.
 
 **Upgrading from 0.2.32:** The context usage ring sits closer to the model picker. Refresh the client after updating.
