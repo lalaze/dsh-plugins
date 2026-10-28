@@ -15,7 +15,7 @@
     "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
-    "test:ui": "node scripts/test-localization-ui.mjs",
+    "test:ui": "node scripts/test-localization-ui.mjs && node scripts/test-inline-ui.mjs",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",
     "prepack": "pnpm run build",
     "pack:plugin": "pnpm pack --pack-destination ../../dist"

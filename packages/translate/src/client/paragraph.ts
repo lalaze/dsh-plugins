@@ -3,7 +3,7 @@ import { loadSettings, subscribeSettings, translate } from './api.js';
 import { isWord, messageSelector } from './dom.js';
 import { i18n, localizeError, ui } from './i18n.js';
 
-// Overlays live outside DSH's message tree, so re-rendering or streaming a message never fights with them.
+// Translation results participate in message layout; only the small gutter button floats.
 const blockSelector = 'p, li, h1, h2, h3, h4, h5, h6, blockquote';
 const skipSelector = 'pre, code, textarea, [contenteditable="true"], [data-dsh-translate-paragraph]';
 const BUTTON = 20, GAP = 4;
@@ -11,9 +11,9 @@ export const TRANSLATE_ICON_PATH = 'M1.5 3.5h7M5 2v1.5M3 3.5c.6 2.4 2.1 4.2 4.4 
 const icon = `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${TRANSLATE_ICON_PATH}"/></svg>`;
 const spinner = '<svg class="dsh-translate-spinner" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="6" opacity="0.25"/><path d="M14 8a6 6 0 0 0-6-6"/></svg>';
 
-/** A translation card anchored to a paragraph, or to a double-clicked word's live range. */
-interface Card { key: object; scope: Element; rect(): DOMRect; alive(): boolean; width(rect: DOMRect): number; element: HTMLElement; body: HTMLElement }
-type Anchor = Omit<Card, 'element' | 'body'>;
+/** An inline translation owned by its original paragraph or selected word. */
+interface Card { key: object; scope: Element; alive(): boolean; element: HTMLElement; body: HTMLElement; source: string }
+type Anchor = Omit<Card, 'element' | 'body' | 'source'>;
 
 /** The innermost translatable block under `target` inside a chat message. */
 function blockAt(target: EventTarget | null): Element | null {
@@ -24,11 +24,11 @@ function blockAt(target: EventTarget | null): Element | null {
 /** A block's own text: nested lists and code are their own blocks or not translated. */
 function textOf(block: Element): string {
   const clone = block.cloneNode(true) as Element;
-  clone.querySelectorAll('ul, ol, pre').forEach(node => node.remove());
+  clone.querySelectorAll('ul, ol, pre, [data-dsh-translate-paragraph]').forEach(node => node.remove());
   clone.querySelectorAll('br').forEach(node => node.replaceWith('\n'));
   return (clone.textContent ?? '').trim();
 }
-/** The visible region of the block's scrolling ancestor, so overlays never float over the composer or sidebar. */
+/** Keep the gutter button inside the conversation's visible scrolling region. */
 function area(block: Element): { top: number; bottom: number; left: number; right: number } {
   for (let node = block.parentElement; node; node = node.parentElement) {
     if (/(auto|scroll|overlay)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight) return node.getBoundingClientRect();
@@ -60,20 +60,14 @@ function attach(): () => void {
     Object.assign(button.style, { left: `${Math.max(bounds.left + 2, gutter(hovered) - BUTTON - GAP)}px`, top: `${top}px` });
     button.hidden = false;
   };
-  const placeCard = (card: Card) => {
-    if (!card.alive()) { close(card); return; }
-    const rect = card.rect(), bounds = area(card.scope), element = card.element;
-    const visible = rect.bottom > bounds.top && rect.top < bounds.bottom;
-    element.style.visibility = visible ? '' : 'hidden';
-    if (!visible) return;
-    const width = card.width(rect);
-    element.style.width = `${width}px`;
-    element.style.left = `${Math.min(Math.max(6, rect.left), innerWidth - width - 6)}px`;
-    // Below the anchor by default; above it when the bottom of the conversation has no room.
-    const height = element.offsetHeight, below = rect.bottom + 6, above = rect.top - 6 - height;
-    element.style.top = `${below + height <= bounds.bottom || above < bounds.top ? below : above}px`;
+  const place = () => {
+    frame = 0;
+    for (const card of [...cards.values()]) {
+      // The host owns the source nodes. Drop stale results when it streams, replaces, or removes them.
+      if (!card.alive() || !card.element.isConnected || textOf(card.scope) !== card.source) close(card);
+    }
+    placeButton();
   };
-  const place = () => { frame = 0; placeButton(); for (const card of [...cards.values()]) placeCard(card); };
   const schedule = () => { if (!frame) frame = requestAnimationFrame(place); };
   // Streaming text moves paragraphs without scrolling; follow layout changes only while something is shown.
   const observer = new MutationObserver(schedule);
@@ -86,12 +80,18 @@ function attach(): () => void {
     element.className = 'dsh-translate-paragraph-card'; element.dataset.dshTranslateParagraph = ''; element.dataset.state = 'busy'; element.setAttribute('role', 'status');
     body.innerHTML = spinner; body.append(ui('Translating…'));
     dismiss.type = 'button'; dismiss.className = 'dsh-translate-paragraph-close'; dismiss.textContent = '×'; dismiss.title = ui('Close'); dismiss.setAttribute('aria-label', ui('Close'));
-    const card: Card = { ...anchor, element, body };
+    const card: Card = { ...anchor, element, body, source: textOf(anchor.scope) };
     dismiss.addEventListener('click', () => close(card));
     if (context) { const source = document.createElement('div'); source.className = 'dsh-translate-paragraph-source'; source.textContent = text; element.append(source); }
-    element.append(body, dismiss); document.body.append(element); cards.set(card.key, card);
-    placeCard(card); label(); observe();
-    const settle = (state: 'done' | 'error', value: string) => { if (cards.get(card.key) !== card) return; element.dataset.state = state; body.textContent = value; placeCard(card); };
+    element.append(body, dismiss);
+    // Keep list results inside their item (before nested lists), without adding another list marker.
+    // Quotes and message fallbacks also own their result; paragraphs/headings get a following sibling.
+    if (anchor.scope.matches('li, blockquote') || anchor.scope.matches(messageSelector)) {
+      anchor.scope.insertBefore(element, Array.from(anchor.scope.children).find(node => node.matches('ul, ol')) ?? null);
+    } else anchor.scope.after(element);
+    cards.set(card.key, card);
+    label(); observe(); schedule();
+    const settle = (state: 'done' | 'error', value: string) => { if (cards.get(card.key) !== card) return; element.dataset.state = state; body.textContent = value; schedule(); };
     if (!text || text.length > MAX_SOURCE_LENGTH) { settle('error', localizeError('Text must contain 1–5,000 characters')); return; }
     void translate(text, 'auto', loadSettings(), context).then(result => settle('done', result.translation), error => settle('error', localizeError(error instanceof Error ? error.message : String(error))));
   }
@@ -106,14 +106,12 @@ function attach(): () => void {
   };
   const closeAll = () => { for (const card of [...cards.values()]) close(card); };
   const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') closeAll(); };
-  // A click anywhere but a card or the paragraph button dismisses the cards; text in a card stays selectable.
-  const onDown = (event: PointerEvent) => { if (cards.size && !(event.target instanceof Element && event.target.closest('[data-dsh-translate-paragraph]'))) closeAll(); };
   button.addEventListener('mousedown', event => event.preventDefault());
   button.addEventListener('click', () => {
     const block = hovered; if (!block) return;
     const card = cards.get(block);
     if (card) close(card);
-    else open({ key: block, scope: block, rect: () => block.getBoundingClientRect(), alive: () => block.isConnected, width: rect => Math.min(Math.max(rect.width, 280), 620, innerWidth - 12) }, textOf(block));
+    else open({ key: block, scope: block, alive: () => block.isConnected }, textOf(block));
   });
   // Double-clicking a word translates it in the sense of its surrounding passage.
   const onDouble = (event: MouseEvent) => {
@@ -124,16 +122,17 @@ function attach(): () => void {
     const range = selection.getRangeAt(0).cloneRange(), scope = target.closest(blockSelector) ?? message;
     if (!scope.contains(range.commonAncestorContainer)) return;
     const before = document.createRange(); before.setStart(scope, 0); before.setEnd(range.startContainer, range.startOffset);
-    const passage = scope.textContent ?? '', at = before.toString().length, half = MAX_CONTEXT_LENGTH / 2;
+    const prefix = document.createElement('div'); prefix.append(before.cloneContents());
+    const passage = textOf(scope), at = textOf(prefix).length, half = MAX_CONTEXT_LENGTH / 2;
     const context = passage.length <= MAX_CONTEXT_LENGTH ? passage : passage.slice(Math.max(0, at - half), at + half);
-    open({ key: range, scope, rect: () => range.getBoundingClientRect(), alive: () => range.startContainer.isConnected, width: () => Math.min(360, innerWidth - 12) }, text, context.replace(/\s+/g, ' ').trim());
+    open({ key: range, scope, alive: () => scope.isConnected && scope.contains(range.startContainer) }, text, context.replace(/\s+/g, ' ').trim());
   };
-  document.addEventListener('pointerover', onOver); document.addEventListener('keydown', onKey); document.addEventListener('pointerdown', onDown, true); document.addEventListener('dblclick', onDouble);
+  document.addEventListener('pointerover', onOver); document.addEventListener('keydown', onKey); document.addEventListener('dblclick', onDouble);
   document.addEventListener('scroll', schedule, true); window.addEventListener('resize', schedule);
   const unsubscribe = i18n.subscribe(label);
   return () => {
     unsubscribe(); observer.disconnect(); clearTimeout(hideTimer); if (frame) cancelAnimationFrame(frame);
-    document.removeEventListener('pointerover', onOver); document.removeEventListener('keydown', onKey); document.removeEventListener('pointerdown', onDown, true); document.removeEventListener('dblclick', onDouble);
+    document.removeEventListener('pointerover', onOver); document.removeEventListener('keydown', onKey); document.removeEventListener('dblclick', onDouble);
     document.removeEventListener('scroll', schedule, true); window.removeEventListener('resize', schedule);
     for (const card of cards.values()) card.element.remove();
     button.remove();

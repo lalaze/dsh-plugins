@@ -8,6 +8,8 @@ const overlaySelector = '[data-dsh-translate-overlay]';
 function selectedMessage(selection: Selection): Element | null {
   const node = selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode?.parentElement;
   const other = selection.focusNode instanceof Element ? selection.focusNode : selection.focusNode?.parentElement;
+  // Inline results are selectable for copying, but are not another source message.
+  if (node?.closest('[data-dsh-translate-paragraph]') || other?.closest('[data-dsh-translate-paragraph]')) return null;
   const message = node?.closest(messageSelector) ?? null;
   return message && other?.closest(messageSelector) === message ? message : null;
 }
