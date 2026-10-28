@@ -1,6 +1,8 @@
 // Matches the host composer's ghost controls (the access-mode trigger beside it): no fill until hover.
+// The host toolbar's 12px gap plus the trigger's and this button's own padding left a visible hole after the
+// access-mode chevron; the negative margin pulls the icon back to the row's rhythm.
 const CSS = `
-.dsh-translate-composer-button{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer}
+.dsh-translate-composer-button{display:inline-flex;flex:none;margin-left:-8px;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer}
 .dsh-translate-composer-button:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
 .dsh-translate-composer-button:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe))}
 .dsh-translate-composer-button:disabled{color:var(--dsw-alias-label-dimmed,currentColor);cursor:default}
