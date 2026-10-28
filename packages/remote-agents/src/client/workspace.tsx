@@ -1,11 +1,23 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, requestId } from './api.js';
 import { ui, localizeError, useLocale } from './i18n.js';
+import { workspaceStyles } from './workspace-styles.js';
 import { TUNNEL_ACCESS_HOST, type SyncResult, type Tunnel, type WorkspaceEntry, type WorkspaceFile, type WorkspaceTarget } from '../workspace-domain.js';
 
 const TOOLS = { files: 'Files', commands: 'Commands', sync: 'Sync', tunnels: 'Tunnels', web: 'Remote DSH' } as const;
 export type WorkspaceTool = keyof typeof TOOLS;
 const ALL_TOOLS = Object.keys(TOOLS) as WorkspaceTool[];
+const size = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const PATHS = {
+  server: 'M3 4.5h10v3H3zM3 8.5h10v3H3zM5 6h.01M5 10h.01', folder: 'M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z',
+  file: 'M4 2h5l3 3v9H4zM9 2v3h3', up: 'M8 13V3M4 7l4-4 4 4', plus: 'M8 3v10M3 8h10', upload: 'M8 10V2.5M5 5.5l3-3 3 3M3 10v3h10v-3',
+  download: 'M8 2.5V10M5 7l3 3 3-3M3 10v3h10v-3', refresh: 'M13 3v3.5H9.5M3 13V9.5h3.5M4.2 6A4.5 4.5 0 0 1 12.6 5.7M11.8 10A4.5 4.5 0 0 1 3.4 10.3',
+  search: 'M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM14 14l-3.5-3.5', trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5', play: 'M5 3.5v9l7-4.5z',
+  stop: 'M4.5 4.5h7v7h-7z', external: 'M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5',
+} as const;
+function Icon({ kind }: { kind: keyof typeof PATHS }) {
+  return <svg className="ra-ws-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[kind]} /></svg>;
+}
 
 /** The remote workspace tools; `tools` narrows them, and a single tool shows without the tool tabs. */
 export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { sessionId?: string; initialPath?: string; tools?: readonly WorkspaceTool[] }) {
@@ -15,11 +27,11 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
   const [selected, setSelected] = useState<string>(), [file, setFile] = useState<WorkspaceFile>(), [draft, setDraft] = useState('');
   // Rename, delete and download need only the revision; text editing additionally needs readable content.
   const [info, setInfo] = useState<{ path: string; revision: string; size: number }>(), [readOnly, setReadOnly] = useState('');
-  const [name, setName] = useState(''), [kind, setKind] = useState('file'), [deleting, setDeleting] = useState(false);
+  const [name, setName] = useState(''), [kind, setKind] = useState<'file' | 'directory'>('file'), [deleting, setDeleting] = useState(false), [creating, setCreating] = useState(false);
   const [query, setQuery] = useState(''), [matches, setMatches] = useState<{ path: string; line: number; text: string }[]>();
   const [command, setCommand] = useState(''), [output, setOutput] = useState('');
   const [direction, setDirection] = useState<'pull' | 'push'>('pull'), [sync, setSync] = useState<SyncResult>();
-  const [tunnels, setTunnels] = useState<Tunnel[]>([]), [listenPort, setListenPort] = useState('38080'), [targetPort, setTargetPort] = useState('3000'), [tunnelDirection, setTunnelDirection] = useState('local');
+  const [tunnels, setTunnels] = useState<Tunnel[]>([]), [listenPort, setListenPort] = useState('38080'), [targetPort, setTargetPort] = useState('3000'), [tunnelDirection, setTunnelDirection] = useState<'local' | 'reverse'>('local');
   const [webPort, setWebPort] = useState('3080'), [webLocalPort, setWebLocalPort] = useState('38088'), [webUrl, setWebUrl] = useState(''), [webLink, setWebLink] = useState('');
   const abort = useRef(new AbortController()), input = useRef<HTMLInputElement>(null), alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; abort.current.abort(); }; }, []);
@@ -80,60 +92,126 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
   }, [target, tab, call]);
   const tunnelAction = async (action: string, id: string) => { await call(action, { id }); setTunnels(await call<Tunnel[]>('workspaceTunnels')); };
 
-  return <section className="dsh-ra ra-workspace-panel" aria-label={ui('Remote workspace')}>
-    <header><h2>{ui('Remote workspace')}</h2>{target && <p className="ra-mono">{target.label}:{target.cwd}</p>}</header>
-    {error && <div className="ra-banner" role="alert">{error}{selected && <button disabled={busy} onClick={() => void run(() => open(selected))}>{ui('Reload file')}</button>}</div>}
-    {!sessionId ? <p>{ui('Select a verified remote workspace first.')}</p> : !target ? <p role="status">{ui(error ? 'Select a verified remote workspace first.' : 'Loading workspace…')}</p> : <>
-      {tools.length > 1 && <nav className="ra-workspace-tabs" aria-label={ui('Workspace tools')}>{tools.map(key => <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{ui(TOOLS[key])}</button>)}</nav>}
-      {tab === 'files' && <div className="ra-workspace-files">
-        <aside><div className="ra-actions"><button disabled={busy || !path} onClick={() => { if (canNavigate()) setPath(path.split('/').slice(0, -1).join('/')); }}>{ui('Up')}</button><span className="ra-mono">/{path}</span><button disabled={busy} onClick={() => void run(reload)}>{ui('Refresh')}</button></div>
-          <form className="ra-workspace-create" onSubmit={event => { event.preventDefault(); void run(async () => {
-            if (!name || /[\\/]/.test(name) || name === '.' || name === '..') throw new Error(ui('Enter a file or folder name.'));
-            const destination = path ? `${path}/${name}` : name;
-            await operate(kind === 'directory' ? { op: 'mkdir', path: destination } : { op: 'write', path: destination, content: '', revision: null }); setName(''); await reload();
-          }); }}><select aria-label={ui('New item type')} value={kind} onChange={e => setKind(e.target.value)}><option value="file">{ui('File')}</option><option value="directory">{ui('Folder')}</option></select><input aria-label={ui('New item name')} value={name} onChange={e => setName(e.target.value)} /><button disabled={busy || !name}>{ui('Create')}</button></form>
-          <form className="ra-workspace-search" onSubmit={event => { event.preventDefault(); void run(async () => { const value = await operate<{ matches: typeof matches }>({ op: 'search', path: '.', query }); setMatches(value.matches); }); }}><input aria-label={ui('Search remote files')} value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setMatches(undefined); }} /><button disabled={busy || !query}>{ui('Search')}</button></form>
-          <div className="ra-workspace-entries">{matches ? matches.map((match, index) => <button key={index} disabled={busy} onClick={() => { if (canNavigate()) void run(() => open(match.path)); }}>{match.path}:{match.line}<small>{match.text}</small></button>) : entries.map(entry => <button key={entry.path} disabled={busy || !['directory', 'file'].includes(entry.kind)} aria-pressed={selected === entry.path} onClick={() => {
-            if (!canNavigate()) return;
-            if (entry.kind === 'directory') { setPath(entry.path); setMatches(undefined); }
-            else void run(() => open(entry.path));
-          }}><span>{entry.kind === 'directory' ? '▸ ' : ''}{entry.name}</span><small>{entry.kind === 'file' ? `${entry.size} B` : ui(entry.kind)}</small></button>)}</div>
-          <input hidden type="file" ref={input} onChange={event => { const upload = event.target.files?.[0]; event.target.value = ''; if (upload) void run(async () => {
-            if (upload.size > 50 * 1024 * 1024) throw new Error(ui('File exceeds the 50 MB transfer limit'));
-            const destination = path ? `${path}/${upload.name}` : upload.name;
-            const existing = entries.find(e => e.path === destination);
-            if (existing) throw new Error(ui('A file with that name already exists. Rename it before uploading.'));
-            const response = await fetch(urlFor(destination), { method: 'POST', headers: { 'X-DSH-Remote-Agents': '1', 'X-File-Size': String(upload.size), 'X-File-Revision': 'new' }, body: upload, signal: abort.current.signal });
-            if (!response.ok) throw new Error((await response.json()).error); await reload();
-          }); }} /><button disabled={busy} onClick={() => input.current?.click()}>{ui('Upload file')}</button>
+  const folders = path ? path.split('/') : [];
+  const goTo = (next: string) => { if (canNavigate()) { setPath(next); setMatches(undefined); } };
+  const create = (event: React.FormEvent) => { event.preventDefault(); void run(async () => {
+    if (!name || /[\\/]/.test(name) || name === '.' || name === '..') throw new Error(ui('Enter a file or folder name.'));
+    const destination = path ? `${path}/${name}` : name;
+    await operate(kind === 'directory' ? { op: 'mkdir', path: destination } : { op: 'write', path: destination, content: '', revision: null }); setName(''); setCreating(false); await reload();
+  }); };
+  const upload = (event: React.ChangeEvent<HTMLInputElement>) => { const chosen = event.target.files?.[0]; event.target.value = ''; if (chosen) void run(async () => {
+    if (chosen.size > 50 * 1024 * 1024) throw new Error(ui('File exceeds the 50 MB transfer limit'));
+    const destination = path ? `${path}/${chosen.name}` : chosen.name;
+    if (entries.some(e => e.path === destination)) throw new Error(ui('A file with that name already exists. Rename it before uploading.'));
+    const response = await fetch(urlFor(destination), { method: 'POST', headers: { 'X-DSH-Remote-Agents': '1', 'X-File-Size': String(chosen.size), 'X-File-Revision': 'new' }, body: chosen, signal: abort.current.signal });
+    if (!response.ok) throw new Error((await response.json()).error); await reload();
+  }); };
+  const segmented = <T extends string,>(label: string, value: T, set: (value: T) => void, options: readonly (readonly [T, string])[]) =>
+    <div className="ra-ws-segment" role="radiogroup" aria-label={label}>{options.map(([key, text]) => <button type="button" role="radio" key={key} aria-checked={value === key} disabled={busy} onClick={() => set(key)}>{text}</button>)}</div>;
+
+  return <section className="dsh-ra ra-workspace-panel" aria-label={ui('Remote workspace')}><style>{workspaceStyles}</style>
+    <header className="ra-ws-head">
+      {target ? <span className="ra-ws-target" title={`${target.label}:${target.cwd}`}><Icon kind="server" /><b>{target.label}</b><span className="ra-mono">{`\u200e${target.cwd}\u200e`}</span></span> : <span />}
+      {busy && <span className="ra-ws-busy" role="status"><span className="ra-ws-spinner" aria-hidden="true" />{ui('Working…')}</span>}
+    </header>
+    {!sessionId ? <p className="ra-ws-note">{ui('Select a verified remote workspace first.')}</p> : !target ? <p className="ra-ws-note" role="status">{error || ui('Loading workspace…')}</p> : <>
+      {tools.length > 1 && <nav className="ra-ws-tabs" aria-label={ui('Workspace tools')}>{tools.map(key => <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{ui(TOOLS[key])}</button>)}</nav>}
+      {error && <div className="ra-banner" data-tone="error" role="alert"><span>{error}</span>{selected && tab === 'files' && <button disabled={busy} onClick={() => void run(() => open(selected))}>{ui('Reload file')}</button>}</div>}
+      {tab === 'files' && <div className="ra-ws-files">
+        <aside className="ra-ws-browser">
+          <div className="ra-ws-toolbar">
+            <button type="button" className="ra-ws-icon" title={ui('Up')} aria-label={ui('Up')} disabled={busy || !path} onClick={() => goTo(folders.slice(0, -1).join('/'))}><Icon kind="up" /></button>
+            <nav className="ra-ws-crumbs" aria-label={ui('Folder')}><button type="button" disabled={busy || !path} onClick={() => goTo('')}>{target.cwd.split('/').filter(Boolean).pop() ?? '/'}</button>
+              {folders.map((folder, index) => <React.Fragment key={index}><span aria-hidden="true">/</span><button type="button" disabled={busy || index === folders.length - 1} onClick={() => goTo(folders.slice(0, index + 1).join('/'))}>{folder}</button></React.Fragment>)}</nav>
+            <button type="button" className="ra-ws-icon" title={ui('New file or folder')} aria-label={ui('New file or folder')} aria-expanded={creating} disabled={busy} onClick={() => setCreating(!creating)}><Icon kind="plus" /></button>
+            <button type="button" className="ra-ws-icon" title={ui('Upload file')} aria-label={ui('Upload file')} disabled={busy} onClick={() => input.current?.click()}><Icon kind="upload" /></button>
+            <button type="button" className="ra-ws-icon" title={ui('Refresh')} aria-label={ui('Refresh')} disabled={busy} onClick={() => void run(reload)}><Icon kind="refresh" /></button>
+          </div>
+          {creating && <form className="ra-ws-inline" onSubmit={create}>
+            {segmented(ui('New item type'), kind, setKind, [['file', ui('File')], ['directory', ui('Folder')]] as const)}
+            <input className="ra-ws-input" aria-label={ui('New item name')} placeholder={ui(kind === 'directory' ? 'Folder' : 'File')} autoFocus value={name} onChange={e => setName(e.target.value)} />
+            <button className="ra-ws-button ra-primary" disabled={busy || !name}>{ui('Create')}</button>
+          </form>}
+          <form className="ra-ws-search" onSubmit={event => { event.preventDefault(); void run(async () => { const value = await operate<{ matches: typeof matches }>({ op: 'search', path: '.', query }); setMatches(value.matches); }); }}>
+            <Icon kind="search" /><input aria-label={ui('Search remote files')} placeholder={ui('Search remote files')} value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setMatches(undefined); }} />
+          </form>
+          <div className="ra-ws-entries">{matches ? (matches.length ? matches.map((match, index) => <button type="button" key={index} disabled={busy} aria-pressed={selected === match.path} onClick={() => { if (canNavigate()) void run(() => open(match.path)); }}>
+              <Icon kind="file" /><span className="ra-ws-entry-name">{match.path}<small>{match.line}: {match.text}</small></span></button>) : <p className="ra-ws-empty">{ui('No matches')}</p>)
+            : entries.length ? entries.map(entry => <button type="button" key={entry.path} data-kind={entry.kind} disabled={busy || !['directory', 'file'].includes(entry.kind)} aria-pressed={selected === entry.path} onClick={() => {
+              if (!canNavigate()) return;
+              if (entry.kind === 'directory') goTo(entry.path);
+              else void run(() => open(entry.path));
+            }}><Icon kind={entry.kind === 'directory' ? 'folder' : 'file'} /><span className="ra-ws-entry-name">{entry.name}</span>{entry.kind === 'file' ? <small>{size(entry.size)}</small> : entry.kind !== 'directory' && <small>{ui(entry.kind)}</small>}</button>)
+            : <p className="ra-ws-empty">{ui('This folder is empty')}</p>}</div>
+          <input hidden type="file" ref={input} onChange={upload} />
         </aside>
-        <main><div className="ra-actions"><span className="ra-mono">{selected ?? ui('Choose a file')}</span>{selected && <button disabled={busy} onClick={() => void run(download)}>{ui('Download')}</button>}</div>
-          {readOnly && <p className="ra-muted">{readOnly}</p>}
-          {file && <textarea className="ra-workspace-editor" aria-label={ui('Remote file contents')} spellCheck={false} value={draft} onChange={e => setDraft(e.target.value)} disabled={busy} />}
-          {info && <><div className="ra-actions">
-            {file && <><button className="ra-primary" disabled={busy || !dirty} onClick={() => void run(async () => { const saved = await operate<{ path: string; revision: string; size: number }>({ op: 'write', path: file.path, content: draft, revision: file.revision }); setFile({ ...file, ...saved, content: draft }); setInfo(saved); await reload(); })}>{ui('Save to remote')}</button>
-            <button disabled={busy || !dirty} onClick={() => { setDraft(file.content); setError(''); }}>{ui('Discard changes')}</button></>}
-            <button disabled={busy} onClick={() => setDeleting(true)}>{ui('Delete file')}</button>
-          </div><form className="ra-workspace-rename" onSubmit={event => { event.preventDefault(); const form = event.currentTarget, destination = new FormData(form).get('destination') as string; if (destination.trim()) void run(async () => { await operate({ op: 'move', path: info.path, destination, revision: info.revision }); await reload(); await open(destination); }); }}><input name="destination" aria-label={ui('Rename destination')} placeholder={info.path} /><button disabled={busy || dirty}>{ui('Rename')}</button></form></>}
-          {deleting && info && <div className="ra-banner"><span>{ui('Delete this remote file?')}</span><button disabled={busy} onClick={() => void run(async () => { await operate({ op: 'remove', path: info.path, revision: info.revision }); setFile(undefined); setInfo(undefined); setReadOnly(''); setSelected(undefined); setDeleting(false); await reload(); })}>{ui('Delete')}</button><button onClick={() => setDeleting(false)}>{ui('Cancel')}</button></div>}
-          {!selected && <p className="ra-muted">{ui('Files are read directly from the remote machine. Saving checks for concurrent edits.')}</p>}
+        <main className="ra-ws-viewer">
+          {selected ? <>
+            <div className="ra-ws-viewer-head"><Icon kind="file" /><span className="ra-mono" title={selected}>{selected}</span>{dirty && <span className="ra-ws-dirty">{ui('Unsaved')}</span>}
+              <button type="button" className="ra-ws-icon" title={ui('Download')} aria-label={ui('Download')} disabled={busy} onClick={() => void run(download)}><Icon kind="download" /></button></div>
+            {readOnly && <p className="ra-ws-note">{readOnly}</p>}
+            {file && <textarea className="ra-workspace-editor" aria-label={ui('Remote file contents')} spellCheck={false} value={draft} onChange={e => setDraft(e.target.value)} disabled={busy} />}
+            {info && <div className="ra-ws-viewer-actions">
+              {file && <><button className="ra-ws-button ra-primary" disabled={busy || !dirty} onClick={() => void run(async () => { const saved = await operate<{ path: string; revision: string; size: number }>({ op: 'write', path: file.path, content: draft, revision: file.revision }); setFile({ ...file, ...saved, content: draft }); setInfo(saved); await reload(); })}>{ui('Save to remote')}</button>
+                <button className="ra-ws-button" disabled={busy || !dirty} onClick={() => { setDraft(file.content); setError(''); }}>{ui('Discard changes')}</button></>}
+              <form className="ra-ws-rename" onSubmit={event => { event.preventDefault(); const form = event.currentTarget, destination = new FormData(form).get('destination') as string; if (destination.trim()) void run(async () => { await operate({ op: 'move', path: info.path, destination, revision: info.revision }); await reload(); await open(destination); }); }}>
+                <input className="ra-ws-input" name="destination" aria-label={ui('Rename destination')} placeholder={info.path} /><button className="ra-ws-button" disabled={busy || dirty}>{ui('Rename')}</button></form>
+              <button className="ra-ws-button ra-ws-danger" disabled={busy} onClick={() => setDeleting(true)}><Icon kind="trash" />{ui('Delete file')}</button>
+            </div>}
+            {deleting && info && <div className="ra-banner" data-tone="error"><span>{ui('Delete this remote file?')}</span><span className="ra-ws-row"><button disabled={busy} onClick={() => void run(async () => { await operate({ op: 'remove', path: info.path, revision: info.revision }); setFile(undefined); setInfo(undefined); setReadOnly(''); setSelected(undefined); setDeleting(false); await reload(); })}>{ui('Delete')}</button><button onClick={() => setDeleting(false)}>{ui('Cancel')}</button></span></div>}
+          </> : <div className="ra-ws-placeholder"><Icon kind="file" /><p>{ui('Choose a file')}</p><small>{ui('Files are read directly from the remote machine. Saving checks for concurrent edits.')}</small></div>}
         </main>
       </div>}
-      {tab === 'commands' && <div className="ra-workspace-section"><p>{ui('For an interactive terminal, select Remote workspace in the native terminal’s shell menu.')}</p><form onSubmit={event => { event.preventDefault(); void run(async () => {
-        const result = await operate<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean }>({ op: 'command', path: '.', command });
-        setOutput(`${result.stdout}${result.stderr ? '\n' + result.stderr : ''}\n${ui('Exit code')}: ${result.exitCode ?? '—'}${result.timedOut ? '\n' + ui('Command timed out') : ''}${result.truncated ? '\n' + ui('Output truncated') : ''}`);
-      }); }}><textarea aria-label={ui('Remote command')} value={command} onChange={e => setCommand(e.target.value)} placeholder="git status" /><button disabled={busy || !command.trim()}>{ui('Run command')}</button></form><pre className="ra-workspace-output">{output}</pre></div>}
-      {tab === 'sync' && <div className="ra-workspace-section"><p>{ui('Sync the remote directory and its local workspace mirror. Preview first; files changed on both sides are preserved as conflicts. Git, dependencies and symbolic links are skipped.')}</p><select aria-label={ui('Sync direction')} disabled={busy} value={direction} onChange={e => { setDirection(e.target.value as 'pull' | 'push'); setSync(undefined); }}><option value="pull">{ui('Pull remote → local mirror')}</option><option value="push">{ui('Push local mirror → remote')}</option></select><div className="ra-actions"><button disabled={busy} onClick={() => void run(async () => setSync(await call<SyncResult>('workspaceSync', { direction })))}>{ui('Preview sync')}</button><button disabled={busy || !sync?.dryRun} onClick={() => void run(async () => setSync(await call<SyncResult>('workspaceSync', { direction, apply: true, planId: sync!.planId })))}>{ui('Apply preview')}</button></div>
-        {sync && <><p role="status">{ui(sync.dryRun ? 'Sync preview' : 'Sync completed')}: {sync.changes.length} {ui('changes')}, {sync.conflicts.length} {ui('conflicts')}</p><ul>{sync.changes.map(c => <li key={c.path}>{ui(c.action)} · {c.path}</li>)}{sync.conflicts.map(p => <li key={p}>{ui('Conflict')} · {p}</li>)}</ul>{sync.skipped.length > 0 && <details><summary>{ui('Skipped files')} ({sync.skipped.length})</summary><pre>{sync.skipped.join('\n')}</pre></details>}</>}
+      {tab === 'commands' && <div className="ra-ws-section">
+        <p className="ra-ws-note">{ui('For an interactive terminal, select Remote workspace in the native terminal’s shell menu.')}</p>
+        <form className="ra-ws-card ra-ws-command" onSubmit={event => { event.preventDefault(); void run(async () => {
+          const result = await operate<{ stdout: string; stderr: string; exitCode: number | null; timedOut: boolean; truncated: boolean }>({ op: 'command', path: '.', command });
+          setOutput(`${result.stdout}${result.stderr ? '\n' + result.stderr : ''}\n${ui('Exit code')}: ${result.exitCode ?? '—'}${result.timedOut ? '\n' + ui('Command timed out') : ''}${result.truncated ? '\n' + ui('Output truncated') : ''}`);
+        }); }}><textarea aria-label={ui('Remote command')} value={command} onChange={e => setCommand(e.target.value)} placeholder="git status" spellCheck={false}
+          onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} />
+          <div className="ra-ws-card-foot"><span className="ra-ws-hint">⌘/Ctrl + Enter</span><button className="ra-ws-button ra-primary" disabled={busy || !command.trim()}><Icon kind="play" />{ui('Run command')}</button></div></form>
+        {output && <pre className="ra-ws-output" aria-label={ui('Output')}>{output}</pre>}
       </div>}
-      {tab === 'tunnels' && <div className="ra-workspace-section"><p>{ui('Forward application ports or a running remote DSH web interface. Tunnels stop when DSH closes; saved definitions remain. Agent sessions keep running independently.')}</p>
-        <form className="ra-tunnel-form" onSubmit={event => { event.preventDefault(); void run(async () => { await call('addWorkspaceTunnel', { tunnel: { id: requestId(), direction: tunnelDirection, listenPort: Number(listenPort), targetPort: Number(targetPort), targetHost: '127.0.0.1' } }); setTunnels(await call<Tunnel[]>('workspaceTunnels')); }); }}>
-          <label>{ui('Direction')}<select value={tunnelDirection} onChange={e => setTunnelDirection(e.target.value)}><option value="local">{ui('Local → remote')}</option><option value="reverse">{ui('Remote → local')}</option></select></label><label>{ui('Listen port')}<input type="number" min="1" max="65535" required value={listenPort} onChange={e => setListenPort(e.target.value)} /></label><label>{ui('Target port')}<input type="number" min="1" max="65535" required value={targetPort} onChange={e => setTargetPort(e.target.value)} /></label><button disabled={busy}>{ui('Add tunnel')}</button>
-        </form><ul className="ra-tunnel-list">{tunnels.map(t => <li key={t.id}><span>{ui(t.direction)} · {t.listenPort} → {t.targetHost}:{t.targetPort} · {ui(t.status)}</span>{t.error && <p role="alert">{t.error}</p>}<div className="ra-actions"><button disabled={busy} onClick={() => void run(() => tunnelAction(t.status === 'running' ? 'stopWorkspaceTunnel' : 'startWorkspaceTunnel', t.id))}>{ui(t.status === 'running' ? 'Stop' : 'Start')}</button>{t.status === 'running' && t.direction === 'local' && <a href={`http://${TUNNEL_ACCESS_HOST}:${t.listenPort}`} target="_blank" rel="noreferrer">{ui('Open')}</a>}<button disabled={busy} onClick={() => void run(() => tunnelAction('removeWorkspaceTunnel', t.id))}>{ui('Remove')}</button></div></li>)}</ul>
+      {tab === 'sync' && <div className="ra-ws-section">
+        <p className="ra-ws-note">{ui('Sync the remote directory and its local workspace mirror. Preview first; files changed on both sides are preserved as conflicts. Git, dependencies and symbolic links are skipped.')}</p>
+        <div className="ra-ws-card">
+          {segmented(ui('Sync direction'), direction, value => { setDirection(value); setSync(undefined); }, [['pull', ui('Pull remote → local mirror')], ['push', ui('Push local mirror → remote')]] as const)}
+          <div className="ra-ws-card-foot"><button className="ra-ws-button" disabled={busy} onClick={() => void run(async () => setSync(await call<SyncResult>('workspaceSync', { direction })))}>{ui('Preview sync')}</button>
+            <button className="ra-ws-button ra-primary" disabled={busy || !sync?.dryRun} onClick={() => void run(async () => setSync(await call<SyncResult>('workspaceSync', { direction, apply: true, planId: sync!.planId })))}>{ui('Apply preview')}</button></div>
+        </div>
+        {sync && <div className="ra-ws-card">
+          <p className="ra-ws-card-title" role="status">{ui(sync.dryRun ? 'Sync preview' : 'Sync completed')}<span>{sync.changes.length} {ui('changes')} · {sync.conflicts.length} {ui('conflicts')}</span></p>
+          {sync.changes.length + sync.conflicts.length > 0 ? <ul className="ra-ws-list">{sync.changes.map(c => <li key={c.path}><span className="ra-ws-tag" data-action={c.action}>{ui(c.action)}</span><span className="ra-mono">{c.path}</span></li>)}
+            {sync.conflicts.map(p => <li key={p}><span className="ra-ws-tag" data-action="conflict">{ui('Conflict')}</span><span className="ra-mono">{p}</span></li>)}</ul> : <p className="ra-ws-empty">{ui('Nothing to sync')}</p>}
+          {sync.skipped.length > 0 && <details className="ra-ws-skipped"><summary>{ui('Skipped files')} ({sync.skipped.length})</summary><pre>{sync.skipped.join('\n')}</pre></details>}
+        </div>}
       </div>}
-      {tab === 'web' && <div className="ra-workspace-section"><p>{ui('Open the remote machine’s DSH interface through SSH. Starting an instance uses an isolated DSH home and requires dsh on the remote login PATH. Closing the tunnel leaves that instance running.')}</p>
-        <div className="ra-tunnel-form"><label>{ui('Remote DSH port')}<input aria-label={ui('Remote DSH port')} type="number" min="1024" max="65535" value={webPort} onChange={e => setWebPort(e.target.value)} /></label><button disabled={busy} onClick={() => void run(async () => { const result = await operate<{ url: string }>({ op: 'webStart', path: '.', port: Number(webPort), host: TUNNEL_ACCESS_HOST }); setWebUrl(result.url); setWebLink(''); })}>{ui('Start remote DSH')}</button><button disabled={busy} onClick={() => void run(async () => { await operate({ op: 'webStop', path: '.', port: Number(webPort) }); setWebUrl(''); setWebLink(''); })}>{ui('Stop managed instance')}</button></div>
-        <form className="ra-tunnel-form" onSubmit={event => { event.preventDefault(); void run(async () => {
+      {tab === 'tunnels' && <div className="ra-ws-section">
+        <p className="ra-ws-note">{ui('Forward application ports or a running remote DSH web interface. Tunnels stop when DSH closes; saved definitions remain. Agent sessions keep running independently.')}</p>
+        <form className="ra-ws-card" onSubmit={event => { event.preventDefault(); void run(async () => { await call('addWorkspaceTunnel', { tunnel: { id: requestId(), direction: tunnelDirection, listenPort: Number(listenPort), targetPort: Number(targetPort), targetHost: '127.0.0.1' } }); setTunnels(await call<Tunnel[]>('workspaceTunnels')); }); }}>
+          {segmented(ui('Direction'), tunnelDirection, setTunnelDirection, [['local', ui('Local → remote')], ['reverse', ui('Remote → local')]] as const)}
+          <div className="ra-ws-ports"><label className="ra-ws-field">{ui('Listen port')}<input className="ra-ws-input" type="number" min="1" max="65535" required value={listenPort} onChange={e => setListenPort(e.target.value)} /></label>
+            <span className="ra-ws-arrow" aria-hidden="true">→</span>
+            <label className="ra-ws-field">{ui('Target port')}<input className="ra-ws-input" type="number" min="1" max="65535" required value={targetPort} onChange={e => setTargetPort(e.target.value)} /></label>
+            <button className="ra-ws-button ra-primary" disabled={busy}><Icon kind="plus" />{ui('Add tunnel')}</button></div>
+        </form>
+        <h3 className="ra-ws-subhead">{ui('Saved tunnels')}{tunnels.length > 0 && <span>{tunnels.length}</span>}</h3>
+        {tunnels.length ? <ul className="ra-ws-tunnels">{tunnels.map(t => <li key={t.id} data-status={t.status}>
+          <span className="ra-ws-dot" aria-hidden="true" />
+          <div className="ra-ws-tunnel-main"><span className="ra-mono">{t.listenPort} → {t.targetHost}:{t.targetPort}</span><small>{ui(t.direction === 'local' ? 'Local → remote' : 'Remote → local')} · {ui(t.status)}</small>{t.error && <small className="ra-ws-error" role="alert">{t.error}</small>}</div>
+          <div className="ra-ws-row">{t.status === 'running' && t.direction === 'local' && <a className="ra-ws-icon" href={`http://${TUNNEL_ACCESS_HOST}:${t.listenPort}`} target="_blank" rel="noreferrer" title={ui('Open')} aria-label={ui('Open')}><Icon kind="external" /></a>}
+            <button type="button" className="ra-ws-icon" title={ui(t.status === 'running' ? 'Stop' : 'Start')} aria-label={ui(t.status === 'running' ? 'Stop' : 'Start')} disabled={busy} onClick={() => void run(() => tunnelAction(t.status === 'running' ? 'stopWorkspaceTunnel' : 'startWorkspaceTunnel', t.id))}><Icon kind={t.status === 'running' ? 'stop' : 'play'} /></button>
+            <button type="button" className="ra-ws-icon ra-ws-danger" title={ui('Remove')} aria-label={ui('Remove')} disabled={busy} onClick={() => void run(() => tunnelAction('removeWorkspaceTunnel', t.id))}><Icon kind="trash" /></button></div>
+        </li>)}</ul> : <p className="ra-ws-empty">{ui('No tunnels yet. Add one above.')}</p>}
+      </div>}
+      {tab === 'web' && <div className="ra-ws-section">
+        <p className="ra-ws-note">{ui('Open the remote machine’s DSH interface through SSH. Starting an instance uses an isolated DSH home and requires dsh on the remote login PATH. Closing the tunnel leaves that instance running.')}</p>
+        <div className="ra-ws-card"><p className="ra-ws-card-title">{ui('Managed instance')}</p>
+          <div className="ra-ws-ports"><label className="ra-ws-field">{ui('Remote DSH port')}<input className="ra-ws-input" aria-label={ui('Remote DSH port')} type="number" min="1024" max="65535" value={webPort} onChange={e => setWebPort(e.target.value)} /></label>
+            <button className="ra-ws-button ra-primary" disabled={busy} onClick={() => void run(async () => { const result = await operate<{ url: string }>({ op: 'webStart', path: '.', port: Number(webPort), host: TUNNEL_ACCESS_HOST }); setWebUrl(result.url); setWebLink(''); })}><Icon kind="play" />{ui('Start remote DSH')}</button>
+            <button className="ra-ws-button" disabled={busy} onClick={() => void run(async () => { await operate({ op: 'webStop', path: '.', port: Number(webPort) }); setWebUrl(''); setWebLink(''); })}>{ui('Stop managed instance')}</button></div>
+        </div>
+        <form className="ra-ws-card" onSubmit={event => { event.preventDefault(); void run(async () => {
           const remote = new URL(webUrl);
           if (remote.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(remote.hostname) || remote.username || remote.password || !remote.port) throw new Error(ui('Enter the remote loopback DSH login URL.'));
           const listenPort = Number(webLocalPort), targetPort = Number(remote.port);
@@ -143,10 +221,13 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
           if (!saved) await call('addWorkspaceTunnel', { tunnel: { id, direction: 'local', listenPort, targetPort, targetHost: '127.0.0.1' } });
           await call('startWorkspaceTunnel', { id });
           setWebLink(`http://${TUNNEL_ACCESS_HOST}:${Number(webLocalPort)}${remote.pathname}${remote.search}`);
-        }); }}><label>{ui('Remote login URL')}<input aria-label={ui('Remote login URL')} type="password" autoComplete="off" value={webUrl} onChange={e => { setWebUrl(e.target.value); setWebLink(''); }} placeholder="http://127.0.0.1:3080/?token=…" /></label><label>{ui('Local DSH port')}<input type="number" min="1" max="65535" value={webLocalPort} onChange={e => setWebLocalPort(e.target.value)} /></label><button disabled={busy || !webUrl}>{ui('Connect remote DSH')}</button></form>
-        {webLink && <a href={webLink} target="_blank" rel="noreferrer">{ui('Open remote DSH')}</a>}
+        }); }}><p className="ra-ws-card-title">{ui('Connect remote DSH')}</p>
+          <label className="ra-ws-field">{ui('Remote login URL')}<input className="ra-ws-input" aria-label={ui('Remote login URL')} type="password" autoComplete="off" value={webUrl} onChange={e => { setWebUrl(e.target.value); setWebLink(''); }} placeholder="http://127.0.0.1:3080/?token=…" /></label>
+          <div className="ra-ws-ports"><label className="ra-ws-field">{ui('Local DSH port')}<input className="ra-ws-input" type="number" min="1" max="65535" value={webLocalPort} onChange={e => setWebLocalPort(e.target.value)} /></label>
+            <button className="ra-ws-button ra-primary" disabled={busy || !webUrl}>{ui('Connect remote DSH')}</button>
+            {webLink && <a className="ra-ws-button" href={webLink} target="_blank" rel="noreferrer"><Icon kind="external" />{ui('Open remote DSH')}</a>}</div>
+        </form>
       </div>}
-      {busy && <p role="status">{ui('Working…')}</p>}
     </>}
   </section>;
 }
