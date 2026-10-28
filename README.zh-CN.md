@@ -13,6 +13,7 @@
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Chrome 风格元素、控制台和网络调试器，在 Chrome/Edge 独立窗口中打开 |
 | `dsh-translate` | [packages/translate](packages/translate/README.zh-CN.md) | 在聊天选中文本或输入框草稿中调用 OpenAI 兼容接口进行翻译 |
+| `dsh-auth-cookie-cleanup` | [packages/auth-cookie-cleanup](packages/auth-cookie-cleanup/README.zh-CN.md) | 临时修复 Desktop 启动约 70 次后无法打开：自动清理残留的按端口 `dsh-auth-*` cookie（deepseek-harness#10598） |
 
 ## 语言
 
@@ -86,6 +87,7 @@ packages/
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景
   browser-devtools/     # 在独立窗口中打开的网页调试器
   translate/            # DSH 聊天选区与草稿翻译
+  auth-cookie-cleanup/  # 残留 dsh-auth cookie 的临时修复
 scripts/
   build-client.mjs      # 共用的 DSH Web 客户端打包脚本
 tsconfig.base.json     # 共用 TypeScript 编译选项

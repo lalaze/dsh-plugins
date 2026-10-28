@@ -1,0 +1,40 @@
+{
+  "name": "dsh-auth-cookie-cleanup",
+  "version": "0.1.0",
+  "description": "Temporary fix: expire stale per-port dsh-auth-* cookies so Desktop keeps opening after many launches",
+  "type": "module",
+  "main": "lib/server/index.js",
+  "types": "lib/server/index.d.ts",
+  "exports": {
+    ".": { "types": "./lib/server/index.d.ts", "default": "./lib/server/index.js" },
+    "./package.json": "./package.json"
+  },
+  "files": ["lib", "bin", "cordis.patch.yml", "README.md", "README.zh-CN.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "check": "pnpm run typecheck && pnpm test && pnpm run build",
+    "prepack": "pnpm run build",
+    "pack:plugin": "pnpm pack --pack-destination ../../dist"
+  },
+  "engines": { "node": ">=22.15.0", "dsh": ">=0.2.1-rc.2 <0.3.0" },
+  "keywords": ["dsh-plugin", "deepseek-harness", "desktop", "cookie", "auth"],
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/lalaze/dsh-plugins.git", "directory": "packages/auth-cookie-cleanup" },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-client-connection": { "optional": true }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2"
+  }
+}

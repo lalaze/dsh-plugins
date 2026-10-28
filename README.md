@@ -13,6 +13,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | Chrome-style Elements, Console and Network debugger in a separate Chrome/Edge window |
 | `dsh-translate` | [packages/translate](packages/translate/README.md) | Translate selected chat text and composer drafts through an OpenAI-compatible API |
+| `dsh-auth-cookie-cleanup` | [packages/auth-cookie-cleanup](packages/auth-cookie-cleanup/README.md) | Temporary fix for Desktop failing to open after ~70 launches: expires stale per-port `dsh-auth-*` cookies (deepseek-harness#10598) |
 
 ## Languages
 
@@ -86,6 +87,7 @@ packages/
   gallery/              # Local wallpaper library and DSH backgrounds
   browser-devtools/     # Separate-window debugger for Sidebar Browser tabs
   translate/            # Chat selection and composer translation
+  auth-cookie-cleanup/  # Temporary fix for stale dsh-auth cookies
 scripts/
   build-client.mjs      # Shared DSH web client bundler
 tsconfig.base.json     # Shared TypeScript compiler options
