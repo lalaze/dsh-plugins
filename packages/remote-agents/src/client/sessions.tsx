@@ -18,6 +18,7 @@ import { PaperPlaneTiltIcon } from '@phosphor-icons/react/dist/csr/PaperPlaneTil
 import { PauseIcon } from '@phosphor-icons/react/dist/csr/Pause';
 import { TerminalIcon } from '@phosphor-icons/react/dist/csr/Terminal';
 import { needsAttention, projectName, sessionPriority, sessionView, visibleSession, type SessionView } from './session-list.js';
+import type { WorkspacePlacement } from '../workspace-access.js';
 
 export function useDashboard() {
   const [dashboard, setDashboard] = useState<Dashboard>(), [error, setError] = useState(''), [revision, setRevision] = useState(0);
@@ -52,7 +53,7 @@ function dayLabel(value: string): string {
   today.setDate(today.getDate() - 1);
   return date >= today ? 'Yesterday' : 'Earlier';
 }
-export function Sessions({ openChat, cwd }: { openChat?: (id: string) => void; cwd?: string }) {
+export function Sessions({ openChat, sessionId, cwd }: { openChat?: (id: string) => void; sessionId?: string; cwd?: string }) {
   useLocale();
   const { dashboard, error, refresh } = useDashboard();
   const [selected, setSelected] = useState<string>(), [query, setQuery] = useState(''), [filter, setFilter] = useState<SessionView>('active'), [creating, setCreating] = useState(false), [showDetail, setShowDetail] = useState(false);
@@ -98,31 +99,43 @@ export function Sessions({ openChat, cwd }: { openChat?: (id: string) => void; c
       <footer className="ra-list-footer">{filter === 'history' && matches.length > 0 && <button className="ra-bulk-archive" disabled={archiving} onClick={() => void archiveHistory()}>{ui(archiving ? 'Archiving…' : 'Archive listed history')}</button>}<button className="ra-archive-link" aria-pressed={filter === 'archived'} onClick={() => switchView('archived')}><ArchiveIcon size={19} /><span>{ui('Archived sessions')}</span>{archivedCount > 0 && <small>{archivedCount}</small>}<CaretRightIcon size={15} /></button></footer>
     </aside>
     <main className="ra-session-main"><button className="ra-back" onClick={() => { setShowDetail(false); setCreating(false); }}><ArrowLeftIcon size={16} />{ui('Back to sessions')}</button>
-      {creating ? <NewSession cwd={cwd} created={a => { choose(a.id); setFilter(sessionView(a)); refresh(); }} />
+      {creating ? <NewSession key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} created={a => { choose(a.id); setFilter(sessionView(a)); refresh(); }} />
         : agent ? <SessionDetail key={agent.id} original={agent} host={dashboard?.hosts.find(h => h.id === agent.hostId)} changed={refresh} openChat={openChat} />
         : <div className="ra-selection-empty"><TerminalIcon size={28} weight="light" /><h2>{ui(dashboard ? 'Choose a session' : 'Loading sessions…')}</h2><p>{ui('Select saved work to read its history or continue a task.')}</p><button onClick={newSession}>{ui('New session')}</button></div>}
     </main>
   </div>;
 }
 
-function NewSession({ cwd, created }: { cwd?: string; created: (agent: AgentSummary) => void }) {
+function NewSession({ sessionId, created }: { sessionId?: string; created: (agent: AgentSummary) => void }) {
   const [projects, setProjects] = useState<ChatProject[]>(), [projectId, setProjectId] = useState(''), [providerId, setProviderId] = useState(''), [modelId, setModelId] = useState(''), [selectedMode, setSelectedMode] = useState(''), [speedId, setSpeedId] = useState('');
   const [prompt, setPrompt] = useState(''), [error, setError] = useState(''), [sending, setSending] = useState(false), [pending, setPending] = useState<TaskInput>();
-  useEffect(() => { const c = new AbortController(); void api<ChatProject[]>('hostCatalogs', {}, c.signal).then(p => { if (!c.signal.aborted) { setProjects(p); setProjectId(p[0]?.id ?? ''); } }).catch(e => { if (!c.signal.aborted) setError(e instanceof Error ? e.message : String(e)); }); return () => c.abort(); }, []);
+  const [placement, setPlacement] = useState<WorkspacePlacement>();
+  useEffect(() => {
+    if (!sessionId) return;
+    const c = new AbortController();
+    void Promise.all([api<ChatProject[]>('hostCatalogs', {}, c.signal), api<WorkspacePlacement>('workspaceModels', { sessionId }, c.signal)])
+      .then(([catalogs, resolved]) => {
+        if (c.signal.aborted) return;
+        const matching = catalogs.filter(p => resolved.hostIds.includes(p.hostId));
+        setPlacement(resolved); setProjects(matching); setProjectId(matching[0]?.id ?? '');
+      }).catch(e => { if (!c.signal.aborted) setError(e instanceof Error ? e.message : String(e)); });
+    return () => c.abort();
+  }, [sessionId]);
+  const cwd = placement?.cwd;
   const project = projects?.find(p => p.id === projectId), providers = project?.providers.filter(p => p.status === 'ready' && p.models.length) ?? [];
   const provider = providers.find(p => p.id === providerId) ?? providers[0], model = provider?.models.find(m => m.id === modelId) ?? provider?.models.find(m => m.isDefault) ?? provider?.models[0];
   const modes = provider ? permissionModes(provider.id, provider.modes) : [];
   const modeId = selectedMode || (provider?.id === 'claude' ? 'inherit' : provider?.defaultModeId ?? '');
   const serviceTier = model?.serviceTiers?.find(t => t.id === speedId)?.id;
   const submit = async () => {
-    if (!project || !provider || !model || !cwd || !prompt.trim() || sending) return;
+    if (!sessionId || !project || !provider || !model || !cwd || !prompt.trim() || sending) return;
     const request = pending ?? { id: requestId(), hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt: prompt.trim(), ...(modeId ? { modeId } : {}), ...(model.defaultThinkingOptionId ? { thinkingOptionId: model.defaultThinkingOptionId } : {}), ...(serviceTier ? { serviceTier } : {}) };
     setPending(request); setSending(true); setError('');
-    try { created(await api<AgentSummary>('create', { agent: request })); }
+    try { created(await api<AgentSummary>('createWorkspaceSession', { sessionId, agent: request })); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); if (e instanceof ApiError && e.status < 500) setPending(undefined); }
     finally { setSending(false); }
   };
-  return <form className="ra-new-session" onSubmit={e => { e.preventDefault(); void submit(); }}><h2>{ui('New remote session')}</h2><p className="ra-muted">{ui('Choose a machine and an agent. The current DSH workspace path is used on that machine.')}</p>
+  return <form className="ra-new-session" onSubmit={e => { e.preventDefault(); void submit(); }}><h2>{ui('New remote session')}</h2><p className="ra-muted">{ui('Remote models are only available in workspaces belonging to the same machine.')}</p>
     {error && <div className="ra-banner" role="alert" data-tone="error">{localizeError(error)}</div>}
     {projects?.length === 0 ? <p className="ra-banner">{ui('Add a machine or refresh its models in Settings → Remote agents.')}</p> : <>
       <label className="ra-field">{ui('Host')}<select aria-label={ui('Session host')} value={projectId} disabled={sending || !!pending} onChange={e => { setProjectId(e.target.value); setProviderId(''); setModelId(''); setSelectedMode(''); setSpeedId(''); }}>{projects?.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}</select></label>

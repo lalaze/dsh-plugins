@@ -15,7 +15,11 @@ export interface UsageOptions {
   account?: boolean;
   refresh?: boolean;
 }
-export interface CreateOptions { title?: string; origin?: Task['origin']; chat?: Task['chat']; signal?: AbortSignal }
+export interface CreateOptions {
+  title?: string; origin?: Task['origin']; chat?: Task['chat']; signal?: AbortSignal;
+  /** Recheck a workspace-bound request after discovery and immediately before CLI execution. */
+  beforeStart?(): Promise<void>;
+}
 export interface SendOptions {
   /** Interrupt a running turn. When false, a working agent rejects the message. */
   interrupt?: boolean;
@@ -256,7 +260,7 @@ export class RemoteAgentsService {
       const existing = this.store.task(t => t.id === request.id);
       if (existing) {
         if (JSON.stringify(taskInput(existing)) !== JSON.stringify(request)) throw new RemoteError('This request ID belongs to a different agent', 409);
-        return existing.agentId ? this.summary(existing.id) : this.launch(existing, options.signal);
+        return existing.agentId ? this.summary(existing.id) : this.launch(existing, options.signal, options.beforeStart);
       }
       return this.use(request.hostId, async (backend, host) => {
         if (!enabledProvidersOf(host).includes(request.provider)) throw new RemoteError('This CLI is disabled on this machine. Enable it in Settings → Remote agents.', 409);
@@ -269,6 +273,7 @@ export class RemoteAgentsService {
         if (request.modeId && !permissionModes(provider.id, provider.modes).some(m => m.id === request.modeId)) throw new RemoteError('The selected mode is unavailable', 409);
         if (request.thinkingOptionId && !model.thinkingOptions?.some(m => m.id === request.thinkingOptionId)) throw new RemoteError('The selected thinking level is unavailable', 409);
         if (request.serviceTier && !model.serviceTiers?.some(t => t.id === request.serviceTier)) throw new RemoteError('The selected speed is unavailable', 409);
+        await options.beforeStart?.();
         const now = new Date().toISOString();
         const task: Task = { ...request, serverId: host.serverId!, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), state: 'creating' };
         // Persist the exact execution intent and idempotency key before any remote mutation.
@@ -277,7 +282,7 @@ export class RemoteAgentsService {
           if (state.tasks.length >= 1000) throw new RemoteError('The remote agent registry is full. Delete archived agents first.');
           state.tasks.push(task);
         });
-        return this.launch(task, options.signal);
+        return this.launch(task, options.signal, options.beforeStart);
       });
     });
   }
@@ -292,9 +297,10 @@ export class RemoteAgentsService {
       return this.summary(id);
     }, task.serverId));
   }
-  private async launch(task: Task, signal?: AbortSignal): Promise<AgentSummary> {
+  private async launch(task: Task, signal?: AbortSignal, beforeStart?: () => Promise<void>): Promise<AgentSummary> {
     try {
       await this.use(task.hostId, async backend => {
+        await beforeStart?.();
         const agent = await backend.create(task, signal);
         if (agent.provider !== task.provider) throw new Error('Created agent provider does not match the request');
         await this.updateTask(task.id, next => { next.agentId = agent.id; next.executionCwd = agent.cwd; next.state = 'ready'; delete next.error; });

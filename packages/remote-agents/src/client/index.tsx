@@ -1,5 +1,5 @@
 import { XIcon } from '@phosphor-icons/react/dist/csr/X';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { LocaleContext } from '@dsh-plugins/i18n';
 import type { Dashboard } from '../domain.js';
@@ -40,7 +40,7 @@ function Settings({ openSessions }: { openSessions: () => void }) {
       : <div className="ra-empty" role="status">{ui('Loading settings…')}</div>}
   </section>;
 }
-function SessionDialog({ close, openChat, cwd }: { close: () => void; openChat: (id: string) => void; cwd?: string }) {
+function SessionDialog({ close, openChat, sessionId, cwd }: { close: () => void; openChat: (id: string) => void; sessionId?: string; cwd?: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const focused = document.activeElement, element = dialog.current;
@@ -50,7 +50,7 @@ function SessionDialog({ close, openChat, cwd }: { close: () => void; openChat: 
   }, []);
   return createPortal(<dialog className="dsh-ra ra-dialog" ref={dialog} aria-label={ui('Remote sessions')} onCancel={close} onClose={close}>
     <style>{styles}</style><div className="ra-dialog-bar"><span>{ui('Remote sessions')}</span><button aria-label={ui('Close remote sessions')} onClick={close}><XIcon size={19} /></button></div>
-    <Sessions openChat={openChat} cwd={cwd} />
+    <Sessions openChat={openChat} sessionId={sessionId} cwd={cwd} />
   </dialog>, document.body);
 }
 export const name = 'dsh-remote-agents-client';
@@ -65,9 +65,13 @@ export function apply(ctx: Client): void {
       if (!navigation?.openSession) throw new Error('Open this conversation from the DSH sidebar.');
       navigation.openSession(id); setVisible(false);
     };
-    const sessions = (ctx.get as ((name: string) => unknown) | undefined)?.('sessions') as { list?: { getSnapshot(): { byId?: Record<string, { cwd?: string; retainedBy?: Record<string, number> }> } } } | undefined;
-    const cwd = Object.values(sessions?.list?.getSnapshot()?.byId ?? {}).find(s => (s.retainedBy?.mainView ?? 0) > 0)?.cwd;
-    return <><Settings openSessions={() => setVisible(true)} />{visible && <SessionDialog close={() => setVisible(false)} openChat={openChat} cwd={cwd} />}</>;
+    const sessions = (ctx.get as ((name: string) => unknown) | undefined)?.('sessions') as { list?: { getSnapshot(): { byId?: Record<string, { cwd?: string; retainedBy?: Record<string, number> }> }; subscribe(listener: () => void): () => void } } | undefined;
+    const active = useSyncExternalStore(useCallback(listener => sessions?.list?.subscribe(listener) ?? (() => {}), [sessions]), () => {
+      const entry = Object.entries(sessions?.list?.getSnapshot()?.byId ?? {}).find(([, s]) => (s.retainedBy?.mainView ?? 0) > 0);
+      return JSON.stringify(entry ? [entry[0], entry[1].cwd] : []);
+    });
+    const [sessionId, cwd] = JSON.parse(active) as [string?, string?];
+    return <><Settings openSessions={() => setVisible(true)} />{visible && <SessionDialog close={() => setVisible(false)} openChat={openChat} sessionId={sessionId} cwd={cwd} />}</>;
   };
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, Surface));
   ctx.effect(installModelGroups);

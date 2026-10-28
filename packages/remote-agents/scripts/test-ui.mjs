@@ -267,6 +267,8 @@ try {
   expect('window.fixture.navigation.at(-1) === "fixture-main-chat"');
   browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-list-heading")');
   browser('click', '.ra-list-heading button'); wait('document.querySelector("[aria-label=会话机器] option")');
+  expect('document.querySelector(".ra-new-session .ra-mono").textContent === "/srv/main-chat" && !document.querySelector(".ra-new-session").textContent.includes("/fixture/remote-workspaces")');
+  expect('document.querySelectorAll("[aria-label=会话机器] option").length === 1 && document.querySelector("[aria-label=会话机器] option").textContent === "build-box"');
   browser('select', '[aria-label="权限模式"]', 'full-access');
   browser('fill', '[aria-label="任务"]', '检查 API 的分页实现');
   browser('click', 'button:text-is("开始会话")'); wait('document.querySelector(".ra-detail-heading h2")?.textContent === "检查 API 的分页实现"');

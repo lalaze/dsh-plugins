@@ -1,4 +1,4 @@
-import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError } from './domain.js';
+import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './domain.js';
 import type { RemoteAgentsService } from './service.js';
 import { ChatProjects } from './chat-projects.js';
 import type { WorkspacePlacement } from './workspace-access.js';
@@ -47,6 +47,21 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         }
         case 'providers': result = await service.providers(hostId(), remotePath(input.cwd), input.refresh === true); break;
         case 'create': result = await service.create(input.agent, input.title === undefined ? {} : { title: field(input.title, 'title', 100) }); break;
+        case 'createWorkspaceSession': {
+          if (!workspace) throw new RemoteError('Remote workspaces are unavailable', 501);
+          const sessionId = field(input.sessionId, 'session ID', 256), agent = taskInput(input.agent);
+          const beforeStart = async () => {
+            request.signal.throwIfAborted();
+            const placement = await workspace(sessionId, request.signal);
+            if (!placement.hostIds.includes(agent.hostId) || !placement.cwd || placement.cwd !== agent.cwd) {
+              throw new RemoteError('This remote model does not belong to the current workspace machine. Select a matching workspace and model.', 409);
+            }
+          };
+          await beforeStart();
+          result = await service.create(agent, { signal: request.signal, beforeStart,
+            ...(input.title === undefined ? {} : { title: field(input.title, 'title', 100) }) });
+          break;
+        }
         case 'agent': {
           if (input.direction !== undefined && input.direction !== 'before' && input.direction !== 'after') throw new RemoteError('Invalid timeline direction');
           result = await service.detail(agentId(), cursorInput(input.cursor), input.direction); break;

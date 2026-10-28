@@ -48,7 +48,9 @@ const endpoint = async connection => ({ host: new URL(connection).hostname, user
 const access = new WorkspaceAccess(() => store.hosts(), { home: directory, omc: join(directory, 'omc'), endpoint });
 const workspaces = new RemoteWorkspaces(service, access, { home: directory, endpoint });
 let createDelay = 0;
-const handler = createHandler(service, undefined, async () => ({ hostIds: workspaceHostIds }), {
+const handler = createHandler(service, undefined, async sessionId => sessionId === 'current'
+  ? { hostIds: store.hosts().filter(h => h.connection === 'ssh://build-box').map(h => h.id), cwd: '/srv/main-chat' }
+  : { hostIds: workspaceHostIds }, {
   create: async (...args) => { if (createDelay) await new Promise(resolve => setTimeout(resolve, createDelay)); return workspaces.create(...args); },
 });
 const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined });

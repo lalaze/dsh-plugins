@@ -31,7 +31,7 @@ let modelWorkspace = 'macmini';
 const placementListeners = new Set<() => void>();
 const subscribePlacement = (listener: () => void) => { placementListeners.add(listener); return () => { placementListeners.delete(listener); }; };
 const sessions = { subagentAddress: () => undefined, list: { subscribe: subscribePlacement, getSnapshot: () => ({ byId: {
-  current: { cwd: '/srv/main-chat', retainedBy: { mainView: 1 } }, 'fixture-conversation': { cwd: `/srv/${modelWorkspace}` },
+  current: { cwd: '/fixture/remote-workspaces/build-box-builder-22/main-chat', retainedBy: { mainView: 1 } }, 'fixture-conversation': { cwd: `/srv/${modelWorkspace}` },
 } }) } };
 const workspaces = { list: { subscribe: subscribePlacement, getSnapshot: () => ({ items: [{ path: `/srv/${modelWorkspace}`, workspaceId: modelWorkspace }] }) } };
 function get(name: 'locale'): typeof fixtureLocale;
