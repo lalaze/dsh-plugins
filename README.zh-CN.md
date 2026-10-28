@@ -11,7 +11,7 @@
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
-| `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | 停靠在 Sidebar Browser 页面下方的 Chrome 风格元素、控制台和网络调试器 |
+| `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Chrome 风格元素、控制台和网络调试器，支持底部停靠及 Chrome/Edge 独立窗口 |
 | `dsh-translate` | [packages/translate](packages/translate/README.zh-CN.md) | 在聊天选中文本或输入框草稿中调用 OpenAI 兼容接口进行翻译 |
 
 ## 语言
@@ -84,7 +84,7 @@ packages/
   workspace-tags/       # 工作区标签，侧栏按标签或状态分组
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景
-  browser-devtools/     # 停靠在 Sidebar Browser 下方的调试器
+  browser-devtools/     # 支持底部停靠和独立窗口的网页调试器
   translate/            # DSH 聊天选区与草稿翻译
 scripts/
   build-client.mjs      # 共用的 DSH Web 客户端打包脚本

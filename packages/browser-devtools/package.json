@@ -1,7 +1,7 @@
 {
   "name": "dsh-browser-devtools",
-  "version": "0.2.0",
-  "description": "A Chrome-style debugger docked under DSH Desktop sidebar browser tabs",
+  "version": "0.3.0",
+  "description": "Page debugger for DSH Desktop with docked and separate Chrome/Edge windows",
   "type": "module",
   "main": "lib/server/index.js",
   "types": "lib/server/index.d.ts",
@@ -21,12 +21,13 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs && node scripts/build-window.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",
     "prepack": "pnpm run build",
-    "pack:plugin": "pnpm pack --pack-destination ../../dist"
+    "pack:plugin": "pnpm pack --pack-destination ../../dist",
+    "test:ui": "pnpm build && node --import tsx scripts/test-window-ui.mjs"
   },
   "engines": {
     "node": ">=22.15.0",
@@ -57,6 +58,20 @@
   },
   "devDependencies": {
     "@dsh-plugins/i18n": "workspace:*",
-    "jsdom": "^26.1.0"
+    "jsdom": "^26.1.0",
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    }
   }
 }

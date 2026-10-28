@@ -152,6 +152,7 @@ export class DebuggerPanel {
   private tab: Tab = 'elements';
   private timer: ReturnType<typeof setInterval> | undefined;
   private polling = false;
+  private epoch = 0;
   private status: 'idle' | 'waiting' | 'connecting' | 'ready' | 'unavailable' = 'idle';
   private logSeq = 0; private netSeq = 0;
   private rows: Row[] = []; private network: NetworkEntry[] = [];
@@ -167,7 +168,7 @@ export class DebuggerPanel {
   private readonly navigated = () => { this.reset(); this.status = 'waiting'; this.renderAll(); };
   private readonly loaded = () => { if (this.opened) void this.attach(); };
 
-  constructor(private readonly doc: Document, private readonly view: PanelView, private readonly closed: () => void) {
+  constructor(private readonly doc: Document, private readonly view: PanelView, private readonly closed: () => void, private readonly container?: HTMLElement) {
     this.root = h(doc, 'section', { class: 'dsh-bdt-panel', 'data-dsh-browser-devtools': 'panel' });
     this.style = doc.querySelector<HTMLStyleElement>('style[data-dsh-browser-devtools=panel]') ?? h(doc, 'style', { 'data-dsh-browser-devtools': 'panel', text: css });
   }
@@ -177,17 +178,20 @@ export class DebuggerPanel {
     if (this.opened) return;
     // `.content > .viewport > webview` in a flex column next to the toolbar form.
     const content = this.view.parentElement?.parentElement;
-    if (!content?.parentElement || !Array.from(content.parentElement.children).some(child => child.tagName === 'FORM')) throw new Error('layout');
+    if (!this.container && (!content?.parentElement || !Array.from(content.parentElement.children).some(child => child.tagName === 'FORM'))) throw new Error('layout');
     if (!this.style.isConnected) this.doc.head.append(this.style);
     const stored = Number(this.doc.defaultView?.localStorage?.getItem(HEIGHT_KEY));
     this.root.style.height = `${Number.isFinite(stored) && stored >= 120 ? stored : 300}px`;
-    content.after(this.root);
+    if (this.container) {
+      this.root.style.height = '100%'; this.root.style.minHeight = '0'; this.root.style.flex = '1';
+      this.container.append(this.root);
+    } else content!.after(this.root);
     this.opened = true;
     this.view.addEventListener('did-navigate', this.navigated);
     this.view.addEventListener('dom-ready', this.loaded);
     this.renderAll();
     await this.attach();
-    this.timer = setInterval(() => { void this.poll(); }, POLL_MS);
+    if (this.opened) this.timer = setInterval(() => { void this.poll(); }, POLL_MS);
   }
 
   close(): void {
@@ -209,7 +213,8 @@ export class DebuggerPanel {
 
   private ready(): boolean { try { return /^https?:\/\//i.test(this.view.getURL()); } catch { return false; } }
   private async exec(code: string): Promise<unknown> {
-    try { return await this.view.executeJavaScript(code, false); } catch { return undefined; }
+    const epoch = this.epoch;
+    try { const value = await this.view.executeJavaScript(code, false); return epoch === this.epoch ? value : undefined; } catch { return undefined; }
   }
   /** A command for the page agent, reinstalling it once if the page replaced it. */
   private async call<T>(command: string, arg?: unknown): Promise<T | null> {
@@ -218,14 +223,18 @@ export class DebuggerPanel {
     return (result ?? null) as T | null;
   }
   private reset(): void {
+    this.epoch++;
     this.logSeq = 0; this.netSeq = 0; this.rows = []; this.network = [];
     this.tree.clear(); this.rootIds = undefined; this.selected = undefined; this.styles = undefined; this.picking = false; this.selectedRequest = undefined;
   }
 
   private async attach(): Promise<void> {
+    const epoch = this.epoch;
     if (!this.ready()) { this.status = 'waiting'; this.renderAll(); return; }
     this.status = 'connecting'; this.renderStatus();
-    if (await this.exec(agentScript()) !== true) { this.status = 'unavailable'; this.renderAll(); return; }
+    const installed = await this.exec(agentScript());
+    if (!this.opened || epoch !== this.epoch) return;
+    if (installed !== true) { this.status = 'unavailable'; this.renderAll(); return; }
     this.status = 'ready';
     this.renderAll();
     await this.loadRoot();
@@ -332,7 +341,8 @@ export class DebuggerPanel {
     const bar = h(doc, 'div', { class: 'dsh-bdt-bar' });
     const panes = h(doc, 'div', { class: 'dsh-bdt-pane' });
     this.parts = { bar, panes };
-    this.root.append(resize, bar, panes);
+    if (!this.container) this.root.append(resize);
+    this.root.append(bar, panes);
     this.renderBar();
     this.renderStatus();
   }
@@ -564,12 +574,14 @@ export class DebuggerPanel {
   }
 
   private async evaluate(code: string): Promise<void> {
+    const epoch = this.epoch;
     this.history.push(code); if (this.history.length > 100) this.history.shift(); this.historyAt = -1;
     this.rows.push({ kind: 'input', text: code });
     this.renderConsole(true);
     let reply: { result?: Preview; error?: Preview } | undefined;
     try { reply = await this.view.executeJavaScript(evaluateScript(code), true) as typeof reply; }
     catch {
+      if (!this.opened || epoch !== this.epoch) return;
       // Statements (`let x = 1; x`) are not expressions: run them as a script and show its completion value.
       try {
         const value = await this.view.executeJavaScript(code, true);
@@ -578,6 +590,7 @@ export class DebuggerPanel {
       }
       catch (error) { reply = { error: { text: error instanceof Error ? error.message : String(error), kind: 'error' } }; }
     }
+    if (!this.opened || epoch !== this.epoch) return;
     const preview = reply?.error ?? reply?.result ?? { text: 'undefined', kind: 'null' };
     this.rows.push({ kind: 'result', preview: reply?.result?.kind === 'string' ? { ...preview, text: JSON.stringify(preview.text) } : preview, error: Boolean(reply?.error) });
     this.renderConsole(true);

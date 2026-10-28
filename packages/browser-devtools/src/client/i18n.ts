@@ -1,6 +1,13 @@
 import { createI18n } from '@dsh-plugins/i18n';
 
 export const i18n = createI18n('dsh-browser-devtools', {
+  'Open debugger in a separate window': '在独立窗口打开调试器',
+  'Close debugger window': '关闭独立调试窗口',
+  'Install Chrome or Edge to open a desktop debugger window.': '请安装 Chrome 或 Edge 后再打开独立调试窗口。',
+  'Could not start Chrome or Edge.': '无法启动 Chrome 或 Edge。',
+  'Could not connect to the debugger window.': '无法连接独立调试窗口。',
+  'Connection lost. Keep the DSH page open and reopen the debugger if needed.': '连接已断开，请保持 DSH 网页打开，必要时重新打开调试器。',
+  'Open this window from the DSH browser toolbar.': '请从 DSH 浏览器工具栏打开此窗口。',
   'Open page debugger': '打开网页调试器',
   'Close page debugger': '关闭网页调试器',
   'Close DevTools': '关闭 DevTools',

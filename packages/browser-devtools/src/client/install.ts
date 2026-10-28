@@ -1,5 +1,6 @@
 import { controlDevTools, type Inspectable, type State } from './control.js';
 import { DebuggerPanel, type PanelView } from './panel.js';
+import { DetachedDebugger, type DetachedState } from './detached.js';
 import { i18n, ui } from './i18n.js';
 
 const selector = 'webview[data-sidebar-browser-frame="webview"]';
@@ -32,7 +33,7 @@ function toolbarFor(view: Element): HTMLFormElement | undefined {
 export function installDevTools(doc: Document): () => void {
   const win = doc.defaultView;
   if (!win) return () => {};
-  const entries = new Map<Element, { toolbar: HTMLFormElement; button: HTMLButtonElement; notice: HTMLDivElement; render(): void; localize(): void; dispose(): void }>();
+  const entries = new Map<Element, { toolbar: HTMLFormElement; button: HTMLButtonElement; detachedButton: HTMLButtonElement; notice: HTMLDivElement; render(): void; localize(): void; dispose(): void }>();
   const style = doc.createElement('style');
   style.dataset.dshBrowserDevtools = '';
   style.textContent = css;
@@ -48,6 +49,7 @@ export function installDevTools(doc: Document): () => void {
         entry.dispose(); entries.delete(view);
       } else {
         if (entry.button.parentElement !== entry.toolbar) entry.toolbar.append(entry.button);
+        if (entry.detachedButton.parentElement !== entry.toolbar) entry.toolbar.append(entry.detachedButton);
         if (entry.notice.previousElementSibling !== entry.toolbar) entry.toolbar.after(entry.notice);
       }
     }
@@ -63,6 +65,9 @@ export function installDevTools(doc: Document): () => void {
       button.dataset.dshBrowserDevtools = 'toggle';
       // Fixed icon markup, never page content.
       button.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 12l-3 3 3 3m6-6 3 3-3 3"/></svg>';
+      const detachedButton = button.cloneNode(true) as HTMLButtonElement;
+      detachedButton.dataset.dshBrowserDevtools = 'detach';
+      detachedButton.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3h7v7m0-7L10 14"/><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></svg>';
       const notice = doc.createElement('div');
       notice.className = 'dsh-bdt-notice';
       notice.hidden = true;
@@ -74,35 +79,62 @@ export function installDevTools(doc: Document): () => void {
       dismiss.textContent = '×';
       notice.append(description, dismiss);
       let latest: State;
+      let external: DetachedState = { opened: false, busy: false };
+      let switching = false;
       const render = (state = latest) => {
         latest = state;
         dismiss.setAttribute('aria-label', ui(messages.dismiss));
         const label = state.native ? messages.closeNative : state.opened ? messages.close : messages.open;
         // An open debugger can always be closed, even while its page navigates.
-        button.disabled = state.busy || (!state.ready && !state.opened && !state.native);
+        button.disabled = switching || external.busy || state.busy || (!state.ready && !state.opened && !state.native);
         button.setAttribute('aria-pressed', String(state.opened || state.native));
         button.setAttribute('aria-busy', String(state.busy));
         button.setAttribute('aria-label', ui(label));
         button.title = ui(state.busy ? messages.loading : state.opened || state.native ? label : !state.ready ? messages.waiting : label);
-        notice.hidden = !state.error;
-        const message = state.error ? ui(messages[state.error]) : '';
+        const externalLabel = external.opened ? 'Close debugger window' : 'Open debugger in a separate window';
+        detachedButton.disabled = switching || state.busy || external.busy || (!state.ready && !external.opened);
+        detachedButton.setAttribute('aria-pressed', String(external.opened));
+        detachedButton.setAttribute('aria-busy', String(external.busy));
+        detachedButton.setAttribute('aria-label', ui(externalLabel));
+        detachedButton.title = ui(external.busy ? messages.loading : externalLabel);
+        notice.hidden = !state.error && !external.error;
+        const message = external.error ? ui(external.error) : state.error ? ui(messages[state.error]) : '';
         if (description.textContent !== message) description.textContent = message;
       };
       let control: ReturnType<typeof controlDevTools> | undefined;
       const panel = new DebuggerPanel(doc, view as unknown as PanelView, () => control?.sync());
       control = controlDevTools(view as HTMLElement & Inspectable, panel, render);
-      const click = (event: Event) => { event.preventDefault(); event.stopPropagation(); void control?.toggle(); };
-      const dismissClick = () => { control?.dismiss(); button.focus(); };
+      const detached = new DetachedDebugger(doc, view as HTMLElement & Inspectable, state => { external = state; render(); });
+      const toggle = async (separate: boolean) => {
+        if (switching) return;
+        switching = true; render();
+        try {
+          if (separate) {
+            if (detached.opened) await detached.close();
+            else {
+              panel.close(); control?.sync();
+              try { view.closeDevTools?.(); } catch { /* Already closed. */ }
+              await detached.open();
+            }
+          } else { await detached.close(); await control?.toggle(); }
+        } finally { switching = false; render(); }
+      };
+      const click = (event: Event) => { event.preventDefault(); event.stopPropagation(); void toggle(false); };
+      const detachClick = (event: Event) => { event.preventDefault(); event.stopPropagation(); void toggle(true); };
+      const dismissClick = () => { detached.dismiss(); control?.dismiss(); button.focus(); };
       button.addEventListener('click', click);
+      detachedButton.addEventListener('click', detachClick);
       dismiss.addEventListener('click', dismissClick);
-      toolbar.append(button);
+      toolbar.append(button, detachedButton);
       toolbar.after(notice);
-      entries.set(element, { toolbar, button, notice, render, localize: () => { render(); panel.localize(); }, dispose() {
+      entries.set(element, { toolbar, button, detachedButton, notice, render, localize: () => { render(); panel.localize(); }, dispose() {
+        detached.dispose();
         panel.dispose();
         control?.dispose();
         button.removeEventListener('click', click);
         dismiss.removeEventListener('click', dismissClick);
-        button.remove(); notice.remove();
+        detachedButton.removeEventListener('click', detachClick);
+        detachedButton.remove(); button.remove(); notice.remove();
       } });
     }
   };
