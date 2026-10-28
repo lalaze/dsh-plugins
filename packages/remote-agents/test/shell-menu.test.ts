@@ -49,6 +49,17 @@ test('the shell menu opens below its chevron, and other menus keep DSH placement
   assert.ok(!shell.hasAttribute('data-ra-shell-menu') && !document.querySelector('style[data-remote-shell-menu]'));
 });
 
+test('a new shell menu is placed before the browser paints it', async () => {
+  dispose = installShellMenu();
+  await frame();
+  trigger(330);
+  const shell = menu(['zsh', 'Remote workspace']);
+  document.body.append(shell);
+  await Promise.resolve();
+  assert.equal(shell.style.getPropertyValue('--ra-shell-menu-left'), '410px', 'placed in the mutation microtask, not a later frame');
+  assert.equal(shell.style.getPropertyValue('--ra-shell-menu-origin'), 'top left');
+});
+
 test('the shell menu opens above when only that side fits, and stays inside the viewport', async () => {
   dispose = installShellMenu();
   trigger(740);
