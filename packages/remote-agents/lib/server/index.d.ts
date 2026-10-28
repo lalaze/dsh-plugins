@@ -1,10 +1,15 @@
 import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
+import { type SyncAgent } from './native-chat.js';
 import { type RemoteUsageRecord } from './usage.js';
 declare module '@deepseek-ai/cordis' {
     interface Events {
         /** Every finished remote CLI turn: main-chat replies, delegated agents and turns sent from the sessions panel. */
         'remote-agents/usage'(record: RemoteUsageRecord): void;
+        /** Emitted by DSH's agent registry for each new or resumed conversation agent. */
+        'agent/created'(payload: {
+            agent: SyncAgent;
+        }): undefined | Promise<undefined>;
     }
 }
 export declare const name = "dsh-remote-agents";

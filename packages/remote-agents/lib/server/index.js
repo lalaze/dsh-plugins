@@ -74,7 +74,7 @@ export async function apply(ctx, config = {}) {
             ctx.emit('remote-agents/usage', remoteUsageRecord(task, store.hosts(), usage, turn));
     });
     // Persistent CLIs kept running while DSH was away; reattach and catch up in the background.
-    void service.resume();
+    const resumed = service.resume();
     ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, placement, workspaces, features) });
     ctx.connection.fetch.register({ path: '/api/remote-agents/files', methods: ['GET', 'POST'], requestBody: 'streaming', fetch: workspaceTransferHandler(files) });
     ctx.inject(['terminalController'], scoped => {
@@ -134,6 +134,12 @@ export async function apply(ctx, config = {}) {
         // A model's remembered reasoning effort is its advertised default; DSH reloads the catalog on replace.
         scoped.effect(() => adapter.onModelInfoChange(() => registration.replace(CHAT_PROVIDERS)));
         scoped.effect(() => () => adapter.close());
+        // A response cut off by quitting DSH or reloading the plugin catches up by itself once its CLI is reattached:
+        // when DSH opens the conversation, or right away for conversations already open.
+        const wake = (agent) => { void resumed.then(() => adapter.sync(agent)).catch(() => { }); };
+        scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
+        for (const agent of host.agents.list?.() ?? [])
+            wake(agent);
     });
     // Native conversation routes and settings also work without the delegation tool registry.
     ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {

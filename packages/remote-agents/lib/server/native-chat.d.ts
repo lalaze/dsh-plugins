@@ -1,4 +1,4 @@
-import { LlmAdapter, type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
+import { createUserMessage, LlmAdapter, type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { type DshPermission } from './domain.js';
 import { type AttachmentAccess } from './attachments.js';
@@ -6,6 +6,22 @@ import { ChatProjects } from './chat-projects.js';
 import { type ToolHost } from './tools.js';
 import type { WorkspacePlacement } from './workspace-access.js';
 export declare const CHAT_PROVIDER = "remote-cli";
+/** Wakes a conversation whose remote turn outlived DSH, so the missed output streams in without a new message. */
+export declare const SYNC_SOURCE = "remote-cli-sync";
+declare module '@deepseek-ai/dsh-llm' {
+    interface MessageSourceMap {
+        'remote-cli-sync': {
+            readonly kind: 'remote-cli-sync';
+            readonly form: 'notice';
+            readonly summary: string;
+        };
+    }
+}
+/** The parts of a live DSH agent that a catch-up wake needs. */
+export interface SyncAgent {
+    readonly session: Pick<Session, 'id' | 'requestHeader'>;
+    send(message: ReturnType<typeof createUserMessage>, target: 'next-turn', wakeup: boolean): void;
+}
 export declare const chatProviderId: (cli: string) => string;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
 export declare const CHAT_PROVIDERS: string[];
@@ -36,6 +52,7 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     private released;
     private auxiliaryDirectories;
     private modelInfoListeners;
+    private woken;
     constructor(projects: ChatProjects, host: ChatHost, pollMs?: number);
     providerInfo(provider: string): {
         id: string;
@@ -61,5 +78,13 @@ export declare class RemoteCliAdapter extends LlmAdapter {
      * CLI keeps working; the conversation shows its remaining output with the next response.
      */
     close(): void;
+    /** The conversation's remote task when its last response ended before all its output reached DSH. */
+    private unsynced;
+    /**
+     * Wake a conversation whose last remote response was cut off when DSH quit or reloaded the plugin. Its turn
+     * streams the output produced meanwhile and waits for the remote turn to finish. Only a conversation still
+     * routed to a remote CLI is woken: another model would answer the notice instead.
+     */
+    sync(agent: SyncAgent): boolean;
     stream(options: GenerateOptions): AsyncGenerator<StreamChunk>;
 }
