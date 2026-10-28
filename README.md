@@ -66,7 +66,7 @@ For Desktop, fully quit DSH and use the desktop application's bundled `dsh` comm
 
 ### Plugin market
 
-`pnpm release:market` builds every plugin, commits the install-ready packages to the `market` branch, and updates `index.json` there: a DSH plugin market index listing every released version, each pinned to a commit. Publish with `git push origin market`. A release requires a clean working tree; versions already in the index are skipped, and a plugin that changed without a version bump is reported. `--dry-run` previews the release. Never rewrite or force-push `market`, because installed versions resolve through its commits.
+`pnpm release:market` builds every plugin, commits the install-ready packages to the `market` branch, and updates `index.json` there: a DSH plugin market index listing the newest release of each plugin, pinned to a commit. Earlier releases are no longer listed but stay installable through their commits. Publish with `git push origin market`. A release requires a clean working tree; versions already in the index are skipped, and a plugin that changed without a version bump is reported. `--dry-run` previews the release. Never rewrite or force-push `market`, because installed versions resolve through its commits.
 
 To install and update from DSH, open **Plugins**, switch on **Custom plugin markets** under experimental plugins, and add this index source on the **Discover** tab:
 

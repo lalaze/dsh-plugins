@@ -66,7 +66,7 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 ### 插件市场
 
-`pnpm release:market` 构建全部插件，将可直接安装的包提交到 `market` 分支，并更新其中的 `index.json`：一份 DSH 插件市场索引，列出每个已发布版本，并固定到对应提交。之后用 `git push origin market` 发布。发布要求工作区干净；索引中已有的版本会跳过，代码改动但未升级版本号的插件会给出提示。`--dry-run` 可预览。不要改写或强制推送 `market`，已安装版本依赖其中的提交。
+`pnpm release:market` 构建全部插件，将可直接安装的包提交到 `market` 分支，并更新其中的 `index.json`：一份 DSH 插件市场索引，只列出每个插件的最新版本，并固定到对应提交。更早的版本不再列出，但仍可通过各自的提交安装。之后用 `git push origin market` 发布。发布要求工作区干净；索引中已有的版本会跳过，代码改动但未升级版本号的插件会给出提示。`--dry-run` 可预览。不要改写或强制推送 `market`，已安装版本依赖其中的提交。
 
 在 DSH 中安装和更新：打开 **插件**，在实验插件中开启 **Custom plugin markets**，然后在 **Discover** 中添加索引地址：
 
