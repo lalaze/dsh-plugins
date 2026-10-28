@@ -1,6 +1,6 @@
 {
   "name": "dsh-translate",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Translation controls for DeepSeek Harness conversations",
   "type": "module",
   "main": "lib/server/index.js",
