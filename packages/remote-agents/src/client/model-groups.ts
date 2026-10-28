@@ -55,6 +55,21 @@ ${HEADING_ROW}[aria-disabled=true]:before{opacity:.4}
 `;
 interface Group { element: HTMLElement; heading: HTMLElement; provider: string; rows: HTMLButtonElement[]; restore: () => void }
 interface Menu { element: HTMLElement; groups: Map<HTMLElement, Group>; active?: HTMLButtonElement; query: string; dispose: () => void }
+// DSH places its model menu once it has its size: by the trigger's right edge, above it, kept 12px inside the
+// window. Folding then resizes it, and DSH places it again only after a frame has painted it out of place.
+const NATIVE_LIST = '[role="menu"][id$="-models"]', MENU_MARGIN = 12;
+/** Before a fold, read the placed menu's right and bottom edges; the returned call keeps them after it. */
+function keepPlacement(element: HTMLElement): () => void {
+  const left = parseFloat(element.style.left), top = parseFloat(element.style.top);
+  // Still measuring (DSH renders it hidden at 0,0 first), or not DSH's own model menu.
+  if (element.style.visibility === 'hidden' || !Number.isFinite(left) || !Number.isFinite(top) || !element.querySelector(NATIVE_LIST)) return () => {};
+  const right = left + element.offsetWidth, bottom = top + element.offsetHeight;
+  return () => {
+    const width = element.offsetWidth, height = element.offsetHeight;
+    element.style.left = `${Math.min(Math.max(right - width, MENU_MARGIN), window.innerWidth - width - MENU_MARGIN)}px`;
+    element.style.top = `${Math.min(Math.max(bottom - height, MENU_MARGIN), window.innerHeight - height - MENU_MARGIN)}px`;
+  };
+}
 function setAttribute(element: Element, name: string, value: string | null) {
   if (value === null) { if (element.hasAttribute(name)) element.removeAttribute(name); }
   else if (element.getAttribute(name) !== value) element.setAttribute(name, value);
@@ -76,23 +91,23 @@ export function installModelGroups(): () => void {
     const query = menu.element.querySelector('input')?.value.trim() ?? '';
     if (query !== menu.query) { menu.query = query; menu.active = undefined; }
     const preferences = readGroups();
-    let resized = false;
-    for (const group of menu.groups.values()) {
-      const selected = group.rows.some(row => row.getAttribute('aria-checked') === 'true');
-      const collapsed = !query && (preferences[group.provider] ?? !selected);
+    const folds = new Map([...menu.groups.values()].map(group => [group, !query && (preferences[group.provider] ?? !group.rows.some(row => row.getAttribute('aria-checked') === 'true'))]));
+    const resized = [...folds].some(([group, collapsed]) => group.rows.some(row => row.hasAttribute('data-ra-model-hidden') !== collapsed));
+    const settle = resized ? keepPlacement(menu.element) : undefined;
+    for (const [group, collapsed] of folds) {
       const busy = group.rows.every(row => row.disabled);
       setAttribute(group.heading, 'aria-expanded', String(!collapsed));
       setAttribute(group.heading, 'aria-disabled', String(!!query || busy));
       setAttribute(group.heading, 'data-ra-model-count', String(group.rows.length));
       for (const row of group.rows) {
         setAttribute(row, 'data-ra-model-option', '');
-        if (row.hasAttribute('data-ra-model-hidden') !== collapsed) resized = true;
         setAttribute(row, 'data-ra-model-hidden', collapsed ? '' : null);
       }
     }
     // The Codex menu places itself from its height when it renders, and again on scroll. Folding
     // changes that height, so replay the scroll its list sends anyway for the menu to place itself again.
     if (resized) menu.element.querySelector(CODEX_LIST)?.dispatchEvent(new Event('scroll'));
+    settle?.();
     const rows = visibleRows(menu);
     highlight(menu, rows.includes(menu.active!) ? menu.active : rows.find(row => row.hasAttribute('data-highlighted')) ?? rows.find(row => row.getAttribute('aria-checked') === 'true') ?? rows[0]);
   };

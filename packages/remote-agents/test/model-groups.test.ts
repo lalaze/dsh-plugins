@@ -61,3 +61,26 @@ test('leaves other radio menus with group headings alone', () => {
   assert.equal(speed.querySelector('[data-menu-group-heading]')!.hasAttribute('role'), false);
   assert.deepEqual(hidden(speed), [false, false]);
 });
+
+test('folding keeps the native menu where DSH placed it, by its right and bottom edges', () => {
+  document.body.innerHTML = surface(`<div id="r1-models" role="menu">${group('Magpie', [['A very long model name', false, ['magpie', 'a']], ['B', false, ['magpie', 'b']]])}${group('Qwen', [['Qwen', true, ['qwen', 'q']]])}</div>`);
+  Object.assign(window, { innerWidth: 1000, innerHeight: 800 });
+  const menu = document.querySelector<HTMLElement>('[data-menu-material]')!;
+  // DSH placed it at its open size: wide and tall with every row shown. Folding Magpie narrows and shortens it.
+  const shown = () => menu.querySelectorAll('button:not([data-ra-model-hidden])').length;
+  Object.defineProperty(menu, 'offsetWidth', { get: () => shown() === 3 ? 320 : 240 });
+  Object.defineProperty(menu, 'offsetHeight', { get: () => 40 * shown() + 60 });
+  menu.style.left = '280px'; menu.style.top = '400px';
+  dispose = installModelGroups();
+  assert.deepEqual(hidden(groupNamed('Magpie')), [true, true]);
+  assert.equal(menu.style.left, `${280 + 320 - 240}px`);
+  assert.equal(menu.style.top, `${400 + 180 - 100}px`);
+
+  const measuring = document.createElement('div');
+  measuring.innerHTML = surface(`<div id="r2-models" role="menu">${group('Magpie', [['A', false, ['magpie', 'a']]])}</div>`);
+  const hiddenMenu = measuring.firstElementChild as HTMLElement;
+  hiddenMenu.setAttribute('style', 'visibility: hidden; left: 0px; top: 0px');
+  document.body.append(hiddenMenu);
+  dispose(); dispose = installModelGroups();
+  assert.equal(hiddenMenu.style.left, '0px', 'a menu DSH is still measuring is left to DSH');
+});
