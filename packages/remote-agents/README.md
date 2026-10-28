@@ -136,6 +136,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.37:** In a remote conversation, **New terminal** and its shortcut now open an SSH terminal in the remote workspace instead of your local shell, without choosing **Remote workspace** from the shell menu. Back in a local conversation they open the shell you used before. Restart DSH and refresh the client after updating.
+
 **Upgrading from 0.2.36:** **New terminal** remembers the shell you last chose in every conversation, so after you choose **Remote workspace** once, local conversations used to fail with `Select a verified remote workspace before using this shell.` Outside a remote workspace that shell now opens your local shell instead and says so on its first line; the tab is still titled **Remote workspace**. Restart DSH after updating.
 
 **Upgrading from 0.2.35:** Remote workspace files, search, sync and commands no longer need Node.js on the SSH host. They run with its shell and standard tools, plus `sha256sum`, `shasum` or `openssl`, so a host without Node.js, such as a Docker host with a standalone Codex, no longer fails with `node: not found`. The `remote_workspace` tool for DSH models now follows the conversation's DSH permission: **Full access** and **Auto review** run changes and commands without asking (before, Full access rejected every one), and **Workspace Write** asks only before commands. A command that times out now stops everything it started. Remote CLIs and remote DSH still need Node.js 18+. Restart DSH and refresh the client after updating.
