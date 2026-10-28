@@ -57,12 +57,19 @@ try {
   await browser('click', '.dsh-bdt-tab:text-is("网络")');
   await wait('document.querySelector(".dsh-bdt-table").textContent.includes("200")');
   await browser('screenshot', `${output}/network-dark-zh.png`);
+  await browser('click', '.dsh-bdt-table tr[data-seq]:has-text("check")');
+  await wait('document.querySelector(".dsh-bdt-detail").textContent.includes("请求网址") && document.querySelectorAll(".dsh-bdt-table th").length === 1');
+  await browser('screenshot', `${output}/network-headers-dark-zh.png`);
+  await browser('click', '.dsh-bdt-detail .dsh-bdt-tab:text-is("预览")');
+  await wait('document.querySelector(".dsh-bdt-detail .dsh-bdt-json-key")?.textContent === "ok: "');
+  await browser('press', 'Escape');
+  await wait('document.querySelector(".dsh-bdt-detail").hidden && document.querySelectorAll(".dsh-bdt-table th").length === 5');
   await browser('set', 'viewport', '480', '640');
   assert.equal(await evaluate('document.documentElement.scrollWidth <= innerWidth'), true);
   await browser('click', '[aria-label="关闭网页调试器"]');
   await until(() => closed === 1 && !owner.opened);
   assert.equal(guest.window[AGENT_KEY], undefined);
-  console.log('Chrome UI passed: DOM/styles, $0, console, network, theme/locale, resize and close.');
+  console.log('Chrome UI passed: DOM/styles, $0, console, network and request details, theme/locale, resize and close.');
   await browser('close');
 
   }

@@ -1,7 +1,7 @@
 /** Global the page agent installs itself under, inside the inspected page. */
 export const AGENT_KEY = '__DSH_BROWSER_DEVTOOLS__';
 /** Bump when the agent's protocol changes, so a page keeps no stale agent. */
-export const AGENT_VERSION = 2;
+export const AGENT_VERSION = 3;
 
 export interface LogEntry { seq: number; level: 'log' | 'info' | 'warn' | 'error' | 'debug'; text: string; time: number }
 export interface NetworkEntry {
@@ -11,6 +11,34 @@ export interface NetworkEntry {
   /** Bytes over the network; -1 when unknown, 0 with `cached`. */
   size: number; cached: boolean;
   start: number; duration: number;
+}
+/** Resource timing marks for one request, in milliseconds since the page's time origin. */
+export interface Timing {
+  startTime: number; redirectStart: number; redirectEnd: number; fetchStart: number;
+  domainLookupStart: number; domainLookupEnd: number; connectStart: number; connectEnd: number; secureConnectionStart: number;
+  requestStart: number; responseStart: number; responseEnd: number; duration: number;
+}
+/** What the page passed as a request body. Form fields hold `null` for files. */
+export type Payload = { kind: 'text'; text: string; truncated: boolean } | { kind: 'form'; fields: Array<[string, string | null]> } | { kind: 'binary'; size: number } | { kind: 'stream' };
+/**
+ * One request in full, read when it is selected in the Network panel. Headers and bodies are only
+ * known for Fetch and XHR the page started while the agent was installed.
+ */
+export interface RequestDetail {
+  statusText: string;
+  /** The final URL after redirects, when it differs from the requested one. */
+  responseUrl?: string;
+  requestHeaders?: Array<[string, string]>;
+  responseHeaders?: Array<[string, string]>;
+  payload?: Payload;
+  /** A text-like response body; `done` is false while it is still arriving. */
+  body?: { text: string; truncated: boolean; done: boolean };
+  /** Why there is no body: not text, no body at all, dropped to save memory, or not recorded. */
+  bodyNote?: 'binary' | 'empty' | 'dropped' | 'unrecorded';
+  error?: string;
+  timing?: Timing;
+  /** The body or timing is still arriving; ask again. */
+  pending: boolean;
 }
 export interface NodeSummary {
   id: number; type: number; name: string;
@@ -125,56 +153,242 @@ export function guestAgent(key: string, version: number): boolean {
   const absolute = (input: unknown): string => {
     try { return new page.URL(typeof input === 'string' ? input : String((input as any)?.url ?? input), page.location.href).href; } catch { return String(input); }
   };
-  const request = (entry: Omit<NetworkEntry, 'seq'>) => {
-    network.push({ ...entry, seq: ++netSeq });
-    if (network.length > 1000) network.shift();
+  // Full request records, kept apart from the polled list and bounded in total size.
+  const BODY_CAP = 512 * 1024, PAYLOAD_CAP = 64 * 1024, BUDGET = 8 * 1024 * 1024;
+  const details = new Map<number, any>(), awaiting: any[] = [];
+  let stored = 0, recording = true;
+  const safe = <T>(work: () => T): T | undefined => { try { return work(); } catch { return undefined; } };
+  const account = (detail: any) => {
+    if (!details.has(detail.seq)) return;
+    const size = (detail.body?.text.length ?? 0) + (detail.payload?.text?.length ?? 0);
+    stored += size - (detail.counted ?? 0); detail.counted = size;
+    for (const old of details.values()) {
+      if (stored <= BUDGET) break;
+      if (old === detail || !old.counted) continue;
+      stored -= old.counted; old.counted = 0; old.dropped = true;
+      if (old.body) { old.body = undefined; old.bodyNote = 'dropped'; }
+      if (old.payload?.kind === 'text') old.payload = { kind: 'text', text: '', truncated: true };
+    }
+  };
+  const forget = (seq: number) => {
+    const detail = details.get(seq);
+    if (!detail) return;
+    stored -= detail.counted ?? 0; detail.dropped = true; details.delete(seq);
+  };
+  const request = (entry: Omit<NetworkEntry, 'seq'>, detail?: any) => {
+    const seq = ++netSeq;
+    network.push({ ...entry, seq });
+    if (detail) { detail.seq = seq; details.set(seq, detail); account(detail); }
+    if (network.length > 1000) forget(network.shift().seq);
+  };
+  const headerList = (source: any): Array<[string, string]> => {
+    const list: Array<[string, string]> = [];
+    try {
+      if (!source) return list;
+      if (typeof source.forEach === 'function' && !Array.isArray(source)) source.forEach((value: unknown, name: unknown) => { list.push([String(name), String(value)]); });
+      else for (const [name, value] of Array.isArray(source) ? source : Object.entries(source)) list.push([String(name), String(value)]);
+    } catch { /* Malformed headers; the request rejects them too. */ }
+    return list.slice(0, 200).map(([name, value]) => [name.toLowerCase().slice(0, 1024), value.slice(0, 8192)]);
+  };
+  const rawHeaders = (text: string): Array<[string, string]> => headerList(String(text || '').split(/\r?\n/).filter(line => line.includes(':'))
+    .map(line => { const at = line.indexOf(':'); return [line.slice(0, at), line.slice(at + 1).trim()]; }));
+  const payloadOf = (body: any): any => {
+    if (body === undefined || body === null) return undefined;
+    try {
+      if (typeof body === 'string') return { kind: 'text', text: body.slice(0, PAYLOAD_CAP), truncated: body.length > PAYLOAD_CAP };
+      if (page.URLSearchParams && body instanceof page.URLSearchParams) return payloadOf(body.toString());
+      if (page.FormData && body instanceof page.FormData) {
+        const fields: Array<[string, string | null]> = [];
+        body.forEach((value: unknown, name: string) => { if (fields.length < 500) fields.push([name, typeof value === 'string' ? value.slice(0, 8192) : null]); });
+        return { kind: 'form', fields };
+      }
+      if (page.Blob && body instanceof page.Blob) return { kind: 'binary', size: body.size };
+      if (body instanceof page.ArrayBuffer || page.ArrayBuffer?.isView?.(body)) return { kind: 'binary', size: body.byteLength };
+      if (page.ReadableStream && body instanceof page.ReadableStream) return { kind: 'stream' };
+      if (page.Document && body instanceof page.Document) return payloadOf(new page.XMLSerializer().serializeToString(body));
+    } catch { /* An exotic body; describe it as text. */ }
+    return payloadOf(String(body));
+  };
+  // The Content-Type the browser adds for a body the page did not label.
+  const implicitType = (body: any): string | undefined => safe(() => typeof body === 'string' ? 'text/plain;charset=UTF-8'
+    : page.URLSearchParams && body instanceof page.URLSearchParams ? 'application/x-www-form-urlencoded;charset=UTF-8'
+    : page.FormData && body instanceof page.FormData ? 'multipart/form-data'
+    : page.Blob && body instanceof page.Blob && body.type ? body.type : undefined);
+  const withBody = (detail: any, body: any) => {
+    detail.payload = payloadOf(body);
+    const type = implicitType(body);
+    if (type && !detail.requestHeaders.some(([name]: [string]) => name === 'content-type')) detail.requestHeaders.push(['content-type', type]);
+  };
+  const headerOf = (list: Array<[string, string]> | undefined, name: string) => list?.find(([key]) => key === name)?.[1] ?? '';
+  const textLike = (mime: string) => !mime || /^text\/|[/+](json|x-ndjson|ndjson|xml|javascript|ecmascript|x-www-form-urlencoded)\b/i.test(mime);
+  /** Reads a cloned body as text up to `cap`, reporting progress; `update` returns false to stop. */
+  const readText = async (source: any, mime: string, cap: number, update: (text: string, truncated: boolean, done: boolean) => boolean) => {
+    let decoder: any;
+    try { decoder = new page.TextDecoder(/charset=["']?([\w-]+)/i.exec(mime)?.[1] ?? 'utf-8'); } catch { decoder = safe(() => new page.TextDecoder()); }
+    // Taking a reader locks the body, so only take one that will be used.
+    const reader = decoder ? source.body?.getReader?.() : undefined;
+    if (!reader) { const text = String(await source.text()); update(text.slice(0, cap), text.length > cap, true); return; }
+    let text = '';
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) { text += decoder.decode(); break; }
+      text += decoder.decode(value, { stream: true });
+      if (text.length >= cap || !update(text, false, false)) { void reader.cancel().catch(() => {}); update(text.slice(0, cap), text.length >= cap, true); return; }
+    }
+    update(text, false, true);
+  };
+  const setBody = (detail: any, text: string, truncated: boolean, done: boolean): boolean => {
+    if (detail.dropped || !recording) return false;
+    detail.body = { text, truncated, done };
+    account(detail);
+    return true;
+  };
+  // Fetch and XHR resource timing arrives after the response; match it to the request it measures.
+  const expect = (detail: any) => { awaiting.push(detail); if (awaiting.length > 300) awaiting.shift(); };
+  const claim = (timing: any) => {
+    const url = String(timing.name).split('#')[0];
+    let best = -1, gap = 1000;
+    awaiting.forEach((detail, index) => {
+      const distance = Math.abs(timing.startTime - detail.start);
+      if (detail.url.split('#')[0] === url && distance < gap) { best = index; gap = distance; }
+    });
+    if (best >= 0) awaiting.splice(best, 1)[0].timing = timing;
   };
   const originalFetch = page.fetch;
   if (typeof originalFetch === 'function') {
     page.fetch = function (input: unknown, init?: any) {
       const start = now(), method = String(init?.method ?? (input as any)?.method ?? 'GET').toUpperCase(), url = absolute(input);
+      const detail: any = { url, start, statusText: '', requestHeaders: [], timed: true };
+      safe(() => {
+        const isRequest = page.Request && input instanceof page.Request;
+        const headers = init?.headers ?? (isRequest ? (input as any).headers : undefined);
+        detail.requestHeaders = headerList(safe(() => new page.Headers(headers)) ?? headers);
+        if (init?.body !== undefined && init.body !== null) withBody(detail, init.body);
+        else if (isRequest && (input as any).body && !(input as any).bodyUsed) {
+          // Read a copy before fetch consumes the original.
+          const copy = (input as any).clone();
+          detail.payload = { kind: 'text', text: '', truncated: false };
+          void readText(copy, headerOf(detail.requestHeaders, 'content-type'), PAYLOAD_CAP, (text, truncated) => {
+            if (detail.dropped || !recording) return false;
+            detail.payload = { kind: 'text', text, truncated }; account(detail); return true;
+          }).catch(() => {});
+        }
+      });
+      expect(detail);
       return originalFetch.call(page, input, init).then((response: any) => {
         const length = Number(response.headers?.get?.('content-length'));
-        request({ url, method, type: 'fetch', status: response.status, failed: false, size: Number.isFinite(length) && length >= 0 ? length : -1, cached: false, start, duration: now() - start });
+        safe(() => {
+          detail.statusText = String(response.statusText ?? '');
+          detail.responseHeaders = headerList(response.headers);
+          if (response.url && response.url !== url) detail.responseUrl = String(response.url);
+          const mime = headerOf(detail.responseHeaders, 'content-type');
+          if (method === 'HEAD' || [101, 204, 205, 304].includes(response.status) || response.type === 'opaque' || response.body === null) detail.bodyNote = 'empty';
+          else if (!textLike(mime)) detail.bodyNote = 'binary';
+          else {
+            // A clone is read alongside the page; cancelling it leaves the page's copy intact.
+            detail.body = { text: '', truncated: false, done: false };
+            void readText(response.clone(), mime, BODY_CAP, (text, truncated, done) => setBody(detail, text, truncated, done)).catch((error: any) => {
+              if (detail.body) detail.body.done = true;
+              detail.error = String(error?.message ?? error);
+            });
+          }
+        });
+        request({ url, method, type: 'fetch', status: response.status, failed: false, size: Number.isFinite(length) && length >= 0 ? length : -1, cached: false, start, duration: now() - start }, detail);
         return response;
       }, (error: unknown) => {
-        request({ url, method, type: 'fetch', status: 0, failed: true, size: -1, cached: false, start, duration: now() - start });
+        detail.error = String((error as any)?.message ?? error); detail.bodyNote = 'empty';
+        request({ url, method, type: 'fetch', status: 0, failed: true, size: -1, cached: false, start, duration: now() - start }, detail);
         throw error;
       });
     };
     restore.push(() => { page.fetch = originalFetch; });
   }
-  const XHR = page.XMLHttpRequest?.prototype, xhrOpen = XHR?.open, xhrSend = XHR?.send;
-  if (xhrOpen && xhrSend) {
-    const meta = new WeakMap<object, { method: string; url: string }>();
+  const XHR = page.XMLHttpRequest?.prototype, xhrOpen = XHR?.open, xhrSend = XHR?.send, xhrHeader = XHR?.setRequestHeader;
+  if (xhrOpen && xhrSend && xhrHeader) {
+    const meta = new WeakMap<object, { method: string; url: string; headers: Array<[string, string]> }>();
     XHR.open = function (this: any, method: string, url: unknown, ...rest: unknown[]) {
-      meta.set(this, { method: String(method).toUpperCase(), url: absolute(url) });
+      meta.set(this, { method: String(method).toUpperCase(), url: absolute(url), headers: [] });
       return xhrOpen.call(this, method, url, ...rest);
+    };
+    XHR.setRequestHeader = function (this: any, name: string, value: string) {
+      const result = xhrHeader.call(this, name, value);
+      meta.get(this)?.headers.push([String(name).toLowerCase(), String(value)]);
+      return result;
     };
     XHR.send = function (this: any, ...args: unknown[]) {
       const info = meta.get(this), start = now();
-      if (info) this.addEventListener('loadend', () => {
-        const length = Number(this.getResponseHeader?.('content-length'));
-        request({ ...info, type: 'xhr', status: this.status, failed: this.status === 0, size: Number.isFinite(length) && this.getResponseHeader?.('content-length') !== null ? length : -1, cached: false, start, duration: now() - start });
-      }, { once: true });
+      if (info) {
+        const detail: any = { url: info.url, start, statusText: '', requestHeaders: info.headers.slice(0, 200), timed: true };
+        if (info.method !== 'GET' && info.method !== 'HEAD') safe(() => withBody(detail, args[0]));
+        expect(detail);
+        this.addEventListener('loadend', () => {
+          const length = Number(this.getResponseHeader?.('content-length'));
+          safe(() => {
+            detail.statusText = String(this.statusText ?? '');
+            detail.responseHeaders = rawHeaders(this.getAllResponseHeaders?.());
+            if (this.responseURL && this.responseURL !== info.url) detail.responseUrl = String(this.responseURL);
+            const type = this.responseType, mime = headerOf(detail.responseHeaders, 'content-type');
+            const text = this.status === 0 ? undefined
+              : type === 'json' ? (this.response === null ? undefined : JSON.stringify(this.response))
+              : type === 'document' ? this.responseXML?.documentElement?.outerHTML
+              : (type === '' || type === 'text') && textLike(mime) ? this.responseText : undefined;
+            if (this.status === 0) { detail.error = 'Request failed'; detail.bodyNote = 'empty'; }
+            else if (text === undefined) detail.bodyNote = type === 'json' ? 'empty' : 'binary';
+            else if (text === '') detail.bodyNote = 'empty';
+            else detail.body = { text: text.slice(0, BODY_CAP), truncated: text.length > BODY_CAP, done: true };
+          });
+          request({ url: info.url, method: info.method, type: 'xhr', status: this.status, failed: this.status === 0, size: Number.isFinite(length) && this.getResponseHeader?.('content-length') !== null ? length : -1, cached: false, start, duration: now() - start }, detail);
+        }, { once: true });
+      }
       return xhrSend.apply(this, args);
     };
-    restore.push(() => { XHR.open = xhrOpen; XHR.send = xhrSend; });
+    restore.push(() => { XHR.open = xhrOpen; XHR.send = xhrSend; XHR.setRequestHeader = xhrHeader; });
   }
+  // Requests still in flight at detach stop reading their bodies.
+  restore.push(() => { recording = false; });
   const resource = (timing: any) => request({
     url: timing.name, method: 'GET', type: timing.initiatorType || 'other', status: timing.responseStatus ?? 0, failed: false,
     size: timing.transferSize > 0 ? timing.transferSize : timing.decodedBodySize > 0 ? 0 : -1, cached: timing.transferSize === 0 && timing.decodedBodySize > 0,
     start: timing.startTime, duration: timing.duration,
-  });
-  // Requests made before the panel opened are only known from resource timing.
+  }, { url: timing.name, start: timing.startTime, statusText: '', bodyNote: 'unrecorded', timing });
+  // The document itself, then requests made before the panel opened, are only known from resource timing.
+  for (const timing of page.performance?.getEntriesByType?.('navigation') ?? []) resource(timing);
   for (const timing of page.performance?.getEntriesByType?.('resource') ?? []) resource(timing);
   if (page.PerformanceObserver) {
     const observer = new page.PerformanceObserver((list: any) => {
       // Fetch and XHR are recorded with their method and status by the wrappers above.
-      for (const timing of list.getEntries()) if (timing.initiatorType !== 'fetch' && timing.initiatorType !== 'xmlhttprequest') resource(timing);
+      for (const timing of list.getEntries()) {
+        if (timing.initiatorType === 'fetch' || timing.initiatorType === 'xmlhttprequest') claim(timing); else resource(timing);
+      }
     });
     try { observer.observe({ type: 'resource' }); restore.push(() => observer.disconnect()); } catch { /* No resource timing. */ }
   }
+  const TIMING_KEYS = ['startTime', 'redirectStart', 'redirectEnd', 'fetchStart', 'domainLookupStart', 'domainLookupEnd', 'connectStart', 'connectEnd',
+    'secureConnectionStart', 'requestStart', 'responseStart', 'responseEnd', 'duration'];
+  const describe = (seq: number): RequestDetail | null => {
+    const detail = details.get(seq);
+    if (!detail) return null;
+    const result: RequestDetail = {
+      statusText: detail.statusText,
+      ...(detail.responseUrl ? { responseUrl: detail.responseUrl } : {}),
+      ...(detail.timed ? { requestHeaders: detail.requestHeaders } : {}),
+      ...(detail.responseHeaders ? { responseHeaders: detail.responseHeaders } : {}),
+      ...(detail.payload ? { payload: detail.payload } : {}),
+      ...(detail.body ? { body: { ...detail.body } } : {}),
+      ...(detail.bodyNote ? { bodyNote: detail.bodyNote } : {}),
+      ...(detail.error ? { error: detail.error } : {}),
+      ...(detail.timing ? { timing: Object.fromEntries(TIMING_KEYS.map(key => [key, Number(detail.timing[key]) || 0])) as unknown as Timing } : {}),
+      pending: Boolean(detail.body && !detail.body.done) || Boolean(detail.timed && !detail.timing && !detail.error && now() - detail.start < 10_000),
+    };
+    // Stay inside the owner's 1 MB reply limit.
+    const size = () => { const json = JSON.stringify(result); return page.TextEncoder ? new page.TextEncoder().encode(json).length : json.length * 3; };
+    for (let i = 0; i < 12 && size() > 900_000; i++) {
+      if (result.body?.text) result.body = { ...result.body, text: result.body.text.slice(0, result.body.text.length >> 1), truncated: true };
+      else if (result.payload?.kind === 'text' && result.payload.text) result.payload = { ...result.payload, text: result.payload.text.slice(0, result.payload.text.length >> 1), truncated: true };
+      else break;
+    }
+    return result;
+  };
 
   // Element highlight in Chrome's box-model colours, isolated from page CSS.
   const overlayHost = document.createElement('dsh-browser-devtools-overlay');
@@ -310,7 +524,12 @@ export function guestAgent(key: string, version: number): boolean {
       if (command === 'highlight') { highlight(arg?.id ? nodeOf(arg.id) : null); return true; }
       if (command === 'select') { selected = arg?.id ? nodeOf(arg.id) ?? null : null; return true; }
       if (command === 'pick') { picking = Boolean(arg?.on); if (!picking) highlight(null); return picking; }
-      if (command === 'clear') { if (arg === 'console') logs.length = 0; else network.length = 0; return true; }
+      if (command === 'request') return describe(Number(arg?.seq));
+      if (command === 'clear') {
+        if (arg === 'console') logs.length = 0;
+        else { network.length = 0; for (const seq of Array.from(details.keys())) forget(seq); awaiting.length = 0; }
+        return true;
+      }
       return null;
     },
   };

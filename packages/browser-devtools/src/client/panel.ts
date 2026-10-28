@@ -1,4 +1,4 @@
-import { agentScript, commandScript, detachScript, evaluateScript, type LogEntry, type NetworkEntry, type NodeSummary, type Poll, type Preview, type Styles } from './guest.js';
+import { agentScript, commandScript, detachScript, evaluateScript, type LogEntry, type NetworkEntry, type NodeSummary, type Poll, type Preview, type RequestDetail, type Styles, type Timing } from './guest.js';
 import { ui } from './i18n.js';
 
 /** The part of Electron's webview tag the panel uses. */
@@ -8,6 +8,7 @@ export interface PanelView extends HTMLElement {
 }
 type Tab = 'elements' | 'console' | 'network';
 type Filter = 'styles' | 'computed' | 'console' | 'network';
+type DetailTab = 'headers' | 'payload' | 'preview' | 'response' | 'timing';
 type Row = { kind: 'log'; entry: LogEntry; count: number } | { kind: 'input'; text: string } | { kind: 'result'; preview: Preview; error: boolean };
 interface TreeNode { node: NodeSummary; children?: number[]; expanded: boolean }
 
@@ -104,6 +105,41 @@ body[data-ds-dark-theme] .dsh-bdt-panel{--bdt-bg:#202124;--bdt-bar:#292a2d;--bdt
 .dsh-bdt-table td.bad{color:var(--bdt-error)}
 .dsh-bdt-table .num{text-align:right}
 .dsh-bdt-status{flex:none;padding:3px 8px;border-top:1px solid var(--bdt-line);background:var(--bdt-bar);color:var(--bdt-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsh-bdt-net{display:flex;flex:1;min-height:0}
+.dsh-bdt-net[data-detail]>.dsh-bdt-table{flex:0 0 32%;min-width:140px;max-width:420px;border-right:1px solid var(--bdt-line)}
+.dsh-bdt-table:focus{outline:none}
+.dsh-bdt-detail{display:flex;flex-direction:column;flex:1;min-width:0}
+.dsh-bdt-detail[hidden]{display:none}
+.dsh-bdt-detail>.dsh-bdt-bar{height:25px}
+.dsh-bdt-detail-body{padding-bottom:8px;user-select:text}
+.dsh-bdt-section{border-bottom:1px solid var(--bdt-soft)}
+.dsh-bdt-section>summary{padding:5px 8px;font-weight:600;list-style:none;cursor:default;user-select:none}
+.dsh-bdt-section>summary:hover{background:var(--bdt-soft)}
+.dsh-bdt-section>summary::-webkit-details-marker,.dsh-bdt-json>summary::-webkit-details-marker{display:none}
+.dsh-bdt-section>summary:before,.dsh-bdt-json>summary:before{content:'▶';display:inline-block;width:12px;font-size:8px;color:var(--bdt-muted)}
+.dsh-bdt-section[open]>summary:before,.dsh-bdt-json[open]>summary:before{content:'▼'}
+.dsh-bdt-section>:last-child:not(summary){margin-bottom:6px}
+.dsh-bdt-kv{display:grid;grid-template-columns:minmax(100px,32%) 1fr;gap:12px;padding:1px 8px 1px 24px}
+.dsh-bdt-kv>span:first-child{font-weight:600;overflow-wrap:anywhere}
+.dsh-bdt-kv>span:last-child{white-space:pre-wrap;overflow-wrap:anywhere}
+.dsh-bdt-hint{display:flex;gap:6px;margin:2px 8px 4px 24px;color:var(--bdt-muted)}
+.dsh-bdt-hint svg{flex:none;width:12px;height:12px;margin-top:2px;color:var(--bdt-warn-icon)}
+.dsh-bdt-dot{display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;background:#0f9d58}
+.dsh-bdt-dot[data-tone=redirect]{background:#e37400}.dsh-bdt-dot[data-tone=bad]{background:var(--bdt-error)}
+.dsh-bdt-code{margin:0;padding:6px 8px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
+.dsh-bdt-json-root{padding:4px 8px 4px 20px}
+.dsh-bdt-json>summary{margin-left:-12px;list-style:none;cursor:default;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsh-bdt-json>.dsh-bdt-json,.dsh-bdt-json>.dsh-bdt-json-leaf{padding-left:14px}
+.dsh-bdt-json-leaf{white-space:pre-wrap;overflow-wrap:anywhere}
+.dsh-bdt-json-key{color:var(--bdt-tag)}.dsh-bdt-json-string{color:var(--bdt-string)}.dsh-bdt-json-number{color:var(--bdt-number)}
+.dsh-bdt-timing{display:grid;grid-template-columns:minmax(140px,max-content) minmax(80px,1fr) 80px;gap:3px 12px;align-items:center;padding:0 8px 8px 24px}
+.dsh-bdt-timing>.group,.dsh-bdt-timing>.total{grid-column:1/-1;display:flex;justify-content:space-between;margin-top:8px;font-weight:600}
+.dsh-bdt-timing>.group{color:var(--bdt-muted)}
+.dsh-bdt-timing>.total{padding-top:4px;border-top:1px solid var(--bdt-soft)}
+.dsh-bdt-timing .num{text-align:right}
+.dsh-bdt-track{position:relative;height:10px}
+.dsh-bdt-track span{position:absolute;top:0;bottom:0;min-width:1px}
+.dsh-bdt-phase-redirect{background:#9e9e9e}.dsh-bdt-phase-stalled{background:#bdbdbd}.dsh-bdt-phase-dns{background:#009688}.dsh-bdt-phase-connect{background:#ff9800}.dsh-bdt-phase-ssl{background:#9c27b0}.dsh-bdt-phase-waiting{background:#00a846}.dsh-bdt-phase-download{background:#2196f3}
 `;
 
 /** One element with attributes, text and children; values are always set as text, never markup. */
@@ -136,6 +172,41 @@ const typeLabel = (entry: NetworkEntry) => {
   return ({ js: 'script', css: 'stylesheet', font: 'font', media: 'media', doc: 'document' } as Record<string, string>)[kind]
     ?? (kind === 'img' ? (/\.([a-z0-9]+)(?:[?#]|$)/i.exec(entry.url)?.[1]?.toLowerCase() ?? 'image') : entry.type);
 };
+const precise = (ms: number) => ms < 1000 ? `${ms.toFixed(2)} ms` : `${(ms / 1000).toFixed(2)} s`;
+const STATUS_TEXT: Record<number, string> = {
+  200: 'OK', 201: 'Created', 202: 'Accepted', 204: 'No Content', 206: 'Partial Content', 301: 'Moved Permanently', 302: 'Found', 303: 'See Other',
+  304: 'Not Modified', 307: 'Temporary Redirect', 308: 'Permanent Redirect', 400: 'Bad Request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not Found',
+  405: 'Method Not Allowed', 408: 'Request Timeout', 409: 'Conflict', 413: 'Payload Too Large', 415: 'Unsupported Media Type', 422: 'Unprocessable Entity',
+  429: 'Too Many Requests', 500: 'Internal Server Error', 502: 'Bad Gateway', 503: 'Service Unavailable', 504: 'Gateway Timeout',
+};
+const PHASES = { redirect: 'Redirect', stalled: 'Stalled', dns: 'DNS Lookup', connect: 'Initial connection', ssl: 'SSL', waiting: 'Waiting for server response', download: 'Content Download' } as const;
+export interface Phase { id: keyof typeof PHASES; group: 'connection' | 'request'; start: number; end: number }
+/** The phases of Chrome's Timing tab. `detailed` is false when a cross-origin server hides them (no Timing-Allow-Origin). */
+export function timingPhases(t: Timing): { detailed: boolean; phases: Phase[] } {
+  const phases: Phase[] = [];
+  const add = (id: Phase['id'], group: Phase['group'], start: number, end: number, empty = false) => {
+    if (start > 0 && (end > start || empty && end === start)) phases.push({ id, group, start, end });
+  };
+  add('redirect', 'connection', t.redirectStart, t.redirectEnd);
+  add('stalled', 'connection', t.fetchStart || t.startTime, [t.domainLookupStart, t.connectStart, t.requestStart].find(mark => mark > 0) ?? 0);
+  add('dns', 'connection', t.domainLookupStart, t.domainLookupEnd);
+  add('connect', 'connection', t.connectStart, t.connectEnd);
+  add('ssl', 'connection', t.secureConnectionStart, t.connectEnd);
+  add('waiting', 'request', t.requestStart, t.responseStart, true);
+  add('download', 'request', t.responseStart, t.responseEnd, true);
+  return { detailed: t.responseStart > 0, phases };
+}
+const queryOf = (url: string): Array<[string, string]> => { try { return Array.from(new URL(url).searchParams); } catch { return []; } };
+const parseJson = (text: string): unknown => { try { return /^\s*[[{"]/.test(text) ? JSON.parse(text) : undefined; } catch { return undefined; } };
+/** A one-line summary of a JSON value, as Chrome shows on a collapsed object. */
+const jsonPreview = (value: unknown, nested = false): string => {
+  if (typeof value === 'string') return JSON.stringify(nested && value.length > 50 ? `${value.slice(0, 50)}…` : value);
+  if (value === null || typeof value !== 'object') return String(value);
+  if (nested) return Array.isArray(value) ? `Array(${value.length})` : '{…}';
+  if (Array.isArray(value)) return `(${value.length}) [${value.slice(0, 10).map(item => jsonPreview(item, true)).join(', ')}${value.length > 10 ? ', …' : ''}]`;
+  const keys = Object.keys(value);
+  return `{${keys.slice(0, 8).map(key => `${key}: ${jsonPreview((value as Record<string, unknown>)[key], true)}`).join(', ')}${keys.length > 8 ? ', …' : ''}}`;
+};
 const nameOf = (url: string) => {
   try { const parsed = new URL(url); const last = parsed.pathname.split('/').filter(Boolean).pop(); return `${last ?? parsed.host}${parsed.search}`; } catch { return url; }
 };
@@ -157,6 +228,9 @@ export class DebuggerPanel {
   private tree = new Map<number, TreeNode>(); private rootIds: number[] | undefined;
   private selected: number | undefined; private styles: Styles | null | undefined; private side: 'styles' | 'computed' = 'styles';
   private picking = false; private selectedRequest: number | undefined;
+  /** The selected request's details: `undefined` while loading, `null` when the page no longer has them. */
+  private detail: RequestDetail | null | undefined; private detailJson = ''; private detailTab: DetailTab = 'headers';
+  private loadingDetail: number | undefined; private closedSections = new Set<string>();
   private filters: Record<Filter, string> = { styles: '', computed: '', console: '', network: '' };
   private level = 'all'; private type = 'all';
   private draft = ''; private history: string[] = []; private historyAt = -1;
@@ -216,6 +290,7 @@ export class DebuggerPanel {
     this.epoch++;
     this.logSeq = 0; this.netSeq = 0; this.rows = []; this.network = [];
     this.tree.clear(); this.rootIds = undefined; this.selected = undefined; this.styles = undefined; this.picking = false; this.selectedRequest = undefined;
+    this.detail = undefined; this.detailJson = ''; this.loadingDetail = undefined;
   }
 
   private async attach(): Promise<void> {
@@ -253,6 +328,8 @@ export class DebuggerPanel {
         this.netSeq = result.network.at(-1)!.seq;
         this.renderNetwork();
       }
+      // A selected response that is still arriving refreshes with the log.
+      if (this.selectedRequest !== undefined && this.detail?.pending) await this.loadDetail(this.selectedRequest);
       if (this.picking !== result.picking) { this.picking = result.picking; this.renderBar(); }
       if (result.picked) { this.tab = 'elements'; this.renderAll(); await this.reveal(result.picked.path); }
     } finally { this.polling = false; }
@@ -617,28 +694,48 @@ export class DebuggerPanel {
       chips.append(chip);
     }
     const tools = h(doc, 'div', { class: 'dsh-bdt-tools' },
-      this.iconButton('clear', ui('Clear network log'), () => { this.network = []; this.selectedRequest = undefined; void this.call('clear', 'network'); this.renderNetwork(); }),
+      this.iconButton('clear', ui('Clear network log'), () => { this.network = []; void this.call('clear', 'network'); this.renderNetwork(); }),
       this.filterInput('network', () => this.renderNetwork()), h(doc, 'span', { class: 'dsh-bdt-sep' }), chips);
-    const table = h(doc, 'div', { class: 'dsh-bdt-table' });
+    const table = h(doc, 'div', { class: 'dsh-bdt-table', tabindex: 0 });
     table.addEventListener('click', event => {
       const row = (event.target as Element).closest<HTMLElement>('tr[data-seq]');
-      if (!row) return;
-      this.selectedRequest = Number(row.dataset.seq);
-      for (const other of Array.from(table.querySelectorAll('tr[data-seq]'))) other.setAttribute('aria-selected', String(other === row));
+      if (row) this.selectRequest(Number(row.dataset.seq));
+    });
+    table.addEventListener('keydown', event => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      const rows = Array.from(table.querySelectorAll<HTMLElement>('tr[data-seq]'));
+      if (!rows.length) return;
+      event.preventDefault();
+      const at = rows.findIndex(row => Number(row.dataset.seq) === this.selectedRequest);
+      const seq = rows[at < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, at + (event.key === 'ArrowDown' ? 1 : -1)))].dataset.seq;
+      this.selectRequest(Number(seq));
+      table.querySelector(`tr[data-seq="${seq}"]`)?.scrollIntoView?.({ block: 'nearest' });
+    });
+    const detail = h(doc, 'section', { class: 'dsh-bdt-detail', 'aria-label': ui('Request details'), hidden: true });
+    const split = h(doc, 'div', { class: 'dsh-bdt-net' }, table, detail);
+    split.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || this.selectedRequest === undefined) return;
+      event.preventDefault(); this.selectRequest(undefined); table.focus();
     });
     const status = h(doc, 'div', { class: 'dsh-bdt-status' });
-    this.parts.network = table; this.parts.networkStatus = status;
-    this.parts.panes.append(tools, table, status);
-    this.renderNetwork();
+    this.parts.network = table; this.parts.detail = detail; this.parts.networkStatus = status;
+    this.parts.panes.append(tools, split, status);
+    this.renderNetwork(); this.renderDetail();
   }
 
   private renderNetwork(): void {
     const table = this.parts.network;
     if (!table?.isConnected) return;
     const doc = this.doc, needle = this.filters.network.toLowerCase();
+    // Cleared or dropped from the log: close its details.
+    const gone = this.selectedRequest !== undefined && !this.network.some(entry => entry.seq === this.selectedRequest);
+    if (gone) { this.selectedRequest = undefined; this.detail = undefined; }
+    // As in Chrome, an open request leaves only the Name column beside its details.
+    const open = this.selectedRequest !== undefined;
     const shown = this.network.filter(entry => (this.type === 'all' || category(entry) === this.type) && (!needle || entry.url.toLowerCase().includes(needle)));
     const head = h(doc, 'tr', {});
-    for (const [label, width, num] of [['Name', '', false], ['Status', '64px', false], ['Type', '84px', false], ['Size', '76px', true], ['Time', '72px', true]] as const) {
+    const columns = [['Name', '', false], ['Status', '64px', false], ['Type', '84px', false], ['Size', '76px', true], ['Time', '72px', true]] as const;
+    for (const [label, width, num] of open ? columns.slice(0, 1) : columns) {
       const cell = h(doc, 'th', { class: num ? 'num' : undefined, text: ui(label) });
       if (width) cell.style.width = width;
       head.append(cell);
@@ -646,12 +743,14 @@ export class DebuggerPanel {
     const body = h(doc, 'tbody', {});
     for (const entry of shown) {
       const bad = entry.failed || entry.status >= 400;
-      body.append(h(doc, 'tr', { 'data-seq': entry.seq, 'aria-selected': String(entry.seq === this.selectedRequest), title: `${entry.method} ${entry.url}` },
-        h(doc, 'td', { class: bad ? 'bad' : undefined, text: nameOf(entry.url) }),
+      const row = h(doc, 'tr', { 'data-seq': entry.seq, 'aria-selected': String(entry.seq === this.selectedRequest), title: `${entry.method} ${entry.url}` },
+        h(doc, 'td', { class: bad ? 'bad' : undefined, text: nameOf(entry.url) }));
+      if (!open) row.append(
         h(doc, 'td', { class: bad ? 'bad' : undefined, text: entry.failed ? ui('(failed)') : entry.status ? String(entry.status) : '—' }),
         h(doc, 'td', { text: typeLabel(entry) }),
         h(doc, 'td', { class: 'num', text: entry.cached ? ui('(cache)') : entry.size >= 0 ? bytes(entry.size) : '—' }),
-        h(doc, 'td', { class: 'num', text: duration(entry.duration) })));
+        h(doc, 'td', { class: 'num', text: duration(entry.duration) }));
+      body.append(row);
     }
     const atBottom = table.scrollHeight - table.scrollTop - table.clientHeight < 24;
     table.replaceChildren(h(doc, 'table', { class: 'dsh-bdt-mono' }, h(doc, 'thead', {}, head), body));
@@ -659,5 +758,185 @@ export class DebuggerPanel {
     const transferred = shown.reduce((sum, entry) => sum + Math.max(0, entry.size), 0);
     const count = shown.length === this.network.length ? ui('{0} requests', { 0: shown.length }) : ui('{0} / {1} requests', { 0: shown.length, 1: this.network.length });
     if (this.parts.networkStatus) this.parts.networkStatus.textContent = `${count}  |  ${ui('{0} transferred', { 0: bytes(transferred) })}`;
+    if (gone) this.renderDetail();
+  }
+
+  // Request details
+
+  private selectRequest(seq: number | undefined): void {
+    if (seq === this.selectedRequest) return;
+    this.selectedRequest = seq; this.detail = undefined; this.detailJson = '';
+    this.renderNetwork(); this.renderDetail();
+    if (seq !== undefined) void this.loadDetail(seq);
+  }
+
+  private async loadDetail(seq: number): Promise<void> {
+    if (this.loadingDetail === seq) return;
+    const epoch = this.epoch;
+    this.loadingDetail = seq;
+    try {
+      const detail = await this.call<RequestDetail>('request', { seq });
+      if (!this.opened || epoch !== this.epoch || seq !== this.selectedRequest) return;
+      // Re-render only on change, so a refresh keeps expanded trees and the scroll position.
+      const json = JSON.stringify(detail);
+      if (this.detail !== undefined && json === this.detailJson) return;
+      this.detail = detail; this.detailJson = json;
+      this.renderDetail();
+    } finally { if (this.loadingDetail === seq) this.loadingDetail = undefined; }
+  }
+
+  private renderDetail(): void {
+    const pane = this.parts.detail;
+    if (!pane?.isConnected) return;
+    const entry = this.network.find(item => item.seq === this.selectedRequest);
+    pane.parentElement?.toggleAttribute('data-detail', Boolean(entry));
+    pane.hidden = !entry;
+    if (!entry) { pane.replaceChildren(); return; }
+    const doc = this.doc, detail = this.detail;
+    const tabs: Array<[DetailTab, string]> = [['headers', 'Headers']];
+    if (queryOf(entry.url).length || detail?.payload) tabs.push(['payload', 'Payload']);
+    tabs.push(['preview', 'Preview'], ['response', 'Response'], ['timing', 'Timing']);
+    // Keep the chosen tab across requests where it exists, as Chrome does.
+    const shown = tabs.some(([id]) => id === this.detailTab) ? this.detailTab : 'headers';
+    const list = h(doc, 'div', { class: 'dsh-bdt-tabs', role: 'tablist' });
+    for (const [id, label] of tabs) {
+      const tab = h(doc, 'button', { type: 'button', role: 'tab', class: 'dsh-bdt-tab', 'aria-selected': String(shown === id), text: ui(label) });
+      tab.addEventListener('click', () => { this.detailTab = id; this.renderDetail(); pane.querySelector<HTMLElement>('[role=tab][aria-selected=true]')?.focus(); });
+      list.append(tab);
+    }
+    const close = this.iconButton('close', ui('Close request details'), () => { this.selectRequest(undefined); this.parts.network?.focus(); });
+    const previous = pane.querySelector<HTMLElement>('.dsh-bdt-detail-body');
+    const keep = previous?.dataset.view === `${entry.seq}:${shown}` ? previous.scrollTop : 0;
+    const body = h(doc, 'div', { class: 'dsh-bdt-scroll dsh-bdt-detail-body', role: 'tabpanel', 'data-view': `${entry.seq}:${shown}` });
+    pane.replaceChildren(h(doc, 'div', { class: 'dsh-bdt-bar' }, close, list), body);
+    if (detail === undefined) body.append(this.note(ui('Loading…')));
+    else if (shown === 'headers') body.append(...this.headersView(entry, detail));
+    else if (shown === 'payload') body.append(...this.payloadView(entry, detail));
+    else if (shown === 'timing') body.append(...this.timingView(detail));
+    else body.append(...this.bodyView(shown === 'preview', entry, detail));
+    body.scrollTop = keep;
+  }
+
+  private headersView(entry: NetworkEntry, detail: RequestDetail | null): Node[] {
+    const doc = this.doc;
+    const tone = entry.failed || entry.status >= 400 ? 'bad' : entry.status >= 300 ? 'redirect' : 'ok';
+    const status = entry.failed ? ui('(failed)') : entry.status ? `${entry.status} ${detail?.statusText || STATUS_TEXT[entry.status] || ''}`.trim() : '—';
+    const general = this.section('general', ui('General'), [
+      this.pair(ui('Request URL'), entry.url),
+      this.pair(ui('Request Method'), entry.method),
+      this.pair(ui('Status Code'), h(doc, 'span', {}, entry.status || entry.failed ? h(doc, 'span', { class: 'dsh-bdt-dot', 'data-tone': tone }) : null, status)),
+      detail?.responseUrl ? this.pair(ui('Response URL'), detail.responseUrl) : null,
+    ]);
+    if (!detail?.requestHeaders) return [general, this.note(ui('Headers are only recorded for Fetch and XHR requests made while the debugger is connected.'))];
+    const rows = (list: Array<[string, string]>) => [...list].sort((a, b) => a[0].localeCompare(b[0])).map(([name, value]) => this.pair(name, value));
+    let crossOrigin = false;
+    try { crossOrigin = new URL(entry.url).origin !== new URL(this.view.getURL()).origin; } catch { /* Not a URL. */ }
+    return [general,
+      detail.responseHeaders ? this.section('response', ui('Response Headers'), [
+        crossOrigin ? this.hint(ui('Cross-origin responses only expose the headers the server allows.')) : null, ...rows(detail.responseHeaders)]) : null,
+      this.section('request', ui('Request Headers'), [
+        this.hint(ui('Only headers set by the page are shown; the browser also sends others, such as cookies.')), ...rows(detail.requestHeaders)]),
+    ].filter((node): node is HTMLElement => node !== null);
+  }
+
+  private payloadView(entry: NetworkEntry, detail: RequestDetail | null): Node[] {
+    const doc = this.doc, views: Node[] = [];
+    const query = queryOf(entry.url);
+    if (query.length) views.push(this.section('query', ui('Query String Parameters'), query.map(([name, value]) => this.pair(name, value))));
+    const payload = detail?.payload;
+    if (!payload) return views;
+    const truncated = payload.kind === 'text' && payload.truncated ? this.note(ui('Showing the first {0} characters.', { 0: payload.text.length.toLocaleString() })) : null;
+    const type = detail.requestHeaders?.find(([name]) => name === 'content-type')?.[1] ?? '';
+    if (payload.kind === 'form') views.push(this.section('form', ui('Form Data'), payload.fields.map(([name, value]) => this.pair(name, value ?? ui('(binary)')))));
+    else if (payload.kind === 'text' && /application\/x-www-form-urlencoded/i.test(type)) {
+      views.push(this.section('form', ui('Form Data'), [...Array.from(new URLSearchParams(payload.text)).map(([name, value]) => this.pair(name, value)), truncated]));
+    } else {
+      const json = payload.kind === 'text' ? parseJson(payload.text) : undefined;
+      const content = payload.kind === 'binary' ? this.note(ui('Binary data, {0}', { 0: bytes(payload.size) }))
+        : payload.kind === 'stream' ? this.note(ui('Streamed request body'))
+        : json !== undefined ? this.jsonTree(json) : h(doc, 'pre', { class: 'dsh-bdt-code dsh-bdt-mono', text: payload.text });
+      views.push(this.section('payload', ui('Request Payload'), [truncated, content]));
+    }
+    return views;
+  }
+
+  private bodyView(preview: boolean, entry: NetworkEntry, detail: RequestDetail | null): Node[] {
+    const body = detail?.body;
+    if (!body || body.done && !body.text) {
+      const reason = detail?.error ? ui('Failed to load response data: {0}', { 0: detail.error })
+        : detail?.bodyNote === 'binary' ? ui('Only text responses are shown.')
+        : detail?.bodyNote === 'dropped' ? ui('This response was dropped to save memory.')
+        : detail?.bodyNote === 'empty' || body ? ui('This request has no response data available.')
+        : ui('Response bodies are only recorded for Fetch and XHR requests made while the debugger is connected.');
+      return [this.note(entry.failed && !detail?.error ? ui('This request has no response data available.') : reason)];
+    }
+    const notes = [
+      body.truncated ? this.note(ui('Showing the first {0} characters.', { 0: body.text.length.toLocaleString() })) : null,
+      body.done ? null : this.note(ui('Receiving…')),
+    ].filter((node): node is HTMLElement => node !== null);
+    const json = preview && body.done && !body.truncated ? parseJson(body.text) : undefined;
+    return [...notes, json !== undefined ? this.jsonTree(json) : h(this.doc, 'pre', { class: 'dsh-bdt-code dsh-bdt-mono', text: body.text })];
+  }
+
+  private timingView(detail: RequestDetail | null): Node[] {
+    const doc = this.doc, t = detail?.timing;
+    if (!t) return [this.note(detail?.pending ? ui('Loading…') : ui('Timing is not available for this request.'))];
+    const { detailed, phases } = timingPhases(t);
+    const total = Math.max(t.duration, ...phases.map(phase => phase.end - t.startTime), 0.001);
+    const grid = h(doc, 'div', { class: 'dsh-bdt-timing' });
+    for (const group of ['connection', 'request'] as const) {
+      const rows = phases.filter(phase => phase.group === group);
+      if (!rows.length) continue;
+      grid.append(h(doc, 'div', { class: 'group' }, h(doc, 'span', { text: ui(group === 'connection' ? 'Connection Start' : 'Request/Response') }), h(doc, 'span', { text: ui('Duration') })));
+      for (const phase of rows) {
+        const bar = h(doc, 'span', { class: `dsh-bdt-phase-${phase.id}` });
+        bar.style.left = `${(phase.start - t.startTime) / total * 100}%`;
+        bar.style.width = `${(phase.end - phase.start) / total * 100}%`;
+        grid.append(h(doc, 'span', { text: ui(PHASES[phase.id]) }), h(doc, 'div', { class: 'dsh-bdt-track' }, bar), h(doc, 'span', { class: 'num', text: precise(phase.end - phase.start) }));
+      }
+    }
+    grid.append(h(doc, 'div', { class: 'total' }, h(doc, 'span', { text: ui('Total') }), h(doc, 'span', { text: precise(t.duration) })));
+    return [this.note(ui('Started at {0}', { 0: precise(t.startTime) })),
+      ...(detailed ? [] : [this.hint(ui('Detailed timing is hidden because the server did not send Timing-Allow-Origin.'))]), grid];
+  }
+
+  /** A collapsible JSON value; children are built when first expanded. */
+  private jsonTree(value: unknown): HTMLElement {
+    const doc = this.doc;
+    const leaf = (item: unknown) => typeof item === 'string' ? h(doc, 'span', { class: 'dsh-bdt-json-string', text: JSON.stringify(item) })
+      : typeof item === 'number' || typeof item === 'boolean' ? h(doc, 'span', { class: 'dsh-bdt-json-number', text: String(item) })
+      : h(doc, 'span', { class: 'dsh-bdt-dim', text: String(item) });
+    const label = (key?: string) => key === undefined ? null : h(doc, 'span', { class: 'dsh-bdt-json-key', text: `${key}: ` });
+    const node = (key: string | undefined, item: unknown, open: boolean): HTMLElement => {
+      if (item === null || typeof item !== 'object') return h(doc, 'div', { class: 'dsh-bdt-json-leaf' }, label(key), leaf(item));
+      const element = h(doc, 'details', { class: 'dsh-bdt-json' }, h(doc, 'summary', {}, label(key), h(doc, 'span', { class: 'dsh-bdt-dim', text: jsonPreview(item) })));
+      let filled = false;
+      const fill = () => {
+        if (filled) return;
+        filled = true;
+        const entries: Array<[string, unknown]> = Array.isArray(item) ? item.map((child, index) => [String(index), child]) : Object.entries(item);
+        for (const [name, child] of entries.slice(0, 1000)) element.append(node(name, child, false));
+        if (entries.length > 1000) element.append(h(doc, 'div', { class: 'dsh-bdt-json-leaf dsh-bdt-dim', text: '…' }));
+      };
+      element.addEventListener('toggle', () => { if (element.open) fill(); });
+      if (open) { element.open = true; fill(); }
+      return element;
+    };
+    return h(doc, 'div', { class: 'dsh-bdt-json-root dsh-bdt-mono' }, node(undefined, value, true));
+  }
+
+  private section(id: string, title: string, children: Array<Node | null>): HTMLElement {
+    const section = h(this.doc, 'details', { class: 'dsh-bdt-section', open: !this.closedSections.has(id) }, h(this.doc, 'summary', { text: title }), ...children);
+    section.addEventListener('toggle', () => { if (section.open) this.closedSections.delete(id); else this.closedSections.add(id); });
+    return section;
+  }
+  private pair(name: string, value: string | Node): HTMLElement {
+    return h(this.doc, 'div', { class: 'dsh-bdt-kv' }, h(this.doc, 'span', { text: name }), typeof value === 'string' ? h(this.doc, 'span', { text: value }) : h(this.doc, 'span', {}, value));
+  }
+  private note(text: string): HTMLElement { return h(this.doc, 'div', { class: 'dsh-bdt-note', role: 'status', text }); }
+  private hint(text: string): HTMLElement {
+    const hint = h(this.doc, 'div', { class: 'dsh-bdt-hint' }, h(this.doc, 'span', { text }));
+    hint.insertAdjacentHTML('afterbegin', ICONS.warn);
+    return hint;
   }
 }

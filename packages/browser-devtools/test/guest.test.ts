@@ -1,8 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
-import { AGENT_KEY, agentScript, commandScript, detachScript, evaluateScript, type NodeSummary, type Poll, type Styles } from '../src/client/guest.js';
+import { AGENT_KEY, agentScript, commandScript, detachScript, evaluateScript, type NodeSummary, type Poll, type RequestDetail, type Styles } from '../src/client/guest.js';
 
 const HTML = `<!doctype html><html><head><style>#title{color:red}.missing{color:blue}@media (min-width:1px){h1{margin:4px}}</style></head>
 <body><!-- note --><h1 id="title" class="big" style="padding:2px">Hello</h1><ul><li>One</li><li>Two</li></ul></body></html>`;
@@ -110,4 +113,85 @@ test('console input is evaluated as an expression with $0, and errors are return
   assert.equal(failure.error.kind, 'error'); assert.match(failure.error.text, /missing is not defined/);
   assert.throws(() => run(evaluateScript('let x = 1')), (error: Error) => error.name === 'SyntaxError', 'statements fail to compile, so the panel runs them as a script');
   void window;
+});
+
+/** Waits until the response body has been read. */
+const settled = async (read: () => RequestDetail | null) => {
+  for (let i = 0; i < 100; i++) { const detail = read(); if (detail?.body?.done) return detail; await delay(10); }
+  assert.fail('the response body was never read');
+};
+
+test('fetch keeps request headers, payload, response headers and a text body; the page still reads its own body', async () => {
+  const { window, run, command } = page();
+  Object.assign(window, {
+    TextDecoder,
+    fetch: async () => new Response(JSON.stringify({ ok: true, items: [1, 2] }), { status: 201, statusText: 'Created', headers: { 'Content-Type': 'application/json', 'X-Trace': 'abc' } }),
+  });
+  run(agentScript());
+  const read = await window.eval(`fetch('/api/items?q=1', { method: 'POST', headers: { 'X-Token': 't' }, body: JSON.stringify({ name: 'a' }) }).then(r => r.json())`);
+  assert.deepEqual(read, { ok: true, items: [1, 2] });
+  const [entry] = command<Poll>('poll')!.network;
+  assert.deepEqual([entry.method, entry.url, entry.status], ['POST', 'https://page.test/api/items?q=1', 201]);
+  const detail = await settled(() => command<RequestDetail>('request', { seq: entry.seq }));
+  assert.equal(detail.statusText, 'Created');
+  assert.deepEqual(detail.requestHeaders, [['x-token', 't'], ['content-type', 'text/plain;charset=UTF-8']], 'the browser\'s implicit Content-Type is shown');
+  assert.deepEqual(detail.payload, { kind: 'text', text: '{"name":"a"}', truncated: false });
+  assert.deepEqual(detail.responseHeaders?.filter(([name]) => name.startsWith('x-')), [['x-trace', 'abc']]);
+  assert.deepEqual(detail.body, { text: '{"ok":true,"items":[1,2]}', truncated: false, done: true });
+  assert.equal(command('request', { seq: entry.seq + 1 }), null, 'an unknown request has no details');
+  command('clear', 'network');
+  assert.equal(command('request', { seq: entry.seq }), null, 'clearing the log forgets its details');
+});
+
+test('fetch describes form, binary and failed requests without reading binary bodies', async () => {
+  const { window, run, command } = page();
+  Object.assign(window, {
+    TextDecoder,
+    fetch: async (input: string) => {
+      if (input.includes('fail')) throw new TypeError('Failed to fetch');
+      return new Response(new Uint8Array([1, 2, 3]), { headers: { 'Content-Type': 'image/png' } });
+    },
+  });
+  run(agentScript());
+  await window.eval(`(() => { const form = new FormData(); form.append('name', 'Ada'); form.append('file', new Blob(['x']), 'a.txt'); return fetch('/upload', { method: 'POST', body: form }); })()`);
+  await window.eval(`fetch('/fail').catch(() => {})`);
+  const [upload, failed] = command<Poll>('poll')!.network;
+  const sent = command<RequestDetail>('request', { seq: upload.seq })!;
+  assert.deepEqual(sent.payload, { kind: 'form', fields: [['name', 'Ada'], ['file', null]] });
+  assert.equal(sent.bodyNote, 'binary'); assert.equal(sent.body, undefined);
+  assert.equal(failed.failed, true);
+  assert.equal(command<RequestDetail>('request', { seq: failed.seq })!.error, 'Failed to fetch');
+});
+
+test('XHR keeps headers set with setRequestHeader, the body sent and the response text', async t => {
+  const server = createServer((req, res) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*', 'Access-Control-Expose-Headers': 'X-Echo', 'X-Echo': req.headers['content-type'] ?? '' });
+      res.end(`got ${body}`);
+    });
+  });
+  server.listen(0, '127.0.0.1'); await once(server, 'listening');
+  t.after(() => server.close());
+  const { port } = server.address() as { port: number };
+  const { window, run, command } = page();
+  run(agentScript());
+  await window.eval(`new Promise(done => { const xhr = new XMLHttpRequest(); xhr.open('post', 'http://127.0.0.1:${port}/echo'); xhr.setRequestHeader('Content-Type', 'text/plain'); xhr.onloadend = done; xhr.send('a=1'); })`);
+  const [entry] = command<Poll>('poll')!.network;
+  assert.deepEqual([entry.type, entry.method, entry.status], ['xhr', 'POST', 200]);
+  const detail = command<RequestDetail>('request', { seq: entry.seq })!;
+  assert.deepEqual(detail.requestHeaders, [['content-type', 'text/plain']]);
+  assert.deepEqual(detail.payload, { kind: 'text', text: 'a=1', truncated: false });
+  assert.deepEqual(detail.responseHeaders?.find(([name]) => name === 'x-echo'), ['x-echo', 'text/plain']);
+  assert.deepEqual(detail.body, { text: 'got a=1', truncated: false, done: true });
+});
+
+test('a page without TextDecoder still records the response text', async () => {
+  const { window, run, command } = page();
+  Object.assign(window, { fetch: async () => new Response('plain text') });
+  run(agentScript());
+  assert.equal(await window.eval(`fetch('/text').then(r => r.text())`), 'plain text');
+  const [entry] = command<Poll>('poll')!.network;
+  assert.equal((await settled(() => command<RequestDetail>('request', { seq: entry.seq }))).body?.text, 'plain text');
 });

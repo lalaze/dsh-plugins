@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { JSDOM } from 'jsdom';
 import { AGENT_KEY } from '../src/client/guest.js';
-import { category, DebuggerPanel, type PanelView } from '../src/client/panel.js';
+import { category, DebuggerPanel, timingPhases, type PanelView } from '../src/client/panel.js';
 
 const PAGE = `<!doctype html><html><head><style>.card{color:green}</style></head><body><main class="card">Card</main><p>Text</p></body></html>`;
 
@@ -97,6 +97,56 @@ test('a non-web page shows a message', async t => {
   await panel.open();
   assert.ok(text().includes('Open a web page to debug it.'));
   panel.close();
+});
+
+test('selecting a request opens Chrome-style details beside the Name column', async t => {
+  const { guest, panel, text, until, click, tab } = setup(t);
+  Object.assign(guest.window, {
+    TextDecoder,
+    fetch: async () => new Response('{"user":{"name":"Ada"},"tags":["a"]}', { headers: { 'Content-Type': 'application/json' } }),
+  });
+  await panel.open();
+  click(tab('Network'));
+  await guest.window.eval(`fetch('https://page.test/api/user?id=7', { method: 'POST', headers: { 'X-Token': 't' }, body: '{"id":7}' })`);
+  const row = () => Array.from(panel.root.querySelectorAll<HTMLElement>('tr[data-seq]')).find(item => item.textContent?.startsWith('user?id=7'));
+  await until(() => Boolean(row()), 'the request row');
+  assert.equal(panel.root.querySelectorAll('th').length, 5);
+  click(row()!.firstElementChild);
+  await until(() => text().includes('Request URL'), 'the Headers tab');
+  assert.equal(panel.root.querySelectorAll('th').length, 1, 'only the Name column stays');
+  for (const expected of ['https://page.test/api/user?id=7', 'POST', '200 OK', 'Response Headers', 'content-type', 'application/json', 'Request Headers', 'x-token']) assert.ok(text().includes(expected), expected);
+  click(tab('Payload'));
+  await until(() => text().includes('Query String Parameters'), 'the Payload tab');
+  assert.ok(text().includes('Request Payload') && text().includes('id: 7'));
+  click(tab('Preview'));
+  await until(() => Boolean(panel.root.querySelector('.dsh-bdt-detail .dsh-bdt-json[open]')), 'the JSON tree');
+  assert.ok(text().includes('user: {name: "Ada"}') && text().includes('tags: (1) ["a"]'));
+  click(tab('Response'));
+  await until(() => panel.root.querySelector('.dsh-bdt-detail pre')?.textContent === '{"user":{"name":"Ada"},"tags":["a"]}', 'the raw response');
+  panel.root.querySelector('.dsh-bdt-table')!.dispatchEvent(new guest.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(panel.root.querySelector<HTMLElement>('.dsh-bdt-detail')!.hidden, true);
+  assert.equal(panel.root.querySelectorAll('th').length, 5, 'closing restores every column');
+});
+
+test('a resource known only from timing says what was not recorded', async t => {
+  const { panel, text, until, click, tab } = setup(t);
+  await panel.open();
+  click(tab('Network'));
+  (panel as unknown as { network: unknown[] }).network = [{ seq: 99, url: 'https://cdn.test/app.js', method: 'GET', type: 'script', status: 0, failed: false, size: -1, cached: false, start: 1, duration: 2 }];
+  (panel as unknown as { renderNetwork(): void }).renderNetwork();
+  click(panel.root.querySelector('tr[data-seq="99"] td'));
+  await until(() => text().includes('Headers are only recorded'), 'the missing-details note');
+  click(tab('Response'));
+  assert.ok(text().includes('Response bodies are only recorded'));
+});
+
+test('timing phases follow Chrome and are hidden for cross-origin requests without Timing-Allow-Origin', () => {
+  const zero = { startTime: 0, redirectStart: 0, redirectEnd: 0, fetchStart: 0, domainLookupStart: 0, domainLookupEnd: 0, connectStart: 0, connectEnd: 0, secureConnectionStart: 0, requestStart: 0, responseStart: 0, responseEnd: 0, duration: 0 };
+  const full = timingPhases({ ...zero, startTime: 10, fetchStart: 10, domainLookupStart: 12, domainLookupEnd: 15, connectStart: 15, connectEnd: 30, secureConnectionStart: 20, requestStart: 30, responseStart: 80, responseEnd: 95, duration: 85 });
+  assert.equal(full.detailed, true);
+  assert.deepEqual(full.phases.map(phase => [phase.id, phase.end - phase.start]), [['stalled', 2], ['dns', 3], ['connect', 15], ['ssl', 10], ['waiting', 50], ['download', 15]]);
+  const hidden = timingPhases({ ...zero, startTime: 10, fetchStart: 10, responseEnd: 95, duration: 85 });
+  assert.equal(hidden.detailed, false); assert.deepEqual(hidden.phases, []);
 });
 
 test('requests are sorted into Chrome\'s Network type filters', () => {
