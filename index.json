@@ -855,6 +855,42 @@
           }
         }
       ]
+    },
+    {
+      "name": "dsh-auth-cookie-cleanup",
+      "title": "DSH Auth Cookie Cleanup",
+      "description": {
+        "en": "Temporary fix for Desktop failing to open after ~70 launches: expires stale per-port `dsh-auth-*` cookies (deepseek-harness#10598)",
+        "zh": "临时修复 Desktop 启动约 70 次后无法打开：自动清理残留的按端口 `dsh-auth-*` cookie（deepseek-harness#10598）"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/auth-cookie-cleanup",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/auth-cookie-cleanup"
+      },
+      "metadata": {
+        "keywords": [
+          "desktop",
+          "cookie",
+          "auth"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793182538,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "fe8e6dfc3bfe68ca3aafa4f36d5f003caf74000c",
+            "path": "packages/auth-cookie-cleanup"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
     }
   ]
 }
