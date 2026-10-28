@@ -45,8 +45,9 @@ export function formatReset(at: string, now = Date.now()): string | undefined {
 const contextLevel = (percent: number | null) => percent === null ? 'normal' : percent > 90 ? 'error' : percent >= 70 ? 'warning' : 'normal';
 const remainingLevel = (left: number) => left < 10 ? 'error' : left < 30 ? 'warning' : 'normal';
 
+// The host's 12px gap plus this button's and the model trigger's padding left a hole before the model picker.
 const styles = `
-.ra-usage{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer}
+.ra-usage{display:inline-flex;flex:none;margin-right:-8px;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;color:var(--dsw-alias-label-secondary,currentColor);cursor:pointer}
 .ra-usage:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
 .ra-usage:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe))}
 .ra-usage svg{width:16px;height:16px;overflow:visible}
