@@ -196,7 +196,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         const effort = options.reasoningEffort ?? model.defaultThinkingOptionId;
         if (effort && !model.thinkingOptions?.some(o => o.id === effort))
             throw new LlmError('This remote model does not support that thinking level.', 'INVALID_REQUEST');
-        const task = service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route === options.model)
+        let task = service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route === options.model)
             ?? service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route.startsWith(`${project.id}/${encodeURIComponent(provider.id)}/`));
         // Recheck even saved routes: a previous model choice cannot authorize another workspace's machine.
         const selectedCwd = this.auxiliaryDirectories.get(sessionId) ?? this.host.cwd?.(sessionId);
@@ -210,8 +210,14 @@ export class RemoteCliAdapter extends LlmAdapter {
         const cwd = remotePath(placement.cwd);
         if (task && task.cwd !== cwd || project.id !== project.hostId && project.cwd !== cwd)
             throw new LlmError('The remote conversation belongs to a different workspace directory. Start a new conversation.', 'WORKSPACE_MISMATCH');
-        const binding = hash(sessionId, task?.chat?.receiptRoute ?? task?.chat?.route ?? options.model);
         const userId = lastUser.id ?? hash(JSON.stringify(options.messages));
+        // A CLI that never started left only its first prompt. A new message starts afresh with that prompt as
+        // context; retrying it would run the stale prompt first and reject this message as busy.
+        if (task && !task.agentId && !this.active.has(sessionId) && task.id !== hash(hash(sessionId, task.chat?.receiptRoute ?? task.chat?.route ?? options.model), userId)) {
+            await service.delete(task.id);
+            task = undefined;
+        }
+        const binding = hash(sessionId, task?.chat?.receiptRoute ?? task?.chat?.route ?? options.model);
         const messageId = hash(binding, userId);
         const controller = new AbortController(), signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
         signal.throwIfAborted();
