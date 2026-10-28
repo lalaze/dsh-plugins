@@ -7,7 +7,7 @@ import type { PanelView } from '../src/client/panel.js';
 
 const until = async (check: () => boolean) => { for (let i = 0; i < 100; i++) { if (check()) return; await delay(10); } assert.fail('toolbar state timed out'); };
 
-test('toolbar switches docked/separate modes and removes the session when its tab disappears', async t => {
+test('toolbar opens and closes the separate window and removes the session when its tab disappears', async t => {
   const dom = new JSDOM('<body><div><form><input></form><div class="content"><div class="viewport"></div></div></div></body>', { url: 'https://dsh.test/', pretendToBeVisual: true });
   const guest = new JSDOM('<html><body>Hello</body></html>', { url: 'https://page.test', runScripts: 'outside-only' });
   const doc = dom.window.document, view = doc.createElement('webview') as unknown as PanelView;
@@ -24,15 +24,28 @@ test('toolbar switches docked/separate modes and removes the session when its ta
   });
   const stop = installDevTools(doc);
   t.after(() => { stop(); guest.window.close(); dom.window.close(); });
-  const dock = doc.querySelector<HTMLButtonElement>('[data-dsh-browser-devtools=toggle]')!;
   const separate = doc.querySelector<HTMLButtonElement>('[data-dsh-browser-devtools=detach]')!;
-  assert.ok(dock); assert.ok(separate); assert.equal(doc.querySelectorAll('form button').length, 2);
-  dock.click(); await until(() => dock.getAttribute('aria-pressed') === 'true' && !dock.disabled);
-  assert.ok(doc.querySelector('.dsh-bdt-panel'));
+  assert.ok(separate); assert.equal(doc.querySelector('[data-dsh-browser-devtools=toggle]'), null);
+  assert.equal(doc.querySelectorAll('form button').length, 1);
   separate.click(); await until(() => separate.getAttribute('aria-pressed') === 'true' && !separate.disabled);
   assert.equal(creates, 1); assert.equal(doc.querySelector('.dsh-bdt-panel'), null);
-  dock.click(); await until(() => dock.getAttribute('aria-pressed') === 'true' && !dock.disabled);
-  assert.equal(closes, 1); assert.ok(doc.querySelector('.dsh-bdt-panel'));
+  separate.click(); await until(() => separate.getAttribute('aria-pressed') === 'false' && !separate.disabled);
+  assert.equal(closes, 1);
   separate.click(); await until(() => separate.getAttribute('aria-pressed') === 'true' && !separate.disabled);
   view.remove(); await until(() => closes === 2 && doc.querySelectorAll('form button').length === 0);
+});
+
+test('the separate-window button waits for a web page', async t => {
+  const dom = new JSDOM('<body><div><form><input></form><div class="content"><div class="viewport"></div></div></div></body>', { url: 'https://dsh.test/', pretendToBeVisual: true });
+  const doc = dom.window.document, view = doc.createElement('webview') as unknown as PanelView;
+  let url = 'about:blank';
+  view.setAttribute('data-sidebar-browser-frame', 'webview');
+  view.getURL = () => url; view.executeJavaScript = async () => undefined;
+  doc.querySelector('.viewport')!.append(view);
+  const stop = installDevTools(doc);
+  t.after(() => { stop(); dom.window.close(); });
+  const separate = doc.querySelector<HTMLButtonElement>('[data-dsh-browser-devtools=detach]')!;
+  assert.equal(separate.disabled, true);
+  url = 'https://page.test'; view.dispatchEvent(new dom.window.Event('dom-ready'));
+  assert.equal(separate.disabled, false);
 });

@@ -11,7 +11,6 @@ type Filter = 'styles' | 'computed' | 'console' | 'network';
 type Row = { kind: 'log'; entry: LogEntry; count: number } | { kind: 'input'; text: string } | { kind: 'result'; preview: Preview; error: boolean };
 interface TreeNode { node: NodeSummary; children?: number[]; expanded: boolean }
 
-const HEIGHT_KEY = 'dsh-browser-devtools:height';
 const POLL_MS = 500;
 const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'source', 'track', 'wbr']);
 const LEVELS = [['all', 'All levels'], ['error', 'Errors'], ['warn', 'Warnings'], ['info', 'Info'], ['debug', 'Verbose']] as const;
@@ -27,11 +26,10 @@ const ICONS = {
 
 const css = `
 .dsh-bdt-panel{--bdt-bg:#fff;--bdt-bar:#f1f3f4;--bdt-line:#cacdd1;--bdt-soft:#e8eaed;--bdt-text:#202124;--bdt-muted:#5f6368;--bdt-accent:#1a73e8;--bdt-hover:#eef3fd;--bdt-select:#cfe8fc;--bdt-select-blur:#e8eaed;--bdt-tag:#881280;--bdt-attr:#994500;--bdt-value:#1a1aa6;--bdt-comment:#236e25;--bdt-string:#c41a16;--bdt-number:#1a1aa6;--bdt-warn-bg:#fffbe5;--bdt-warn-line:#fff5c2;--bdt-warn:#5c3c00;--bdt-warn-icon:#e37400;--bdt-error-bg:#fff0f0;--bdt-error-line:#ffd6d6;--bdt-error:#d93025;
-  position:relative;display:flex;flex-direction:column;flex:0 0 auto;min-height:120px;color:var(--bdt-text);background:var(--bdt-bg);border-top:1px solid var(--bdt-line);font:12px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;container-type:inline-size;-webkit-app-region:no-drag}
+  position:relative;display:flex;flex-direction:column;flex:1;min-height:0;height:100%;color:var(--bdt-text);background:var(--bdt-bg);border-top:1px solid var(--bdt-line);font:12px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;container-type:inline-size;-webkit-app-region:no-drag}
 body[data-ds-dark-theme] .dsh-bdt-panel{--bdt-bg:#202124;--bdt-bar:#292a2d;--bdt-line:#3c4043;--bdt-soft:#35363a;--bdt-text:#e8eaed;--bdt-muted:#9aa0a6;--bdt-accent:#8ab4f8;--bdt-hover:#2c3440;--bdt-select:#004a77;--bdt-select-blur:#3c4043;--bdt-tag:#5db0d7;--bdt-attr:#9bbbdc;--bdt-value:#f29766;--bdt-comment:#898989;--bdt-string:#f28b54;--bdt-number:#9980ff;--bdt-warn-bg:#332b00;--bdt-warn-line:#665500;--bdt-warn:#fdd663;--bdt-warn-icon:#fdd663;--bdt-error-bg:#290000;--bdt-error-line:#5c0000;--bdt-error:#f28b82}
 .dsh-bdt-panel *{box-sizing:border-box}
 .dsh-bdt-panel button,.dsh-bdt-panel input,.dsh-bdt-panel select,.dsh-bdt-panel textarea{font:inherit;color:inherit}
-.dsh-bdt-resize{position:absolute;top:-4px;left:0;right:0;height:7px;cursor:ns-resize;z-index:1}
 .dsh-bdt-bar{display:flex;align-items:stretch;height:27px;flex:none;background:var(--bdt-bar);border-bottom:1px solid var(--bdt-line);overflow:hidden}
 .dsh-bdt-icon{display:inline-flex;align-items:center;justify-content:center;width:27px;flex:none;padding:0;border:0;background:transparent;color:var(--bdt-muted);cursor:pointer}
 .dsh-bdt-icon svg{width:16px;height:16px}
@@ -143,7 +141,7 @@ const nameOf = (url: string) => {
 };
 
 /**
- * Chrome-style debugger docked under one Sidebar Browser page, in DSH's own document.
+ * Chrome-style debugger for one Sidebar Browser page, rendered in the separate debugger window.
  * The page only runs a data agent, so page CSS and scripts cannot restyle or remove the panel.
  */
 export class DebuggerPanel {
@@ -168,24 +166,16 @@ export class DebuggerPanel {
   private readonly navigated = () => { this.reset(); this.status = 'waiting'; this.renderAll(); };
   private readonly loaded = () => { if (this.opened) void this.attach(); };
 
-  constructor(private readonly doc: Document, private readonly view: PanelView, private readonly closed: () => void, private readonly container?: HTMLElement) {
+  constructor(private readonly doc: Document, private readonly view: PanelView, private readonly closed: () => void, private readonly container: HTMLElement) {
     this.root = h(doc, 'section', { class: 'dsh-bdt-panel', 'data-dsh-browser-devtools': 'panel' });
     this.style = doc.querySelector<HTMLStyleElement>('style[data-dsh-browser-devtools=panel]') ?? h(doc, 'style', { 'data-dsh-browser-devtools': 'panel', text: css });
   }
 
-  /** Dock under the page and connect to it. Throws when the browser layout is not recognized. */
+  /** Show the panel in its container and connect to the page. */
   async open(): Promise<void> {
     if (this.opened) return;
-    // `.content > .viewport > webview` in a flex column next to the toolbar form.
-    const content = this.view.parentElement?.parentElement;
-    if (!this.container && (!content?.parentElement || !Array.from(content.parentElement.children).some(child => child.tagName === 'FORM'))) throw new Error('layout');
     if (!this.style.isConnected) this.doc.head.append(this.style);
-    const stored = Number(this.doc.defaultView?.localStorage?.getItem(HEIGHT_KEY));
-    this.root.style.height = `${Number.isFinite(stored) && stored >= 120 ? stored : 300}px`;
-    if (this.container) {
-      this.root.style.height = '100%'; this.root.style.minHeight = '0'; this.root.style.flex = '1';
-      this.container.append(this.root);
-    } else content!.after(this.root);
+    this.container.append(this.root);
     this.opened = true;
     this.view.addEventListener('did-navigate', this.navigated);
     this.view.addEventListener('dom-ready', this.loaded);
@@ -336,12 +326,9 @@ export class DebuggerPanel {
     const doc = this.doc;
     this.root.replaceChildren();
     this.root.setAttribute('aria-label', ui('Page debugger'));
-    const resize = h(doc, 'div', { class: 'dsh-bdt-resize', role: 'separator', 'aria-orientation': 'horizontal', 'aria-label': ui('Resize debugger') });
-    resize.addEventListener('pointerdown', event => this.resize(event, resize));
     const bar = h(doc, 'div', { class: 'dsh-bdt-bar' });
     const panes = h(doc, 'div', { class: 'dsh-bdt-pane' });
     this.parts = { bar, panes };
-    if (!this.container) this.root.append(resize);
     this.root.append(bar, panes);
     this.renderBar();
     this.renderStatus();
@@ -672,22 +659,5 @@ export class DebuggerPanel {
     const transferred = shown.reduce((sum, entry) => sum + Math.max(0, entry.size), 0);
     const count = shown.length === this.network.length ? ui('{0} requests', { 0: shown.length }) : ui('{0} / {1} requests', { 0: shown.length, 1: this.network.length });
     if (this.parts.networkStatus) this.parts.networkStatus.textContent = `${count}  |  ${ui('{0} transferred', { 0: bytes(transferred) })}`;
-  }
-
-  private resize(event: PointerEvent, handle: HTMLElement): void {
-    event.preventDefault();
-    const startY = event.clientY, startHeight = this.root.getBoundingClientRect().height;
-    const available = (this.root.parentElement?.getBoundingClientRect().height ?? 600) - 160;
-    handle.setPointerCapture?.(event.pointerId);
-    // The page's native view would otherwise swallow the drag once the pointer crosses it.
-    const pointer = this.view.style.pointerEvents;
-    this.view.style.pointerEvents = 'none';
-    const move = (next: PointerEvent) => { this.root.style.height = `${Math.max(120, Math.min(available, startHeight + startY - next.clientY))}px`; };
-    const end = () => {
-      handle.removeEventListener('pointermove', move); handle.removeEventListener('pointerup', end); handle.removeEventListener('pointercancel', end);
-      this.view.style.pointerEvents = pointer;
-      try { this.doc.defaultView?.localStorage?.setItem(HEIGHT_KEY, String(Math.round(this.root.getBoundingClientRect().height))); } catch { /* Storage unavailable. */ }
-    };
-    handle.addEventListener('pointermove', move); handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
   }
 }

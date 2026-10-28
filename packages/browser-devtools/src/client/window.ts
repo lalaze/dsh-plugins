@@ -51,7 +51,7 @@ export function startDebuggerWindow(win: Window): () => void {
         page = next;
         disposePanel();
         const revision = next.revision;
-        // A minimal view adapter lets both windows share exactly the same panel implementation.
+        // A minimal view adapter runs the panel's page commands through the owner DSH renderer.
         const view = doc.createElement('div') as unknown as PanelView;
         view.getURL = () => next.ready ? next.url : '';
         view.executeJavaScript = (code, gesture = false) => {

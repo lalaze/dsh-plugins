@@ -11,7 +11,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.md) | Colored workspace tags, with sidebar grouping by tag or by running status |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
-| `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | Chrome-style Elements, Console and Network debugger, docked or in a separate Chrome/Edge window |
+| `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | Chrome-style Elements, Console and Network debugger in a separate Chrome/Edge window |
 | `dsh-translate` | [packages/translate](packages/translate/README.md) | Translate selected chat text and composer drafts through an OpenAI-compatible API |
 
 ## Languages
@@ -84,7 +84,7 @@ packages/
   workspace-tags/       # Workspace tags and tag/status grouping in the sidebar
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds
-  browser-devtools/     # Docked / separate-window debugger for Sidebar Browser tabs
+  browser-devtools/     # Separate-window debugger for Sidebar Browser tabs
   translate/            # Chat selection and composer translation
 scripts/
   build-client.mjs      # Shared DSH web client bundler

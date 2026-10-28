@@ -30,7 +30,7 @@ export interface Poll { logs: LogEntry[]; network: NetworkEntry[]; picking: bool
 /**
  * Installs the page agent. Serialized and evaluated inside the Electron webview, so every
  * helper lives in this function: the page cannot reach this plugin's module realm.
- * The agent only collects data and answers the docked panel; it draws nothing but the
+ * The agent only collects data and answers the debugger panel; it draws nothing but the
  * element highlight, which lives in a closed shadow root so page styles cannot reach it.
  */
 export function guestAgent(key: string, version: number): boolean {

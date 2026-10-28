@@ -7,9 +7,9 @@ import { category, DebuggerPanel, type PanelView } from '../src/client/panel.js'
 
 const PAGE = `<!doctype html><html><head><style>.card{color:green}</style></head><body><main class="card">Card</main><p>Text</p></body></html>`;
 
-/** DSH's Sidebar Browser body (form + .content > .viewport > webview) around a jsdom "guest" page. */
+/** The debugger window's panel container, driving a jsdom "guest" page through a webview-like view. */
 function setup(t: TestContext) {
-  const host = new JSDOM('<!doctype html><html><head></head><body><div class="root"><form><input></form><div class="content"><div class="viewport"></div></div></div></body></html>', { url: 'https://dsh.test/', pretendToBeVisual: true });
+  const host = new JSDOM('<!doctype html><html><head></head><body><div id="panel"></div></body></html>', { url: 'https://dsh.test/', pretendToBeVisual: true });
   const guest = new JSDOM(PAGE, { url: 'https://page.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   const doc = host.window.document;
   const view = doc.createElement('webview') as unknown as PanelView & { url: string };
@@ -20,9 +20,8 @@ function setup(t: TestContext) {
     const value = await guest.window.eval(code);
     return value === undefined ? value : structuredClone(value);
   };
-  doc.querySelector('.viewport')!.append(view);
   let closed = 0;
-  const panel = new DebuggerPanel(doc, view, () => { closed++; });
+  const panel = new DebuggerPanel(doc, view, () => { closed++; }, doc.getElementById('panel')!);
   // A failed assertion must not leave the poll interval or jsdom timers keeping the run alive.
   t.after(() => { panel.dispose(); host.window.close(); guest.window.close(); });
   const text = () => panel.root.textContent ?? '';
@@ -35,10 +34,10 @@ function setup(t: TestContext) {
   return { host, guest, doc, view, panel, text, until, click, tab, closed: () => closed };
 }
 
-test('docks under the page in DSH\'s document and shows the DOM tree with html and body expanded', async t => {
+test('opens in its container and shows the DOM tree with html and body expanded', async t => {
   const { doc, panel, text, until } = setup(t);
   await panel.open();
-  assert.equal(doc.querySelector('.content')!.nextElementSibling, panel.root, 'the panel sits after the page, in the flex column');
+  assert.equal(panel.root.parentElement, doc.getElementById('panel'));
   assert.ok(doc.querySelector('style[data-dsh-browser-devtools=panel]'));
   await until(() => text().includes('<main class="card">Card</main>'), 'the body\'s children');
   assert.ok(text().includes('<!DOCTYPE html>'));
@@ -92,14 +91,12 @@ test('close removes the panel, detaches the page agent and reports it', async t 
   await until(() => (guest.window as unknown as Record<string, unknown>)[AGENT_KEY] === undefined, 'the agent to detach');
 });
 
-test('a non-web page shows a message; an unknown layout refuses to dock', async t => {
-  const { doc, view, panel, text } = setup(t);
+test('a non-web page shows a message', async t => {
+  const { view, panel, text } = setup(t);
   view.url = 'about:blank';
   await panel.open();
   assert.ok(text().includes('Open a web page to debug it.'));
   panel.close();
-  doc.querySelector('form')!.remove();
-  await assert.rejects(panel.open(), /layout/);
 });
 
 test('requests are sorted into Chrome\'s Network type filters', () => {
