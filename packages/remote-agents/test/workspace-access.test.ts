@@ -90,7 +90,7 @@ test('the mounted workspace API uses live or persisted session placement and rej
     if (changeDuringCheck) live = { header: { cwd: '/different-workspace' } };
     return { hostIds: [hostId], cwd: '/srv/remote' };
   });
-  ctx.provide('connection', { fetch: { register(route: { fetch(request: Request): Promise<Response> }) { handle = route.fetch; } } });
+  ctx.provide('connection', { fetch: { register(route: { path: string; fetch(request: Request): Promise<Response> }) { if (route.path === '/api/remote-agents') handle = route.fetch; } } });
   ctx.provide('sessions', { get: () => live });
   ctx.provide('sessionPersistence', { list: async () => [{ header: { id: 'cold-session', cwd: '/saved/workspace' } }] });
   const mounted = ctx.plugin(plugin, { stateDir: directory }); await mounted.await();

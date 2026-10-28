@@ -38,7 +38,7 @@ function get(name: 'locale'): typeof fixtureLocale;
 function get(name: 'uiWorkspace'): typeof workspace;
 function get(name: 'sessions'): typeof sessions;
 function get(name: 'modelDirectories'): typeof modelDirectories;
-function get(name: string) { return name === 'uiWorkspace' ? workspace : name === 'sessions' ? sessions : name === 'modelDirectories' ? modelDirectories : fixtureLocale; }
+function get(name: string) { return name === 'sidebarRightTabs' ? undefined : name === 'uiWorkspace' ? workspace : name === 'sessions' ? sessions : name === 'modelDirectories' ? modelDirectories : fixtureLocale; }
 const slots = new Map<string, React.FC>();
 const specs = new Map<string, Record<string, unknown>>();
 const context = {

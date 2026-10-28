@@ -15,13 +15,15 @@ import { installWorkspaceModels, type WorkspaceClient } from './workspace-models
 import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './usage.js';
 import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDirectories } from './workspace-flow.js';
 import { symbols } from '@deepseek-ai/cordis';
+import { WorkspacePanel } from './workspace.js';
+import { installWorkspaceSidebar } from './workspace-sidebar.js';
 
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
   inject?(services: string[], factory: (scoped: Client) => void): unknown;
   slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC<any>): unknown };
 }
-function Settings({ openSessions }: { openSessions: () => void }) {
+function Settings({ openSessions, openWorkspace }: { openSessions: () => void; openWorkspace: () => void }) {
   useLocale();
   const [dashboard, setDashboard] = useState<Dashboard | null>(null), [error, setError] = useState(''), [revision, setRevision] = useState(0);
   useEffect(() => {
@@ -32,7 +34,7 @@ function Settings({ openSessions }: { openSessions: () => void }) {
     return () => controller.abort();
   }, [revision]);
   return <section className="dsh-ra ra-settings" aria-label={ui('Remote agents')}><style>{styles}</style>
-    <div className="ra-settings-heading"><h2>{ui('Remote agents')}</h2><button onClick={openSessions}>{ui('Open sessions')}</button></div>
+    <div className="ra-settings-heading"><h2>{ui('Remote agents')}</h2><button data-open-sessions onClick={openSessions}>{ui('Open sessions')}</button><button data-open-workspace onClick={openWorkspace}>{ui('Remote workspace')}</button></div>
     <p className="ra-muted ra-intro">{ui('Select remote CLIs in the DSH model picker and chat in the main conversation.')}</p>
     <p className="ra-muted ra-intro">{ui('Remote models are only available in workspaces belonging to the same machine.')}</p>
     {dashboard ? <HostManager dashboard={dashboard} update={setDashboard} />
@@ -40,7 +42,7 @@ function Settings({ openSessions }: { openSessions: () => void }) {
       : <div className="ra-empty" role="status">{ui('Loading settings…')}</div>}
   </section>;
 }
-function SessionDialog({ close, openChat, sessionId, cwd }: { close: () => void; openChat: (id: string) => void; sessionId?: string; cwd?: string }) {
+function SessionDialog({ close, openChat, sessionId, cwd, workspace }: { close: () => void; openChat: (id: string) => void; sessionId?: string; cwd?: string; workspace?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const focused = document.activeElement, element = dialog.current;
@@ -48,9 +50,9 @@ function SessionDialog({ close, openChat, sessionId, cwd }: { close: () => void;
     element?.showModal();
     return () => { element?.close(); document.body.style.overflow = overflow; if (focused instanceof HTMLElement) focused.focus(); };
   }, []);
-  return createPortal(<dialog className="dsh-ra ra-dialog" ref={dialog} aria-label={ui('Remote sessions')} onCancel={close} onClose={close}>
-    <style>{styles}</style><div className="ra-dialog-bar"><span>{ui('Remote sessions')}</span><button aria-label={ui('Close remote sessions')} onClick={close}><XIcon size={19} /></button></div>
-    <Sessions openChat={openChat} sessionId={sessionId} cwd={cwd} />
+  return createPortal(<dialog className="dsh-ra ra-dialog" ref={dialog} aria-label={ui(workspace ? 'Remote workspace' : 'Remote sessions')} onCancel={close} onClose={close}>
+    <style>{styles}</style><div className="ra-dialog-bar"><span>{ui(workspace ? 'Remote workspace' : 'Remote sessions')}</span><button aria-label={ui('Close remote sessions')} onClick={close}><XIcon size={19} /></button></div>
+    {workspace ? <WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} /> : <Sessions openChat={openChat} sessionId={sessionId} cwd={cwd} />}
   </dialog>, document.body);
 }
 export const name = 'dsh-remote-agents-client';
@@ -59,7 +61,7 @@ export const inject = ['slots', 'locale'];
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
   const Surface = () => {
-    useLocale(); const [visible, setVisible] = useState(false);
+    useLocale(); const [visible, setVisible] = useState(false), [workspace, setWorkspace] = useState(false);
     const openChat = (id: string) => {
       const navigation = (ctx.get as ((name: string) => unknown) | undefined)?.('uiWorkspace') as { openSession?: (id: string) => void } | undefined;
       if (!navigation?.openSession) throw new Error('Open this conversation from the DSH sidebar.');
@@ -71,7 +73,7 @@ export function apply(ctx: Client): void {
       return JSON.stringify(entry ? [entry[0], entry[1].cwd] : []);
     });
     const [sessionId, cwd] = JSON.parse(active) as [string?, string?];
-    return <><Settings openSessions={() => setVisible(true)} />{visible && <SessionDialog close={() => setVisible(false)} openChat={openChat} sessionId={sessionId} cwd={cwd} />}</>;
+    return <><Settings openSessions={() => { setWorkspace(false); setVisible(true); }} openWorkspace={() => { setWorkspace(true); setVisible(true); }} />{visible && <SessionDialog close={() => setVisible(false)} openChat={openChat} sessionId={sessionId} cwd={cwd} workspace={workspace} />}</>;
   };
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, Surface));
   ctx.effect(installModelGroups);
@@ -79,6 +81,7 @@ export function apply(ctx: Client): void {
   ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({ name: 'conversation.input.model.label', id: 'remote-agents-model-label', priority: 50 }, ModelLabel));
   ctx.effect(installCustomModelLabels);
   ctx.effect(installUsageStyles);
+  installWorkspaceSidebar(ctx);
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     // Read through the service itself: this plugin's proxy would resolve dependencies from our context.
     const service = (scoped as unknown as { modelDirectories: ModelDirectories }).modelDirectories;

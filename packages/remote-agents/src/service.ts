@@ -3,6 +3,7 @@ import { connectionInput, SshBackend, type Backend, type BackendFactory } from '
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from './domain.js';
+import type { WorkspaceFiles } from './workspace-files.js';
 import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type HostConfig, type PermissionAnswer, type Task, type UsageReport } from './domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
@@ -33,6 +34,14 @@ export class RemoteAgentsService {
   private readonly factory: BackendFactory;
   constructor(readonly store: Store, factory?: BackendFactory, private readonly readSshConfig = readSshConfigHosts) { this.factory = factory ?? (host => new SshBackend(host, store)); }
   async sshConfig() { return this.readSshConfig(); }
+  /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
+  async withWorkspace<T>(hostId: string, verify: () => Promise<void>, action: (files: WorkspaceFiles) => Promise<T>): Promise<T> {
+    return this.use(hostId, async backend => {
+      await verify();
+      if (!backend.workspaceFiles) throw new RemoteError('Remote workspace files are unavailable on this host', 501);
+      return action(backend.workspaceFiles);
+    });
+  }
   hosts(): Host[] {
     return this.store.hosts().map(({ password, catalog, ...host }) => {
       const enabled = enabledProvidersOf(host), providers = catalog?.providers.filter(p => enabled.includes(p.id)) ?? [];

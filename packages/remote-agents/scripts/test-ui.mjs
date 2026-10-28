@@ -25,6 +25,58 @@ const chooseSsh = connection => {
   wait('!document.querySelector(".ra-ssh-menu:popover-open")');
 };
 const image = name => { if (screenshots) browser('screenshot', ...(name.startsWith('sessions-') || name.startsWith('model-groups-') ? [] : ['--full']), `${screenshots}/${name}.png`); };
+const workspaceChecks = () => {
+  evaluate('window.fixture.setLocale("en")');
+  browser('click', '[data-open-workspace]'); wait('document.querySelector(".ra-workspace-entries")?.textContent.includes("hello.txt")');
+  expect('document.querySelector(".ra-workspace-panel header").textContent.includes("build-box:/srv/main-chat")');
+  browser('click', '.ra-workspace-entries button:has-text("hello.txt")');
+  wait('document.querySelector("[aria-label=\\"Remote file contents\\"]")?.value.includes("Hello from")');
+  browser('fill', '[aria-label="Remote file contents"]', 'edited from the workspace UI');
+  browser('click', 'button:text-is("Save to remote")'); wait('document.querySelector(".ra-workspace-panel button.ra-primary")?.disabled && !document.querySelector(".ra-workspace-panel>p[role=status]")');
+  fixture({ workspaceContent: 'external change' });
+  browser('fill', '[aria-label="Remote file contents"]', 'stale edit'); browser('click', 'button:text-is("Save to remote")');
+  wait('document.querySelector(".ra-workspace-panel [role=alert]")?.textContent.includes("file changed")');
+  browser('click', 'button:text-is("Reload file")'); wait('document.querySelector("[aria-label=\\"Remote file contents\\"]")?.value === "external change"');
+  browser('fill', '[aria-label="New item name"]', 'created.txt'); browser('click', 'button:text-is("Create")'); wait('document.querySelector(".ra-workspace-entries")?.textContent.includes("created.txt")');
+  browser('click', '.ra-workspace-entries button:has-text("created.txt")'); wait('document.querySelector(".ra-workspace-files main .ra-mono")?.textContent === "created.txt" && document.querySelector(".ra-workspace-editor")?.value === ""');
+  browser('fill', '[aria-label="Rename destination"]', 'renamed.txt'); browser('click', '.ra-workspace-rename button'); wait('document.querySelector(".ra-workspace-files main .ra-mono")?.textContent === "renamed.txt"');
+  browser('click', 'button:text-is("Delete file")'); browser('click', 'button:text-is("Delete")'); wait('!document.querySelector(".ra-workspace-entries")?.textContent.includes("renamed.txt")');
+  evaluate('(()=>{const input=document.querySelector(".ra-workspace-files input[type=file]"), files=new DataTransfer();files.items.add(new File([new Uint8Array([0,1,255])],"upload.bin"));input.files=files.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()');
+  wait('document.querySelector(".ra-workspace-entries")?.textContent.includes("upload.bin")');
+  // A binary file cannot be edited here, but it can still be renamed and deleted.
+  browser('click', '.ra-workspace-entries button:has-text("upload.bin")');
+  wait('document.querySelector(".ra-workspace-files main .ra-muted")?.textContent.includes("binary") && !document.querySelector(".ra-workspace-editor")');
+  browser('fill', '[aria-label="Rename destination"]', 'moved.bin'); browser('click', '.ra-workspace-rename button');
+  wait('document.querySelector(".ra-workspace-files main .ra-mono")?.textContent === "moved.bin" && document.querySelector(".ra-workspace-entries")?.textContent.includes("moved.bin")');
+  browser('click', 'button:text-is("Delete file")'); browser('click', 'button:text-is("Delete")'); wait('!document.querySelector(".ra-workspace-entries")?.textContent.includes("moved.bin")');
+  browser('fill', '[aria-label="Search remote files"]', 'external'); browser('click', '.ra-workspace-search button'); wait('document.querySelector(".ra-workspace-entries")?.textContent.includes("hello.txt:1")');
+  browser('fill', '[aria-label="Search remote files"]', '');
+  browser('set', 'viewport', '390', '844'); expect('document.querySelector("dialog").scrollWidth <= innerWidth'); image('workspace-files-mobile'); browser('set', 'viewport', '1440', '1000');
+  browser('click', '.ra-workspace-tabs button:text-is("Sync")'); browser('click', 'button:text-is("Preview sync")'); wait('document.querySelector(".ra-workspace-section [role=status]")?.textContent.includes("Sync preview")');
+  browser('click', 'button:text-is("Apply preview")'); wait('document.querySelector(".ra-workspace-section [role=status]")?.textContent.includes("Sync completed")');
+  // A preview without changes is applied too, recording the baseline for identical files.
+  browser('click', 'button:text-is("Preview sync")'); wait('document.querySelector(".ra-workspace-section [role=status]")?.textContent.includes("Sync preview: 0 changes")');
+  browser('click', 'button:text-is("Apply preview")'); wait('document.querySelector(".ra-workspace-section [role=status]")?.textContent.includes("Sync completed: 0 changes")');
+  browser('click', '.ra-workspace-tabs button:text-is("Commands")'); browser('fill', '[aria-label="Remote command"]', 'printf workspace-ui'); browser('click', 'button:text-is("Run command")'); wait('document.querySelector(".ra-workspace-output")?.textContent.includes("workspace-ui")');
+  browser('click', '.ra-workspace-tabs button:text-is("Tunnels")'); browser('click', 'button:text-is("Add tunnel")'); wait('document.querySelector(".ra-tunnel-list li")'); browser('click', '.ra-tunnel-list button:text-is("Start")'); wait('document.querySelector(".ra-tunnel-list a")?.href === "http://100.96.195.115:38080/"');
+  browser('click', '.ra-tunnel-list button:text-is("Stop")'); wait('document.querySelector(".ra-tunnel-list button")?.textContent === "Start"'); browser('click', '.ra-tunnel-list button:text-is("Remove")'); wait('!document.querySelector(".ra-tunnel-list li")');
+  browser('click', '.ra-workspace-tabs button:text-is("Remote DSH")'); browser('fill', '[aria-label="Remote login URL"]', 'http://127.0.0.1:3080/?token=test-only'); browser('click', 'button:text-is("Connect remote DSH")'); wait('document.querySelector(".ra-workspace-section>a")?.href === "http://100.96.195.115:38088/?token=test-only"');
+  // Connecting again reuses the saved tunnel, whether it is still running or was stopped.
+  const reconnect = token => {
+    browser('fill', '[aria-label="Remote login URL"]', `http://127.0.0.1:3080/?token=${token}`); wait('!document.querySelector(".ra-workspace-section>a")');
+    browser('click', 'button:text-is("Connect remote DSH")'); wait(`document.querySelector(".ra-workspace-section>a")?.href === "http://100.96.195.115:38088/?token=${token}"`);
+    expect('!document.querySelector(".ra-workspace-panel [role=alert]")');
+  };
+  reconnect('running');
+  browser('click', '.ra-workspace-tabs button:text-is("Tunnels")'); wait('document.querySelector(".ra-tunnel-list button")?.textContent === "Stop"');
+  browser('click', '.ra-tunnel-list button:text-is("Stop")'); wait('document.querySelector(".ra-tunnel-list button")?.textContent === "Start"');
+  browser('click', '.ra-workspace-tabs button:text-is("Remote DSH")'); reconnect('stopped');
+  browser('click', '.ra-workspace-tabs button:text-is("Tunnels")'); wait('document.querySelector(".ra-tunnel-list button")?.textContent === "Stop"');
+  expect('document.querySelectorAll(".ra-tunnel-list li").length === 1');
+  browser('click', '.ra-tunnel-list button:text-is("Remove")'); wait('!document.querySelector(".ra-tunnel-list li")');
+  browser('press', 'Escape'); wait('!document.querySelector("dialog[open]")'); evaluate('window.fixture.setLocale("zh")');
+  console.log('PASS: integrated workspace files, stale-edit conflicts, create/rename/delete, upload, search, sync preview/apply, commands, tunnels, remote DSH attach and mobile layout');
+};
 try {
   const base = await new Promise((resolve, reject) => {
     let output = '';
@@ -35,6 +87,10 @@ try {
   });
   browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', base);
   browser('set', 'viewport', '1440', '1000');
+
+  if (process.argv.includes('--workspace-only')) {
+    wait('window.fixture'); fixture({ seedSessions: true }); workspaceChecks();
+  } else {
 
   if (!process.argv.includes('--custom-labels-only')) {
   if (!process.argv.includes('--models-only')) {
@@ -204,7 +260,8 @@ try {
   console.log('PASS: settings load failure and retry; session entry remains in settings without a sidebar or composer launcher');
 
   fixture({ seedSessions: true });
-  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
+  workspaceChecks();
+  browser('click', '[data-open-sessions]'); wait('document.querySelector("dialog[open] .ra-session-item")');
   expect('document.querySelectorAll(".ra-session-item").length === 1');
   image('sessions-overview');
   browser('fill', '[aria-label="搜索会话"]', 'no-such-session');
@@ -219,9 +276,9 @@ try {
   expect('document.querySelector("dialog").scrollWidth <= innerWidth');
   image('sessions-mobile-approval');
   browser('press', 'Escape'); wait('!document.querySelector("dialog[open]")');
-  expect('document.activeElement === document.querySelector(".ra-settings-heading button")');
+  expect('document.activeElement === document.querySelector("[data-open-sessions]")');
   if (state().answers.length || state().stops) throw new Error('Closing the panel resolved or stopped a pending approval');
-  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-session-item")');
+  browser('click', '[data-open-sessions]'); wait('document.querySelector("dialog[open] .ra-session-item")');
   browser('click', '.ra-session-item:has-text("审查构建脚本")'); wait('document.querySelector(".ra-permission")');
   browser('click', 'button:text-is("此项目始终允许匹配的请求")');
   wait('!document.querySelector(".ra-permission") && document.querySelector(".ra-output")?.textContent.includes("审批已通过")');
@@ -265,7 +322,7 @@ try {
   expect('!document.querySelector("[aria-label=给智能体发消息]")');
   browser('click', 'button:text-is("在主对话打开")'); wait('!document.querySelector("dialog[open]")');
   expect('window.fixture.navigation.at(-1) === "fixture-main-chat"');
-  browser('click', '.ra-settings-heading button'); wait('document.querySelector("dialog[open] .ra-list-heading")');
+  browser('click', '[data-open-sessions]'); wait('document.querySelector("dialog[open] .ra-list-heading")');
   browser('click', '.ra-list-heading button'); wait('document.querySelector("[aria-label=会话机器] option")');
   expect('document.querySelector(".ra-new-session .ra-mono").textContent === "/srv/main-chat" && !document.querySelector(".ra-new-session").textContent.includes("/fixture/remote-workspaces")');
   expect('document.querySelectorAll("[aria-label=会话机器] option").length === 1 && document.querySelector("[aria-label=会话机器] option").textContent === "build-box"');
@@ -497,6 +554,8 @@ try {
   evaluate('window.customModel.unmount()');
   const customErrors = browser('errors'); if (customErrors.errors?.length) throw new Error(JSON.stringify(customErrors.errors));
   console.log('PASS: captured custom composer omits known remote hosts, preserves text nodes, effort, tooltip and clicks, follows React updates and restores on unload');
+
+  }
 
 } finally {
   try { browser('close'); } catch {}

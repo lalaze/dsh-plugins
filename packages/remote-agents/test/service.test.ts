@@ -253,10 +253,16 @@ test('HTTP boundary rejects malformed input, form submissions, oversized bodies 
   assert.equal((await post('{')).status, 400);
   assert.equal((await post('{}', { 'content-type': 'application/x-www-form-urlencoded' })).status, 403);
   assert.equal((await post(JSON.stringify({ action: 'unknown' }))).status, 400);
-  assert.equal((await post(' '.repeat(256_001))).status, 413);
   const created = await (await post(JSON.stringify({ action: 'create', agent: request() }))).json();
   assert.equal(created.status, 'idle');
   assert.equal((await post(JSON.stringify({ action: 'agent', agentId: created.id }))).status, 200);
+  // Bodies may be up to 2,000,000 bytes, counted in bytes rather than characters.
+  const sized = (bytes: number) => { const json = JSON.stringify({ action: 'agent', agentId: created.id }); return json + ' '.repeat(bytes - json.length); };
+  assert.equal((await post(sized(2_000_000))).status, 200);
+  assert.equal((await post(sized(2_000_001))).status, 413);
+  assert.equal((await post(JSON.stringify({ action: 'agent', agentId: created.id, note: 'é'.repeat(1_000_000) }))).status, 413);
+  // A declared length over the limit is refused before the body is read.
+  assert.equal((await post('{}', { 'content-type': 'application/json', 'X-DSH-Remote-Agents': '1', 'content-length': '2000001' })).status, 413);
   assert.equal((await post(JSON.stringify({ action: 'agent', agentId: randomUUID() }))).status, 404);
   const response = await handle(new Request('http://dsh.test/api/remote-agents'));
   assert.equal(response.headers.get('cache-control'), 'no-store');

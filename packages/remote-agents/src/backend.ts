@@ -12,10 +12,12 @@ import { RelayClient, RelayLink } from './relay.js';
 import { readAccountUsage } from './usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { WorkspaceFiles } from './workspace-files.js';
 export { connectionInput } from './ssh.js';
 
 /** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
 export interface Backend {
+  workspaceFiles?: WorkspaceFiles;
   connect(): Promise<string>;
   close(): Promise<void>;
   homeDirectory(): Promise<string>;
@@ -73,6 +75,7 @@ export function codexServiceTiers(model: Record<string, unknown>): Choice[] | un
   return tiers.length ? tiers : undefined;
 }
 export class SshBackend implements Backend {
+  readonly workspaceFiles: WorkspaceFiles;
   private readonly transport: SshTransport;
   private closed = false;
   private readonly probes = new Set<JsonlPeer>();
@@ -91,6 +94,7 @@ export class SshBackend implements Backend {
   private cleaning?: Promise<void>;
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport) {
     this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection));
+    this.workspaceFiles = new WorkspaceFiles(this.transport);
   }
   private assertOpen(): void { if (this.closed) throw new Error('SSH agent backend has stopped'); }
   async homeDirectory(): Promise<string> {

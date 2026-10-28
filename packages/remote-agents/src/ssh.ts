@@ -67,6 +67,8 @@ export interface SshTransport {
   upload?(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
   /** Commands run in a POSIX shell where a detached relay can outlive the connection. */
   readonly relays?: boolean;
+  /** Bounded binary transfer through the same verified SSH connection settings. */
+  transfer?(script: string, options: { input?: AsyncIterable<Uint8Array>; maxBytes: number; signal?: AbortSignal }): Promise<Buffer>;
 }
 export class OpenSshTransport implements SshTransport {
   readonly relays: boolean = true;
@@ -103,6 +105,24 @@ esac
 exec /bin/sh -c ${quote(REMOTE_PATH + script)}
 `;
     return this.spawnRemote(command);
+  }
+  async transfer(script: string, options: { input?: AsyncIterable<Uint8Array>; maxBytes: number; signal?: AbortSignal }): Promise<Buffer> {
+    options.signal?.throwIfAborted();
+    const child = this.spawn(script), chunks: Buffer[] = []; let size = 0, stderr = '', failure: Error | undefined;
+    const stop = () => child.kill('SIGTERM');
+    const timer = setTimeout(() => { failure = new Error('SSH transfer timed out'); stop(); }, 300_000);
+    options.signal?.addEventListener('abort', stop, { once: true });
+    child.stdout.on('data', (data: Buffer) => { size += data.length; if (size > options.maxBytes) { failure = new Error('SSH transfer exceeds its size limit'); stop(); } else chunks.push(data); });
+    child.stderr.on('data', data => { stderr = (stderr + data).slice(-4000); });
+    const completed = new Promise<void>((accept, reject) => {
+      child.on('error', reject);
+      child.on('close', code => failure ? reject(failure) : code === 0 ? accept() : reject(new Error(stderr.trim() || `SSH transfer failed (${code})`)));
+    });
+    try {
+      await Promise.all([completed, pipeline(Readable.from(options.input ?? []), child.stdin, { signal: options.signal })]);
+      options.signal?.throwIfAborted(); return Buffer.concat(chunks);
+    } catch (error) { stop(); await completed.catch(() => {}); options.signal?.throwIfAborted(); throw error; }
+    finally { clearTimeout(timer); options.signal?.removeEventListener('abort', stop); }
   }
   /** Runs a POSIX shell command on the SSH host. */
   protected spawnRemote(command: string): ChildProcessWithoutNullStreams {

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { enabledProvidersOf, PROVIDER_LABELS, type Dashboard, type Host } from '../domain.js';
+import type { LegacyMachine } from '../workspace-domain.js';
 import { api } from './api.js';
 import { localizeError, ui } from './i18n.js';
 import { SshHostPicker } from './ssh-host-picker.js';
@@ -24,6 +25,7 @@ export function HostManager({ dashboard, update }: { dashboard: Dashboard; updat
   const [selection, setSelection] = useState<string[]>([]);
   const [busy, setBusy] = useState(''), [error, setError] = useState('');
   const [removing, setRemoving] = useState('');
+  const [legacy, setLegacy] = useState<LegacyMachine[]>();
   const run = async (key: string, action: () => Promise<void>) => {
     setBusy(key); setError('');
     try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(''); }
@@ -35,6 +37,10 @@ export function HostManager({ dashboard, update }: { dashboard: Dashboard; updat
   return <div className="ra-page ra-hosts">
     <h2>{ui('Hosts')}</h2>
     <p className="ra-muted">{ui('Choose which CLIs to enable on each machine. No project registration is needed.')}</p>
+    <details className="ra-legacy-import"><summary onClick={() => { if (!legacy) void run('legacy', async () => setLegacy(await api<LegacyMachine[]>('legacyMachines'))); }}>{ui('Import machines from dsh-remote')}</summary>
+      {legacy && !legacy.length && <p>{ui('No saved dsh-remote machines found.')}</p>}
+      {legacy?.map(m => <div className="ra-legacy-row" key={m.id}><strong>{m.label}</strong><span>{m.connection}</span>{m.reason && <p>{localizeError(m.reason)}</p>}<button disabled={!!busy || !m.available || m.imported} onClick={() => void run(m.id, async () => { update(await api<Dashboard>('importLegacyMachine', { id: m.id })); setLegacy(await api<LegacyMachine[]>('legacyMachines')); window.dispatchEvent(new Event('remote-agents-updated')); })}>{ui(m.imported ? 'Imported' : 'Import machine')}</button></div>)}
+    </details>
     {error && <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}</div>}
     {hosts.length > 0 && <ul className="ra-host-list" aria-label={ui('Saved hosts')}>{hosts.map(host => {
       const agents = dashboard.agents.filter(a => a.hostId === host.id).length;
@@ -46,6 +52,7 @@ export function HostManager({ dashboard, update }: { dashboard: Dashboard; updat
           {host.providerErrors?.map(p => <span key={p.label} className="ra-host-error">{p.label}: {localizeError(p.error)}</span>)}
         </div>
         <span className="ra-badge" data-status={host.status}>{ui(host.status)}</span>
+        <button type="button" disabled={!!busy} onClick={() => void run(`connect:${host.id}`, async () => update(await api<Dashboard>('connect', { hostId: host.id })))}>{ui('Test connection')}</button>
         <button type="button" disabled={!!busy || !enabledProvidersOf(host).length} onClick={() => void run(`discover:${host.id}`, async () => update(await api<Dashboard>('discoverHost', { hostId: host.id })))}>{ui(busy === `discover:${host.id}` ? 'Detecting models…' : 'Refresh models')}</button>
         <button type="button" className="ra-danger" disabled={!!busy}
           onClick={() => agents ? setRemoving(host.id) : remove(host.id)}>{ui('Remove')}</button></div>

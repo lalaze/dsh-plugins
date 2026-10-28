@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
@@ -14,8 +15,23 @@ import { ChatProjects } from '../src/chat-projects.ts';
 import { RemoteWorkspaces } from '../src/remote-workspaces.ts';
 import { WorkspaceAccess } from '../src/workspace-access.ts';
 import { randomUUID } from 'node:crypto';
+import { OpenSshTransport } from '../src/ssh.ts';
+import { WorkspaceFiles } from '../src/workspace-files.ts';
+import { WorkspaceService } from '../src/workspace-service.ts';
+import { WorkspaceTunnels } from '../src/workspace-tunnels.ts';
+import { WorkspaceMigration } from '../src/workspace-migration.ts';
+import { workspaceTransferHandler } from '../src/workspace-http.ts';
 
 const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-preview-'));
+const workspaceRoot = join(directory, 'remote-project'), mirrorRoot = join(directory, 'local-mirror');
+await mkdir(workspaceRoot); await mkdir(mirrorRoot);
+await writeFile(join(workspaceRoot, 'hello.txt'), 'Hello from the remote workspace.\n');
+await writeFile(join(mirrorRoot, '.dsh-remote-meta.json'), '{}');
+class PreviewTransport extends OpenSshTransport {
+  // The workspace runner keeps file locks under the remote home; the preview's is its temporary directory.
+  spawnRemote(command) { return spawn('/bin/sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, SHELL: '/bin/sh', HOME: directory } }); }
+}
+const workspaceFiles = new WorkspaceFiles(new PreviewTransport('ssh://preview.invalid'));
 const store = new Store(join(directory, 'state.json')); await store.open();
 const remote = new FakeRemote();
 remote.store = store;
@@ -37,7 +53,11 @@ remote.onSend = (agent, text) => {
 };
 const service = new RemoteAgentsService(store, host => {
   const backend = remote.backend(host);
-  return { ...backend, connect: async () => { if (connectionError) throw new Error(connectionError); return backend.connect(); }, respond: async (id, requestId, answer) => {
+  return { ...backend, workspaceFiles: {
+    operate: (_cwd, ...args) => workspaceFiles.operate(workspaceRoot, ...args),
+    download: (_cwd, ...args) => workspaceFiles.download(workspaceRoot, ...args),
+    upload: (_cwd, ...args) => workspaceFiles.upload(workspaceRoot, ...args),
+  }, connect: async () => { if (connectionError) throw new Error(connectionError); return backend.connect(); }, respond: async (id, requestId, answer) => {
     await backend.respond(id, requestId, answer);
     const agent = remote.agents.get(id);
     if (!agent.pendingPermissions.length) { remote.append(id, { type: 'assistant_message', text: answer.behavior === 'allow' ? '审批已通过，检查完成。' : '已拒绝该操作。' }); agent.status = 'idle'; }
@@ -48,11 +68,16 @@ const endpoint = async connection => ({ host: new URL(connection).hostname, user
 const access = new WorkspaceAccess(() => store.hosts(), { home: directory, omc: join(directory, 'omc'), endpoint });
 const workspaces = new RemoteWorkspaces(service, access, { home: directory, endpoint });
 let createDelay = 0;
-const handler = createHandler(service, undefined, async sessionId => sessionId === 'current'
+const placement = async sessionId => sessionId === 'current'
   ? { hostIds: store.hosts().filter(h => h.connection === 'ssh://build-box').map(h => h.id), cwd: '/srv/main-chat' }
-  : { hostIds: workspaceHostIds }, {
+  : { hostIds: workspaceHostIds };
+const workspaceService = new WorkspaceService(service, placement, async () => mirrorRoot);
+const tunnels = new WorkspaceTunnels(join(directory, 'tunnels.json'), () => store.hosts(), () => spawn(process.execPath, ['-e', 'process.stderr.write("debug1: Entering interactive session.\\n");setInterval(()=>{},1000)'], { stdio: ['pipe', 'pipe', 'pipe'] })); await tunnels.open();
+const migration = new WorkspaceMigration(service, directory, endpoint);
+const handler = createHandler(service, undefined, placement, {
   create: async (...args) => { if (createDelay) await new Promise(resolve => setTimeout(resolve, createDelay)); return workspaces.create(...args); },
-});
+}, { files: workspaceService, tunnels, migration });
+const transfer = workspaceTransferHandler(workspaceService);
 const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined });
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = await build({ absWorkingDir: root, entryPoints: ['test/ui/app.fixture.tsx'], bundle: true, write: false, outfile: 'preview.js', loader: { '.woff2': 'dataurl', '.woff': 'dataurl', '.ttf': 'dataurl' }, platform: 'browser', format: 'esm', target: 'es2022' });
@@ -73,6 +98,7 @@ const server = createServer(async (request, response) => {
         if (input.createDelay !== undefined) createDelay = Number(input.createDelay) || 0;
         if (input.connectionError !== undefined) connectionError = input.connectionError || undefined;
         if (input.sshConfig) { sshConfig.hosts = input.sshConfig.hosts; sshConfig.warnings = input.sshConfig.warnings ?? []; }
+        if (input.workspaceContent !== undefined) await writeFile(join(workspaceRoot, 'hello.txt'), String(input.workspaceContent));
         if (input.loseSend) remote.loseSend = true;
         if (input.seedUsage) {
           let [project] = new ChatProjects(service).hosts();
@@ -124,6 +150,10 @@ const server = createServer(async (request, response) => {
       }
       response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ creates: remote.creates, stops: remote.stops, sends: remote.sends, interrupts: remote.interrupts, detaches: remote.detaches, forgets: remote.forgets, answers: remote.answers, modelGroups: (await Promise.all(CHAT_PROVIDERS.map(async id => ({ ...adapter.providerInfo(id), models: await adapter.listModels(id) })))).filter(group => group.models.length), state: await service.snapshot(), tasks: store.snapshot().tasks })); return;
     }
+    if (request.url.startsWith('/api/remote-agents/files?')) {
+      const result = await transfer(new Request(`http://preview.test${request.url}`, { method: request.method, headers: request.headers, ...(request.method === 'POST' ? { body } : {}) }));
+      response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(Buffer.from(await result.arrayBuffer())); return;
+    }
     if (request.url === '/api/remote-agents') {
       if (failReads && request.method === 'GET') { response.writeHead(503, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: '模拟连接中断' })); return; }
       const result = await handler(new Request(`http://preview.test${request.url}`, { method: request.method, headers: request.headers, ...(request.method === 'POST' ? { body } : {}) }));
@@ -139,7 +169,7 @@ async function stop() {
   if (stopping) return; stopping = true;
   for (const timer of timers) clearTimeout(timer);
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-  await service.close(); await rm(directory, { recursive: true, force: true });
+  await tunnels.close(); await service.close(); await rm(directory, { recursive: true, force: true });
 }
 process.on('SIGTERM', () => void stop().then(() => process.exit(0)));
 process.on('SIGINT', () => void stop().then(() => process.exit(0)));

@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
+import { spawn, execFile } from 'node:child_process';
+import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+import { transform } from 'esbuild';
+import { fixture } from './fakes.js';
+import { WorkspaceMigration } from '../src/workspace-migration.js';
+import { WorkspaceTunnels, tunnelArguments } from '../src/workspace-tunnels.js';
+import { installWorkspaceTerminal } from '../src/workspace-terminal.js';
+import { ensureAnchor } from '../src/remote-workspaces.js';
+
+test('legacy import preserves aliases, skips duplicate endpoints and never returns or copies secrets', async t => {
+  const f = await fixture(t), dir = join(f.directory, 'remote-workspaces'); await mkdir(dir);
+  const entries = [
+    { id: 'alias-machine', name: 'Work box', host: 'work-box', useSshConfig: true },
+    { id: 'duplicate', host: 'build-box', username: 'builder', port: 22 },
+    { id: 'password-machine', name: 'Secret', host: 'password-box', username: 'builder', password: 'must-never-leak' },
+    { id: 'unsafe', host: '-oProxyCommand=bad' },
+  ];
+  const file = join(dir, 'machines.json'), original = JSON.stringify({ list: entries, currentId: 'alias-machine' }); await writeFile(file, original);
+  const migration = new WorkspaceMigration(f.service, f.directory, async connection => ({ host: connection.includes('work-box') ? 'other-box' : new URL(connection.startsWith('ssh:') ? connection : `ssh://${connection}`).hostname, username: 'builder', port: 22 }));
+  const list = await migration.list();
+  assert.equal(list[0].connection, 'ssh://work-box'); assert.equal(list[0].available, true);
+  assert.equal(list[1].imported, true); assert.equal(list[2].available, false); assert.equal(list[3].available, false);
+  assert.equal(JSON.stringify(list).includes('must-never-leak'), false);
+  await assert.rejects(migration.import('password-machine'), /authentication/);
+  await migration.import('alias-machine'); await migration.import('alias-machine');
+  const hosts = f.store.hosts(); assert.equal(hosts.length, 2); assert.equal(hosts[0].id, f.hostId);
+  assert.equal(hosts[1].connection, 'ssh://work-box'); assert.deepEqual(hosts[1].enabledProviders, []);
+  assert.equal(await readFile(file, 'utf8'), original, 'source registry and current selection are untouched');
+});
+
+test('tunnel startup, stop, saved definitions and host removal are independent of remote agents', async t => {
+  const f = await fixture(t), path = join(f.directory, 'tunnels.json'); let args: string[] = [];
+  const manager = new WorkspaceTunnels(path, () => f.store.hosts(), values => {
+    args = values;
+    return spawn(process.execPath, ['-e', 'process.stderr.write("debug1: Entering interactive session.\\n");setInterval(()=>{},1000)'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  });
+  t.after(() => manager.close()); await manager.open();
+  const config = { id: 'tunnel-test-1', hostId: f.hostId, direction: 'local', listenPort: 38081, targetPort: 3000, targetHost: '127.0.0.1' };
+  await manager.add(config); const running = await manager.start(config.id, f.hostId);
+  assert.equal(running.status, 'running'); assert.ok(args.includes('0.0.0.0:38081:127.0.0.1:3000')); assert.ok(args.includes('StrictHostKeyChecking=yes'));
+  await assert.rejects(manager.add({ ...config, id: 'tunnel-other' }), /already saved/);
+  assert.throws(() => manager.stop(config.id, 'other-host'), /not found/);
+  manager.stop(config.id, f.hostId); assert.equal(manager.list(f.hostId)[0].status, 'stopped');
+  const restarted = new WorkspaceTunnels(path, () => f.store.hosts()); await restarted.open(); t.after(() => restarted.close());
+  assert.equal(restarted.list(f.hostId)[0].status, 'stopped');
+  await manager.start(config.id, f.hostId); await manager.removeHost(f.hostId); assert.deepEqual(manager.list(f.hostId), []);
+  assert.equal(f.remote.stops, 0); assert.equal(f.remote.closes, 0);
+  const reverse = tunnelArguments('ssh://jump-alias', { ...running, direction: 'reverse' });
+  assert.ok(reverse.includes('-R')); assert.ok(reverse.includes('127.0.0.1:38081:127.0.0.1:3000')); assert.equal(reverse.at(-1), 'jump-alias');
+});
+
+test('native terminal launcher resolves the workspace and refuses an invalid binding without running SSH', async t => {
+  if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }
+  const f = await fixture(t), modules = join(f.directory, 'modules'), bin = join(f.directory, 'bin'), capture = join(f.directory, 'ssh-args.json');
+  await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
+  for (const name of ['domain', 'store', 'ssh', 'workspace-access']) {
+    const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
+    await writeFile(join(modules, `${name}.js`), (await transform(source, { loader: 'ts', format: 'esm', target: 'node22' })).code);
+  }
+  await writeFile(join(bin, 'ssh'), `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv.includes('-G'))process.stdout.write('hostname build-box\\nuser builder\\nport 22\\n');else fs.writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify(process.argv.slice(2)));\n`); await chmod(join(bin, 'ssh'), 0o700);
+  const anchor = await ensureAnchor(f.directory, { host: 'build-box', username: 'builder', port: 22 }, '/srv/app');
+  const controller = { config: { shellCandidates: ['/bin/sh'] } };
+  const cleanup = await installWorkspaceTerminal(controller, join(f.directory, 'terminal'), f.path, pathToFileURL(modules + '/')); t.after(cleanup);
+  const launcher = controller.config.shellCandidates[1];
+  const env = { ...process.env, DSH_HOME: f.directory, DSH_TERMINAL_CAPTURE: capture, PATH: `${bin}:${process.env.PATH}` };
+  await promisify(execFile)(launcher, [], { cwd: anchor, env });
+  const args: string[] = JSON.parse(await readFile(capture, 'utf8'));
+  assert.ok(args.includes('-tt')); assert.ok(args.includes('builder@build-box')); assert.equal(args.at(-1), 'cd \'/srv/app\' && exec "${SHELL:-/bin/sh}" -l');
+  await writeFile(join(anchor, '.dsh-remote-meta.json'), '{}');
+  await assert.rejects(promisify(execFile)(launcher, [], { cwd: anchor, env }), /valid remote workspace binding/);
+  cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);
+});

@@ -3,23 +3,29 @@ import type { RemoteAgentsService } from './service.js';
 import { ChatProjects } from './chat-projects.js';
 import type { WorkspacePlacement } from './workspace-access.js';
 import type { RemoteWorkspaces } from './remote-workspaces.js';
+import { workspaceAction, type WorkspaceFeatures } from './workspace-http.js';
 
-export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Pick<RemoteWorkspaces, 'create'>) {
+export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Pick<RemoteWorkspaces, 'create'>, features?: WorkspaceFeatures) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
     try {
       if (request.method === 'GET') return Response.json(await service.snapshot(), { headers });
       if (request.method !== 'POST') return new Response(null, { status: 405, headers: { ...headers, Allow: 'GET, POST' } });
       if (request.headers.get('X-DSH-Remote-Agents') !== '1' || !request.headers.get('content-type')?.startsWith('application/json')) throw new RemoteError('Use the remote agents client to submit requests', 403);
-      if (Number(request.headers.get('content-length')) > 256_000) throw new RemoteError('Request is too large', 413);
+      if (Number(request.headers.get('content-length')) > 2_000_000) throw new RemoteError('Request is too large', 413);
       const text = await request.text();
-      if (Buffer.byteLength(text) > 256_000) throw new RemoteError('Request is too large', 413);
+      if (Buffer.byteLength(text) > 2_000_000) throw new RemoteError('Request is too large', 413);
       let raw: unknown;
       try { raw = JSON.parse(text); } catch { throw new RemoteError('Request must be valid JSON'); }
       const input = record(raw), action = field(input.action, 'action', 50);
       const hostId = () => identifier(input.hostId), agentId = () => identifier(input.agentId);
       let result: unknown;
       switch (action) {
+        case 'legacyMachines': case 'importLegacyMachine': case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync':
+        case 'workspaceTunnels': case 'addWorkspaceTunnel': case 'startWorkspaceTunnel': case 'stopWorkspaceTunnel': case 'removeWorkspaceTunnel': {
+          if (!features) throw new RemoteError('Remote workspaces are unavailable', 501);
+          result = await workspaceAction(features, action, input, request.signal); break;
+        }
         case 'workspaceModels': result = workspace ? await workspace(field(input.sessionId, 'session ID', 256), request.signal) : { hostIds: [] }; break;
         case 'hostCatalogs': result = projects.hosts(); break;
         case 'usage': {
@@ -38,7 +44,10 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'removeChatProject': result = await projects.remove(identifier(input.projectId)); break;
         case 'sshConfig': result = await service.sshConfig(); break;
         case 'addHost': result = await service.addHost(input.host, { discoverModels: true }); break;
-        case 'removeHost': result = await service.removeHost(hostId(), { deleteAgents: input.deleteAgents === true }); break;
+        case 'removeHost': {
+          const id = hostId(); result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true });
+          await features?.tunnels.removeHost(id); break;
+        }
         case 'connect': result = await service.connect(hostId()); break;
         case 'browse': result = await service.browse(hostId(), input.path === undefined ? undefined : browsePath(input.path)); break;
         case 'createWorkspace': {
