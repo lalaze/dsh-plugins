@@ -25,40 +25,51 @@ try {
   const html = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>:root{color-scheme:light dark}body{margin:0;background:Canvas;color:CanvasText;font:14px system-ui}</style></head><body><script>' + result.outputFiles[0].text.replaceAll('</script', '<\\/script') + '</script></body></html>';
   const file = join(temp, 'index.html'); await writeFile(file, html);
   browser(...(executable ? ['--executable-path', executable] : []), '--allow-file-access', 'open', pathToFileURL(file).href);
-  const total = `document.querySelector(${JSON.stringify('article[aria-label="总 Token"] strong')})`;
-  const count = `document.querySelector(${JSON.stringify('article[aria-label="调用次数"] strong')})`;
-  const tab = label => `nav[aria-label="分组方式"] button:text-is("${label}")`;
-  wait('document.querySelectorAll("tbody tr").length === 2'); // By provider: deepseek and Claude Code.
+  const total = 'document.querySelector(".us-hero-total strong")';
+  const requests = n => `document.querySelector(".us-hero-exact")?.textContent.endsWith(" ${n} 次调用")`;
+  const rows = 'document.querySelectorAll(".us-breakdown li").length';
+  const list = 'document.querySelector(".us-breakdown")?.textContent';
+  const tab = label => `[aria-label="分组方式"] button:text-is("${label}")`;
+  wait(`${rows} === 2`); // By provider: deepseek and Claude Code.
   evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".us-title h2").textContent === "Usage statistics"');
   browser('set', 'viewport', '390', '844');
   expect('document.documentElement.scrollWidth <= innerWidth');
   evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".us-title h2").textContent === "使用量统计"');
   browser('set', 'viewport', '1120', '900');
-  expect(`${count}.textContent === "3" && ${total}.textContent === "83"`);
-  expect('document.querySelectorAll(".us-bar-hit").length === 2 && !document.querySelector("[aria-label=来源占比], nav[aria-label=调用来源]")');
-  expect('document.querySelector(".us-breakdown").textContent.includes("Claude Code") && document.querySelector("thead th").textContent === "服务商"');
+  expect(`${requests(3)} && ${total}.textContent === "83" && document.querySelector(".us-hero-exact").textContent === "83 Token · 3 次调用"`);
+  expect('document.querySelectorAll(".us-bar-hit").length === 2 && document.querySelector(".us-range").textContent.startsWith("全部记录 · ")');
+  expect(`${list}.includes("Claude Code") && document.querySelector(".us-row-name").textContent === "deepseek"`);
+  // The failed remote turn returned no usage: the headline is marked partial and links to what needs attention.
+  expect('document.querySelector(".us-sources-head").getAttribute("aria-expanded") === "false" && document.querySelector(".us-sources-status").textContent === "1 项需关注"');
+  browser('click', '.us-partial');
+  wait('document.querySelector(".us-sources-head").getAttribute("aria-expanded") === "true"');
+  expect('document.querySelector(".us-sources-detail").textContent.includes("1 次调用未返回用量") && document.querySelector(".us-sources").textContent.includes("已返回用量 1/2")');
   browser('click', '.us-bar-hit:first-child');
-  // Categories drive the breakdown and the details table together, without another request.
-  evaluate('window.fixture.requests = []');
+  // Categories drive the breakdown without another request. Polls skip hidden pages, so hide this one meanwhile.
+  evaluate('Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); window.fixture.requests = []');
   browser('click', tab('按模型'));
-  wait('document.querySelectorAll("tbody tr").length === 3 && document.querySelector("thead th").textContent === "模型"');
-  expect('document.querySelectorAll(".us-breakdown-list li").length === 3 && document.querySelector(".us-breakdown").textContent.includes("sonnet")');
+  wait(`${rows} === 3 && ${list}.includes("sonnet")`);
   expect('document.querySelectorAll(".us-bar-hit").length === 2 && window.fixture.requests.length === 0');
-  browser('click', tab('按模型厂商')); wait('document.querySelector("tbody").textContent.includes("Anthropic") && document.querySelector("tbody").textContent.includes("DeepSeek")');
-  browser('click', tab('按主机')); wait('document.querySelector("tbody").textContent.includes("本机") && document.querySelector("tbody").textContent.includes("未知主机")');
-  browser('click', tab('按 Workspace')); wait('document.querySelectorAll("tbody tr").length === 1');
+  evaluate('delete document.hidden');
+  // A row expands into its details; switching categories collapses it.
+  evaluate('[...document.querySelectorAll(".us-row")].find(row => row.textContent.includes("opus")).click()');
+  wait('document.querySelector(".us-row[aria-expanded=true] .us-row-name")?.textContent === "opus"');
+  expect('document.querySelector(".us-row-detail").textContent.includes("已返回用量 0/1") && document.querySelector(".us-row-detail").textContent.includes("1 失败")');
+  browser('click', tab('按模型厂商')); wait(`${list}.includes("Anthropic") && ${list}.includes("DeepSeek") && !document.querySelector(".us-row-detail")`);
+  browser('click', tab('按主机')); wait(`${list}.includes("本机") && ${list}.includes("未知主机")`);
+  browser('click', tab('按 Workspace')); wait(`${rows} === 1`);
   browser('snapshot', '-i');
   browser('click', tab('按模型'));
   browser('click', '.us-filters summary');
   browser('fill', '[aria-label="会话 ID"]', 'remote-session');
-  wait(`${count}?.textContent === "2"`);
-  expect(`${total}.textContent === "23" && document.body.textContent.includes("已返回用量 1/2")`);
-  wait('document.querySelector("tbody").textContent.includes("sonnet")');
-  expect('!document.querySelector("tbody").textContent.includes("deepseek-chat")');
+  wait(requests(2));
+  expect(`${total}.textContent === "23" && document.querySelector(".us-sources").textContent.includes("已返回用量 1/2")`);
+  wait(`${list}.includes("sonnet")`);
+  expect(`!${list}.includes("deepseek-chat")`);
   browser('fill', '[aria-label="会话 ID"]', 'missing-session');
   wait('document.body.textContent.includes("暂无符合条件的记录")');
   browser('fill', '[aria-label="会话 ID"]', 'remote-session');
-  wait('document.querySelectorAll("tbody tr").length === 2');
+  wait(`${rows} === 2`);
   const csvPath = join(temp, 'usage.csv');
   browser('download', 'button:has-text("导出 CSV")', csvPath);
   expect('window.fixture.requests.some(url => url.includes("groupBy=model") && url.includes("sessionId=remote-session") && url.includes("format=csv"))');
@@ -67,16 +78,17 @@ try {
   evaluate('window.fixture.fail = true'); browser('click', 'button:has-text("刷新")');
   wait('document.querySelector("[role=alert]")?.textContent.includes("模拟网络错误")');
   evaluate('window.fixture.fail = false'); browser('click', '[role=alert] button');
-  wait('!document.querySelector("[role=alert]") && document.querySelectorAll("tbody tr").length === 2');
+  wait(`!document.querySelector("[role=alert]") && ${rows} === 2`);
   browser('fill', '[aria-label="会话 ID"]', '');
   browser('click', 'button:has-text("自定义")');
   browser('fill', '[aria-label="开始日期"]', '2026-10-21'); browser('fill', '[aria-label="结束日期"]', '2026-10-21');
-  wait(`${count}?.textContent === "2" && ${total}?.textContent === "60"`);
-  expect('document.querySelectorAll(".us-bar-hit").length === 1');
+  wait(`${requests(2)} && ${total}?.textContent === "60"`);
+  // A single day is the headline total; the trend needs at least two buckets.
+  expect('!document.querySelector(".us-chart") && document.querySelector(".us-range").textContent.startsWith("2026-10-21 · ")');
   browser('click', 'button:has-text("近 7 天")');
   wait('window.fixture.requests.at(-1).includes("from=") && document.querySelector("[aria-label=时间范围] button[aria-pressed=true]").textContent === "近 7 天"');
   browser('click', '[aria-label="时间范围"] button:text-is("全部")');
-  wait(`${count}?.textContent === "3"`);
+  wait(requests(3));
   // Move the browser clock across local midnight without waiting a real day; times without `Z` are local.
   evaluate(`window.fixture.now = '2026-10-21T23:59:59'; window.fixture.NativeDate = Date;
     window.Date = class extends window.fixture.NativeDate {
@@ -89,7 +101,7 @@ try {
   evaluate("window.fixture.now = '2026-10-22T00:00:01'");
   browser('click', 'button:has-text("刷新")');
   wait(hasRange('2026-10-22', '2026-10-22'));
-  wait(`${count}?.textContent === "0"`);
+  wait(requests(0));
   browser('click', '[aria-label="时间范围"] button:text-is("近 7 天")');
   wait(hasRange('2026-10-16', '2026-10-22'));
   evaluate("window.fixture.now = '2026-10-23T00:00:01'");
@@ -106,22 +118,22 @@ try {
   expect(hasRange('2026-09-25', '2026-10-24'));
   evaluate('window.Date = window.fixture.NativeDate');
   browser('click', '[aria-label="时间范围"] button:text-is("全部")');
-  wait(`${count}?.textContent === "3"`);
+  wait(requests(3));
   evaluate('window.fixture.demo = true'); browser('click', 'button:has-text("刷新")');
   wait('document.querySelectorAll(".us-bar-hit").length === 21');
   browser('click', '[aria-label="趋势指标"] button:has-text("调用次数")');
-  expect('document.querySelector(".us-chart-readout").textContent.includes("588 次调用")');
+  expect('document.querySelector(".us-chart-readout").textContent.includes("770 次调用")');
   browser('click', '[aria-label="趋势指标"] button:has-text("Token")');
   evaluate('window.fixture.demo = false; window.fixture.workspaces = true'); browser('click', 'button:has-text("刷新")');
   browser('click', tab('按 Workspace'));
-  wait('document.querySelectorAll("tbody tr").length === 10');
-  browser('click', '[aria-label="下一页"]');
-  wait('document.querySelector(".us-pagination").textContent.includes("第 2 / 3 页")');
-  browser('click', '[aria-label="下一页"]');
-  wait('document.querySelectorAll("tbody tr").length === 1');
+  wait(`${rows} === 8`);
+  browser('click', 'button:has-text("显示全部 21 项")');
+  wait(`${rows} === 21`);
+  browser('click', 'button:has-text("收起")');
+  wait(`${rows} === 8`);
   evaluate('window.fixture.workspaces = false; window.fixture.demo = true'); browser('click', 'button:has-text("刷新")');
   browser('click', tab('按 Provider'));
-  wait('document.querySelectorAll(".us-bar-hit").length === 21 && document.querySelectorAll("tbody tr").length === 3');
+  wait(`document.querySelectorAll(".us-bar-hit").length === 21 && ${rows} === 3`);
   browser('click', '.us-filters summary');
   browser('set', 'viewport', '1280', '1000'); browser('set', 'media', 'light');
   if (process.env.DSH_TEST_DESKTOP_SCREENSHOT) browser('screenshot', '--full', process.env.DSH_TEST_DESKTOP_SCREENSHOT);
@@ -132,7 +144,7 @@ try {
   if (process.env.DSH_TEST_SCREENSHOT) browser('screenshot', '--full', process.env.DSH_TEST_SCREENSHOT);
   const errors = browser('errors');
   if (errors.errors?.length) throw new Error(JSON.stringify(errors));
-  console.log('PASS: dashboard totals, category tabs driving breakdown/details/CSV without refetching, trend/category independence, date presets and local-midnight rollover, session/date filters, CSV contents, empty state, error recovery, light/dark and mobile width');
+  console.log('PASS: headline totals and partial-records link, category tabs driving the breakdown/CSV without refetching, expandable rows and show-all, trend/category independence, date presets and local-midnight rollover, session/date filters, CSV contents, empty state, error recovery, light/dark and mobile width');
 } finally {
   try { browser('close'); } catch {}
   await rm(temp, { recursive: true, force: true });

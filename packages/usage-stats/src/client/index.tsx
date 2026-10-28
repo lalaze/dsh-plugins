@@ -1,6 +1,6 @@
 import type { LocaleContext } from '@dsh-plugins/i18n';
 import { ui, installLocale, useLocale, formatLocale } from './i18n.js';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Dimension, UsageReport, Totals } from '../domain.js';
 import { compact, dateRange, localOffset, trendBuckets } from './metrics.js';
 import { styles } from './styles.js';
@@ -14,45 +14,64 @@ interface Client extends LocaleContext {
 const number = (value: number) => value.toLocaleString(formatLocale());
 const percent = (value: number, total: number) => total ? `${(value / total * 100).toFixed(1)}%` : '—';
 const shortDate = (value: string) => value.slice(5).replace('-', '/');
-function UsageMark() {
-  return <svg width="28" height="28" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-    <circle cx="16" cy="16" r="12.5" stroke="currentColor" strokeOpacity=".14" strokeWidth="2.5" />
-    <path d="M16 3.5a12.5 12.5 0 0 1 12.5 12.5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-    <path d="M27.4 21.1a12.5 12.5 0 0 1-19.1 4.7" stroke="var(--us-purple)" strokeWidth="2.5" strokeLinecap="round" />
-    <rect x="9" y="15" width="3" height="7" rx="1.5" fill="currentColor" fillOpacity=".55" />
-    <rect x="14.5" y="10" width="3" height="12" rx="1.5" fill="currentColor" />
-    <rect x="20" y="13" width="3" height="9" rx="1.5" fill="var(--us-purple)" />
-  </svg>;
-}
+/** The viewer's IANA zone, the one the date presets and the API's `tz` follow. */
+const timeZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || ui("Local time"); } catch { return ui("Local time"); } };
 function Icon({ kind = 'chart' }: { kind?: 'chart' | 'download' | 'refresh' }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{kind === 'chart' ? <><path d="M4 19h16M7 15V9m5 6V5m5 10v-4" /></> : kind === 'download' ? <><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4" /></> : <><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.2 6.2A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.8 5.8" /></>}</svg>;
+}
+/** The expand marker of a breakdown row or the data sources: a plus that turns into a minus. */
+function Plus({ open }: { open: boolean }) {
+  return <svg className="us-plus" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M3 8h10" />{!open && <path d="M8 3v10" />}</svg>;
+}
+/** A full-width row of equal choices: the time range and the category. */
+function Tabs<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: readonly (readonly [T, string])[]; onChange: (value: T) => void }) {
+  return <div className="us-tabs" role="group" aria-label={label}>{options.map(([key, text]) => <button key={key} type="button" aria-pressed={value === key} onClick={() => onChange(key)}>{ui(text)}</button>)}</div>;
 }
 function Trend({ data }: { data: UsageReport }) {
   const [metric, setMetric] = useState<'tokens' | 'requests'>('tokens');
   const [hovered, setHovered] = useState<number>();
   const buckets = trendBuckets(data.series ?? [], data.query.from, data.query.to);
+  // A single day is already the headline total.
+  if (buckets.length < 2) return null;
   const max = Math.max(1, ...buckets.map(b => b[metric]));
   const selected = hovered === undefined ? undefined : buckets[hovered];
   const total = metric === 'tokens' ? data.totals.totalTokens : data.totals.requests;
   return <section className="us-panel" aria-label={ui("Usage trend")}>
-    <div className="us-panel-head"><div><h3>{ui("Usage trend")}</h3><p className="us-subtitle">{buckets.length && buckets[0].from !== buckets[0].to ? ui("Grouped by time period") : ui("Daily usage")} · {ui("Local time")}</p></div><div className="us-segment" role="group" aria-label={ui("Trend metric")}>{(['tokens', 'requests'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => { setMetric(value); setHovered(undefined); }}>{value === 'tokens' ? 'Token' : ui("Requests")}</button>)}</div></div>
-    {buckets.length ? <div className="us-chart">
+    <div className="us-panel-head"><div><h3>{ui("Usage trend")}</h3><p className="us-subtitle">{buckets[0].from !== buckets[0].to ? ui("Grouped by time period") : ui("Daily usage")} · {ui("Local time")}</p></div><div className="us-segment" role="group" aria-label={ui("Trend metric")}>{(['tokens', 'requests'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => { setMetric(value); setHovered(undefined); }}>{value === 'tokens' ? 'Token' : ui("Requests")}</button>)}</div></div>
+    <div className="us-chart">
       <div className="us-chart-readout" aria-live="polite"><span>{selected ? `${selected.from}${selected.to !== selected.from ? ` → ${selected.to}` : ''}` : ui("Selected period")}</span><span className="us-number">{number(selected ? selected[metric] : total)} {metric === 'tokens' ? 'Token' : ui("requests")}</span></div>
       <div className="us-chart-body"><div className="us-y-axis" aria-hidden="true"><span>{compact(max)}</span><span>{compact(max / 2)}</span><span>0</span></div><div className="us-plot"><div className="us-grid" aria-hidden="true"><span /><span /><span /></div><div className="us-bars" role="group" aria-label={ui("Daily usage trend")}>{buckets.map((b, i) => <button key={b.from} className="us-bar-hit" aria-label={`${b.from}${b.from !== b.to ? ui(" to {0}", { 0: b.to }) : ''}: ${number(b[metric])} ${metric === 'tokens' ? 'Token' : ui("requests")}`} aria-pressed={hovered === i} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(undefined)} onFocus={() => setHovered(i)} onBlur={() => setHovered(undefined)} onClick={() => setHovered(i)}><span className="us-bar" style={{ height: `${b[metric] ? Math.max(1.5, b[metric] / max * 100) : 0}%` }} /></button>)}</div></div></div>
       <div className="us-x-axis" aria-hidden="true"><span>{shortDate(buckets[0].from)}</span>{buckets.length > 3 && <span>{shortDate(buckets[Math.floor(buckets.length / 2)].from)}</span>}<span>{shortDate(buckets.at(-1)!.to)}</span></div>
-    </div> : <div className="us-empty"><Icon /><p>{ui("No trend data yet")}</p></div>}
-    <div className="us-token-parts">{([[ui("Input · Uncached"), data.totals.inputTokens], [ui("Output tokens"), data.totals.outputTokens], [ui("Cache reads"), data.totals.cacheReadTokens], [ui("Cache writes"), data.totals.cacheWriteTokens]] as const).map(([label, value]) => <div key={label}><span>{label}</span><b className="us-number" title={number(value)}>{compact(value)}</b></div>)}</div>
+    </div>
   </section>;
-}
-function Metric({ label, value, detail, title }: { label: string; value: string; detail: string; title?: string }) {
-  return <article className="us-metric" aria-label={label}><div className="us-metric-label">{label}</div><strong className="us-number" title={title}>{value}</strong><small>{detail}</small></article>;
 }
 function Status({ totals: t }: { totals: Totals }) {
   return t.errors || t.cancelled ? <span className="us-badge us-error">{t.errors ? ui("{0} failed", { 0: number(t.errors) }) : ''}{t.errors && t.cancelled ? ' · ' : ''}{t.cancelled ? ui("{0} cancelled", { 0: number(t.cancelled) }) : ''}</span> : <span className="us-badge">{ui("Completed")}</span>;
 }
-/** The dashboard's categories; the selected one drives the breakdown, the details table and the CSV export. */
+/** Data problems that make the totals partial: unsaved records and requests that returned no usage. */
+function attention(data: UsageReport): string[] {
+  const missing = data.totals.requests - data.totals.withUsage;
+  return [data.failedWrites > 0 ? ui("{0} records could not be saved. Statistics may be incomplete. Check DSH logs and disk permissions.", { 0: number(data.failedWrites) }) : '',
+    missing > 0 ? ui("{0} requests returned no usage. Token totals only include reported data.", { 0: number(missing) }) : ''].filter(Boolean);
+}
+/** The period's total in large type, its exact value and request count, then input and output. */
+function Headline({ data, onPartial }: { data: UsageReport; onPartial: () => void }) {
+  const t = data.totals, notes = attention(data);
+  const input = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens;
+  return <article className="us-hero" aria-label={ui("Recorded usage")}>
+    <div className="us-hero-head"><span>{ui("Recorded usage")}</span>{notes.length > 0 && <button type="button" className="us-partial" title={notes.join('\n')} onClick={onPartial}>{ui("Partial records")}</button>}</div>
+    <div className="us-hero-total"><strong className="us-number" title={number(t.totalTokens)}>{compact(t.totalTokens)}</strong><span>{ui("tokens")}</span></div>
+    <p className="us-hero-exact us-number">{ui("{0} tokens · {1} requests", { 0: number(t.totalTokens), 1: number(t.requests) })}</p>
+    <div className="us-hero-split">
+      <div><span>{ui("Input · incl. cache")}</span><b className="us-number" title={number(input)}>{compact(input)}</b><small>{ui("Cache reads {0} · {1} of input", { 0: compact(t.cacheReadTokens), 1: t.withUsage ? percent(t.cacheReadTokens, input) : '—' })}</small></div>
+      <div><span>{ui("Output · incl. reasoning")}</span><b className="us-number" title={number(t.outputTokens)}>{compact(t.outputTokens)}</b>{t.reasoningTokens > 0 && <small>{ui("Reasoning {0}", { 0: compact(t.reasoningTokens) })}</small>}</div>
+    </div>
+  </article>;
+}
+/** The dashboard's time ranges and categories; the selected category drives the breakdown and the CSV export. */
+type Period = 'today' | '7d' | '30d' | 'all' | 'custom';
+const PERIODS = [['today', "Today"], ['7d', "Last 7 days"], ['30d', "Last 30 days"], ['all', "All"], ['custom', "Custom"]] as const;
 const BREAKDOWNS = [['provider', "By provider"], ['workspace', "By workspace"], ['model', "By model"], ['vendor', "By model vendor"], ['host', "By host"]] as const;
-const CATEGORY_NAMES: Record<Dimension, string> = { provider: "Provider", workspace: "Workspace", model: "Model", vendor: "Model vendor", host: "Host" };
 const BREAKDOWN_ROWS = 8;
 /** Long workspace paths keep their last two folders; the full path is in the tooltip. */
 const shortPath = (path: string) => { const parts = path.split(/[\\/]/).filter(Boolean); return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path; };
@@ -61,34 +80,62 @@ const groupName = (g: { key: string; label: string }, by: Dimension) => {
   const placeholder = g.key === '' || g.key === '?';
   return { name: placeholder ? ui(g.label) : by === 'workspace' ? shortPath(g.label) : g.label, title: placeholder ? ui(g.label) : g.label };
 };
-function Breakdowns({ data, by }: { data: UsageReport; by: Dimension }) {
+/** The selected category's groups, largest first; a row expands into its request, token and status details. */
+function Breakdown({ data, by }: { data: UsageReport; by: Dimension }) {
   const [all, setAll] = useState(false);
-  useEffect(() => setAll(false), [by]);
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => { setAll(false); setOpen(new Set()); }, [by]);
   const rows = data.breakdowns?.[by] ?? [], total = data.totals.totalTokens;
-  return <section className="us-panel us-breakdown" aria-label={ui("Usage breakdown")}>
-    <div className="us-panel-head"><div><h3>{ui("Usage breakdown")}</h3><p className="us-subtitle">{ui("Share of reported tokens")}</p></div></div>
-    {rows.length ? <ol className="us-breakdown-list">{(all ? rows : rows.slice(0, BREAKDOWN_ROWS)).map(g => {
-      const { name, title } = groupName(g, by);
-      return <li key={g.key}><div className="us-breakdown-row"><span className="us-breakdown-name" title={title}>{name}</span><b className="us-number" title={number(g.totals.totalTokens)}>{compact(g.totals.totalTokens)}</b></div>
-        <div className="us-breakdown-bar"><span style={{ width: `${total ? g.totals.totalTokens / total * 100 : 0}%` }} /></div>
-        <div className="us-breakdown-meta"><span>{ui("{0} requests", { 0: number(g.totals.requests) })}</span><span className="us-number">{percent(g.totals.totalTokens, total)}</span></div></li>;
-    })}</ol> : <p className="us-muted">{ui("No matching records")}</p>}
-    {rows.length > BREAKDOWN_ROWS && <button className="us-button us-breakdown-more" onClick={() => setAll(!all)}>{all ? ui("Show fewer") : ui("Show all {0}", { 0: number(rows.length) })}</button>}
+  if (!rows.length) return <div className="us-empty" role="status"><Icon /><h3>{ui("No matching records")}</h3><p>{ui("Usage appears here after a model or remote agent request completes.")}</p></div>;
+  const toggle = (key: string) => setOpen(previous => { const next = new Set(previous); if (!next.delete(key)) next.add(key); return next; });
+  return <section className="us-breakdown" aria-label={ui("Usage breakdown")}>
+    <ol>{(all ? rows : rows.slice(0, BREAKDOWN_ROWS)).map(g => {
+      const { name, title } = groupName(g, by), expanded = open.has(g.key), t = g.totals;
+      return <li key={g.key}>
+        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={title}>{name}</span><b className="us-number" title={number(t.totalTokens)}>{compact(t.totalTokens)}</b><Plus open={expanded} /></button>
+        <div className="us-row-bar"><span className="us-meter"><span style={{ width: `${total ? t.totalTokens / total * 100 : 0}%` }} /></span><span className="us-number">{percent(t.totalTokens, total)}</span></div>
+        {expanded && <dl className="us-row-detail">
+          <div><dt>{ui("Requests")}</dt><dd>{number(t.requests)}<small>{ui("Usage reported {0}/{1}", { 0: number(t.withUsage), 1: number(t.requests) })}</small></dd></div>
+          <div><dt>{ui("Input · Uncached")}</dt><dd>{number(t.inputTokens)}</dd></div>
+          <div><dt>{ui("Output tokens")}</dt><dd>{number(t.outputTokens)}</dd></div>
+          <div><dt>{ui("Cache read / write")}</dt><dd>{number(t.cacheReadTokens)} / {number(t.cacheWriteTokens)}</dd></div>
+          <div><dt>{ui("Total tokens")}</dt><dd>{number(t.totalTokens)}</dd></div>
+          <div><dt>{ui("Status")}</dt><dd><Status totals={t} /></dd></div>
+        </dl>}
+      </li>;
+    })}</ol>
+    {rows.length > BREAKDOWN_ROWS && <button type="button" className="us-link us-more" onClick={() => setAll(!all)}>{all ? ui("Show fewer") : ui("Show all {0}", { 0: number(rows.length) })}</button>}
+  </section>;
+}
+/** DSH model calls and remote agents with their totals; the details hold what needs attention and how usage is counted. */
+function Sources({ data, open, onToggle, anchor }: { data: UsageReport; open: boolean; onToggle: () => void; anchor: React.RefObject<HTMLElement> }) {
+  const t = data.totals, notes = attention(data);
+  return <section ref={anchor} className="us-sources" aria-label={ui("Data sources")}>
+    <button type="button" className="us-sources-head" aria-expanded={open} onClick={onToggle}><span className="us-sources-title">{ui("Data sources")}</span>
+      <span className="us-sources-status">{notes.length ? <><i className="us-dot us-warn" />{ui("{0} need attention", { 0: notes.length })}</> : ui("Measurement and scope")}</span><Plus open={open} /></button>
+    <ul className="us-source-list">{data.sources.map(s => <li key={s.key}><div><span>{ui(s.label)}</span><small>{ui("{0} requests", { 0: number(s.totals.requests) })} · {ui("Usage reported {0}/{1}", { 0: number(s.totals.withUsage), 1: number(s.totals.requests) })}</small></div><b className="us-number" title={number(s.totals.totalTokens)}>{compact(s.totals.totalTokens)}</b></li>)}</ul>
+    {open && <div className="us-sources-detail">
+      {notes.map(note => <p key={note} className="us-notice us-warning">{note}</p>)}
+      <p>{ui("Completion rate")} {percent(t.completed, t.requests)} · {ui("Failed {0} · Cancelled {1}", { 0: number(t.errors), 1: number(t.cancelled) })}</p>
+      <p>{ui("Dates use your local time zone and the request start time. Input excludes cache tokens; cache reads and writes are counted separately. Cache read share = cache reads ÷ (uncached input + cache reads + cache writes). Reasoning tokens")} {number(t.reasoningTokens)} {ui("are included in output. Only calls from this DSH instance are tracked, including titles and compaction. Remote agents are counted once per remote turn; independently running CLIs are excluded. Missing usage is not estimated. First record:")} {data.recordedSince ? new Date(data.recordedSince).toLocaleString(formatLocale()) : ui("None yet")}.</p>
+      <p>{ui("Only calls from this DSH instance are recorded, on this computer. Nothing is uploaded.")}</p>
+    </div>}
   </section>;
 }
 export function Dashboard() {
   useLocale();
   const [groupBy, setGroupBy] = useState<Dimension>('provider');
   const [from, setFrom] = useState(''); const [to, setTo] = useState('');
-  const [period, setPeriod] = useState<'today' | '7d' | '30d' | 'all' | 'custom'>('all');
+  const [period, setPeriod] = useState<Period>('all');
   const [provider, setProvider] = useState(''); const [model, setModel] = useState(''); const [sessionId, setSessionId] = useState('');
   const [data, setData] = useState<UsageReport>(); const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0); const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false); const [exportError, setExportError] = useState(''); const [page, setPage] = useState(0);
+  const [exporting, setExporting] = useState(false); const [exportError, setExportError] = useState('');
+  const [sourcesOpen, setSourcesOpen] = useState(false); const sources = useRef<HTMLElement>(null);
   const params = new URLSearchParams();
   // Days follow the viewer's time zone, like the header pill.
   for (const [key, value] of Object.entries({ from, to, provider, model, sessionId, tz: localOffset() })) if (value) params.set(key, value);
-  // Every category's groups arrive in one report, so switching tabs needs no new request.
+  // Every category's groups arrive in one report, so switching categories needs no new request.
   const path = `/api/usage-stats?${params}`;
   const exportCsv = async () => {
     setExporting(true); setExportError('');
@@ -103,7 +150,7 @@ export function Dashboard() {
   };
   useEffect(() => {
     const controller = new AbortController(); let pending = false;
-    setData(undefined); setPage(0); setLoading(true); setError('');
+    setData(undefined); setLoading(true); setError('');
     const read = async () => {
       if (period !== 'custom') {
         const range = dateRange(period);
@@ -125,36 +172,32 @@ export function Dashboard() {
     void read(); const timer = setInterval(() => { if (!document.hidden) void read(); }, 5000);
     return () => { controller.abort(); clearInterval(timer); };
   }, [path, refresh, period]);
-  const choosePeriod = (value: 'today' | '7d' | '30d' | 'all') => { const range = dateRange(value); setPeriod(value); setFrom(range.from); setTo(range.to); };
+  const choosePeriod = (value: Period) => {
+    setPeriod(value);
+    if (value !== 'custom') { const range = dateRange(value); setFrom(range.from); setTo(range.to); }
+  };
   const reset = () => { setProvider(''); setModel(''); setSessionId(''); choosePeriod('all'); };
+  const showAttention = () => { setSourcesOpen(true); requestAnimationFrame(() => sources.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); };
   const filterCount = [provider, model, sessionId].filter(Boolean).length;
   const select = (label: string, value: string, set: (value: string) => void, options: string[]) => <label className="us-field">{label}<select aria-label={label} value={value} onChange={e => set(e.target.value)}><option value="">{ui("All {0}", { 0: label })}</option>{options.map(v => <option key={v} value={v}>{v}</option>)}</select></label>;
-  const t = data?.totals;
-  const groups = data?.breakdowns?.[groupBy] ?? [];
-  const lastPage = Math.max(0, Math.ceil(groups.length / 10) - 1);
-  const currentPage = Math.min(page, lastPage);
+  const range = from && from === to ? from : from || to ? `${from || ui("First record")} → ${to || ui("Latest record")}` : ui("All records");
   return <section className="dsh-usage" aria-label={ui("Usage statistics")}><style>{styles}</style>
-    <header className="us-top"><div className="us-title"><span className="us-logo"><UsageMark /></span><div><h2>{ui("Usage statistics")}</h2><p className="us-subtitle">{ui("Model usage from DSH and remote agents")}</p></div></div><div className="us-actions"><span className="us-live"><i className="us-dot" />{ui("Updates every 5 seconds")}</span><button className="us-button" onClick={() => setRefresh(n => n + 1)} aria-label={ui("Refresh")}><Icon kind="refresh" />{ui("Refresh")}</button><button className="us-button us-primary" disabled={exporting} onClick={() => void exportCsv()}><Icon kind="download" />{exporting ? ui("Exporting…") : ui("Export CSV")}</button></div></header>
-    <nav className="us-tabs" aria-label={ui("Group by")}>{BREAKDOWNS.map(([value, label]) => <button className="us-tab" key={value} aria-pressed={groupBy === value} onClick={() => { setGroupBy(value); setPage(0); }}>{ui(label)}</button>)}</nav>
-    <div className="us-toolbar"><div className="us-period"><div className="us-segment" role="group" aria-label={ui("Time range")}>{([['today', ui("Today")], ['7d', ui("Last 7 days")], ['30d', ui("Last 30 days")], ['all', ui("All")]] as const).map(([value, label]) => <button key={value} aria-pressed={period === value} onClick={() => choosePeriod(value)}>{label}</button>)}<button aria-pressed={period === 'custom'} onClick={() => setPeriod('custom')}>{ui("Custom")}</button></div><span className="us-muted" style={{ fontSize: 11 }}>{from || to ? `${from || ui("First record")} → ${to || ui("Latest record")}` : ui("All records")} · {ui("Local time")}</span></div>{(filterCount > 0 || period === 'custom') && <button className="us-button" onClick={reset}>{ui("Reset filters")}</button>}</div>
+    <header className="us-top"><div className="us-title"><h2>{ui("Usage statistics")}</h2><p className="us-subtitle">{data ? ui("Updated {0}", { 0: new Date(data.generatedAt).toLocaleTimeString(formatLocale()) }) + ' · ' : ''}{ui("Updates every 5 seconds")}</p></div>
+      <div className="us-actions"><button type="button" className="us-link us-accent" onClick={() => setRefresh(n => n + 1)}><Icon kind="refresh" />{ui("Refresh")}</button><button type="button" className="us-link" disabled={exporting} onClick={() => void exportCsv()}><Icon kind="download" />{exporting ? ui("Exporting…") : ui("Export CSV")}</button></div></header>
+    <Tabs label={ui("Time range")} value={period} options={PERIODS} onChange={choosePeriod} />
     {period === 'custom' && <div className="us-custom-dates"><label className="us-field">{ui("Start date")}<input aria-label={ui("Start date")} type="date" value={from} onChange={e => setFrom(e.target.value)} /></label><span className="us-muted">—</span><label className="us-field">{ui("End date")}<input aria-label={ui("End date")} type="date" value={to} onChange={e => setTo(e.target.value)} /></label></div>}
-    <details className="us-filters"><summary>{ui("More filters")}{filterCount ? ui(" · {0} applied", { 0: filterCount }) : ui(" · Provider, model, session")}</summary><div className="us-filter-grid">{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div></details>
+    <div className="us-filter-row"><details className="us-filters"><summary>{ui("More filters")}{filterCount ? ui(" · {0} applied", { 0: filterCount }) : ui(" · Provider, model, session")}</summary><div className="us-filter-grid">{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div></details>
+      {(filterCount > 0 || period === 'custom') && <button type="button" className="us-link" onClick={reset}>{ui("Reset filters")}</button>}</div>
     {error && <div className="us-notice us-warning" role="alert">{ui("Could not load:")}{ui(error)}<button className="us-button" onClick={() => setRefresh(n => n + 1)}>{ui("Retry")}</button></div>}
     {exportError && <div className="us-notice us-warning" role="alert">{ui(exportError)}</div>}
     {loading && <div className="us-loading" role="status">{ui("Loading usage…")}</div>}
-    {data && t && <>
-      {data.failedWrites > 0 && <div className="us-notice us-warning" role="alert">{ui("{0} records could not be saved. Statistics may be incomplete. Check DSH logs and disk permissions.", { 0: number(data.failedWrites) })}</div>}
-      <div className="us-summary"><Metric label={ui("Total tokens")} value={compact(t.totalTokens)} title={number(t.totalTokens)} detail={ui("Input {0} / Output {1}", { 0: compact(t.inputTokens), 1: compact(t.outputTokens) })} /><Metric label={ui("Requests")} value={number(t.requests)} detail={ui("Usage reported {0}/{1}", { 0: number(t.withUsage), 1: number(t.requests) })} /><Metric label={ui("Cache read share")} value={t.withUsage ? percent(t.cacheReadTokens, t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens) : '—'} detail={ui("Cache reads {0} tokens", { 0: compact(t.cacheReadTokens) })} /><Metric label={ui("Completion rate")} value={percent(t.completed, t.requests)} detail={ui("Failed {0} · Cancelled {1}", { 0: number(t.errors), 1: number(t.cancelled) })} /></div>
-      {t.withUsage < t.requests && <div className="us-notice us-warning" role="status">{ui("{0} requests returned no usage. Token totals only include reported data.", { 0: number(t.requests - t.withUsage) })}</div>}
+    {data && <>
+      <Headline data={data} onPartial={showAttention} />
+      <p className="us-range us-number">{range} · {timeZone()}</p>
+      <Tabs label={ui("Group by")} value={groupBy} options={BREAKDOWNS} onChange={setGroupBy} />
+      <Breakdown data={data} by={groupBy} />
       <Trend data={data} />
-      <Breakdowns data={data} by={groupBy} />
-      <section className="us-panel" aria-label={ui("Usage details")}><div className="us-details-head"><div><h3>{ui("Usage details")}</h3><p className="us-subtitle">{ui("See where your usage comes from")}</p></div></div>
-        {groups.length ? <><div className="us-scroll" tabIndex={0} aria-label={ui("Usage details, scroll horizontally")}><table className="us-table"><thead><tr>{[ui(CATEGORY_NAMES[groupBy]), ui("Requests"), ui("Input"), ui("Output"), ui("Cache read / write"), ui("Total tokens"), ui("Status")].map(label => <th scope="col" key={label}>{label}</th>)}</tr></thead><tbody>{groups.slice(currentPage * 10, (currentPage + 1) * 10).map(g => {
-          const { name, title } = groupName(g, groupBy);
-          return <tr key={g.key}><th scope="row" title={title}><div className="us-table-main">{name}</div></th><td>{number(g.totals.requests)}<span className="us-table-sub" style={{ marginLeft: 'auto' }}>{ui("With usage")} {g.totals.withUsage}/{g.totals.requests}</span></td><td title={ui("Uncached input: {0}", { 0: number(g.totals.inputTokens) })}>{number(g.totals.inputTokens)}</td><td>{number(g.totals.outputTokens)}</td><td>{compact(g.totals.cacheReadTokens)} / {compact(g.totals.cacheWriteTokens)}</td><td className="us-total-cell">{number(g.totals.totalTokens)}<span className="us-table-sub">{ui("Share")} {percent(g.totals.totalTokens, t.totalTokens)}</span></td><td><Status totals={g.totals} /></td></tr>;
-        })}</tbody></table></div><div className="us-pagination"><span>{ui("{0} groups · Page {1} / {2}", { 0: number(groups.length), 1: currentPage + 1, 2: lastPage + 1 })}</span><div className="us-actions"><button className="us-button" aria-label={ui("Previous page")} disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>←</button><button className="us-button" aria-label={ui("Next page")} disabled={currentPage === lastPage} onClick={() => setPage(currentPage + 1)}>→</button></div></div></> : <div className="us-empty" role="status"><Icon /><h3>{ui("No matching records")}</h3><p>{ui("Usage appears here after a model or remote agent request completes.")}</p></div>}
-      </section>
-      <footer className="us-foot"><span>{ui("Updated")} {new Date(data.generatedAt).toLocaleTimeString(formatLocale())}  {ui("· Stored locally")}</span><details><summary>{ui("Measurement and scope")}</summary><p>{ui("Dates use your local time zone and the request start time. Input excludes cache tokens; cache reads and writes are counted separately. Cache read share = cache reads ÷ (uncached input + cache reads + cache writes). Reasoning tokens")} {number(t.reasoningTokens)}  {ui("are included in output. Only calls from this DSH instance are tracked, including titles and compaction. Remote agents are counted once per remote turn; independently running CLIs are excluded. Missing usage is not estimated. First record:")} {data.recordedSince ? new Date(data.recordedSince).toLocaleString(formatLocale()) : ui("None yet")}.</p></details></footer>
+      <Sources data={data} open={sourcesOpen} onToggle={() => setSourcesOpen(!sourcesOpen)} anchor={sources} />
     </>}
   </section>;
 }
