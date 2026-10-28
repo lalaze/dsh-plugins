@@ -50,6 +50,7 @@ export const zh: Record<string, string> = {
   "Full access": "完全访问",
   "Ask before commands": "执行命令前询问",
   "Workspace write · ask on request": "工作区可写 · 按需审批",
+  "Workspace write · auto review": "工作区可写 · 自动审查",
   "Read only": "只读",
   "Allow matching requests for this session": "本次会话允许匹配的请求",
   "Always allow matching requests in this project": "此项目始终允许匹配的请求",

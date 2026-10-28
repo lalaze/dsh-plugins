@@ -415,6 +415,7 @@ test('restart resumes the saved native thread without replaying an uncertain pro
   assert.equal(resumedParams.threadId, 'thread-remote');
   assert.equal(resumedParams.sandbox, 'read-only');
   assert.equal(resumedParams.approvalPolicy, 'on-request');
+  assert.equal(resumedParams.approvalsReviewer, 'user', 'a resumed thread drops a reviewer it had before');
   const detail = await resumed.detail(agent.id);
   assert.equal(detail.agent.status, 'idle');
   assert.ok(detail.timeline!.entries.some(e => e.item.type === 'user_message' && e.item.delivery === 'pending'));
@@ -425,7 +426,14 @@ test('Codex inherit mode leaves approval policy and sandbox to the remote config
   const { ssh, service, request } = await fixture(t);
   await service.create({ ...request, modeId: 'inherit' }); await tick();
   const params = ssh.live.sent.find(m => m.method === 'thread/start')!.params;
-  assert.equal(params.approvalPolicy, undefined); assert.equal(params.sandbox, undefined);
+  assert.equal(params.approvalPolicy, undefined); assert.equal(params.sandbox, undefined); assert.equal(params.approvalsReviewer, undefined);
+});
+
+test('Codex auto review writes to the workspace and routes approval requests to its reviewer', async t => {
+  const { ssh, service, request } = await fixture(t);
+  await service.create({ ...request, modeId: 'auto-review' }); await tick();
+  const params = ssh.live.sent.find(m => m.method === 'thread/start')!.params;
+  assert.equal(params.sandbox, 'workspace-write'); assert.equal(params.approvalPolicy, 'on-request'); assert.equal(params.approvalsReviewer, 'auto_review');
 });
 
 test('saved agent output remains readable when its SSH host is unavailable', async t => {

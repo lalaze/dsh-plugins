@@ -20,7 +20,13 @@ export interface Choice { id: string; label: string; isDefault?: boolean }
 /** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export function permissionModes(provider: string, modes: Choice[]): Choice[] {
   // Codex's inherit mode leaves approval policy and sandbox to the remote config.toml.
-  if (provider === 'codex') return modes.some(m => m.id === 'inherit') ? modes : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
+  if (provider === 'codex') {
+    const choices = modes.some(m => m.id === 'inherit') ? [...modes] : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
+    // Catalogs saved before auto review existed gain it next to the workspace write mode it builds on.
+    const write = choices.findIndex(m => m.id === 'workspace-write');
+    if (write >= 0 && !choices.some(m => m.id === 'auto-review')) choices.splice(write + 1, 0, { id: 'auto-review', label: 'Workspace write · auto review' });
+    return choices;
+  }
   if (provider !== 'claude') return modes;
   const choices = modes.some(m => m.id === 'inherit') ? [...modes] : [{ id: 'inherit', label: 'Remote CLI settings' }, ...modes];
   if (!choices.some(m => m.id === 'auto')) choices.splice(choices.findIndex(m => m.id === 'inherit') + 1, 0, { id: 'auto', label: 'Auto · safety checks' });
@@ -31,7 +37,7 @@ export type DshPermission = 'read-only' | 'workspace-write' | 'danger-full-acces
 const PRESET_MODES: Readonly<Record<string, Readonly<Record<DshPermission, string>>>> = {
   // Claude has no read-only mode that keeps the normal workflow; asking before every tool is the closest.
   claude: { 'read-only': 'default', 'workspace-write': 'acceptEdits', 'danger-full-access': 'bypassPermissions', auto: 'auto' },
-  codex: { 'read-only': 'read-only', 'workspace-write': 'workspace-write', 'danger-full-access': 'full-access', auto: 'workspace-write' },
+  codex: { 'read-only': 'read-only', 'workspace-write': 'workspace-write', 'danger-full-access': 'full-access', auto: 'auto-review' },
 };
 /** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
 export function presetMode(provider: string, modes: Choice[], permission: DshPermission | undefined): string | undefined {

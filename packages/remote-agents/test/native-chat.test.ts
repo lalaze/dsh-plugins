@@ -347,6 +347,13 @@ test('Codex chats map the DSH composer permission and skip modes their catalog l
   assert.equal(remote.created!.modeId, 'read-only');
 });
 
+test('DSH Auto review selects Codex auto review, even from a catalog saved before it existed', async t => {
+  const { remote, projects, project, adapter, options } = await setup(t, { permission: () => 'auto' });
+  remote.catalog[0].modes.push({ id: 'workspace-write', label: 'Workspace write · ask on request' }); await projects.refresh(project.id);
+  await collect(adapter.stream(options()));
+  assert.equal(remote.created!.modeId, 'auto-review');
+});
+
 test('a host that cannot keep the CLI running after DSH quits fails the response with the reason', async t => {
   const { remote, adapter, options } = await setup(t);
   remote.onCreate = () => { throw new Error(RELAY_UNAVAILABLE['missing-node']); };
