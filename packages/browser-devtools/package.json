@@ -1,6 +1,6 @@
 {
   "name": "dsh-browser-devtools",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Page debugger for DSH Desktop in a separate Chrome/Edge window",
   "type": "module",
   "main": "lib/server/index.js",
