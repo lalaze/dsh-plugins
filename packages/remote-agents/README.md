@@ -116,6 +116,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.25:** Provider groups in the model menu fold again in DSH builds whose model rows carry no model ids, such as the Desktop app: those groups remember their folding by provider name. Groups that already folded keep their saved choices. Refresh the client after updating.
+
 **Upgrading from 0.2.24:** A conversation whose remote CLI failed to start (for example, because the SSH host had no Node.js) no longer stays stuck with "This agent is still working" after the host is fixed: the next message starts the CLI with that message, keeping earlier messages as context. Restart DSH after updating.
 
 **Upgrading from 0.2.23:** A remote CLI is no longer started when its SSH host cannot run the background relay (no Node.js 18+ on the login PATH, or the relay cannot be installed); the response fails with the reason instead of silently using a direct SSH pipe that ends with DSH. Install Node.js 18 or newer on such hosts. New conversations are titled from your first message instead of DSH's title instruction; existing titles are not changed. Restart DSH after updating.
