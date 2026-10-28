@@ -149,7 +149,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
             <button className="ra-ws-button ra-primary" disabled={busy || !name}>{ui('Create')}</button>
           </form>}
           <form className="ra-ws-search" onSubmit={event => { event.preventDefault(); void run(async () => { const value = await operate<{ matches: typeof matches }>({ op: 'search', path: '.', query }); setMatches(value.matches); }); }}>
-            <Icon kind="search" /><input aria-label={ui('Search remote files')} placeholder={ui('Search remote files')} value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setMatches(undefined); }} onKeyDown={e => { if (e.key === 'Escape' && query) { e.stopPropagation(); clearSearch(); } }} />
+            <Icon kind="search" /><input aria-label={ui('Search remote files')} placeholder={ui('Search remote files')} value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setMatches(undefined); }} onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); e.stopPropagation(); clearSearch(); } }} />
             {query && <button type="button" className="ra-ws-icon" title={ui('Clear search')} aria-label={ui('Clear search')} onClick={clearSearch}><Icon kind="close" /></button>}
           </form>
           <div className="ra-ws-entries">{matches ? (matches.length ? matches.map((match, index) => <button type="button" key={index} disabled={busy} aria-pressed={selected === match.path} onClick={() => { if (canNavigate()) void run(() => open(match.path)); }}>
