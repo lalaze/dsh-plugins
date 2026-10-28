@@ -498,6 +498,8 @@ try {
   wait('document.querySelector(".ra-usage-card")?.textContent.includes("剩余 82%")');
   browser('click', '.ra-usage'); // Keep the card open through viewport and data changes.
   expect('(()=>{const t=document.querySelector(".ra-usage-card").textContent;return t.includes("已使用 17%")&&t.includes("169k / 1m tokens")&&t.includes("Plus")&&t.includes("4h后重置")&&t.includes("剩余 65%")&&t.includes("2d后重置")&&t.includes("dev@example.com")})()');
+  expect('(()=>{const s=document.querySelector(".ra-usage-cache"),b=s.querySelector(".ra-usage-cache-toggle");return b.getAttribute("aria-expanded")==="false"&&b.textContent.includes("命中 75%")&&!s.textContent.includes("缓存读取")})()');
+  browser('click', '.ra-usage-cache-toggle');
   expect('(()=>{const t=document.querySelector(".ra-usage-cache").textContent;return t.includes("缓存读取30k")&&t.includes("缓存写入未知")&&t.includes("缓存命中比例75%")})()');
   browser('click', '.ra-usage-cache summary');
   expect('document.querySelector(".ra-usage-cache details").open && document.querySelector(".ra-usage-cache details").textContent.includes("缓存读取60k")');
@@ -512,6 +514,9 @@ try {
   fixture({ seedUsage: { ...usageFixture, tokenUsage: {} } });
   wait('document.querySelector(".ra-usage-cache")?.textContent.includes("缓存读取未知")');
   expect('!document.querySelector(".ra-usage-cache").textContent.includes("0%")');
+  browser('press', 'Escape'); wait('!document.querySelector(".ra-usage-card")');
+  browser('hover', '.ra-usage'); wait('document.querySelector(".ra-usage-cache-toggle")?.getAttribute("aria-expanded") === "true"'); // The fold survives reopening.
+  browser('click', '.ra-usage');
   evaluate('window.fixture.setLocale("en")');
   wait('document.querySelector(".ra-usage-cache")?.textContent.includes("Cache readUnknown")');
   evaluate('window.fixture.setLocale("zh")');

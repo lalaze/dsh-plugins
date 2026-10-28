@@ -25,7 +25,7 @@ test('cache counters keep provider input semantics, reported zeros and missing f
 });
 
 test('cache display distinguishes unreported counts, no hits and a token hit rate', () => {
-  const render = (last?: Parameters<typeof CacheSection>[0]['usage']) => renderToStaticMarkup(createElement(CacheSection, { usage: last }));
+  const render = (last?: Parameters<typeof CacheSection>[0]['usage']) => renderToStaticMarkup(createElement(CacheSection, { usage: last, expanded: true }));
   assert.match(render(), /Unknown/);
   assert.doesNotMatch(render(), /0%/);
   assert.match(render({ last: { inputTokens: 1000, cachedInputTokens: 0 } }), /0%/);
@@ -34,6 +34,9 @@ test('cache display distinguishes unreported counts, no hits and a token hit rat
   assert.doesNotMatch(render({ last: { inputTokens: 0, cachedInputTokens: 0 } }), /NaN|Infinity|0%/);
   assert.doesNotMatch(render({ last: { inputTokens: 10, cachedInputTokens: 20 } }), /200%/);
   assert.match(render({ total: { cachedInputTokens: 1800 } }), /<details>/);
+  const folded = renderToStaticMarkup(createElement(CacheSection, { usage: { last: { inputTokens: 1000, cachedInputTokens: 800 }, total: { cachedInputTokens: 1800 } } }));
+  assert.match(folded, /aria-expanded="false"/); assert.match(folded, /80% hit/, 'the folded header keeps the hit rate');
+  assert.doesNotMatch(folded, /Cache read|<details>/, 'the breakdown stays folded until opened');
 });
 
 test('Codex token reports and account limits become the ring and its plan windows', () => {

@@ -69,6 +69,11 @@ const styles = `
 .ra-usage-summary .ra-usage-muted{margin-top:4px}
 .ra-usage-account{display:grid;gap:10px;margin-top:14px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.25))}
 .ra-usage-cache{display:grid;gap:6px;margin-top:14px;padding-top:14px;border-top:1px solid var(--dsw-alias-border-l2,rgba(127,127,127,.25))}
+.ra-usage-cache-toggle{display:flex;align-items:center;gap:8px;width:100%;margin:-4px 0;padding:4px 0;border:none;border-radius:6px;outline:none;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.ra-usage-cache-toggle:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe))}
+.ra-usage-cache-toggle>.ra-usage-muted{margin-left:auto}
+.ra-usage-cache-toggle svg{flex:none;width:14px;height:14px;color:var(--dsw-alias-label-secondary,#999);transition:transform .15s ease}
+.ra-usage-cache-toggle[aria-expanded=true] svg{transform:rotate(180deg)}
 .ra-usage-cache details>summary{cursor:pointer;color:var(--dsw-alias-label-secondary,#999)}
 .ra-usage-cache details[open]>summary{margin-bottom:6px}
 .ra-usage-head{display:flex;align-items:center;gap:8px;min-width:0}
@@ -121,25 +126,40 @@ function useContextReport(sessionId: string | undefined, route: string | undefin
 function RefreshIcon() {
   return <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5v3h-3" /></svg>;
 }
-function TokenBreakdown({ usage }: { usage?: TokenUsageBreakdown }) {
+/** Share of input tokens served from cache, or undefined when the report cannot support one. */
+function hitRate(usage?: TokenUsageBreakdown): string | undefined {
   const input = usage?.inputTokens, read = usage?.cachedInputTokens;
   const ratio = input !== undefined && input > 0 && read !== undefined && read <= input ? read / input * 100 : undefined;
-  const percent = ratio === undefined ? ui('Unknown') : ratio > 0 && ratio < 0.1 ? '<0.1%' : `${Number(ratio.toFixed(1))}%`;
+  return ratio === undefined ? undefined : ratio > 0 && ratio < 0.1 ? '<0.1%' : `${Number(ratio.toFixed(1))}%`;
+}
+function TokenBreakdown({ usage }: { usage?: TokenUsageBreakdown }) {
   const token = (value: number | undefined) => <span title={value === undefined ? undefined : String(value)}>{value === undefined ? ui('Unknown') : formatTokens(value)}</span>;
   return <>
-    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Input tokens')}</span>{token(input)}</div>
-    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Cache read')}</span>{token(read)}</div>
+    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Input tokens')}</span>{token(usage?.inputTokens)}</div>
+    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Cache read')}</span>{token(usage?.cachedInputTokens)}</div>
     <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Cache write')}</span>{token(usage?.cacheWriteInputTokens)}</div>
-    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Cache hit rate')}</span><span>{percent}</span></div>
+    <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Cache hit rate')}</span><span>{hitRate(usage) ?? ui('Unknown')}</span></div>
     <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Output tokens')}</span>{token(usage?.outputTokens)}</div>
   </>;
 }
-export function CacheSection({ usage }: { usage?: TokenUsage }) {
+// The card unmounts whenever it closes, so the fold is remembered for the page instead.
+let cacheExpanded = false;
+/** Folded to its hit rate; the breakdown opens on click. */
+export function CacheSection({ usage, expanded: initial = cacheExpanded }: { usage?: TokenUsage; expanded?: boolean }) {
+  const [expanded, setExpanded] = useState(initial);
+  const rate = hitRate(usage?.last);
+  const toggle = () => { cacheExpanded = !expanded; setExpanded(cacheExpanded); };
   return <section className="ra-usage-cache" aria-label={ui('Prompt cache')}>
-    <p className="ra-usage-title">{ui('Prompt cache')}</p>
-    <p className="ra-usage-muted">{ui('Latest reported model request')}</p>
-    <TokenBreakdown usage={usage?.last} />
-    {usage?.total && <details><summary>{ui('Thread total')}</summary><TokenBreakdown usage={usage.total} /></details>}
+    <button type="button" className="ra-usage-cache-toggle" aria-expanded={expanded} onClick={toggle}>
+      <span className="ra-usage-title">{ui('Prompt cache')}</span>
+      <span className="ra-usage-muted">{rate === undefined ? ui('Unknown') : ui('{percent} hit', { percent: rate })}</span>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+    </button>
+    {expanded && <>
+      <p className="ra-usage-muted">{ui('Latest reported model request')}</p>
+      <TokenBreakdown usage={usage?.last} />
+      {usage?.total && <details><summary>{ui('Thread total')}</summary><TokenBreakdown usage={usage.total} /></details>}
+    </>}
   </section>;
 }
 function AccountSection({ provider, account, loading, refresh }: { provider: string; account?: AccountUsage; loading: boolean; refresh: () => void }) {

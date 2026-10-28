@@ -290,6 +290,7 @@ export const zh: Record<string, string> = {
   "Cache read": "缓存读取",
   "Cache write": "缓存写入",
   "Cache hit rate": "缓存命中比例",
+  "{percent} hit": "命中 {percent}",
   "Unknown": "未知",
   "{percent}% used": "已使用 {percent}%",
   "{used} / {max} tokens": "{used} / {max} tokens",
