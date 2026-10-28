@@ -4,8 +4,9 @@ import { ChatProjects } from './chat-projects.js';
 import type { WorkspacePlacement } from './workspace-access.js';
 import type { RemoteWorkspaces } from './remote-workspaces.js';
 import { workspaceAction, type WorkspaceFeatures } from './workspace-http.js';
+import type { Sharing } from './sharing.js';
 
-export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Pick<RemoteWorkspaces, 'create'>, features?: WorkspaceFeatures) {
+export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Pick<RemoteWorkspaces, 'create'>, features?: WorkspaceFeatures, sharing?: Pick<Sharing, 'catalog' | 'set' | 'status'>) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
     try {
@@ -28,6 +29,11 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         }
         case 'workspaceModels': result = workspace ? await workspace(field(input.sessionId, 'session ID', 256), request.signal) : { hostIds: [] }; break;
         case 'hostCatalogs': result = projects.hosts(); break;
+        case 'sharing': case 'setSharing': {
+          if (!sharing) throw new RemoteError('Sharing with remote CLIs is unavailable', 501);
+          if (action === 'setSharing') await sharing.set(input.kind, input.name, input.shared);
+          result = { ...await sharing.catalog(request.signal), errors: sharing.status() }; break;
+        }
         case 'usage': {
           const route = input.model === undefined ? undefined : field(input.model, 'model', 1000);
           const [projectId, cli] = route?.split('/') ?? [], project = projects.routes().find(p => p.id === projectId);

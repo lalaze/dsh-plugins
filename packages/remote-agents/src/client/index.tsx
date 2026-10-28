@@ -6,6 +6,7 @@ import type { Dashboard } from '../domain.js';
 import { api } from './api.js';
 import { installLocale, localizeError, ui, useLocale } from './i18n.js';
 import { HostManager } from './hosts.js';
+import { SharingSettings } from './sharing.js';
 import { styles } from './styles.js';
 import { Sessions } from './sessions.js';
 import { installModelGroups } from './model-groups.js';
@@ -39,7 +40,7 @@ function Settings({ openSessions, openWorkspace }: { openSessions: () => void; o
     <div className="ra-settings-heading"><h2>{ui('Remote agents')}</h2><button data-open-sessions onClick={openSessions}>{ui('Open sessions')}</button><button data-open-workspace onClick={openWorkspace}>{ui('Remote workspace')}</button></div>
     <p className="ra-muted ra-intro">{ui('Select remote CLIs in the DSH model picker and chat in the main conversation.')}</p>
     <p className="ra-muted ra-intro">{ui('Remote models are only available in workspaces belonging to the same machine.')}</p>
-    {dashboard ? <HostManager dashboard={dashboard} update={setDashboard} />
+    {dashboard ? <><HostManager dashboard={dashboard} update={setDashboard} /><SharingSettings dashboard={dashboard} /></>
       : error ? <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}<button type="button" onClick={() => setRevision(value => value + 1)}>{ui('Retry')}</button></div>
       : <div className="ra-empty" role="status">{ui('Loading settings…')}</div>}
   </section>;

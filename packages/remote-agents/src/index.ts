@@ -22,6 +22,7 @@ import { workspaceTransferHandler } from './workspace-http.js';
 import { installWorkspaceTerminal } from './workspace-terminal.js';
 import { workspaceTools } from './workspace-tools.js';
 import { dshHome, under } from './workspace-access.js';
+import { Sharing, type SharingSkills, type SharingTools } from './sharing.js';
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -70,8 +71,10 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   await tunnels.open();
   const terminal: { shell?: string } = {};
   const features = { files, tunnels, migration: new WorkspaceMigration(service), terminal };
+  const sharing = new Sharing(store, undefined, message => (ctx.get('logger') as { warn?(text: string): void } | undefined)?.warn?.(message));
+  service.sharing = sharing;
   // Close the store last: a reloaded plugin's new instance owns the state from then on.
-  ctx.effect(() => async () => { await tunnels.close(); await service.close(); await store.close(); });
+  ctx.effect(() => async () => { await sharing.close(); await tunnels.close(); await service.close(); await store.close(); });
   // Every finished turn is announced for usage statistics. Main chat does not report usage to DSH: a CLI turn's total
   // spans many model calls and would misstate the conversation's context size.
   store.usageListeners.add((taskId, usage, turn) => {
@@ -80,7 +83,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   });
   // Persistent CLIs kept running while DSH was away; reattach and catch up in the background.
   const resumed = service.resume();
-  ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, placement, workspaces, features) });
+  ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, placement, workspaces, features, sharing) });
   ctx.connection.fetch.register({ path: '/api/remote-agents/files', methods: ['GET', 'POST'], requestBody: 'streaming', fetch: workspaceTransferHandler(files) });
   ctx.inject(['terminalController'], scoped => {
     let disposed = false, cleanup: (() => void) | undefined;
@@ -135,6 +138,20 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     const wake = (agent: SyncAgent) => { void resumed.then(() => adapter.sync(agent)).catch(() => {}); };
     scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
     for (const agent of host.agents.list?.() ?? []) wake(agent);
+  });
+  // Shared MCP calls run through DSH's tool pipeline with the owning conversation's agent; skills come from its registry.
+  ctx.inject(['tools'], scoped => {
+    sharing.host.tools = scoped.get('tools') as unknown as SharingTools;
+    scoped.effect(() => () => { delete sharing.host.tools; });
+  });
+  ctx.inject(['skills'], scoped => {
+    sharing.host.skills = scoped.get('skills') as unknown as SharingSkills;
+    scoped.effect(() => () => { delete sharing.host.skills; });
+  });
+  ctx.inject(['agents'], scoped => {
+    const agents = scoped.get('agents') as { get(id: string): unknown };
+    sharing.host.agent = id => agents.get(id);
+    scoped.effect(() => () => { delete sharing.host.agent; });
   });
   // Native conversation routes and settings also work without the delegation tool registry.
   ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {

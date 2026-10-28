@@ -102,7 +102,8 @@ export class CliSession {
     }
   }
   private write(message: WireMessage, id?: string): void { this.peer.send(message, this.relay ? id : undefined); }
-  async initialize(protocol: NativeProtocol, argv: string[], resume = false): Promise<void> {
+  /** `mcpServers` are DSH's shared servers in ACP's stdio form; other protocols receive them as launch options. */
+  async initialize(protocol: NativeProtocol, argv: string[], resume = false, mcpServers: { name: string; command: string; args: string[]; env: { name: string; value: string }[] }[] = []): Promise<void> {
     this.agent.resumable = protocol !== 'acp';
     if (protocol === 'codex') {
       await initializeCodex(this.peer);
@@ -131,7 +132,7 @@ export class CliSession {
         : capabilities.agentCapabilities?.sessionCapabilities?.resume ? 'session/resume' : undefined;
       this.agent.resumable = !!resumeMethod;
       if (resume && !resumeMethod) throw new Error('This ACP CLI cannot resume sessions. The saved task history remains available.');
-      const response = await this.peer.request(resume ? resumeMethod! : 'session/new', { cwd: this.agent.cwd, mcpServers: [], ...(resume ? { sessionId: this.task.native!.sessionId } : {}) });
+      const response = await this.peer.request(resume ? resumeMethod! : 'session/new', { cwd: this.agent.cwd, mcpServers, ...(resume ? { sessionId: this.task.native!.sessionId } : {}) });
       this.nativeId = resume ? this.task.native!.sessionId : response?.sessionId;
       await configureAcpSession(this.peer, this.nativeId, this.task, response);
     } else if (protocol === 'antigravity') {

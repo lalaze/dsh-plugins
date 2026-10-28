@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend, type Backend, type BackendFactory } from './backend.js';
+import type { LaunchSharing } from './sharing.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from './domain.js';
@@ -17,7 +18,7 @@ export interface UsageOptions {
   refresh?: boolean;
 }
 export interface CreateOptions {
-  title?: string; origin?: Task['origin']; chat?: Task['chat']; signal?: AbortSignal;
+  title?: string; origin?: Task['origin']; chat?: Task['chat']; owner?: Task['owner']; signal?: AbortSignal;
   /** Recheck a workspace-bound request after discovery and immediately before CLI execution. */
   beforeStart?(): Promise<void>;
 }
@@ -32,7 +33,9 @@ export class RemoteAgentsService {
   private readonly catalogListeners = new Set<() => void>();
   private closed = false;
   private readonly factory: BackendFactory;
-  constructor(readonly store: Store, factory?: BackendFactory, private readonly readSshConfig = readSshConfigHosts) { this.factory = factory ?? (host => new SshBackend(host, store)); }
+  /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
+  sharing?: LaunchSharing;
+  constructor(readonly store: Store, factory?: BackendFactory, private readonly readSshConfig = readSshConfigHosts) { this.factory = factory ?? (host => new SshBackend(host, store, undefined, () => this.sharing)); }
   async sshConfig() { return this.readSshConfig(); }
   /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
   async withWorkspace<T>(hostId: string, verify: () => Promise<void>, action: (files: WorkspaceFiles) => Promise<T>): Promise<T> {
@@ -284,7 +287,7 @@ export class RemoteAgentsService {
         if (request.serviceTier && !model.serviceTiers?.some(t => t.id === request.serviceTier)) throw new RemoteError('The selected speed is unavailable', 409);
         await options.beforeStart?.();
         const now = new Date().toISOString();
-        const task: Task = { ...request, serverId: host.serverId!, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), state: 'creating' };
+        const task: Task = { ...request, serverId: host.serverId!, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), ...(options.owner ? { owner: options.owner } : {}), state: 'creating' };
         // Persist the exact execution intent and idempotency key before any remote mutation.
         await this.store.update(state => {
           if (!state.hosts.some(h => h.id === task.hostId && h.serverId === task.serverId)) throw new RemoteError('Remote host binding changed', 409);

@@ -9,7 +9,12 @@ export interface RelayCleanup { hostId: string; relayId: string }
  * `chatEfforts` maps a native chat model route to the reasoning effort its last conversation turn used;
  * `chatFast` lists the DSH conversations whose Codex turns run at the Fast speed.
  */
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[] }
+/**
+ * What DSH shares with remote CLIs: MCP servers switched on (off by default), skills switched off (on by default),
+ * and the secret that derives each task's bridge token.
+ */
+export interface SharingSettings { mcp?: Record<string, boolean>; skills?: Record<string, boolean>; secret?: string }
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings }
 export class Store {
   private state: State = { version: 1, hosts: [], tasks: [] };
   private writes = Promise.resolve();
@@ -58,9 +63,14 @@ export class Store {
     }
     if (value.chatEfforts !== undefined && !Object.values(record(value.chatEfforts)).every(effort => typeof effort === 'string')) throw new Error('Invalid saved reasoning efforts');
     if (value.chatFast !== undefined && (!Array.isArray(value.chatFast) || !value.chatFast.every(id => typeof id === 'string'))) throw new Error('Invalid saved Fast conversations');
+    if (value.sharing !== undefined) {
+      const sharing = record(value.sharing);
+      for (const table of [sharing.mcp, sharing.skills]) if (table !== undefined && !Object.values(record(table)).every(shared => typeof shared === 'boolean')) throw new Error('Invalid saved sharing settings');
+      if (sharing.secret !== undefined && (typeof sharing.secret !== 'string' || !/^[a-f0-9]{64}$/.test(sharing.secret))) throw new Error('Invalid saved sharing secret');
+    }
     this.state = { version: 1, hosts: value.hosts as HostConfig[], tasks: value.tasks as Task[], ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects as ChatProject[] } : {}),
       ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
-      ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}) };
+      ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */

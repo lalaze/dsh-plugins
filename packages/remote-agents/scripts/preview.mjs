@@ -8,6 +8,7 @@ import { build } from 'esbuild';
 import { Store } from '../src/store.ts';
 import { RemoteAgentsService } from '../src/service.ts';
 import { createHandler } from '../src/http.ts';
+import { Sharing } from '../src/sharing.ts';
 import { FakeRemote } from '../test/fakes.ts';
 import { ANTIGRAVITY_NOTICE } from '../src/antigravity.ts';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from '../src/native-chat.ts';
@@ -74,9 +75,19 @@ const placement = async sessionId => sessionId === 'current'
 const workspaceService = new WorkspaceService(service, placement, async () => mirrorRoot);
 const tunnels = new WorkspaceTunnels(join(directory, 'tunnels.json'), () => store.hosts(), () => spawn(process.execPath, ['-e', 'process.stderr.write("debug1: Entering interactive session.\\n");setInterval(()=>{},1000)'], { stdio: ['pipe', 'pipe', 'pipe'] })); await tunnels.open();
 const migration = new WorkspaceMigration(service, directory, endpoint);
+// DSH's tool and skill registries for the sharing settings: two MCP servers and three personal skills.
+const sharing = new Sharing(store);
+Object.assign(sharing.host, {
+  tools: { definitions: () => ['create_issue', 'search_code', 'list_pulls'].map(name => ({ name: `mcp__github__${name}`, description: name })).concat([{ name: 'mcp__linear__create_ticket', description: 'Create a ticket' }]), execute: async () => ({ results: [] }) },
+  skills: { list: async () => [
+    { name: 'release-notes', description: '根据合并的 PR 生成版本说明', source: 'user-dsh', invocation: { modelInvocable: true } },
+    { name: 'db-migration', description: 'Plan and review database migrations with rollback steps', source: 'user-agents', invocation: { modelInvocable: true } },
+    { name: 'design-qa', description: 'Compare an implementation with its design reference', source: 'bundled', invocation: { modelInvocable: true } },
+  ], get: async () => undefined },
+});
 const handler = createHandler(service, undefined, placement, {
   create: async (...args) => { if (createDelay) await new Promise(resolve => setTimeout(resolve, createDelay)); return workspaces.create(...args); },
-}, { files: workspaceService, tunnels, migration });
+}, { files: workspaceService, tunnels, migration }, sharing);
 const transfer = workspaceTransferHandler(workspaceService);
 const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined });
 const root = fileURLToPath(new URL('../', import.meta.url));

@@ -94,6 +94,15 @@ Ask DSH something like *"have Codex on build-box fix the failing tests in /srv/a
 - Stopping the DSH response stops waiting but does **not** stop the remote agents, matching Paseo's independent agents. Stop them with `remote_agent_stop`.
 - The tools load when DSH provides agent tools and approvals. Native model routes and settings work without the delegation tool registry.
 
+## Sharing DSH MCP servers and skills
+
+**Settings → Remote agents → Share with remote CLIs** lists the MCP servers and personal skills configured in DSH. Remote CLIs started afterwards receive what is selected; CLIs already running keep what they had.
+
+- **MCP servers (off by default).** Tools run in DSH on this computer; the remote CLI gets a proxy. A call runs as the DSH conversation that started the CLI: a main-chat session's own conversation, or the conversation that delegated the task. DSH permission rules, approvals and hooks therefore apply, and MCP credentials never leave this computer. The CLI pre-approves these proxies, so DSH alone decides whether to ask. Remote CLIs see each server as `dsh-<name>`, for example `mcp__dsh-github__create_issue`. Sessions created directly in the sessions panel belong to no DSH conversation and receive no MCP servers.
+- **Skills (on by default).** Personal, bundled and plugin skills are copied to `~/.dsh-remote-agents/shared` on each machine, including resources such as `scripts/`; unchanged skills are not sent again. Project skills are not copied: the remote CLI finds the remote project's own skills. Claude Code loads them as the `dsh` plugin (for example `dsh:release-notes`). Codex, DSH, Grok and CodeBuddy load them with the `load_skill` tool of an MCP server named `dsh`, which runs on the remote machine and needs no DSH connection.
+- **Connection.** Each machine uses one SSH reverse forward to a Unix socket under `~/.dsh-remote-agents/bridge` that only your account can open; each task has its own token. While DSH is not connected, a proxy still lists the tools it last saw and calls return a message saying DSH is disconnected; they recover once DSH reconnects. If the server forbids Unix socket forwarding (`AllowStreamLocalForwarding no`), the settings page shows the error; skills are unaffected.
+- **Per CLI:** Claude Code uses `--plugin-dir`, `--mcp-config` and `--allowedTools`; Codex uses `-c mcp_servers.<name>…` overrides with `default_tools_approval_mode = "approve"`; ACP CLIs (DSH, Grok, CodeBuddy) use `mcpServers` in `session/new`. These are launch options only; the remote CLI's own configuration files are not changed. Antigravity has no way to receive MCP servers or skills at launch and is not supported.
+
 ## Supported CLIs
 
 | CLI | Direct protocol |

@@ -13,6 +13,7 @@ import { readAccountUsage } from './usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WorkspaceFiles } from './workspace-files.js';
+import { acpServers, sharedArguments, type LaunchSharing } from './sharing.js';
 export { connectionInput } from './ssh.js';
 
 /** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
@@ -92,7 +93,7 @@ export class SshBackend implements Backend {
   private relayUnavailable?: RelayUnavailable;
   private ending = new Map<string, Promise<void>>();
   private cleaning?: Promise<void>;
-  constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport) {
+  constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport, private readonly sharing: () => LaunchSharing | undefined = () => undefined) {
     this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection));
     this.workspaceFiles = new WorkspaceFiles(this.transport);
   }
@@ -282,6 +283,8 @@ done`}`, 15_000, { login: false });
     session.agent.reconnecting = true;
     this.sessions.set(task.id, session);
     link.open();
+    // Its MCP proxies reach DSH again once the reverse forward is back.
+    this.sharing()?.attached(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, task);
     return structuredClone(session.agent);
   }
   private lease(id: string): () => void {
@@ -345,7 +348,12 @@ done`}`, 15_000, { login: false });
       if (!idle) throw new Error(`This SSH host already has ${SESSION_LIMIT} working CLI sessions. Wait for one to finish, or archive an idle agent.`);
       idle[1].close(); this.sessions.delete(idle[0]);
     }
-    const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : argv;
+    // DSH's shared MCP servers and skills are launch options only; the saved argv stays the CLI's own.
+    // Sharing never blocks a launch: the CLI starts without what could not be prepared.
+    const shared = await this.sharing()?.prepare(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, saved, profile.protocol, signal)
+      .catch(error => { signal?.throwIfAborted(); console.warn(`[remote-agents] Sharing with ${this.host.label} failed: ${String(error)}`); return undefined; });
+    signal?.throwIfAborted(); this.assertOpen();
+    const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : sharedArguments(profile.protocol, argv, shared);
     let link: RelayLink | undefined;
     if (relay) {
       // Record the relay before it exists, so an interrupted start is cleaned up rather than leaked.
@@ -364,7 +372,7 @@ done`}`, 15_000, { login: false });
     const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch)), history, link);    this.sessions.set(task.id, session);
     link?.open();
     try {
-      await session.initialize(profile.protocol, argv, resume);
+      await session.initialize(profile.protocol, argv, resume, acpServers(shared));
       this.assertOpen();
       if (!resume) await session.send(attachmentPrompt(task.prompt, attachments), task.id, attachments);
       return structuredClone(session.agent);
