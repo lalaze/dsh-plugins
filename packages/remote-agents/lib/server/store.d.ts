@@ -4,12 +4,18 @@ export interface RelayCleanup {
     hostId: string;
     relayId: string;
 }
+/**
+ * `chatEfforts` maps a native chat model route to the reasoning effort its last conversation turn used;
+ * `chatFast` lists the DSH conversations whose Codex turns run at the Fast speed.
+ */
 export interface State {
     version: 1;
     hosts: HostConfig[];
     tasks: Task[];
     mainChatProjects?: ChatProject[];
     relayCleanups?: RelayCleanup[];
+    chatEfforts?: Record<string, string>;
+    chatFast?: string[];
 }
 export declare class Store {
     private readonly path;
@@ -30,6 +36,10 @@ export declare class Store {
     /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
     hosts(): HostConfig[];
     chatProjects(): ChatProject[];
+    /** The reasoning effort a native chat model route last used, if any. */
+    /** Whether a DSH conversation's Codex turns use the Fast speed. */
+    chatFast(sessionId: string): boolean;
+    chatEffort(route: string): string | undefined;
     relayCleanups(hostId: string): RelayCleanup[];
     /** A copy of one saved agent record, without cloning the whole registry. */
     task(predicate: (task: Task) => boolean): Task | undefined;

@@ -56,6 +56,8 @@ export interface Model extends Choice {
     serviceTiers?: Choice[];
     inputModalities?: ('text' | 'image')[];
 }
+/** The tier the Fast switch selects: Codex names it `priority` or `fast`; otherwise the model's only extra tier. */
+export declare const fastTierOf: (model: Pick<Model, "serviceTiers">) => Choice | undefined;
 export interface Provider {
     id: string;
     label: string;

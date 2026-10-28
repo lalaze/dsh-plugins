@@ -26,6 +26,8 @@ export function presetMode(provider, modes, permission) {
     const mode = permission && PRESET_MODES[provider]?.[permission];
     return mode && permissionModes(provider, modes).some(m => m.id === mode) ? mode : undefined;
 }
+/** The tier the Fast switch selects: Codex names it `priority` or `fast`; otherwise the model's only extra tier. */
+export const fastTierOf = (model) => model.serviceTiers?.find(t => /^(?:priority|fast)$/i.test(t.id) || /^fast$/i.test(t.label)) ?? (model.serviceTiers?.length === 1 ? model.serviceTiers[0] : undefined);
 /** A CLI is never started without a relay, because it would end silently with DSH. */
 export const RELAY_UNAVAILABLE = {
     'missing-node': 'The remote CLI was not started: Node.js was not found on the SSH host\'s login PATH, so the CLI could not keep running after DSH quits or SSH disconnects. Make Node.js 18 or newer available to the SSH login shell, then retry.',

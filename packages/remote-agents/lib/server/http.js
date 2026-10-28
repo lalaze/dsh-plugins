@@ -71,6 +71,12 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'chatProjects':
                     result = projects.list();
                     break;
+                case 'chatSpeed':
+                    result = projects.speed(field(input.sessionId, 'session ID', 256), field(input.model, 'model', 1000));
+                    break;
+                case 'setChatSpeed':
+                    result = await projects.setFast(field(input.sessionId, 'session ID', 256), input.fast === true);
+                    break;
                 case 'addChatProject':
                     result = await projects.add(input.project);
                     break;

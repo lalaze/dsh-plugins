@@ -35,6 +35,7 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     private controllers;
     private released;
     private auxiliaryDirectories;
+    private modelInfoListeners;
     constructor(projects: ChatProjects, host: ChatHost, pollMs?: number);
     providerInfo(provider: string): {
         id: string;
@@ -51,6 +52,10 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     listModels(provider: string): Promise<LlmModelInfo[]>;
     private route;
     resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo>;
+    /** Called when an advertised default effort changes, for the plugin to refresh DSH's model catalog. */
+    onModelInfoChange(listener: () => void): () => void;
+    /** Remember the effort a conversation turn uses with a model; compaction's disposable sessions do not count. */
+    private rememberEffort;
     /**
      * Plugin unload or DSH shutdown: end local streams but leave remote turns running. A persistent
      * CLI keeps working; the conversation shows its remaining output with the next response.

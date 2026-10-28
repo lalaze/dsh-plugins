@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
 import { join } from 'node:path';
 import { createToolResultMessage, createUserMessage, LlmAdapter, LlmError, MessageId, ReasoningEffortId, ToolCallId, } from '@deepseek-ai/dsh-llm';
-import { busy, inputModalitiesOf, presetMode, remotePath } from './domain.js';
+import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath } from './domain.js';
 import { restoreFiles, stageAttachments } from './attachments.js';
 import { ChatImageLinks, saveChatImage } from './chat-images.js';
 import { decidePermission } from './tools.js';
@@ -93,6 +93,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     controllers = new Set();
     released = false;
     auxiliaryDirectories = new Map();
+    modelInfoListeners = new Set();
     constructor(projects, host, pollMs = 150) {
         super();
         this.projects = projects;
@@ -111,10 +112,11 @@ export class RemoteCliAdapter extends LlmAdapter {
         const projects = this.projects.hosts();
         return projects.flatMap(project => {
             const host = this.projects.service.hosts().find(h => h.id === project.hostId);
-            return project.providers.filter(p => p.status === 'ready' && chatProviderId(p.id) === provider).flatMap(p => p.models.flatMap(m => [undefined, ...m.serviceTiers ?? []].map(tier => ({
-                provider, id: chatModelId(project.id, p.id, m.id, tier?.id), name: `${m.label}${tier ? ` ${tier.label}` : ''} · ${host?.label ?? project.label}`,
+            // One row per model: Codex's Fast speed is the composer's lightning switch. Routes saved with a tier still resolve.
+            return project.providers.filter(p => p.status === 'ready' && chatProviderId(p.id) === provider).flatMap(p => p.models.map(m => ({
+                provider, id: chatModelId(project.id, p.id, m.id), name: `${m.label} · ${host?.label ?? project.label}`,
                 description: `${host?.label ?? project.label} · ${p.label}`, inputModalities: inputModalitiesOf(p.id, m),
-            }))));
+            })));
         });
     }
     route(providerRoute, modelId) {
@@ -140,9 +142,24 @@ export class RemoteCliAdapter extends LlmAdapter {
         signal?.throwIfAborted();
         const route = this.route(provider, model);
         const advertised = (await this.listModels(provider)).find(m => m.id === model);
+        // DSH picks a model's default effort whenever it is chosen in the menu, so the default is the effort this
+        // model last ran with, while the model still offers it; otherwise the CLI's own default.
+        const remembered = this.projects.service.store.chatEffort(model);
+        const defaultEffort = remembered && route.model.thinkingOptions?.some(o => o.id === remembered) ? remembered : route.model.defaultThinkingOptionId;
         return { provider, id: model, name: advertised?.name ?? route.model.label, inputModalities: inputModalitiesOf(route.provider.id, route.model),
             ...(route.model.thinkingOptions?.length ? { reasoning: { efforts: route.model.thinkingOptions.map(o => ({ id: ReasoningEffortId(o.id), name: o.label })),
-                    ...(route.model.defaultThinkingOptionId ? { defaultEffort: ReasoningEffortId(route.model.defaultThinkingOptionId) } : {}) } } : {}) };
+                    ...(defaultEffort ? { defaultEffort: ReasoningEffortId(defaultEffort) } : {}) } } : {}) };
+    }
+    /** Called when an advertised default effort changes, for the plugin to refresh DSH's model catalog. */
+    onModelInfoChange(listener) { this.modelInfoListeners.add(listener); return () => { this.modelInfoListeners.delete(listener); }; }
+    /** Remember the effort a conversation turn uses with a model; compaction's disposable sessions do not count. */
+    async rememberEffort(route, effort) {
+        const store = this.projects.service.store;
+        if (store.chatEffort(route) === effort)
+            return;
+        await store.update(state => { state.chatEfforts = { ...state.chatEfforts, [route]: effort }; });
+        for (const listener of this.modelInfoListeners)
+            listener();
     }
     /**
      * Plugin unload or DSH shutdown: end local streams but leave remote turns running. A persistent
@@ -182,7 +199,9 @@ export class RemoteCliAdapter extends LlmAdapter {
             throw new LlmError('Select a remote CLI in a DSH conversation to use it.', 'SESSION_REQUIRED');
         if (this.active.has(sessionId))
             throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
-        const { project, provider, model, serviceTier } = this.route(options.provider, options.model), service = this.projects.service;
+        const { project, provider, model, serviceTier: routeTier } = this.route(options.provider, options.model), service = this.projects.service;
+        // A route saved with a tier keeps it; otherwise the conversation's lightning switch picks the Fast tier.
+        const serviceTier = routeTier ?? (service.store.chatFast(sessionId) ? fastTierOf(model)?.id : undefined);
         const lastUser = options.messages.findLast(m => m.role === 'user' && (!m.source || m.source.kind === 'user'));
         if (!lastUser || lastUser.role !== 'user')
             throw new LlmError('A user message is required for the remote CLI.', 'INVALID_REQUEST');
@@ -198,6 +217,8 @@ export class RemoteCliAdapter extends LlmAdapter {
         const effort = options.reasoningEffort ?? model.defaultThinkingOptionId;
         if (effort && !model.thinkingOptions?.some(o => o.id === effort))
             throw new LlmError('This remote model does not support that thinking level.', 'INVALID_REQUEST');
+        if (options.reasoningEffort && !this.auxiliaryDirectories.has(sessionId))
+            void this.rememberEffort(options.model, options.reasoningEffort).catch(() => { });
         let task = service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route === options.model)
             ?? service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route.startsWith(`${project.id}/${encodeURIComponent(provider.id)}/`));
         // Recheck even saved routes: a previous model choice cannot authorize another workspace's machine.
