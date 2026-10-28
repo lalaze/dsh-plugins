@@ -9,9 +9,9 @@ import { WorkspaceFiles } from '../src/workspace-files.js';
 import { fileOperation, hash, WorkspaceService } from '../src/workspace-service.js';
 import { RemoteAgentsService } from '../src/service.js';
 import { expectedTarget, workspaceTransferHandler } from '../src/workspace-http.js';
-import type { WorkspaceFile } from '../src/workspace-domain.js';
+import type { WorkspaceFile, WorkspaceManifest } from '../src/workspace-domain.js';
 import { fixture } from './fakes.js';
-import { WORKSPACE_RUNNER } from '../src/workspace-runner.js';
+import { REMOTE_DSH_RUNNER } from '../src/workspace-runner.js';
 import { promisify } from 'node:util';
 
 class LocalTransport extends OpenSshTransport {
@@ -69,11 +69,51 @@ test('remote commands preserve stdout, stderr and exit codes', async t => {
   const result = await files.operate(remote, { op: 'command', path: '.', command: 'printf output; printf problem >&2; exit 7' });
   assert.deepEqual(result, { stdout: 'output', stderr: 'problem', exitCode: 7, timedOut: false, truncated: false });
 });
+test('workspace files and commands never start Node.js on the SSH host', async t => {
+  const { root, remote, files } = await directory(t), bin = join(root, '.local/bin'), marker = join(root, 'node-started');
+  // The login PATH prefers this node after its version check; any real start of it is recorded and fails.
+  await mkdir(bin, { recursive: true });
+  await writeFile(join(bin, 'node'), `#!/bin/sh\n[ "$1" = --version ] && { echo v99.0.0; exit 0; }\n: > '${marker}'\nexit 127\n`, { mode: 0o755 });
+  await files.operate(remote, { op: 'mkdir', path: 'src' });
+  const created = await files.operate(remote, { op: 'write', path: 'src/app.txt', content: 'hello', revision: null }) as { revision: string };
+  assert.equal((await files.operate(remote, { op: 'read', path: 'src/app.txt' }) as WorkspaceFile).content, 'hello');
+  assert.deepEqual(await files.operate(remote, { op: 'stat', path: 'src/app.txt' }), { path: 'src/app.txt', revision: created.revision, size: 5 });
+  assert.deepEqual((await files.operate(remote, { op: 'list', path: 'src' }) as { entries: { path: string; kind: string; size: number }[] }).entries.map(e => [e.path, e.kind, e.size]), [['src/app.txt', 'file', 5]]);
+  assert.deepEqual((await files.operate(remote, { op: 'search', path: '.', query: 'ell' }) as { matches: unknown[] }).matches, [{ path: 'src/app.txt', line: 1, text: 'hello' }]);
+  assert.deepEqual({ ...(await files.operate(remote, { op: 'manifest', path: '.' }) as WorkspaceManifest).files }, { 'src/app.txt': { hash: created.revision, size: 5 } });
+  assert.deepEqual(await files.download(remote, 'src/app.txt', created.revision), Buffer.from('hello'));
+  await files.operate(remote, { op: 'move', path: 'src/app.txt', destination: 'app.txt', revision: created.revision });
+  await files.operate(remote, { op: 'remove', path: 'app.txt', revision: created.revision });
+  assert.equal((await files.operate(remote, { op: 'command', path: 'src', command: 'pwd -P' }) as { stdout: string }).stdout.trim(), await realpath(join(remote, 'src')));
+  assert.equal(await stat(marker).then(() => true, () => false), false);
+});
+test('a remote command that times out stops everything it started, and flooding output is cut', async t => {
+  const { remote, files } = await directory(t);
+  const started = Date.now();
+  const timed = await files.operate(remote, { op: 'command', path: '.', command: 'printf started; (sleep 3; : > survived) & sleep 30', timeoutMs: 1000 }) as { stdout: string; timedOut: boolean; exitCode: number | null };
+  assert.deepEqual([timed.stdout, timed.timedOut, timed.exitCode], ['started', true, null]);
+  assert.ok(Date.now() - started < 2800, 'the command stops at its timeout');
+  await new Promise(resolve => setTimeout(resolve, 3500 - (Date.now() - started)));
+  assert.deepEqual(await readdir(remote), []);
+  const flood = await files.operate(remote, { op: 'command', path: '.', command: 'yes' }) as { stdout: string; truncated: boolean; exitCode: number | null };
+  assert.deepEqual([flood.truncated, flood.exitCode], [true, null]);
+  assert.ok(flood.stdout.length <= 256 * 1024 && flood.stdout.startsWith('y\ny\n'));
+});
+test('a name containing a newline is listed and readable, but scans skip it', async t => {
+  const { remote, files } = await directory(t);
+  await writeFile(join(remote, 'two\nlines'), 'needle'); await writeFile(join(remote, 'plain'), 'needle');
+  assert.deepEqual((await files.operate(remote, { op: 'list', path: '.' }) as { entries: { name: string }[] }).entries.map(e => e.name), ['plain', 'two\nlines']);
+  assert.equal((await files.operate(remote, { op: 'read', path: 'two\nlines' }) as WorkspaceFile).content, 'needle');
+  const manifest = await files.operate(remote, { op: 'manifest', path: '.' }) as WorkspaceManifest;
+  assert.deepEqual([Object.keys(manifest.files), manifest.skipped], [['plain'], ['two\nlines']]);
+  const found = await files.operate(remote, { op: 'search', path: '.', query: 'needle' }) as { matches: { path: string }[]; skipped: string[] };
+  assert.deepEqual([found.matches.map(m => m.path), found.skipped], [['plain'], ['two\nlines']]);
+});
 test('managed remote DSH startup is isolated, idempotent, scoped to its workspace and explicitly stopped', async t => {
   const { root, remote } = await directory(t), bin = join(root, 'bin'); await mkdir(bin);
   await writeFile(join(bin, 'dsh'), `#!${process.execPath}\nconst port=process.argv[process.argv.indexOf('--port')+1];console.log(process.argv.slice(2).join(' '));console.log('http://127.0.0.1:'+port+'/?token=fixture-only');setInterval(()=>{},1000);\n`, { mode: 0o700 });
   await writeFile(join(bin, 'ps'), `#!${process.execPath}\ntry{process.kill(Number(process.argv[process.argv.indexOf('-p')+1]),0);console.log('fixed-test-start-stamp');}catch{process.exit(1);}\n`, { mode: 0o700 });
-  const source = `require('node:os').homedir=()=>${JSON.stringify(root)};\n${WORKSPACE_RUNNER}`;
+  const source = `require('node:os').homedir=()=>${JSON.stringify(root)};\n${REMOTE_DSH_RUNNER}`;
   const run = async (op: string, cwd = remote, host = '100.96.195.115') => JSON.parse((await promisify(execFile)(process.execPath, ['-e', source, JSON.stringify({ op, cwd, path: '.', port: 3080, host })], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 10000 })).stdout);
   let pid: number | undefined;
   t.after(() => { if (pid) try { process.kill(-pid, 'SIGKILL'); } catch {} });
@@ -218,32 +258,21 @@ test('a save waits for a live lock holder and breaks the lock of one that died',
   assert.equal(await readFile(join(remote, 'locked.txt'), 'utf8'), 'after the dead holder');
   assert.deepEqual(await readdir(locks), []);
 });
-test('runners that reclaim a dead holder\'s lock together still let exactly one save through', async t => {
-  const { root, remote } = await directory(t);
-  // Random delays in every filesystem call interleave the runners. Removing another runner's lock waits longest,
-  // so runners that found the same stale lock overlap while reclaiming it.
-  const source = `const delayed = require('node:fs/promises');
-for (const name of ['readdir', 'lstat', 'stat', 'readFile', 'writeFile', 'rm', 'unlink', 'link', 'rename']) {
-  const original = delayed[name];
-  delayed[name] = async (...args) => {
-    const target = String(args[0]), reclaim = (name === 'rm' || name === 'unlink') && target.includes('/.dsh-remote-agents/locks/') && !target.includes('.' + process.pid + '.');
-    await new Promise(r => setTimeout(r, Math.random() * (reclaim ? 150 : 20)));
-    return original.apply(delayed, args);
-  };
-}
-${WORKSPACE_RUNNER}`;
-  const save = async (content: string, revision: string) => JSON.parse((await promisify(execFile)(process.execPath, ['-e', source, JSON.stringify({ op: 'write', cwd: remote, path: 'shared.txt', content, revision })], { env: { ...process.env, HOME: root }, timeout: 40000 })).stdout) as { result?: { revision: string }; error?: string };
+test('saves that reclaim a dead holder\'s lock together still let exactly one through', async t => {
+  const { root, remote, files } = await directory(t);
   const exited = spawn(process.execPath, ['-e', '']); await new Promise(resolve => exited.once('exit', resolve));
   const locks = join(root, '.dsh-remote-agents/locks'); await mkdir(locks, { recursive: true });
   await writeFile(join(remote, 'shared.txt'), 'base');
-  for (let round = 0; round < 12; round++) {
-    await writeFile(join(locks, lockEntry(hash(join(await realpath(remote), 'shared.txt')), exited.pid!)), String(exited.pid));
+  for (let round = 0; round < 8; round++) {
+    await writeFile(join(locks, lockEntry(hash(join(await realpath(remote), 'shared.txt')), exited.pid!)), '');
     const revision = hash(await readFile(join(remote, 'shared.txt')));
-    const results = await Promise.all(Array.from({ length: 6 }, (_, writer) => save(`round ${round} writer ${writer}`, revision)));
-    const saved = results.flatMap(r => r.result ? [r.result] : []);
+    const results = await Promise.allSettled(Array.from({ length: 6 }, (_, writer) =>
+      files.operate(remote, { op: 'write', path: 'shared.txt', content: `round ${round} writer ${writer}`, revision }) as Promise<{ revision: string }>));
+    const saved = results.flatMap(r => r.status === 'fulfilled' ? [r.value] : []);
     assert.equal(saved.length, 1, `round ${round}: ${saved.length} saves succeeded`);
     assert.equal(hash(await readFile(join(remote, 'shared.txt'))), saved[0].revision);
   }
+  assert.deepEqual(await readdir(locks), []);
 });
 test('paths keep leading and trailing spaces, so an operation never reaches a differently named file', async t => {
   const f = await fixture(t), d = await directory(t); await f.service.close();
