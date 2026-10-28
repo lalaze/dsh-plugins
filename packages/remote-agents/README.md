@@ -136,6 +136,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
 
+**Upgrading from 0.2.26:** Adds the integrated **Remote workspace** panel (files, commands, sync, tunnels and remote DSH) and a `remote_workspace` tool for DSH models; see [Integrated workspace tools](#integrated-workspace-tools). Machines saved in dsh-remote can be imported from **Settings → Remote agents**. Restart DSH and refresh the client after updating.
+
 **Upgrading from 0.2.25:** Provider groups in the model menu fold again in DSH builds whose model rows carry no model ids, such as the Desktop app: those groups remember their folding by provider name. Groups that already folded keep their saved choices. Refresh the client after updating.
 
 **Upgrading from 0.2.24:** A conversation whose remote CLI failed to start (for example, because the SSH host had no Node.js) no longer stays stuck with "This agent is still working" after the host is fixed: the next message starts the CLI with that message, keeping earlier messages as context. Restart DSH after updating.
