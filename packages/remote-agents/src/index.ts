@@ -22,6 +22,7 @@ import { installWorkspaceTerminal } from './workspace-terminal.js';
 import { workspaceTools } from './workspace-tools.js';
 import { dshHome, under } from './workspace-access.js';
 import { Sharing, type SharingAttachments, type SharingSkills, type SharingTools } from './sharing.js';
+import { repairStoredSessions } from './session-repair.js';
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -49,6 +50,13 @@ export const Config = Schema.object({ stateDir: Schema.string().default(stateDir
 export async function apply(ctx: Context, config: { stateDir?: string } = {}): Promise<void> {
   const store = new Store(join(config.stateDir ?? stateDir(), 'state.json'));
   await store.open();
+  const logger = () => ctx.get('logger') as { info?(text: string): void; warn?(text: string): void } | undefined;
+  // Conversations saved by 0.2.53 and earlier stored a remote tool row out of order, and DSH refuses to reopen them.
+  const persistence = ctx.get('sessionPersistence') as { root?: unknown } | undefined;
+  const open = (id: string) => !!(ctx.get('sessions') as { get?(id: string): unknown } | undefined)?.get?.(id);
+  void repairStoredSessions(typeof persistence?.root === 'string' ? persistence.root : join(dshHome(), 'sessions'), store.directory, open)
+    .then(paths => { if (paths.length) logger()?.info?.(`Repaired ${paths.length} remote CLI conversation log(s) DSH could not reopen; originals kept in ${join(store.directory, 'session-backups')}`); })
+    .catch(error => logger()?.warn?.(`Remote CLI conversation repair failed: ${String(error)}`));
   const service = new RemoteAgentsService(store);
   const projects = new ChatProjects(service);
   const workspace = new WorkspaceAccess(() => store.hosts(), { runtime: () => ctx.get('subprocess') as WorkspaceRuntime | undefined });
