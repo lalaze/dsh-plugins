@@ -1,0 +1,33 @@
+import { createI18n } from '@dsh-plugins/i18n';
+
+export const i18n = createI18n('dsh-file-editor', {
+  'File contents': '文件内容',
+  'Save': '保存',
+  'Revert': '还原',
+  'Reload': '重新加载',
+  'Unsaved': '未保存',
+  'Saved': '已保存',
+  'Edit': '编辑',
+  'Preview': '预览',
+  'File view': '文件视图',
+  'Fit to pane': '适应窗格',
+  'Actual size': '实际大小',
+  'Loading file…': '正在加载文件…',
+  'This file is not UTF-8 text, so it cannot be edited here.': '该文件不是 UTF-8 文本，无法在此编辑。',
+  'This file is larger than the 4 MB editor limit.': '该文件超过 4 MB 编辑上限。',
+  'The file changed on disk.': '文件已在磁盘上被修改。',
+  'Reload to see the new version; your unsaved changes will be lost.': '重新加载以查看新版本，未保存的修改将丢失。',
+  'File not found': '找不到文件',
+  'Permission denied': '没有权限',
+  'Not a file': '不是文件',
+  'Invalid file path': '文件路径无效',
+  'This conversation has no workspace folder': '此对话没有工作区文件夹',
+  'Files of a remote workspace open in Remote Agents': '远程工作区的文件由 Remote Agents 打开',
+  'The workspace folder is not available': '工作区文件夹不可用',
+  'The file is outside this conversation’s workspace': '该文件不在此对话的工作区内',
+  'The file is too large to preview': '文件过大，无法预览',
+  'The file exceeds the 4 MB editor limit': '文件超过 4 MB 编辑上限',
+  'The file changed on disk. Reload it before saving.': '文件已在磁盘上被修改，请重新加载后再保存。',
+  'The file could not be read or saved': '无法读取或保存该文件',
+});
+export const { ui, installLocale, localizeError } = i18n;

@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CodeEditor, ImagePreview, MarkdownPreview, imageType, isMarkdown } from '@dsh-plugins/file-view';
 import { api, requestId } from '../api.js';
 import { ui, localizeError, useLocale } from '../i18n.js';
 import { workspaceStyles } from './styles.js';
@@ -32,6 +33,8 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
   const [selected, setSelected] = useState<string>(), [file, setFile] = useState<WorkspaceFile>(), [draft, setDraft] = useState('');
   // Rename, delete and download need only the revision; text editing additionally needs readable content.
   const [info, setInfo] = useState<{ path: string; revision: string; size: number }>(), [readOnly, setReadOnly] = useState('');
+  // Markdown and SVG files can also be shown rendered; binary images are only shown.
+  const [mode, setMode] = useState<'edit' | 'preview'>('edit'), [picture, setPicture] = useState<string>();
   const [name, setName] = useState(''), [kind, setKind] = useState<'file' | 'directory'>('file'), [deleting, setDeleting] = useState(false), [creating, setCreating] = useState(false);
   const [query, setQuery] = useState(''), [matches, setMatches] = useState<{ path: string; line: number; text: string }[]>();
   const [direction, setDirection] = useState<'pull' | 'push'>('pull'), [sync, setSync] = useState<SyncResult>();
@@ -65,7 +68,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
     return () => c.abort();
   }, [target, path, call]);
   const open = useCallback(async (filePath: string) => {
-    setSelected(filePath); setFile(undefined); setInfo(undefined); setReadOnly(''); setDraft(''); setDeleting(false);
+    setSelected(filePath); setFile(undefined); setInfo(undefined); setReadOnly(''); setDraft(''); setDeleting(false); setMode('edit');
     try {
       const value = await operate<WorkspaceFile>({ op: 'read', path: filePath });
       if (alive.current) { setFile(value); setInfo(value); setDraft(value.content); }
@@ -106,6 +109,21 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
     await call('startWorkspaceTunnel', { id });
     if (alive.current) setWebLink(`http://${accessHost()}:${listenPort}${remote.pathname}${remote.search}`);
   };
+  // A binary image is fetched at the revision just read; an SVG previews the text being edited.
+  const binaryImage = !file && info && imageType(info.path) ? info : undefined;
+  useEffect(() => {
+    if (!binaryImage || !target || !sessionId) return;
+    const c = new AbortController();
+    let url: string | undefined;
+    void fetch(urlFor(binaryImage.path, binaryImage.revision), { headers: { 'X-DSH-Remote-Agents': '1' }, signal: c.signal })
+      .then(async response => { if (!response.ok) throw new Error((await response.json()).error); return response.blob(); })
+      .then(blob => { if (!c.signal.aborted) { url = URL.createObjectURL(blob); setPicture(url); } })
+      .catch(e => { if (!c.signal.aborted) setError(localizeError(e)); });
+    return () => { c.abort(); if (url) URL.revokeObjectURL(url); setPicture(undefined); };
+  }, [binaryImage?.path, binaryImage?.revision, target, sessionId]);
+  const svg = useMemo(() => file && mode === 'preview' && imageType(file.path) ? URL.createObjectURL(new Blob([draft], { type: 'image/svg+xml' })) : undefined, [file, mode, draft]);
+  useEffect(() => () => { if (svg) URL.revokeObjectURL(svg); }, [svg]);
+  const previewable = !!file && (isMarkdown(file.path) || !!imageType(file.path));
   const tunnelAction = async (action: string, id: string) => { await call(action, { id }); setTunnels(await call<Tunnel[]>('workspaceTunnels')); };
 
   const folders = path ? path.split('/') : [];
@@ -171,9 +189,13 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
             <div className="ra-ws-viewer-head"><Icon kind="file" /><span className="ra-mono" title={selected}>{selected}</span>{dirty && <span className="ra-ws-dirty">{ui('Unsaved')}</span>}
               <button type="button" className="ra-ws-icon" title={ui('Download')} aria-label={ui('Download')} disabled={busy} onClick={() => void run(download)}><Icon kind="download" /></button>
               <button type="button" className="ra-ws-icon" title={ui('Close file')} aria-label={ui('Close file')} disabled={busy} onClick={close}><Icon kind="close" /></button></div>
-            {readOnly && <p className="ra-ws-note">{readOnly}</p>}
-            {file && <textarea className="ra-workspace-editor" aria-label={ui('Remote file contents')} spellCheck={false} value={draft} onChange={e => setDraft(e.target.value)} disabled={busy}
-              onKeyDown={e => { if (e.key.toLowerCase() === 's' && (e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey) { e.preventDefault(); save(); } }} />}
+            {previewable && segmented(ui('File view'), mode, setMode, [['edit', ui('Edit')], ['preview', ui('Preview')]] as const)}
+            {readOnly && !binaryImage && <p className="ra-ws-note">{readOnly}</p>}
+            {binaryImage && (picture ? <div className="ra-ws-preview"><ImagePreview src={picture} name={binaryImage.path.split('/').pop() ?? ''} bytes={binaryImage.size} labels={{ fit: ui('Fit to pane'), actual: ui('Actual size') }} /></div>
+              : <p className="ra-ws-note" role="status">{ui('Loading image…')}</p>)}
+            {file && mode === 'preview' && (svg ? <div className="ra-ws-preview"><ImagePreview src={svg} name={file.path.split('/').pop() ?? ''} labels={{ fit: ui('Fit to pane'), actual: ui('Actual size') }} /></div>
+              : <MarkdownPreview className="ra-ws-preview" source={draft} />)}
+            {file && mode === 'edit' && <CodeEditor key={file.path} className="ra-workspace-editor" label={ui('Remote file contents')} path={file.path} value={draft} onChange={setDraft} onSave={save} readOnly={busy} />}
             {info && <div className="ra-ws-viewer-actions">
               {file && <><button className="ra-ws-button ra-primary" title="⌘/Ctrl + S" disabled={busy || !dirty} onClick={save}>{ui('Save to remote')}</button>
                 <button className="ra-ws-button" disabled={busy || !dirty} onClick={() => { setDraft(file.content); setError(''); }}>{ui('Discard changes')}</button></>}

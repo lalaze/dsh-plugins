@@ -28,29 +28,31 @@ const image = name => { if (screenshots) browser('screenshot', ...(name.startsWi
 const workspaceChecks = () => {
   evaluate('window.fixture.setLocale("en")');
   const entries = '.ra-ws-entries', viewing = '.ra-ws-viewer-head .ra-mono', editor = '[aria-label="Remote file contents"]';
+  // The CodeMirror editor's text, line by line; undefined while no editor is shown.
+  const editorText = `(document.querySelector('${editor}') ? [...document.querySelectorAll('${editor} .cm-line')].map(line => line.textContent).join("\\n") : undefined)`;
   browser('click', '[data-open-workspace]'); wait(`document.querySelector("${entries}")?.textContent.includes("hello.txt")`);
   expect('document.querySelector(".ra-ws-target")?.title === "build-box:/srv/main-chat"');
   expect('[...document.querySelectorAll(".ra-ws-tabs button")].map(b => b.textContent).join() === "Files,Sync,Tunnels,Remote DSH"');
   browser('click', `${entries} button:has-text("hello.txt")`);
-  wait(`document.querySelector('${editor}')?.value.includes("Hello from")`);
+  wait(`${editorText}?.includes("Hello from")`);
   // ⌘/Ctrl+S saves from the editor.
   browser('fill', editor, 'edited from the workspace UI'); wait('document.querySelector(".ra-ws-dirty")');
   browser('press', 'Control+s'); wait('!document.querySelector(".ra-ws-dirty") && !document.querySelector(".ra-ws-busy") && document.querySelector(".ra-ws-viewer-actions .ra-primary")?.disabled');
   fixture({ workspaceContent: 'external change' });
   browser('fill', editor, 'stale edit'); browser('click', 'button:text-is("Save to remote")');
   wait('document.querySelector(".ra-workspace-panel [role=alert]")?.textContent.includes("file changed")');
-  browser('click', 'button:text-is("Reload file")'); wait(`document.querySelector('${editor}')?.value === "external change"`);
+  browser('click', 'button:text-is("Reload file")'); wait(`${editorText} === "external change"`);
   // A new file opens right away; a folder does not.
   const create = (kind, name) => {
     browser('click', '[aria-label="New file or folder"]'); browser('click', `.ra-ws-inline [role=radio]:text-is("${kind}")`);
     browser('fill', '[aria-label="New item name"]', name); browser('click', 'button:text-is("Create")');
   };
-  create('File', 'created.txt'); wait(`document.querySelector("${viewing}")?.textContent === "created.txt" && document.querySelector('${editor}')?.value === ""`);
+  create('File', 'created.txt'); wait(`document.querySelector("${viewing}")?.textContent === "created.txt" && ${editorText} === ""`);
   browser('fill', '[aria-label="Rename destination"]', 'renamed.txt'); browser('click', '.ra-ws-rename button'); wait(`document.querySelector("${viewing}")?.textContent === "renamed.txt"`);
   // Unsaved edits block opening another file, not browsing folders; closing asks to save or discard first.
   create('Folder', 'docs'); wait(`document.querySelector("${entries}")?.textContent.includes("docs")`);
   browser('fill', editor, 'unsaved'); browser('click', `${entries} button:text-is("docs")`);
-  wait(`[...document.querySelectorAll(".ra-ws-crumbs button")].some(b => b.textContent === "docs") && document.querySelector('${editor}')?.value === "unsaved"`);
+  wait(`[...document.querySelectorAll(".ra-ws-crumbs button")].some(b => b.textContent === "docs") && ${editorText} === "unsaved"`);
   browser('click', '.ra-ws-crumbs button'); wait(`document.querySelector("${entries}")?.textContent.includes("hello.txt")`);
   browser('click', `${entries} button:has-text("hello.txt")`); wait('document.querySelector(".ra-workspace-panel [role=alert]")?.textContent.includes("Save or discard")');
   expect(`document.querySelector("${viewing}")?.textContent === "renamed.txt"`);
@@ -60,6 +62,13 @@ const workspaceChecks = () => {
   browser('click', 'button:text-is("Delete file")'); browser('click', 'button:text-is("Delete")'); wait(`!document.querySelector("${entries}")?.textContent.includes("renamed.txt")`);
   evaluate('(()=>{const input=document.querySelector(".ra-ws-files input[type=file]"), files=new DataTransfer();files.items.add(new File([new Uint8Array([0,1,255])],"upload.bin"));input.files=files.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()');
   wait(`document.querySelector("${entries}")?.textContent.includes("upload.bin")`);
+  // An uploaded image is shown instead of the binary-file note.
+  evaluate('(()=>{const input=document.querySelector(".ra-ws-files input[type=file]"), files=new DataTransfer();files.items.add(new File([Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="),c=>c.charCodeAt(0))],"pixel.png"));input.files=files.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()');
+  wait(`document.querySelector("${entries}")?.textContent.includes("pixel.png")`);
+  browser('click', `${entries} button:has-text("pixel.png")`);
+  wait('document.querySelector(".ra-ws-preview .fv-image img")?.naturalWidth === 1 && !document.querySelector(".ra-ws-viewer .ra-ws-note")');
+  wait('document.querySelector(".fv-image-meta")?.textContent.startsWith("1 × 1")');
+  browser('click', 'button:text-is("Delete file")'); browser('click', 'button:text-is("Delete")'); wait(`!document.querySelector("${entries}")?.textContent.includes("pixel.png")`);
   // A binary file cannot be edited here, but it can still be renamed and deleted.
   browser('click', `${entries} button:has-text("upload.bin")`);
   wait(`document.querySelector(".ra-ws-viewer .ra-ws-note")?.textContent.includes("binary") && !document.querySelector('${editor}')`);

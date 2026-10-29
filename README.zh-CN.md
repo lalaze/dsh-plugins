@@ -9,6 +9,7 @@
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务 |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.zh-CN.md) | 在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型 |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.zh-CN.md) | DSH 模型选择器中的提供方分组可折叠，并在各浏览器中记住选择 |
+| `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.zh-CN.md) | 以语法高亮编辑本地工作区的代码和文本文件，并预览 Markdown 与 SVG |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
@@ -20,7 +21,7 @@
 
 插件界面支持英语和简体中文，以英语作为源文案和回退语言。宿主提供 DSH locale 服务时，插件跟随「设置 → 通用 → 语言」即时切换，包括已打开的面板和插件自身的错误提示；未提供该服务的旧宿主使用英语。API 诊断和 CSV 列名使用英语，用户内容、模型 ID 和命令语法保持原文。
 
-私有的 `packages/i18n` 工具在构建时打入各客户端，插件安装包仍可独立安装。
+私有的 `packages/i18n` 工具在构建时打入各客户端，插件安装包仍可独立安装。私有的 `packages/file-view`（代码编辑器与文件预览）以同样方式由 `dsh-file-editor` 和 `dsh-remote-agents` 共用。
 
 ## 初始化
 
@@ -60,7 +61,7 @@ pnpm --filter dsh-remote-agents pack:plugin
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.57.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.58.tgz"
 ```
 
 桌面端请完全退出 DSH，使用桌面应用自带的 `dsh` 命令，将参数改为 `--profile desktop` 后安装并重新打开；npm 版 CLI 不能管理这个保留 profile。Web 端请重启更新的 profile 并刷新浏览器。插件目前未发布到 npm。仓库根目录是私有工作区，安装时应使用各插件的压缩包。
@@ -84,6 +85,8 @@ packages/
   remote-agents/        # dsh-remote-agents 的源码、测试、清单和文档
   session-models/       # 侧栏会话的模型图标与状态徽标
   model-groups/         # 模型选择器的提供方分组折叠
+  file-editor/          # 本地工作区文件的代码编辑器
+  file-view/            # 私有的共享代码编辑器与文件预览
   workspace-tags/       # 工作区标签，侧栏按标签或状态分组
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景
