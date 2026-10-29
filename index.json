@@ -27,12 +27,12 @@
       },
       "versions": [
         {
-          "version": "0.2.56",
-          "publishTimestamp": 1793266350,
+          "version": "0.2.57",
+          "publishTimestamp": 1793270682,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "0949a3f8da2cea33b5b6525e4a29d20b80f4456f",
+            "commit": "c8b16ed5290a84921a51f13583e661e1a7ce84e7",
             "path": "packages/remote-agents"
           },
           "engines": {
@@ -72,6 +72,41 @@
             "url": "https://github.com/lalaze/dsh-plugins",
             "commit": "63df4ce4593bae2f5e68b8668dccc468b14998f9",
             "path": "packages/session-models"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-model-groups",
+      "title": "DSH Model Groups",
+      "description": {
+        "en": "Collapsible provider groups in DSH's model picker, remembered in each browser",
+        "zh": "DSH 模型选择器中的提供方分组可折叠，并在各浏览器中记住选择"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/model-groups",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/model-groups"
+      },
+      "metadata": {
+        "keywords": [
+          "models",
+          "model-picker"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793270682,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "c8b16ed5290a84921a51f13583e661e1a7ce84e7",
+            "path": "packages/model-groups"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.2 <0.3.0"
