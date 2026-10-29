@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from './domain.js';
 
 /** A relay to stop and delete on its SSH host once it is reachable. */
@@ -14,7 +15,15 @@ export interface RelayCleanup { hostId: string; relayId: string }
  * and the secret that derives each task's bridge token.
  */
 export interface SharingSettings { mcp?: Record<string, boolean>; skills?: Record<string, boolean>; secret?: string }
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings }
+/** This DSH instance, as other instances sharing an SSH host's sessions see it. */
+export interface Instance { id: string; label: string }
+/**
+ * `instance` identifies this DSH to others sharing a host's sessions; `seenWorkspaces` lists, per host, the
+ * shared remote workspaces already offered to DSH, so one removed from the sidebar is not added again.
+ */
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[] }
+/** A deleted shared session whose deletion has not reached its SSH host yet. */
+export interface SharedDeletion { hostId: string; id: string }
 export class Store {
   private state: State = { version: 1, hosts: [], tasks: [] };
   private writes = Promise.resolve();
@@ -23,6 +32,8 @@ export class Store {
   private closed = false;
   /** Listeners for the tokens each finished CLI turn used; the plugin forwards them to usage statistics. */
   readonly usageListeners = new Set<(taskId: string, usage: TurnUsage, turn: FinishedTurn) => void>();
+  /** Called after every saved change; shared hosts publish the task records that changed. */
+  readonly changeListeners = new Set<() => void>();
   constructor(private readonly path: string) {}
   get directory(): string { return dirname(this.path); }
   async open(): Promise<void> {
@@ -39,6 +50,7 @@ export class Store {
       if (typeof host.connection !== 'string' || typeof host.label !== 'string' || (host.password !== undefined && typeof host.password !== 'string') || (host.serverId !== undefined && typeof host.serverId !== 'string')) throw new Error('Invalid saved remote host');
       if (host.modelError !== undefined && typeof host.modelError !== 'string') throw new Error('Invalid saved host discovery error');
       if (host.enabledProviders !== undefined) host.enabledProviders = providerSelection(host.enabledProviders);
+      if (host.share !== undefined && typeof host.share !== 'boolean') throw new Error('Invalid saved session sharing setting');
       if (host.catalog !== undefined) {
         const catalog = record(host.catalog); remotePath(catalog.cwd);
         if (typeof catalog.checkedAt !== 'string' || !Array.isArray(catalog.providers) || !catalog.providers.every(p => p && typeof p.id === 'string' && Array.isArray(p.models) && Array.isArray(p.modes))) throw new Error('Invalid saved host model catalog');
@@ -49,6 +61,7 @@ export class Store {
       const task = record(raw);
       if (typeof task.serverId !== 'string' || typeof task.title !== 'string' || typeof task.createdAt !== 'string' || !['creating', 'ready', 'uncertain'].includes(String(task.state))) throw new Error('Invalid saved remote agent');
       if (task.relay !== undefined) identifier(record(task.relay).id);
+      if (task.shared !== undefined && !Number.isSafeInteger(record(task.shared).rev)) throw new Error('Invalid saved shared session');
     }
     if (value.relayCleanups !== undefined) {
       if (!Array.isArray(value.relayCleanups)) throw new Error('Invalid saved relay cleanups');
@@ -68,9 +81,17 @@ export class Store {
       for (const table of [sharing.mcp, sharing.skills]) if (table !== undefined && !Object.values(record(table)).every(shared => typeof shared === 'boolean')) throw new Error('Invalid saved sharing settings');
       if (sharing.secret !== undefined && (typeof sharing.secret !== 'string' || !/^[a-f0-9]{64}$/.test(sharing.secret))) throw new Error('Invalid saved sharing secret');
     }
+    if (value.instance !== undefined) { const instance = record(value.instance); identifier(instance.id); field(instance.label, 'instance name', 100); }
+    if (value.sharedDeletions !== undefined) {
+      if (!Array.isArray(value.sharedDeletions)) throw new Error('Invalid saved shared deletions');
+      for (const raw of value.sharedDeletions) { const deletion = record(raw); identifier(deletion.hostId); identifier(deletion.id); }
+    }
+    if (value.seenWorkspaces !== undefined && !Object.values(record(value.seenWorkspaces)).every(paths => Array.isArray(paths) && paths.every(path => typeof path === 'string'))) throw new Error('Invalid saved shared workspaces');
     this.state = { version: 1, hosts: value.hosts as HostConfig[], tasks: value.tasks as Task[], ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects as ChatProject[] } : {}),
       ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
-      ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}) };
+      ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}),
+      ...(value.instance ? { instance: value.instance as Instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces as Record<string, string[]> } : {}),
+      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
@@ -82,6 +103,13 @@ export class Store {
   /** Whether a DSH conversation's Codex turns use the Fast speed. */
   chatFast(sessionId: string): boolean { return this.state.chatFast?.includes(sessionId) ?? false; }
   chatEffort(route: string): string | undefined { return Object.hasOwn(this.state.chatEfforts ?? {}, route) ? this.state.chatEfforts![route] : undefined; }
+  /** This DSH's identity for shared hosts, created on first use. */
+  async instance(): Promise<Instance> {
+    if (!this.state.instance) await this.update(state => { state.instance ??= { id: `dsh-${randomUUID()}`, label: (hostname() || 'DSH').slice(0, 100) }; });
+    return structuredClone(this.state.instance!);
+  }
+  seenWorkspaces(hostId: string): string[] { return [...(this.state.seenWorkspaces?.[hostId] ?? [])]; }
+  sharedDeletions(hostId: string): string[] { return (this.state.sharedDeletions ?? []).filter(d => d.hostId === hostId).map(d => d.id); }
   relayCleanups(hostId: string): RelayCleanup[] { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }
   /** A copy of one saved agent record, without cloning the whole registry. */
   task(predicate: (task: Task) => boolean): Task | undefined { const found = this.state.tasks.find(predicate); return found && structuredClone(found); }
@@ -101,6 +129,7 @@ export class Store {
         await rename(temporary, this.path);
       } finally { await unlink(temporary).catch(() => {}); }
       this.state = next; this.saved = text;
+      for (const listener of this.changeListeners) { try { listener(); } catch { /* A listener must not fail the saved change. */ } }
     });
     this.writes = write.catch(() => {});
     return write;

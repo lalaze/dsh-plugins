@@ -11,9 +11,15 @@ export interface Host {
   modelsCheckedAt?: string;
   providerErrors?: { label: string; error: string }[];
   enabledProviders?: string[];
+  /** Sessions and workspaces are shared with every DSH connected to this SSH account. On unless switched off. */
+  share: boolean;
+  /** Why the shared session registry is unavailable, while sharing is on. */
+  shareError?: string;
 }
 export interface HostCatalog { cwd: string; providers: Provider[]; checkedAt: string }
-export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string; catalog?: HostCatalog; modelError?: string; enabledProviders?: string[] }
+/** `share: false` keeps this host's sessions to this DSH; any other value shares them. */
+export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string; catalog?: HostCatalog; modelError?: string; enabledProviders?: string[]; share?: boolean }
+export const sharesSessions = (host: Pick<HostConfig, 'share'>): boolean => host.share !== false;
 export interface SshConfigHost { alias: string; connection: string }
 export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
@@ -191,6 +197,8 @@ export interface Task extends TaskInput {
   context?: ContextUsage;
   /** Latest native token counters, kept across detach and restart. */
   tokenUsage?: TokenUsage;
+  /** The shared record revision this copy matches. `imported` copies were started by another DSH, named by `creator`. */
+  shared?: { rev: number; creator?: string; imported?: true };
   state: 'creating' | 'ready' | 'uncertain';
   error?: string;
 }
@@ -232,6 +240,10 @@ export interface AgentSummary {
   nativeSessionId?: string;
   persistent?: boolean;
   reconnecting?: boolean;
+  /** The DSH that started a shared session, when it was another one. */
+  creator?: string;
+  /** Another DSH drives this shared session's CLI; sending, answering or stopping here takes it over. */
+  controller?: string;
 }
 export interface AgentState { agent: AgentSummary; permissions: Permission[] }
 export interface AgentDetail extends AgentState { timeline: TimelinePage | null }

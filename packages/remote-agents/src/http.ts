@@ -6,7 +6,7 @@ import type { RemoteWorkspaces } from './remote-workspaces.js';
 import { workspaceAction, type WorkspaceFeatures } from './workspace-http.js';
 import type { Sharing } from './sharing.js';
 
-export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Pick<RemoteWorkspaces, 'create'>, features?: WorkspaceFeatures, sharing?: Pick<Sharing, 'catalog' | 'set' | 'status'>) {
+export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Partial<Pick<RemoteWorkspaces, 'create' | 'shared' | 'publish'>>, features?: WorkspaceFeatures, sharing?: Pick<Sharing, 'catalog' | 'set' | 'status'>) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
     try {
@@ -53,14 +53,24 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'sshConfig': result = await service.sshConfig(); break;
         case 'addHost': result = await service.addHost(input.host, { discoverModels: true }); break;
         case 'removeHost': {
-          const id = hostId(); result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true });
+          const id = hostId(); result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true, everywhere: input.everywhere === true });
           await features?.tunnels.removeHost(id); break;
         }
         case 'connect': result = await service.connect(hostId()); break;
         case 'browse': result = await service.browse(hostId(), input.path === undefined ? undefined : browsePath(input.path)); break;
         case 'createWorkspace': {
-          if (!workspaces) throw new RemoteError('Remote workspaces are unavailable', 501);
+          if (!workspaces?.create) throw new RemoteError('Remote workspaces are unavailable', 501);
           result = await workspaces.create(hostId(), browsePath(input.path), request.signal); break;
+        }
+        case 'setHostSharing': result = await service.setHostSharing(hostId(), input.share); break;
+        case 'sharedWorkspaces': result = workspaces?.shared ? await workspaces.shared(request.signal) : []; break;
+        case 'publishWorkspaces': {
+          if (!Array.isArray(input.paths) || input.paths.length > 500 || input.paths.some(path => typeof path !== 'string' || path.length > 4096)) throw new RemoteError('Invalid workspace paths');
+          await workspaces?.publish?.(input.paths as string[], request.signal); result = { ok: true }; break;
+        }
+        case 'seeWorkspaces': {
+          if (!Array.isArray(input.paths) || input.paths.length > 500) throw new RemoteError('Invalid workspace paths');
+          await service.seeWorkspaces(hostId(), input.paths.map(path => remotePath(path))); result = { ok: true }; break;
         }
         case 'providers': result = await service.providers(hostId(), remotePath(input.cwd), input.refresh === true); break;
         case 'create': result = await service.create(input.agent, input.title === undefined ? {} : { title: field(input.title, 'title', 100) }); break;

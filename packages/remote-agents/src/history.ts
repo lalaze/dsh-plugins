@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile, rm } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { Cursor, MessageTimeline, RelayPosition, TimelineEntry, TimelinePage } from './domain.js';
 
@@ -6,8 +7,13 @@ export class TaskHistory {
   private entries: TimelineEntry[] = [];
   private queue = Promise.resolve();
   private failure?: unknown;
-  readonly epoch: string;
-  constructor(private readonly directory: string, private readonly taskId: string) { this.epoch = `task-${taskId}`; }
+  /** Raised when entries are replaced, so readers holding cursors start over. */
+  private generation = 0;
+  /** Called after entries written here are saved; a shared host copies them to its registry. Not called for imports. */
+  onAppend?: () => void;
+  constructor(private readonly directory: string, private readonly taskId: string) {}
+  get epoch(): string { return `task-${this.taskId}${this.generation ? `-${this.generation}` : ''}`; }
+  private get file(): string { return join(this.directory, 'events', `${this.taskId}.jsonl`); }
   async open(): Promise<void> {
     let data: string;
     try { data = await readFile(join(this.directory, 'events', `${this.taskId}.jsonl`), 'utf8'); }
@@ -37,6 +43,46 @@ export class TaskHistory {
       await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
       await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
       this.entries.push(...entries);
+      try { this.onAppend?.(); } catch { /* Copying is retried by its owner. */ }
+    });
+    this.queue = next.catch(error => { this.failure = error; }); return next;
+  }
+  /** Number of saved entries, once queued writes finished. */
+  async length(): Promise<number> { await this.queue; return this.entries.length; }
+  /** Entries `from`…`to` (1-based, inclusive) as saved lines. */
+  async lines(from: number, to = Infinity): Promise<string[]> {
+    await this.queue;
+    return this.entries.slice(Math.max(0, from - 1), Math.min(this.entries.length, to)).map(e => JSON.stringify(e));
+  }
+  /** Append entries another DSH recorded. They must continue this history's sequence. */
+  importLines(lines: string[]): Promise<void> {
+    const next = this.queue.then(async () => {
+      if (this.failure) throw this.failure;
+      const entries = lines.map((line, index) => {
+        let entry: TimelineEntry;
+        try { entry = JSON.parse(line); } catch { throw new Error('A shared history entry is damaged'); }
+        if (entry?.seqStart !== this.entries.length + index + 1 || entry.seqEnd !== entry.seqStart || typeof entry.item?.type !== 'string') throw new Error('A shared history entry is out of sequence');
+        return entry;
+      });
+      if (!entries.length) return;
+      await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
+      await appendFile(this.file, entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
+      this.entries.push(...entries);
+    });
+    this.queue = next.catch(error => { this.failure = error; }); return next;
+  }
+  /** Keep only the first `seq` entries: what this DSH recorded after losing a shared session is replaced by the shared history. */
+  truncate(seq: number): Promise<void> {
+    const next = this.queue.then(async () => {
+      if (this.failure) throw this.failure;
+      if (seq >= this.entries.length) return;
+      const kept = this.entries.slice(0, Math.max(0, seq)), temporary = `${this.file}.${randomUUID()}.tmp`;
+      await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
+      try {
+        await writeFile(temporary, kept.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600, flag: 'wx' });
+        await rename(temporary, this.file);
+      } finally { await rm(temporary, { force: true }); }
+      this.entries = kept; this.generation++;
     });
     this.queue = next.catch(error => { this.failure = error; }); return next;
   }

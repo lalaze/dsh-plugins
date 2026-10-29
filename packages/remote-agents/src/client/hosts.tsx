@@ -31,8 +31,8 @@ export function HostManager({ dashboard, update }: { dashboard: Dashboard; updat
     try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(''); }
   };
   const hosts = dashboard.hosts;
-  const remove = (hostId: string, deleteAgents = false) => void run(`remove:${hostId}`, async () => {
-    update(await api<Dashboard>('removeHost', { hostId, deleteAgents })); setRemoving('');
+  const remove = (hostId: string, deleteAgents = false, everywhere = false) => void run(`remove:${hostId}`, async () => {
+    update(await api<Dashboard>('removeHost', { hostId, deleteAgents, everywhere })); setRemoving('');
   });
   return <div className="ra-page ra-hosts">
     <h2>{ui('Hosts')}</h2>
@@ -57,10 +57,19 @@ export function HostManager({ dashboard, update }: { dashboard: Dashboard; updat
         <button type="button" className="ra-danger" disabled={!!busy}
           onClick={() => agents ? setRemoving(host.id) : remove(host.id)}>{ui('Remove')}</button></div>
         {removing === host.id && <div className="ra-banner ra-remove-confirm" role="alert">
-          <span>{ui('Remove {host} and permanently delete its {count} saved sessions, including archived sessions, and their output? Attached CLI processes will be stopped.', { host: host.label, count: agents })}</span>
-          <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
-            <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove host and sessions')}</button></div>
+          {host.share ? <><span>{ui('Remove {host} from this DSH? Its {count} sessions can stay on the machine for the other DSH instances, with their CLIs running, or be deleted in every DSH, which stops their CLIs.', { host: host.label, count: agents })}</span>
+            <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
+              <button type="button" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove from this DSH only')}</button>
+              <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true, true)}>{ui('Delete sessions everywhere')}</button></div></>
+          : <><span>{ui('Remove {host} and permanently delete its {count} saved sessions, including archived sessions, and their output? Attached CLI processes will be stopped.', { host: host.label, count: agents })}</span>
+            <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
+              <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove host and sessions')}</button></div></>}
         </div>}
+        <div className="ra-share-setting"><label><input type="checkbox" checked={host.share} disabled={!!busy} onChange={event => { const share = event.target.checked; void run(`share:${host.id}`, async () => update(await api<Dashboard>('setHostSharing', { hostId: host.id, share }))); }} />
+          <span>{ui('Share sessions and workspaces with other DSH instances')}</span></label>
+          <small className="ra-muted">{ui(host.share ? 'Every DSH connected to this SSH account sees its history, running tasks and remote workspaces, and can continue them.' : 'Sessions started here stay in this DSH, and sessions from other DSH instances are not shown.')}</small>
+          {host.share && host.shareError && <span className="ra-host-error">{localizeError(host.shareError)}</span>}
+        </div>
         <HostProviders key={enabledProvidersOf(host).join(',')} host={host} busy={!!busy} apply={providers => void run(`providers:${host.id}`, async () => update(await api<Dashboard>('setHostProviders', { hostId: host.id, providers })))} />
       </li>;
     })}</ul>}

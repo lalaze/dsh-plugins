@@ -55,9 +55,9 @@ export async function relayHarness(t: TestContext, env: Record<string, string> =
   await copyFile(source, join(root, 'fake-cli.mjs'));
   const relays = join(home, '.dsh-remote-agents', 'relays-v1');
   const services: RemoteAgentsService[] = [];
-  /** A DSH instance: its own store, service and transport, sharing the remote HOME. */
-  const open = async (transport = new LocalTransport(home, env)) => {
-    const store = new Store(join(state, 'state.json')); await store.open();
+  /** A DSH instance: its own store, service and transport, sharing the remote HOME. `stateDir` makes it another DSH. */
+  const open = async (transport = new LocalTransport(home, env), stateDir = state) => {
+    const store = new Store(join(stateDir, 'state.json')); await store.open();
     const service = new RemoteAgentsService(store, host => new SshBackend(host, store, transport));
     services.push(service);
     return { store, service, transport };

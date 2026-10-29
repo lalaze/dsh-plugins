@@ -267,13 +267,18 @@ export class RelayLink implements Child {
   private state: RelayState = { connected: false };
   private prepared = false;
   private installs = 0;
-  /** `prepare(reinstall)` makes sure the current relay script is installed on the host. */
-  constructor(private readonly transport: SshTransport, readonly id: string, offset: number, private readonly prepare: (reinstall: boolean) => Promise<void>, private readonly onState: (state: RelayState) => void = () => {}) { this.bytes = offset; this.offset = offset; }
+  private admitted = false;
+  private admitting = false;
+  /**
+   * `prepare(reinstall)` makes sure the current relay script is installed on the host. `admit`, checked before
+   * every attachment, refuses one while another DSH drives a shared session, so reconnecting never takes it back.
+   */
+  constructor(private readonly transport: SshTransport, readonly id: string, offset: number, private readonly prepare: (reinstall: boolean) => Promise<void>, private readonly onState: (state: RelayState) => void = () => {}, private readonly admit?: () => Promise<boolean>) { this.bytes = offset; this.offset = offset; }
   readonly offset: number;
   get connected(): boolean { return this.state.connected; }
   get error(): string | undefined { return this.state.error; }
   get alive(): boolean { return !this.ended; }
-  open(): void { if (!this.proc && !this.ended && !this.timer) this.connect(); }
+  open(): void { if (!this.proc && !this.ended && !this.timer && !this.admitting) this.connect(); }
   /** Resolves once attached; rejects when the relay ended or the timeout passed. */
   ready(timeout: number): Promise<void> {
     if (this.state.connected) return Promise.resolve();
@@ -298,6 +303,17 @@ export class RelayLink implements Child {
       void this.prepare(reinstall).then(() => { this.prepared = true; this.connect(); }, error => this.retry(error instanceof Error ? error.message : String(error)));
       return;
     }
+    if (this.admit && !this.admitted) {
+      this.admitting = true;
+      void this.admit().catch(() => true).then(admitted => {
+        this.admitting = false;
+        if (this.ended) return;
+        if (!admitted) { this.end(new RelayReleased('Another DSH is driving this remote CLI')); return; }
+        this.admitted = true; this.connect();
+      });
+      return;
+    }
+    this.admitted = false;
     let final: { exit?: RelayExit['exit']; missing?: boolean; evicted?: boolean; error?: string } = {}, errors = '';
     // A missing script (an upgrade, or a deleted ~/.dsh-remote-agents) is reported and installed before retrying.
     const proc = this.transport.start('/', ['sh', '-c', `[ -f ${SCRIPT} ] || { printf '\\036DSH-RELAY {"install":true}\\n' >&2; exit 0; }; exec node ${SCRIPT} attach ${RELAYS} "$1" "$2"`, 'dsh-relay', this.id, String(this.bytes)], {
