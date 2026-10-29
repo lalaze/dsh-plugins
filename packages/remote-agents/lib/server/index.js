@@ -18,6 +18,7 @@ import { installWorkspaceTerminal } from './workspace-terminal.js';
 import { workspaceTools } from './workspace-tools.js';
 import { dshHome, under } from './workspace-access.js';
 import { Sharing } from './sharing.js';
+import { repairStoredSessions } from './session-repair.js';
 export const name = 'dsh-remote-agents';
 export const inject = ['connection'];
 const stateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', name);
@@ -40,6 +41,14 @@ export const Config = Schema.object({ stateDir: Schema.string().default(stateDir
 export async function apply(ctx, config = {}) {
     const store = new Store(join(config.stateDir ?? stateDir(), 'state.json'));
     await store.open();
+    const logger = () => ctx.get('logger');
+    // Conversations saved by 0.2.53 and earlier stored a remote tool row out of order, and DSH refuses to reopen them.
+    const persistence = ctx.get('sessionPersistence');
+    const open = (id) => !!ctx.get('sessions')?.get?.(id);
+    void repairStoredSessions(typeof persistence?.root === 'string' ? persistence.root : join(dshHome(), 'sessions'), store.directory, open)
+        .then(paths => { if (paths.length)
+        logger()?.info?.(`Repaired ${paths.length} remote CLI conversation log(s) DSH could not reopen; originals kept in ${join(store.directory, 'session-backups')}`); })
+        .catch(error => logger()?.warn?.(`Remote CLI conversation repair failed: ${String(error)}`));
     const service = new RemoteAgentsService(store);
     const projects = new ChatProjects(service);
     const workspace = new WorkspaceAccess(() => store.hosts(), { runtime: () => ctx.get('subprocess') });
