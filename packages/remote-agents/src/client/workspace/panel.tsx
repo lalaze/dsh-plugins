@@ -25,8 +25,14 @@ function Icon({ kind }: { kind: keyof typeof PATHS }) {
   return <svg className="ra-ws-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[kind]} /></svg>;
 }
 
-/** The remote workspace tools; `tools` narrows them, and a single tool shows without the tool tabs. */
-export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { sessionId?: string; initialPath?: string; tools?: readonly WorkspaceTool[] }) {
+/**
+ * The remote workspace tools; `tools` narrows them, and a single tool shows without the tool tabs. With `openFile`, the
+ * files tool is only a file list and opening a file calls it, as a sidebar opens a tab; `fileOnly` shows only the
+ * `initialPath` file, at `line`. Otherwise the list and the open file share the panel.
+ */
+export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, openFile, fileOnly = false, line }: {
+  sessionId?: string; initialPath?: string; tools?: readonly WorkspaceTool[]; openFile?: (path: string) => void; fileOnly?: boolean; line?: number;
+}) {
   useLocale();
   const [target, setTarget] = useState<WorkspaceTarget>(), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<WorkspaceTool>(tools[0] ?? 'files'), [path, setPath] = useState(''), [entries, setEntries] = useState<WorkspaceEntry[]>([]);
@@ -34,7 +40,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
   // Rename, delete and download need only the revision; text editing additionally needs readable content.
   const [info, setInfo] = useState<{ path: string; revision: string; size: number }>(), [readOnly, setReadOnly] = useState('');
   // Markdown and SVG files can also be shown rendered; binary images are only shown.
-  const [mode, setMode] = useState<'edit' | 'preview'>('edit'), [picture, setPicture] = useState<string>();
+  const [mode, setMode] = useState<'edit' | 'preview'>('edit'), [picture, setPicture] = useState<string>(), [removed, setRemoved] = useState(false);
   const [name, setName] = useState(''), [kind, setKind] = useState<'file' | 'directory'>('file'), [deleting, setDeleting] = useState(false), [creating, setCreating] = useState(false);
   const [query, setQuery] = useState(''), [matches, setMatches] = useState<{ path: string; line: number; text: string }[]>();
   const [direction, setDirection] = useState<'pull' | 'push'>('pull'), [sync, setSync] = useState<SyncResult>();
@@ -81,13 +87,18 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
   }, [operate]);
   useEffect(() => { if (target && initialPath) void open(initialPath).catch(e => setError(localizeError(e))); }, [target, initialPath, open]);
   const dirty = !!file && draft !== file.content;
+  /** A file chosen in the list opens in its own tab when the host offers one, and here otherwise. */
+  const pick = (filePath: string) => { if (openFile) openFile(filePath); else if (canNavigate()) void run(() => open(filePath)); };
   const canNavigate = () => { if (!dirty) return true; setError(ui('Save or discard your changes before opening another file.')); return false; };
   const fileRevision = async (p: string) => (await operate<{ revision: string; size: number }>({ op: 'stat', path: p }));
-  const urlFor = (p: string, rev?: string) => '/api/remote-agents/files?' + new URLSearchParams({ sessionId: sessionId!, hostId: target!.hostId, cwd: target!.cwd, path: p, ...(rev ? { revision: rev } : {}) });
+  // Downloads and uploads use separate routes: see the workspace install module.
+  const urlFor = (p: string, rev?: string) => (rev ? '/api/remote-agents/download?' : '/api/remote-agents/files?') + new URLSearchParams({ sessionId: sessionId!, hostId: target!.hostId, cwd: target!.cwd, path: p, ...(rev ? { revision: rev } : {}) });
+  /** A failed transfer's message; a failure before the plugin answers has no JSON body. */
+  const transferError = async (response: Response) => new Error((await response.json().catch(() => undefined) as { error?: string } | undefined)?.error ?? ui('File transfer failed ({status})', { status: response.status }));
   const download = async () => {
     if (!selected) return;
     const info = await fileRevision(selected), response = await fetch(urlFor(selected, info.revision), { headers: { 'X-DSH-Remote-Agents': '1' }, signal: abort.current.signal });
-    if (!response.ok) throw new Error((await response.json()).error);
+    if (!response.ok) throw await transferError(response);
     const url = URL.createObjectURL(await response.blob()), link = document.createElement('a');
     link.href = url; link.download = selected.split('/').pop() || 'file'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
@@ -116,7 +127,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
     const c = new AbortController();
     let url: string | undefined;
     void fetch(urlFor(binaryImage.path, binaryImage.revision), { headers: { 'X-DSH-Remote-Agents': '1' }, signal: c.signal })
-      .then(async response => { if (!response.ok) throw new Error((await response.json()).error); return response.blob(); })
+      .then(async response => { if (!response.ok) throw await transferError(response); return response.blob(); })
       .then(blob => { if (!c.signal.aborted) { url = URL.createObjectURL(blob); setPicture(url); } })
       .catch(e => { if (!c.signal.aborted) setError(localizeError(e)); });
     return () => { c.abort(); if (url) URL.revokeObjectURL(url); setPicture(undefined); };
@@ -136,14 +147,14 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
     if (!name || /[\\/]/.test(name) || name === '.' || name === '..') throw new Error(ui('Enter a file or folder name.'));
     const destination = path ? `${path}/${name}` : name;
     await operate(kind === 'directory' ? { op: 'mkdir', path: destination } : { op: 'write', path: destination, content: '', revision: null }); setName(''); setCreating(false); await reload();
-    if (kind === 'file' && !dirty) await open(destination);
+    if (kind === 'file') { if (openFile) openFile(destination); else if (!dirty) await open(destination); }
   }); };
   const upload = (event: React.ChangeEvent<HTMLInputElement>) => { const chosen = event.target.files?.[0]; event.target.value = ''; if (chosen) void run(async () => {
     if (chosen.size > 50 * 1024 * 1024) throw new Error(ui('File exceeds the 50 MB transfer limit'));
     const destination = path ? `${path}/${chosen.name}` : chosen.name;
     if (entries.some(e => e.path === destination)) throw new Error(ui('A file with that name already exists. Rename it before uploading.'));
     const response = await fetch(urlFor(destination), { method: 'POST', headers: { 'X-DSH-Remote-Agents': '1', 'X-File-Size': String(chosen.size), 'X-File-Revision': 'new' }, body: chosen, signal: abort.current.signal });
-    if (!response.ok) throw new Error((await response.json()).error); await reload();
+    if (!response.ok) throw await transferError(response); await reload();
   }); };
   const segmented = <T extends string,>(label: string, value: T, set: (value: T) => void, options: readonly (readonly [T, string])[]) =>
     <div className="ra-ws-segment" role="radiogroup" aria-label={label}>{options.map(([key, text]) => <button type="button" role="radio" key={key} aria-checked={value === key} disabled={busy} onClick={() => set(key)}>{text}</button>)}</div>;
@@ -156,8 +167,8 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
     {!sessionId ? <p className="ra-ws-note">{ui('Select a verified remote workspace first.')}</p> : !target ? <p className="ra-ws-note" role="status">{error || ui('Loading workspace…')}</p> : <>
       {tools.length > 1 && <nav className="ra-ws-tabs" aria-label={ui('Workspace tools')}>{tools.map(key => <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{ui(TOOLS[key])}</button>)}</nav>}
       {error && <div className="ra-banner" data-tone="error" role="alert"><span>{error}</span>{selected && tab === 'files' && <button disabled={busy} onClick={() => void run(() => open(selected))}>{ui('Reload file')}</button>}</div>}
-      {tab === 'files' && <div className="ra-ws-files" data-open={selected ? '' : undefined}>
-        <aside className="ra-ws-browser">
+      {tab === 'files' && <div className="ra-ws-files" data-layout={openFile ? 'list' : fileOnly ? 'file' : undefined} data-open={selected && !openFile ? '' : undefined}>
+        {!fileOnly && <aside className="ra-ws-browser">
           <div className="ra-ws-toolbar">
             <button type="button" className="ra-ws-icon" title={ui('Up')} aria-label={ui('Up')} disabled={busy || !path} onClick={() => goTo(folders.slice(0, -1).join('/'))}><Icon kind="up" /></button>
             <nav className="ra-ws-crumbs" aria-label={ui('Folder')}><button type="button" disabled={busy || !path} onClick={() => goTo('')}>{target.cwd.split('/').filter(Boolean).pop() ?? '/'}</button>
@@ -175,27 +186,27 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
             <Icon kind="search" /><input aria-label={ui('Search remote files')} placeholder={ui('Search remote files')} value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setMatches(undefined); }} onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); e.stopPropagation(); clearSearch(); } }} />
             {query && <button type="button" className="ra-ws-icon" title={ui('Clear search')} aria-label={ui('Clear search')} onClick={clearSearch}><Icon kind="close" /></button>}
           </form>
-          <div className="ra-ws-entries">{matches ? (matches.length ? matches.map((match, index) => <button type="button" key={index} disabled={busy} aria-pressed={selected === match.path} onClick={() => { if (canNavigate()) void run(() => open(match.path)); }}>
+          <div className="ra-ws-entries">{matches ? (matches.length ? matches.map((match, index) => <button type="button" key={index} disabled={busy} aria-pressed={selected === match.path} onClick={() => pick(match.path)}>
               <Icon kind="file" /><span className="ra-ws-entry-name">{match.path}<small>{match.line}: {match.text}</small></span></button>) : <p className="ra-ws-empty">{ui('No matches')}</p>)
             : entries.length ? entries.map(entry => <button type="button" key={entry.path} data-kind={entry.kind} disabled={busy || !['directory', 'file'].includes(entry.kind)} aria-pressed={selected === entry.path} onClick={() => {
               if (entry.kind === 'directory') goTo(entry.path);
-              else if (canNavigate()) void run(() => open(entry.path));
+              else pick(entry.path);
             }}><Icon kind={entry.kind === 'directory' ? 'folder' : 'file'} /><span className="ra-ws-entry-name">{entry.name}</span>{entry.kind === 'file' ? <small>{size(entry.size)}</small> : entry.kind !== 'directory' && <small>{ui(entry.kind)}</small>}</button>)
             : <p className="ra-ws-empty">{ui('This folder is empty')}</p>}</div>
           <input hidden type="file" ref={input} onChange={upload} />
-        </aside>
-        <main className="ra-ws-viewer">
+        </aside>}
+        {!openFile && <main className="ra-ws-viewer">
           {selected ? <>
             <div className="ra-ws-viewer-head"><Icon kind="file" /><span className="ra-mono" title={selected}>{selected}</span>{dirty && <span className="ra-ws-dirty">{ui('Unsaved')}</span>}
               <button type="button" className="ra-ws-icon" title={ui('Download')} aria-label={ui('Download')} disabled={busy} onClick={() => void run(download)}><Icon kind="download" /></button>
-              <button type="button" className="ra-ws-icon" title={ui('Close file')} aria-label={ui('Close file')} disabled={busy} onClick={close}><Icon kind="close" /></button></div>
+              {!fileOnly && <button type="button" className="ra-ws-icon" title={ui('Close file')} aria-label={ui('Close file')} disabled={busy} onClick={close}><Icon kind="close" /></button>}</div>
             {previewable && segmented(ui('File view'), mode, setMode, [['edit', ui('Edit')], ['preview', ui('Preview')]] as const)}
             {readOnly && !binaryImage && <p className="ra-ws-note">{readOnly}</p>}
             {binaryImage && (picture ? <div className="ra-ws-preview"><ImagePreview src={picture} name={binaryImage.path.split('/').pop() ?? ''} bytes={binaryImage.size} labels={{ fit: ui('Fit to pane'), actual: ui('Actual size') }} /></div>
               : <p className="ra-ws-note" role="status">{ui('Loading image…')}</p>)}
             {file && mode === 'preview' && (svg ? <div className="ra-ws-preview"><ImagePreview src={svg} name={file.path.split('/').pop() ?? ''} labels={{ fit: ui('Fit to pane'), actual: ui('Actual size') }} /></div>
               : <MarkdownPreview className="ra-ws-preview" source={draft} />)}
-            {file && mode === 'edit' && <CodeEditor key={file.path} className="ra-workspace-editor" label={ui('Remote file contents')} path={file.path} value={draft} onChange={setDraft} onSave={save} readOnly={busy} />}
+            {file && mode === 'edit' && <CodeEditor key={file.path} className="ra-workspace-editor" label={ui('Remote file contents')} path={file.path} value={draft} onChange={setDraft} onSave={save} readOnly={busy} line={file.path === initialPath ? line : undefined} />}
             {info && <div className="ra-ws-viewer-actions">
               {file && <><button className="ra-ws-button ra-primary" title="⌘/Ctrl + S" disabled={busy || !dirty} onClick={save}>{ui('Save to remote')}</button>
                 <button className="ra-ws-button" disabled={busy || !dirty} onClick={() => { setDraft(file.content); setError(''); }}>{ui('Discard changes')}</button></>}
@@ -203,9 +214,10 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS }: { 
                 <input className="ra-ws-input" name="destination" aria-label={ui('Rename destination')} placeholder={info.path} /><button className="ra-ws-button" disabled={busy || dirty}>{ui('Rename')}</button></form>
               <button className="ra-ws-button ra-ws-danger" disabled={busy} onClick={() => setDeleting(true)}><Icon kind="trash" />{ui('Delete file')}</button>
             </div>}
-            {deleting && info && <div className="ra-banner" data-tone="error"><span>{ui('Delete this remote file?')}</span><span className="ra-ws-row"><button disabled={busy} onClick={() => void run(async () => { await operate({ op: 'remove', path: info.path, revision: info.revision }); setFile(undefined); setInfo(undefined); setReadOnly(''); setSelected(undefined); setDeleting(false); await reload(); })}>{ui('Delete')}</button><button onClick={() => setDeleting(false)}>{ui('Cancel')}</button></span></div>}
-          </> : <div className="ra-ws-placeholder"><Icon kind="file" /><p>{ui('Choose a file')}</p><small>{ui('Files are read directly from the remote machine. Saving checks for concurrent edits.')}</small></div>}
-        </main>
+            {deleting && info && <div className="ra-banner" data-tone="error"><span>{ui('Delete this remote file?')}</span><span className="ra-ws-row"><button disabled={busy} onClick={() => void run(async () => { await operate({ op: 'remove', path: info.path, revision: info.revision }); setFile(undefined); setInfo(undefined); setReadOnly(''); setSelected(undefined); setDeleting(false); setRemoved(true); await reload(); })}>{ui('Delete')}</button><button onClick={() => setDeleting(false)}>{ui('Cancel')}</button></span></div>}
+          </> : fileOnly ? <div className="ra-ws-placeholder"><Icon kind="file" /><p>{ui(removed ? 'File deleted' : 'Loading file…')}</p></div>
+            : <div className="ra-ws-placeholder"><Icon kind="file" /><p>{ui('Choose a file')}</p><small>{ui('Files are read directly from the remote machine. Saving checks for concurrent edits.')}</small></div>}
+        </main>}
       </div>}
       {tab === 'sync' && <div className="ra-ws-section">
         <p className="ra-ws-note">{ui('Sync the remote directory and its local workspace mirror. Preview first; files changed on both sides are preserved as conflicts. Git, dependencies and symbolic links are skipped.')}</p>

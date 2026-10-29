@@ -68,6 +68,7 @@ export const workspaceStyles = `
 .ra-workspace-panel .ra-ws-skipped summary{cursor:pointer;font-size:12px;color:var(--ws-muted)}
 .ra-workspace-panel .ra-ws-skipped pre{margin:8px 0 0;font:11.5px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--ws-muted);white-space:pre-wrap}
 .ra-workspace-panel .ra-ws-files{display:grid;grid-template-columns:minmax(220px,32%) minmax(0,1fr);gap:14px;flex:1;min-height:420px}
+.ra-workspace-panel .ra-ws-files:is([data-layout=list],[data-layout=file]){grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);min-height:0}
 .ra-workspace-panel .ra-ws-browser{display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0}
 .ra-workspace-panel .ra-ws-toolbar{display:flex;align-items:center;gap:2px;min-width:0}
 .ra-workspace-panel .ra-ws-crumbs{display:flex;align-items:center;gap:2px;flex:1;min-width:0;overflow:hidden;white-space:nowrap;font-size:12.5px;color:var(--ws-faint)}

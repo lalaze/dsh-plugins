@@ -24,7 +24,7 @@ Revision checks reject disk changes already present at the check, but are not an
 ```sh
 pnpm --filter dsh-file-editor check
 pnpm --filter dsh-file-editor pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.1.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.1.1.tgz"
 ```
 
 Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Restart the profile and refresh the browser.

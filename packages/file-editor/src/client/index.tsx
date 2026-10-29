@@ -9,14 +9,15 @@ interface Client extends LocaleContext {
   inject?(services: string[], factory: (scoped: Client) => void): unknown;
   slots: { inject(name: string, factory: () => unknown): unknown; register(spec: Record<string, unknown>, component: React.FC<any>): unknown };
 }
-type TabProps = { sessionId: string; useTabInfo(): { tab: { navigation: { address: string } } } };
+type TabProps = { sessionId: string; useTabInfo(): { tab: { navigation: { address: string; params?: Record<string, unknown> } } } };
 type Sessions = { list: { getSnapshot(): { byId?: Record<string, { cwd?: string }> } | undefined } };
 
 /** The right sidebar's file viewer kind this plugin adds. */
 export const KIND = 'file-editor/file';
-const Tab: React.FC<TabProps> = ({ sessionId, useTabInfo }) => {
-  const address = useTabInfo().tab.navigation.address, parsed = fileAddress(address);
-  return parsed ? <FileTab key={address} sessionId={parsed.sessionId || sessionId} path={parsed.path} line={parsed.line} /> : null;
+/** DSH passes the line of a conversation's file link as a navigation parameter; a `#L42` address carries its own. */
+export const Tab: React.FC<TabProps> = ({ sessionId, useTabInfo }) => {
+  const { navigation } = useTabInfo().tab, parsed = fileAddress(navigation.address), line = navigation.params?.line;
+  return parsed ? <FileTab key={navigation.address} sessionId={parsed.sessionId || sessionId} path={parsed.path} line={typeof line === 'number' ? line : parsed.line} /> : null;
 };
 
 export const name = 'dsh-file-editor-client';

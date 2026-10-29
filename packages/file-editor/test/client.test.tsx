@@ -162,3 +162,13 @@ test('the plugin registers a file viewer for local text files and its sidebar pa
   for (const cleanup of cleanups) cleanup();
   assert.equal(registered.length, 0, 'unloading removes the viewer');
 });
+
+test('a conversation link’s line, passed as a navigation parameter, is where the file opens', async () => {
+  disk = { content: 'one\ntwo\nthree\n', mtimeMs: 1 };
+  const [{ createRoot }, { Tab }, { editorOf }] = await Promise.all([import('react-dom/client'), import('../src/client/index.js'), import('@dsh-plugins/file-view')]);
+  root = createRoot(container);
+  const tab = { navigation: { address: 'dsh-resource://file/session/s1/README.md', params: { line: 2 } } };
+  await act(async () => root!.render(<Tab sessionId="s1" useTabInfo={() => ({ tab })} />)); await settle();
+  const view = editorOf(container.querySelector('.cm-editor')!)!;
+  assert.equal(view.state.doc.lineAt(view.state.selection.main.head).number, 2);
+});

@@ -166,7 +166,11 @@ const server = createServer(async (request, response) => {
       }
       response.writeHead(200, { 'content-type': 'application/json' }); response.end(JSON.stringify({ creates: remote.creates, stops: remote.stops, sends: remote.sends, interrupts: remote.interrupts, detaches: remote.detaches, forgets: remote.forgets, answers: remote.answers, modelGroups: (await Promise.all(CHAT_PROVIDERS.map(async id => ({ ...adapter.providerInfo(id), models: await adapter.listModels(id) })))).filter(group => group.models.length), state: await service.snapshot(), tasks: store.snapshot().tasks })); return;
     }
-    if (request.url.startsWith('/api/remote-agents/files?')) {
+    // As DSH registers them: uploads on a streaming POST route, downloads on a buffered GET route.
+    if (request.url.startsWith('/api/remote-agents/files?') && request.method !== 'POST' || request.url.startsWith('/api/remote-agents/download?') && request.method !== 'GET') {
+      response.writeHead(405); response.end(); return;
+    }
+    if (request.url.startsWith('/api/remote-agents/files?') || request.url.startsWith('/api/remote-agents/download?')) {
       const result = await transfer(new Request(`http://preview.test${request.url}`, { method: request.method, headers: request.headers, ...(request.method === 'POST' ? { body } : {}) }));
       response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(Buffer.from(await result.arrayBuffer())); return;
     }

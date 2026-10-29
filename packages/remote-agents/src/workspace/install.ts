@@ -46,7 +46,11 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
   const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
   await tunnels.open();
   const terminal: { shell?: string } = {};
-  ctx.connection.fetch.register({ path: '/api/remote-agents/files', methods: ['GET', 'POST'], requestBody: 'streaming', fetch: workspaceTransferHandler(files) });
+  // Uploads stream; downloads need their own buffered route, because DSH builds every request of a streaming route
+  // with the request stream as its body, and a GET request with a body cannot be built.
+  const transfer = workspaceTransferHandler(files);
+  ctx.connection.fetch.register({ path: '/api/remote-agents/files', methods: ['POST'], requestBody: 'streaming', fetch: transfer });
+  ctx.connection.fetch.register({ path: '/api/remote-agents/download', methods: ['GET'], requestBody: 'buffered', fetch: transfer });
   ctx.inject(['terminalController'], scoped => {
     let disposed = false, cleanup: (() => void) | undefined;
     void installWorkspaceTerminal(scoped.get('terminalController'), join(store.directory, 'terminal'), join(store.directory, 'state.json'))

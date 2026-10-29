@@ -14,6 +14,11 @@ export function workspaceFileAddress(address: string): { sessionId: string; path
     return { sessionId: decodeURIComponent(id), path: decodeURIComponent(parts.join('/')) };
   } catch { return; }
 }
+/** DSH's address for a file of a session, encoded segment by segment as DSH builds it (`:` stays literal for drive letters). */
+export function sessionFileAddress(sessionId: string, path: string): string {
+  const encode = (segment: string) => encodeURIComponent(segment).replace(/%3A/gi, ':');
+  return `dsh-resource://file/session/${encode(sessionId)}/${path.split('/').map(encode).join('/')}`;
+}
 type TabDefinition = Record<string, unknown> & { id: string; kind: string; guide?: readonly Record<string, unknown>[] };
 type Entry = { cwd: string; target?: WorkspaceTarget; check: number };
 /** DSH's own Workspace files type: its kind, which ⌘P opens, and its guide entry's id. */
@@ -103,15 +108,24 @@ export function installWorkspaceSidebar(ctx: Client): void {
           title: (address: string) => workspaceFileAddress(address)?.path.split('/').pop() || ui('Remote file'),
         });
         scoped.slots.inject('sidebar.right.pane.tab', () => {
-          type Props = { sessionId: string; useTabInfo(): { tab: { navigation: { address: string } } } };
+          type Props = { sessionId: string; useTabInfo(): { tab: {
+            navigation: { address: string; params?: Record<string, unknown> };
+            actions?: { openResource?(address: string, options?: Record<string, unknown>): void };
+          } } };
           const useCwd = (id: string) => React.useSyncExternalStore(listener => sessions.list.subscribe(listener), () => sessions.list.getSnapshot()?.byId?.[id]?.cwd);
           // Workspace files already shows the remote files, so Remote workspace keeps the other tools unless that view is unavailable.
           const Explorer: React.FC<Props> = ({ sessionId }) => { const cwd = useCwd(sessionId); return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} tools={live.files ? ['sync', 'tunnels', 'web'] : undefined} /></>; };
-          const Files: React.FC<Props> = ({ sessionId }) => { const cwd = useCwd(sessionId); return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} tools={['files']} /></>; };
+          // As in DSH's own Workspace files, each file opens in a tab of its own beside the list.
+          const Files: React.FC<Props> = ({ sessionId, useTabInfo }) => {
+            const cwd = useCwd(sessionId), actions = useTabInfo().tab.actions;
+            const openFile = actions?.openResource ? (path: string) => actions.openResource!(sessionFileAddress(sessionId, path)) : undefined;
+            return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} tools={['files']} openFile={openFile} /></>;
+          };
           const File: React.FC<Props> = props => {
-            const parsed = workspaceFileAddress(props.useTabInfo().tab.navigation.address);
-            const id = parsed?.sessionId ?? props.sessionId, cwd = useCwd(id);
-            return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([parsed, cwd])} sessionId={id} initialPath={parsed?.path} tools={['files']} /></>;
+            const { navigation } = props.useTabInfo().tab, parsed = workspaceFileAddress(navigation.address);
+            const id = parsed?.sessionId ?? props.sessionId, cwd = useCwd(id), line = navigation.params?.line;
+            return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([parsed, cwd])} sessionId={id} initialPath={parsed?.path} tools={['files']} fileOnly
+              line={typeof line === 'number' ? line : undefined} /></>;
           };
           const disposers = [[explorer, Explorer], [files, Files], [file, File]].map(([key, component]) =>
             scoped.slots.register({ name: 'sidebar.right.pane.tab', key: key as string }, component as React.FC<Props>));
