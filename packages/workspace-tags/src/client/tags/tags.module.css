@@ -25,16 +25,28 @@
   box-shadow: inset 0 0 0 1px var(--dsw-alias-label-tertiary);
 }
 
-/* Workspace row: trailing dots that give way to the hover actions, like a Session row's time. */
+/* Workspace row: trailing marks that give way to the hover actions, like a Session row's time. */
+.rowTrail {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+[role='treeitem']:hover > .rowTrail {
+  display: none;
+}
+
+.rowActivity {
+  display: inline-flex;
+  align-items: center;
+}
+
 .rowDots {
   display: inline-flex;
   flex: none;
   align-items: center;
   gap: 3px;
-}
-
-[role='treeitem']:hover > .rowDots {
-  display: none;
 }
 
 .rowDots .dot {
@@ -46,6 +58,89 @@
   font-size: 10px;
   line-height: 1;
   color: var(--dsw-alias-label-tertiary);
+}
+
+/* Space switcher: one row of chips under the browser header, scrolling sideways when tags overflow. */
+.switcher {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  margin: -2px -4px 6px 0;
+  padding: 0 4px 0 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.switcher::-webkit-scrollbar {
+  display: none;
+}
+
+.chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  max-width: 140px;
+  height: 24px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border: 1px solid var(--dsw-alias-border-l4);
+  border-radius: 12px;
+  corner-shape: round;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.chip:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}
+
+.chip:focus-visible {
+  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, currentColor);
+  outline-offset: -1px;
+}
+
+/* The selected Session row's fill, so the chosen space reads like the chosen row. */
+.chipSelected,
+.chipSelected:hover {
+  border-color: transparent;
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  font-weight: 500;
+}
+
+.chip .dot {
+  width: 7px;
+  height: 7px;
+}
+
+.chipLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Attention count on a space chip or a folded Workspace row. */
+.countBadge {
+  flex: none;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  corner-shape: round;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Sections: the fold header reads like the browser's own section label. */

@@ -1,11 +1,13 @@
 /**
  * Client tag runtime: reads and changes tags through the host route, keeps
- * the Group by choice and folded sections in localStorage, and carries the
- * open menu and dialog requests between the sidebar and its overlays.
+ * the Group by choice, folded sections and the space filter in localStorage,
+ * and carries the open menu and dialog requests between the sidebar and its
+ * overlays.
  */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import { emptyTagState, parseTagState, TAGS_ROUTE, type TagOperation, type WorkspaceTag } from '../../shared/tags.ts'
 import type { SectionMode, TagDialogRequest, TagMenuRequest, TagRuntime, TagSnapshot, TagViewState } from './contract.ts'
+import { sectionFoldedByDefault } from './sections.ts'
 
 /** Other clients of the same host (desktop and remote web) can change tags. */
 const REFRESH_MS = 30_000
@@ -22,12 +24,14 @@ export interface TagRuntimeOptions {
 export function createTagRuntime(options: TagRuntimeOptions = {}): TagRuntime & { dispose(): void } {
   const request = options.fetch ?? ((input, init) => fetch(input, init))
   const tags = createSnapshotStore<TagSnapshot>({ phase: 'loading', state: emptyTagState() }, { flush: 'sync' })
-  const view = createSnapshotStore<TagViewState>({ mode: null, collapsed: {} }, { flush: 'sync', persist: { name: VIEW_KEY } })
+  const view = createSnapshotStore<TagViewState>({ mode: null, collapsed: {}, filter: null }, { flush: 'sync', persist: { name: VIEW_KEY } })
   // A blob from another version may hold anything; keep only what this one understands.
   const stored = view.getSnapshot() as Partial<TagViewState> | null
   view.set({
     mode: isMode(stored?.mode) ? stored.mode : null,
-    collapsed: Object.fromEntries(Object.entries(stored?.collapsed ?? {}).filter(([, value]) => value === true)),
+    collapsed: Object.fromEntries(Object.entries(stored?.collapsed ?? {})
+      .filter(([key, value]) => typeof value === 'boolean' && value !== sectionFoldedByDefault(key))),
+    filter: typeof stored?.filter === 'string' && stored.filter !== '' ? stored.filter : null,
   })
   const menu = createSnapshotStore<TagMenuRequest | null>(null, { flush: 'sync' })
   const dialog = createSnapshotStore<TagDialogRequest | null>(null, { flush: 'sync' })
@@ -81,10 +85,11 @@ export function createTagRuntime(options: TagRuntimeOptions = {}): TagRuntime & 
     setMode: mode => { view.update((draft) => { draft.mode = mode }) },
     setSectionCollapsed: (key, collapsed) => {
       view.update((draft) => {
-        if (collapsed) draft.collapsed[key] = true
+        if (collapsed !== sectionFoldedByDefault(key)) draft.collapsed[key] = collapsed
         else delete draft.collapsed[key]
       })
     },
+    setFilter: (tagId) => { view.update((draft) => { draft.filter = tagId }) },
     openMenu: next => { menu.set(next) },
     openDialog: next => { dialog.set(next) },
     forget: (workspaceId) => {

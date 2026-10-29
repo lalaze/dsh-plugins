@@ -4,11 +4,11 @@ import clsx from 'clsx'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   IconCheckCircleOutlineRegular, IconDarkOutlineRegular, IconPlayOutlineRegular, IconTriangleRightFillRegular,
-  IconWarningOutlineRegular,
+  IconWarningOutlineRegular, StateDot,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { emptyTagState, type TagColor, type TagState, type WorkspaceTag } from '../../shared/tags.ts'
 import type { TagRuntime, TagSnapshot, TagViewState } from './contract.ts'
-import type { BrowserSection } from './sections.ts'
+import type { Attention, BrowserSection, RowActivity } from './sections.ts'
 import css from './tags.module.css'
 
 type Translate = (key: never, vars?: Record<string, string | number>) => string
@@ -48,6 +48,86 @@ export function TagDots({ tags, t }: { tags: readonly WorkspaceTag[]; t: TagTran
       {shown.map(tag => <TagDot key={tag.id} color={tag.color} />)}
       {tags.length > shown.length && <span className={css.more}>+{tags.length - shown.length}</span>}
     </span>
+  )
+}
+
+/** How many Sessions need the user, tinted for waiting when any does: the switcher's and folded rows' badge. */
+function AttentionBadge({ attention }: { attention: Attention }) {
+  return (
+    <span className={clsx(css.countBadge, attention.waiting > 0 ? css.waiting : css.completed)} aria-hidden="true">
+      {attention.waiting + attention.completed}
+    </span>
+  )
+}
+
+function activityLabel({ waiting, completed }: Attention, t: TagTranslate): string {
+  if (waiting > 0 && completed > 0) return t('tags.row.waitingCompleted', { waiting, completed })
+  return waiting > 0 ? t('tags.row.waiting', { n: waiting }) : t('tags.row.completed', { n: completed })
+}
+
+/**
+ * A Workspace row's trailing marks, which give way to the row's hover
+ * actions. A folded row first shows what its Sessions' rows would: a badge
+ * counting those that need the user, else the running spinner. Then come the
+ * tag dots; the badge's shape keeps it apart from a tag of the same color.
+ */
+export function RowTrail({ activity, tags, t }: { activity: RowActivity | undefined; tags: readonly WorkspaceTag[]; t: TagTranslate }) {
+  if (activity === undefined && tags.length === 0) return null
+  const label = activity === undefined
+    ? undefined
+    : activity.waiting + activity.completed > 0 ? activityLabel(activity, t) : t('tags.section.running')
+  return (
+    <span className={css.rowTrail}>
+      {activity !== undefined && (
+        <span className={css.rowActivity} role="img" aria-label={label} title={label}>
+          {activity.waiting + activity.completed > 0 ? <AttentionBadge attention={activity} /> : <StateDot state="ongoing" size={12} />}
+        </span>
+      )}
+      <TagDots tags={tags} t={t} />
+    </span>
+  )
+}
+
+/**
+ * The space switcher: All, then one chip per tag in name order. Picking a
+ * tag narrows every grouping to its Workspaces; picking it again goes back
+ * to All. A chip that is not selected carries a count of the Sessions in its
+ * space that wait for the user or finished unread, tinted for waiting when
+ * any does, so a filtered-out space still asks for attention.
+ */
+export function SpaceSwitcher({ tags, filter, attention, onPick, t }: {
+  tags: readonly WorkspaceTag[]
+  filter: string | null
+  attention: ReadonlyMap<string | null, Attention>
+  onPick: (tagId: string | null) => void
+  t: TagTranslate
+}) {
+  const chip = (id: string | null, name: string, marker: ReactNode) => {
+    const selected = id === filter
+    const count = attention.get(id) ?? { waiting: 0, completed: 0 }
+    const n = selected ? 0 : count.waiting + count.completed
+    const label = n === 0 ? name : t(n === 1 ? 'tags.filter.attention.one' : 'tags.filter.attention.other', { name, n })
+    return (
+      <button
+        key={id ?? ''}
+        type="button"
+        className={clsx(css.chip, selected && css.chipSelected)}
+        aria-pressed={selected}
+        aria-label={label}
+        title={label}
+        onClick={() => { onPick(selected ? null : id) }}
+      >
+        {marker}
+        <span className={css.chipLabel}>{name}</span>
+        {n > 0 && <AttentionBadge attention={count} />}
+      </button>
+    )
+  }
+  return (
+    <div className={css.switcher} role="group" aria-label={t('tags.filter.label')}>
+      {chip(null, t('tags.filter.all'), null)}
+      {tags.map(tag => chip(tag.id, tag.name, <TagDot color={tag.color} />))}
+    </div>
   )
 }
 
@@ -93,7 +173,7 @@ export function SectionBlock({ section, collapsed, onToggle, t, children }: {
         <IconTriangleRightFillRegular className={clsx(css.sectionArrow, !collapsed && css.sectionArrowOpen)} />
         <span className={css.sectionMarker} aria-hidden="true">{marker}</span>
         <span className={css.sectionLabel}>{label}</span>
-        <span className={css.sectionCount}>{section.groups.length}</span>
+        <span className={css.sectionCount}>{section.count}</span>
       </button>
       {!collapsed && children}
     </div>
@@ -103,7 +183,7 @@ export function SectionBlock({ section, collapsed, onToggle, t, children }: {
 const emptyTags: HostObservable<TagSnapshot> = { getSnapshot: () => EMPTY_SNAPSHOT, subscribe: () => () => {} }
 const emptyView: HostObservable<TagViewState> = { getSnapshot: () => EMPTY_VIEW, subscribe: () => () => {} }
 const EMPTY_SNAPSHOT: TagSnapshot = { phase: 'ready', state: emptyTagState() }
-const EMPTY_VIEW: TagViewState = { mode: null, collapsed: {} }
+const EMPTY_VIEW: TagViewState = { mode: null, collapsed: {}, filter: null }
 
 /**
  * Tag state for the browser. Upstream's own specs build the browser without

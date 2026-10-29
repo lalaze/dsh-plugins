@@ -41,10 +41,15 @@ import { AnimatedRows } from './AnimatedRows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
-import type { TagState } from '../../../shared/tags.ts'
+import type { TagState, WorkspaceTag } from '../../../shared/tags.ts'
 import type { SectionMode, TagRuntime } from '../../tags/contract.ts'
-import { asTagTranslate, SectionBlock, TagDots, TagIcon, useTagging, workspaceTags } from '../../tags/parts.tsx'
-import { browserSections, workspaceActivity } from '../../tags/sections.ts'
+import {
+  asTagTranslate, RowTrail, SectionBlock, SpaceSwitcher, TagIcon, useTagging, workspaceTags,
+} from '../../tags/parts.tsx'
+import {
+  attentionBySpace, browserSections, inSpace, isActiveStatus, liveFilter, rowActivity, sectionFolded, sessionActivity,
+  tagsByName, type RowActivity,
+} from '../../tags/sections.ts'
 
 /**
  * Column slide length (--ds-transition-duration-slow): rail-search focus waits it out —
@@ -310,18 +315,33 @@ type SessionTreeProps = Pick<
   revealSessionId?: SessionId | undefined
   /** Acknowledge that the chosen Session row has been revealed. */
   onSessionRevealed: (sessionId: SessionId) => void
-  // workspace-tags: tag dots, the tag menu, and Tag/Status sections while `mode` is set.
+  // workspace-tags: tag dots, the tag menu, Tag/Status sections while `mode` is set, and the space filter.
   tagging?: {
     runtime: TagRuntime
     mode: SectionMode | null
     state: TagState
     collapsed: Readonly<Record<string, boolean>>
+    /** The space filter's tag, or null for every Workspace. */
+    filter: WorkspaceTag | null
   } | undefined
 }
 
 /** The list-empty placeholder — a glyph over the text; the archived-only view names its filter and offers the way back. */
-function EmptySessions({ rowState, onLeaveArchivedOnly, t }: Pick<SessionTreeProps, 'rowState' | 'onLeaveArchivedOnly' | 't'>) {
+function EmptySessions({ rowState, onLeaveArchivedOnly, filter, t }: Pick<SessionTreeProps, 'rowState' | 'onLeaveArchivedOnly' | 't'> & {
+  // workspace-tags: a space filter with nothing under it names its tag and offers All.
+  filter?: { tag: WorkspaceTag; clear: () => void } | undefined
+}) {
   const archivedOnly = rowState.archivedFilter === 'only'
+  if (!archivedOnly && filter !== undefined) {
+    const tagT = asTagTranslate(t)
+    return (
+      <div className={css.emptyState} data-row-key="empty">
+        <TagIcon size={24} />
+        <div>{tagT('tags.filter.empty', { name: filter.tag.name })}</div>
+        <button type="button" className={css.emptyAction} onClick={filter.clear}>{tagT('tags.filter.showAll')}</button>
+      </div>
+    )
+  }
   return (
     <div className={css.emptyState} data-row-key="empty">
       {archivedOnly ? <IconArchiveOutlineRegular size={24} /> : <IconQueueOutlineRegular size={24} />}
@@ -394,13 +414,29 @@ function SessionTree({
     return [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY]
       .filter(key => groupExpansion[key] ?? ancestorKeys.has(key))
   }, [groupExpansion, parents, workspaces])
+  // workspace-tags: the space filter keeps its tag's Workspaces, and `fullGroups` has
+  // every group unfolded, for the Status sections and the folded rows' status marks.
+  const tagState = tagging?.state
+  const spaceTag = tagging?.filter ?? null
+  const spaceTagId = spaceTag?.id ?? null
   const groups = useMemo(
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
-    }),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
+    }).filter(group => tagState === undefined || inSpace(tagState, spaceTagId, group.workspaceId)),
+    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, tagState, spaceTagId],
   )
+  const tagged = tagging !== undefined
+  const fullGroups = useMemo(() => new Map(tagged
+    ? deriveGroups(list, workspaces, rowState, statuses, {
+      expandedGroups: [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY],
+      ungroupedOrder: ungroupedSessionIds,
+    }).map(group => [group.key, group])
+    : []), [tagged, list, workspaces, rowState, statuses, ungroupedSessionIds])
+  const sessionsOf = (group: GroupNode): readonly SessionNode[] => fullGroups.get(group.key)?.sessions ?? []
+  // workspace-tags: a Workspace folds inside a Waiting, Completed or Running section on
+  // its own, and comes back unfolded once it has left the section.
+  const [sectionFolds, setSectionFolds] = useState<ReadonlySet<string>>(() => new Set())
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
       if (groupExpansion[key] === false || (key === revealGroup && groupExpansion[key] !== true)) {
@@ -494,25 +530,60 @@ function SessionTree({
     && workspaceDrag.over.half === 'before'
   // workspace-tags: a Workspace may sit in several sections, so sections turn
   // off Workspace reordering and row motion (both assume one row per key).
-  const archivedSet = new Set(rowState.archivedSessionIds)
   const sections = tagging === undefined || tagging.mode === null
     ? undefined
-    : browserSections(tagging.mode, rootGroups, tagging.state, (group) => {
-      const members = group.workspaceId === undefined
-        ? ungroupedSessionIds
-        : workspaces.find(workspace => workspace.workspaceId === group.workspaceId)?.sessionIds ?? []
-      return workspaceActivity(members, list, statuses, archivedSet)
+    : browserSections(tagging.mode, rootGroups, tagging.state, sessionsOf)
+  const sectionRowKeys = (sections ?? []).filter(section => isActiveStatus(section.kind))
+    .flatMap(section => section.groups.map(group => `${section.key}/${group.key}`)).join('\n')
+  useEffect(() => {
+    const live = new Set(sectionRowKeys.split('\n'))
+    setSectionFolds(folds => [...folds].every(key => live.has(key)) ? folds : new Set([...folds].filter(key => live.has(key))))
+  }, [sectionRowKeys])
+  const toggleSectionFold = (key: string): void => {
+    setSectionFolds((folds) => {
+      const next = new Set(folds)
+      if (!next.delete(key)) next.add(key)
+      return next
     })
+  }
+  // workspace-tags: a search reveal unfolds a section that shows its row when every such section is folded.
+  const revealNode = revealSessionId === undefined || revealGroup === undefined
+    ? undefined
+    : fullGroups.get(revealGroup)?.sessions.find(node => node.id === revealSessionId)
+  const revealSections = revealNode === undefined || sections === undefined
+    ? []
+    : sections.filter(section => (section.kind === 'tag' || section.kind === 'untagged' || section.kind === (sessionActivity(revealNode) ?? 'idle'))
+      && section.groups.some(group => group.key === revealGroup)).map(section => section.key)
+  const revealSection = revealSections.some(key => !sectionFolded(tagging?.collapsed ?? {}, key) && !sectionFolds.has(`${key}/${revealGroup}`))
+    ? undefined
+    : revealSections[0]
+  useEffect(() => {
+    if (revealSection === undefined) return
+    tagging?.runtime.setSectionCollapsed(revealSection, false)
+    setSectionFolds((folds) => {
+      const next = new Set(folds)
+      return next.delete(`${revealSection}/${revealGroup}`) ? next : folds
+    })
+  }, [revealSection, revealGroup])
   const tagT = asTagTranslate(t)
 
   const rowKeys: string[] = groups.length === 0 ? ['empty'] : []
-  const renderGroup = (group: GroupNode, depth: number): ReactNode => {
+  // workspace-tags: `section` marks a Workspace in a Status section, whose Sessions are only
+  // those in the section's state: none drag, and a folded row's mark counts only them.
+  // Waiting, Completed and Running pass `toggle`: all their rows show, and they fold on their own.
+  const renderGroup = (
+    group: GroupNode,
+    depth: number,
+    section?: { activity: RowActivity | undefined; toggle?: () => void },
+  ): ReactNode => {
     const workspaceId = group.workspaceId
     const children = childrenByParent.get(group.key) ?? []
     const compatibleDrag = workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key)
     const watermark = sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE
-    const collapsed = watermarkRows(group.sessions, baselines.get(group.key) ?? SESSION_WATERMARK_BASE)
-    const visible = watermarkRows(group.sessions, watermark)
+    const collapsed = section?.toggle === undefined
+      ? watermarkRows(group.sessions, baselines.get(group.key) ?? SESSION_WATERMARK_BASE)
+      : { rows: group.sessions, hiddenCount: 0 }
+    const visible = section?.toggle === undefined ? watermarkRows(group.sessions, watermark) : collapsed
     const sessionsExpanded = visible.hiddenCount === 0
     rowKeys.push(`workspace:${group.key}`)
     const childRows = group.expanded ? children.map(child => renderGroup(child, depth + 1)) : []
@@ -594,10 +665,10 @@ function SessionTree({
           containsCurrentDescendant={currentAncestors.has(group.key)}
           home={home}
           t={t}
-          onToggle={() => {
+          onToggle={section?.toggle ?? (() => {
             if (group.expanded) dropWatermarks(key => withinGroup(key, group.key))
             setGroupExpanded(group.key, !group.expanded)
-          }}
+          })}
           onCreate={() => {
             if (group.workspaceId !== undefined) {
               setGroupExpanded(group.key, true)
@@ -605,7 +676,15 @@ function SessionTree({
             }
           }}
           drag={sections === undefined ? workspaceDragProps : undefined}
-          tags={tagging === undefined ? undefined : <TagDots tags={workspaceTags(tagging.state, group.workspaceId)} t={tagT} />}
+          tags={tagging === undefined
+            ? undefined
+            : (
+              <RowTrail
+                activity={group.expanded ? undefined : section === undefined ? rowActivity(sessionsOf(group)) : section.activity}
+                tags={workspaceTags(tagging.state, group.workspaceId)}
+                t={tagT}
+              />
+            )}
           onTags={tagging === undefined || workspaceId === undefined
             ? undefined
             : (anchor) => { tagging.runtime.openMenu({ workspaceId, anchor }) }}
@@ -670,7 +749,7 @@ function SessionTree({
               onReveal={node.id === revealSessionId && group.key === revealGroup
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
-              drag={dragProps}
+              drag={section === undefined ? dragProps : undefined}
               t={t}
             />
           )
@@ -705,7 +784,7 @@ function SessionTree({
   const groupRows = sections === undefined
     ? rootGroups.map(group => renderGroup(group, 0))
     : sections.map((section) => {
-      const collapsed = tagging?.collapsed[section.key] === true
+      const collapsed = sectionFolded(tagging?.collapsed ?? {}, section.key)
       return (
         <SectionBlock
           key={section.key}
@@ -714,7 +793,16 @@ function SessionTree({
           onToggle={() => { tagging?.runtime.setSectionCollapsed(section.key, !collapsed) }}
           t={tagT}
         >
-          {collapsed ? null : section.groups.map(group => renderGroup(group, 0))}
+          {collapsed ? null : section.groups.map((group) => {
+            if (section.kind === 'idle') return renderGroup(group, 0, { activity: undefined })
+            if (!isActiveStatus(section.kind)) return renderGroup(group, 0)
+            const foldKey = `${section.key}/${group.key}`
+            const folded = sectionFolds.has(foldKey)
+            return renderGroup(folded ? { ...group, expanded: false, sessions: [] } : group, 0, {
+              activity: rowActivity(group.sessions),
+              toggle: () => { toggleSectionFold(foldKey) },
+            })
+          })}
         </SectionBlock>
       )
     })
@@ -729,7 +817,12 @@ function SessionTree({
         resetKey={JSON.stringify([animationResetKey, watermarkMotionKey])}
       >
         {groups.length === 0 && (
-          <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
+          <EmptySessions
+            rowState={rowState}
+            onLeaveArchivedOnly={onLeaveArchivedOnly}
+            filter={spaceTag === null ? undefined : { tag: spaceTag, clear: () => { tagging?.runtime.setFilter(null) } }}
+            t={t}
+          />
         )}
         {groupRows}
       </AnimatedRows>
@@ -742,7 +835,7 @@ function SessionTree({
 function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, open, onSessionRenameRequest,
   usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
-  revealSessionId, onSessionRevealed, renderSlot, t,
+  revealSessionId, onSessionRevealed, renderSlot, space, t,
 }: Pick<
   SessionTreeProps,
   | 'useSessionStatus'
@@ -761,12 +854,14 @@ function FlatList({
 > & {
   list: SessionListState
   sessionIds: readonly SessionId[]
+  // workspace-tags: the space filter shows only its tag's Workspaces' Sessions; drags keep the hidden ones' order.
+  space?: { tag: WorkspaceTag; sessionIds: ReadonlySet<SessionId>; clear: () => void } | undefined
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
   const rows = useMemo(
-    () => deriveFlat(list, sessionIds, rowState, statuses),
-    [list, sessionIds, rowState, statuses],
+    () => deriveFlat(list, sessionIds, rowState, statuses).filter(row => space === undefined || space.sessionIds.has(row.id)),
+    [list, sessionIds, rowState, statuses, space],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -792,7 +887,12 @@ function FlatList({
         resetKey={animationResetKey}
       >
         {rows.length === 0 && (
-          <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} t={t} />
+          <EmptySessions
+            rowState={rowState}
+            onLeaveArchivedOnly={onLeaveArchivedOnly}
+            filter={space === undefined ? undefined : { tag: space.tag, clear: space.clear }}
+            t={t}
+          />
         )}
         {rows.map((node) => {
           const active = drag !== null && drag.pinned === node.pinned
@@ -942,6 +1042,27 @@ function SearchResults({
 }
 
 /**
+ * workspace-tags: the space switcher under the header. Like the session tree it
+ * owns the status subscription its badges need, and it counts every Workspace,
+ * whatever the filter hides.
+ */
+function SpaceSwitcherSeat({ runtime, state, filter, list, workspaces, ungroupedSessionIds, rowState, useSessionStatus, t }: Pick<
+  SessionTreeProps, 'list' | 'workspaces' | 'ungroupedSessionIds' | 'rowState' | 'useSessionStatus' | 't'
+> & {
+  runtime: TagRuntime
+  state: TagState
+  filter: WorkspaceTag | null
+}) {
+  const statuses = useSessionStatus(s => s)
+  const attention = useMemo(() => attentionBySpace(deriveGroups(list, workspaces, rowState, statuses, {
+    expandedGroups: [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY],
+    ungroupedOrder: ungroupedSessionIds,
+  }), state), [list, workspaces, rowState, statuses, ungroupedSessionIds, state])
+  const tags = useMemo(() => tagsByName(state.tags), [state.tags])
+  return <SpaceSwitcher tags={tags} filter={filter?.id ?? null} attention={attention} onPick={runtime.setFilter} t={asTagTranslate(t)} />
+}
+
+/**
  * Render the browsing region.
  * @param props - composed slot props (shell owner share + store + injected actions).
  * @returns the region element tree.
@@ -1004,9 +1125,19 @@ export function WorkspaceBrowser({
   // flow reads): a composition without a picking affordance can add nothing.
   const directoryFlowAvailable = useDirectoryFlow(occupied => occupied)
   const groupBy = useStore(s => s.groupBy)
-  // workspace-tags: the Tag/Status choice overrides `groupBy` while set.
+  // workspace-tags: the Tag/Status choice overrides `groupBy` while set; the space
+  // filter applies in every grouping, and a deleted tag's filter shows everything.
   const tagView = useTagging(tagging)
   const sectionMode = tagging === undefined ? null : tagView.view.mode
+  const tagState = tagView.snapshot.state
+  const spaceTag = tagging === undefined ? null : liveFilter(tagState, tagView.view.filter)
+  const flatSpace = useMemo(() => spaceTag === null || tagging === undefined ? undefined : {
+    tag: spaceTag,
+    sessionIds: new Set(workspaces.filter(workspace => inSpace(tagState, spaceTag.id, workspace.workspaceId))
+      .flatMap(workspace => workspace.sessionIds)),
+    clear: () => { tagging.setFilter(null) },
+  }, [spaceTag, tagState, tagging, workspaces])
+  const spaceKey = spaceTag?.id ?? ''
   const orderBy = useStore(s => s.orderBy)
   // Persisted view blobs written before the archived filter existed rehydrate
   // without the field; they read as the default hide-archived view.
@@ -1150,6 +1281,9 @@ export function WorkspaceBrowser({
       notifyArchivedNotOpenable()
       return
     }
+    // workspace-tags: a result outside the space filter shows every Workspace again, so the list can reveal it.
+    const owner = workspaces.find(workspace => workspace.sessionIds.includes(sessionId))?.workspaceId
+    if (spaceTag !== null && !inSpace(tagState, spaceTag.id, owner)) tagging?.setFilter(null)
     setRevealSessionId(sessionId)
     setQuery('')
     setSearchExpanded(false)
@@ -1439,6 +1573,21 @@ export function WorkspaceBrowser({
         />
       </div>
 
+      {/* workspace-tags: the space switcher, while there are tags and no search query. */}
+      {wide && tagging !== undefined && tagState.tags.length > 0 && normalizedQuery === '' && (
+        <SpaceSwitcherSeat
+          runtime={tagging}
+          state={tagState}
+          filter={spaceTag}
+          list={list}
+          workspaces={orderedWorkspaces}
+          ungroupedSessionIds={orderedUngroupedSessionIds}
+          rowState={rowState}
+          useSessionStatus={useSessionStatus}
+          t={t}
+        />
+      )}
+
       {/* The collapsed rail keeps search as its own 36px control. */}
       {!wide && <div className={css.search}>
         <Tooltip label={t('search')} shortcutKeys={searchShortcut?.keys}>
@@ -1485,7 +1634,7 @@ export function WorkspaceBrowser({
                 rowState={rowState}
                 onLeaveArchivedOnly={leaveArchivedOnly}
                 workspaceReady={workspaceReady}
-                animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
+                animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}/${spaceKey}`}
                 useSessionStatus={useSessionStatus}
                 open={guardedOpen}
                 onSessionRenameRequest={requestSessionRename}
@@ -1493,6 +1642,7 @@ export function WorkspaceBrowser({
                 setSessionOrder={saveSessionOrder}
                 revealSessionId={revealSessionId}
                 onSessionRevealed={acknowledgeSessionReveal}
+                space={flatSpace}
                 t={t}
               />
             )
@@ -1508,10 +1658,10 @@ export function WorkspaceBrowser({
                 ungroupedSessionIds={orderedUngroupedSessionIds}
                 workspaceReady={workspaceReady}
                 nestWorkspaces={groupBy === 'workspace-tree' && sectionMode === null}
-                animationResetKey={`${sectionMode ?? groupBy}/${orderBy}/${archivedFilter}`}
+                animationResetKey={`${sectionMode ?? groupBy}/${orderBy}/${archivedFilter}/${spaceKey}`}
                 tagging={tagging === undefined
                   ? undefined
-                  : { runtime: tagging, mode: sectionMode, state: tagView.snapshot.state, collapsed: tagView.view.collapsed }}
+                  : { runtime: tagging, mode: sectionMode, state: tagState, collapsed: tagView.view.collapsed, filter: spaceTag }}
                 groupExpansion={groupExpansion}
                 setGroupExpanded={actions.setGroupExpanded}
                 setSessionOrder={saveSessionOrder}

@@ -9,11 +9,10 @@ DSH's sidebar workspace browser is one `single` slot (`sidebar.workspaces`) fill
 | `index.ts` | `apply(ctx, tagging)` passes the tag runtime to the browser; deleting a Workspace also drops its tags |
 | `contract/slots.ts` | Optional `tagging` field on the browser's injected props |
 | `locales.ts` | Tag copy (`tags/locales.ts`) joins the `workspace` namespace |
-| `tree.ts` | Exports `visiblePendingKind` and `runningChildCount` for Status grouping |
 | `rows/Rows.tsx` | Workspace row: trailing tag dots, right-click, and a "Tags…" item in its menu |
-| `rows/WorkspaceBrowser.tsx` | Tag and Status in Group by; Tag/Status sections in the session tree, which turn off Workspace drag and row motion because a Workspace can appear in several sections |
+| `rows/WorkspaceBrowser.tsx` | Tag and Status in Group by; Tag/Status sections in the session tree, which turn off Workspace drag and row motion because a Workspace can appear in several sections, and whose Status sections list only the Sessions in their state (not draggable; Waiting, Completed and Running unfolded and with their own folds), unfolding for a search reveal; the tag chip row under the header and its filter in the tree and flat list, including their empty state; folded Workspace rows' attention badge; a search result outside the filter clears it |
 
-`node scripts/upstream-diff.mjs` prints these changes. The fork leaves ui-workspace's own view store and its `dsh.workspace.view.v5` key alone: the Tag/Status choice and folded sections are kept separately (`dsh-workspace-tags.view.v1`), so uninstalling never leaves the stock browser with a value it does not know.
+`node scripts/upstream-diff.mjs` prints these changes. The fork leaves ui-workspace's own view store and its `dsh.workspace.view.v5` key alone: the Tag/Status choice, folded sections and the tag filter are kept separately (`dsh-workspace-tags.view.v1`), so uninstalling never leaves the stock browser with a value it does not know.
 
 ## Moving to a new DSH release
 

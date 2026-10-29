@@ -4,12 +4,14 @@
 
 Supports English and Simplified Chinese, following DSH’s language setting with live updates.
 
-`dsh-workspace-tags` adds colored tags to the workspaces in the DeepSeek Harness sidebar, and two more **Group by** choices in the sidebar’s view options:
+`dsh-workspace-tags` adds colored tags to the workspaces in the DeepSeek Harness sidebar, a row of tag chips that narrows the sidebar to one tag, and two more **Group by** choices in the sidebar’s view options.
+
+Under the sidebar header, **All** and one chip per tag pick which workspaces the sidebar shows, in every grouping, so tags such as “Work” and “Personal” act as separate spaces. Pick a chip again to go back to All. A chip you are not in shows how many of its sessions need you (waiting for you, or finished and not opened yet), orange when any is waiting. Search still covers every workspace; opening a result from another space switches back to All.
 
 - **Tag**: one section per tag, in name order, then **Untagged**. A workspace with several tags appears under each of them.
-- **Status**: **Running** (an agent in the workspace is executing), **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Completed** (a session finished and you have not opened it yet), then **Idle**. Each status has its own icon. A workspace with sessions in several states appears in each of those sections, and the sections follow live as agents start and stop.
+- **Status**: **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Completed** (a session finished and you have not opened it yet), **Running** (an agent is executing, itself or through a subagent), then **Idle**. Each section lists every workspace with sessions in that state, and only those sessions, so each session shows once. **Idle** also holds workspaces without sessions, counts workspaces where the others count sessions, and starts folded. Each status has its own icon, and the sections follow live as agents start and stop.
 
-Right-click a workspace, or choose **Tags…** in its **⋯** menu, to tick its tags, create a tag (name and color) that is added to that workspace, or open **Manage tags…** to rename, recolor or delete tags. A workspace’s tags show as small dots at the end of its row in every grouping mode. Sections fold, and the Group by choice and folded sections are remembered per browser. Inside a section, workspaces keep the sidebar’s order; drag workspaces into order under Workspace grouping, since a workspace can appear in several sections.
+A folded workspace row shows what its sessions would: a badge counting those that need you, or a spinner when one is only running. Right-click a workspace, or choose **Tags…** in its **⋯** menu, to tick its tags, create a tag (name and color) that is added to that workspace, or open **Manage tags…** to rename, recolor or delete tags. A workspace’s tags show as small dots at the end of its row in every grouping mode. Sections fold, and the Group by choice, folded sections and the chosen tag chip are remembered per browser. Inside a section, workspaces keep the sidebar’s order; drag workspaces into order under Workspace grouping, since a workspace can appear in several sections.
 
 Tags are stored on the DSH host in `~/.dsh/storages/dsh-workspace-tags/tags.json` (under `DSH_HOME` when set), so the desktop app and remote web clients of the same host share them; open clients pick up changes from others within 30 seconds or when their window regains focus. Deleting a workspace in the sidebar removes its tags.
 

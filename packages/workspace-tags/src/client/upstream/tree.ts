@@ -376,8 +376,7 @@ function groupByWorkspace(
 }
 
 /** Keep navigation presentation independent from domain-owned interaction objects. */
-// workspace-tags: exported for Status grouping (tags/sections.ts).
-export function visiblePendingKind(kind: string | undefined): SessionPendingInteractionStatus | undefined {
+function visiblePendingKind(kind: string | undefined): SessionPendingInteractionStatus | undefined {
   switch (kind) {
     case 'approval':
     case 'plan-review':
@@ -388,8 +387,7 @@ export function visiblePendingKind(kind: string | undefined): SessionPendingInte
   }
 }
 
-// workspace-tags: exported for Status grouping (tags/sections.ts).
-export function runningChildCount(list: SessionListState, parentId: SessionId, statuses: SessionStatuses): number {
+function runningChildCount(list: SessionListState, parentId: SessionId, statuses: SessionStatuses): number {
   return list.projectionsBySession[parentId]?.values.subagentCatalog?.reduce(
     (count, child) => count + ((statuses.get(child.id)?.running ?? list.byId[child.id]?.running) === true ? 1 : 0),
     0,

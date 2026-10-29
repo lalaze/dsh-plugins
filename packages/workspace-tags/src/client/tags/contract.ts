@@ -14,8 +14,10 @@ export interface TagSnapshot {
 export interface TagViewState {
   /** Null leaves ui-workspace's own Group by choice in charge. */
   mode: SectionMode | null
-  /** Folded section keys (see `sectionKey`). */
+  /** Sections folded or unfolded against their default (see `sectionFolded`), by section key. */
   collapsed: Record<string, boolean>
+  /** The space filter: the one tag whose Workspaces every grouping shows, or null for all. */
+  filter: string | null
 }
 
 /** Where the tag menu opens: a right-click point or a menu button's box. */
@@ -36,6 +38,7 @@ export interface TagRuntime {
   run(operation: TagOperation): Promise<WorkspaceTag | undefined>
   setMode(mode: SectionMode | null): void
   setSectionCollapsed(key: string, collapsed: boolean): void
+  setFilter(tagId: string | null): void
   openMenu(request: TagMenuRequest | null): void
   openDialog(request: TagDialogRequest | null): void
   /** Drop a deleted Workspace's tags; failures only log. */

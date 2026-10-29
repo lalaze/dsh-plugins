@@ -1,32 +1,100 @@
 /**
- * Tag and Status sections over ui-workspace's Workspace groups. A Workspace
- * appears in every section it qualifies for, keeping the sidebar's Workspace
- * order inside each; empty sections are left out.
+ * Tag and Status sections over ui-workspace's Workspace groups, and the space
+ * filter that narrows every grouping to one tag. A Workspace appears in every
+ * section it qualifies for, keeping the sidebar's Workspace order inside each;
+ * empty sections are left out.
  */
-import type { SessionListState } from '@deepseek-ai/dsh-api-session-controller/client'
-import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TagState, WorkspaceTag } from '../../shared/tags.ts'
-import { runningChildCount, visiblePendingKind, type GroupNode } from '../upstream/tree.ts'
+import type { GroupNode, SessionNode } from '../upstream/tree.ts'
 import type { SectionMode } from './contract.ts'
 
-export type SectionKind = 'tag' | 'untagged' | 'running' | 'waiting' | 'completed' | 'idle'
+/** What a Session can be doing besides nothing, most urgent first: the Status sections' order. */
+export const ACTIVE_STATUSES = ['waiting', 'completed', 'running'] as const
+export type ActiveStatus = typeof ACTIVE_STATUSES[number]
+
+export type SectionKind = 'tag' | 'untagged' | ActiveStatus | 'idle'
 
 export interface BrowserSection {
   /** Stable across renders: `tag:<id>`, `untagged`, or `status:<kind>`. */
   key: string
   kind: SectionKind
   tag?: WorkspaceTag
+  /**
+   * Tag sections hold whole Workspaces. Status sections hold each Workspace
+   * with only its Sessions in that state, so every Session shows once:
+   * Waiting, Completed and Running list theirs whether or not the Workspace
+   * is folded elsewhere, and Idle follows the Workspace's own fold.
+   */
   groups: readonly GroupNode[]
+  /** Workspaces in Tag and Idle sections, Sessions in the others. */
+  count: number
+}
+
+/** Sessions waiting on the user and finished-but-unread ones: what the space switcher's badges count. */
+export interface Attention { waiting: number; completed: number }
+
+/** What a folded Workspace row shows: its Sessions that need the user, else whether one runs. */
+export interface RowActivity extends Attention { running: boolean }
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+export const tagsByName = (tags: readonly WorkspaceTag[]): WorkspaceTag[] =>
+  [...tags].sort((a, b) => collator.compare(a.name, b.name))
+
+/**
+ * A Session's one state, ranked as its row's status dot ranks them: waiting
+ * on the user, then running (itself or a subagent), then finished and unread.
+ * An archived Session cannot be opened, so its completion could never be read.
+ */
+export function sessionActivity(node: SessionNode): ActiveStatus | undefined {
+  if (node.pendingInteraction !== undefined) return 'waiting'
+  if (node.running || node.runningSubagentCount > 0) return 'running'
+  if (node.completed && !node.archived) return 'completed'
+  return undefined
+}
+
+/** A group's activity from its unfolded Sessions; undefined when all are idle. */
+export function rowActivity(sessions: readonly SessionNode[]): RowActivity | undefined {
+  const activity: RowActivity = { waiting: 0, completed: 0, running: false }
+  for (const node of sessions) {
+    const kind = sessionActivity(node)
+    if (kind === 'running') activity.running = true
+    else if (kind !== undefined) activity[kind]++
+  }
+  return activity.running || activity.waiting + activity.completed > 0 ? activity : undefined
+}
+
+export const isActiveStatus = (kind: SectionKind): kind is ActiveStatus => (ACTIVE_STATUSES as readonly string[]).includes(kind)
+
+/** The space filter's tag when it still exists; a deleted or not yet loaded tag shows everything. */
+export function liveFilter(state: TagState, filter: string | null): WorkspaceTag | null {
+  return filter === null ? null : state.tags.find(tag => tag.id === filter) ?? null
+}
+
+/** Whether a group shows under the space filter; the Ungrouped bucket has no tags. */
+export function inSpace(state: TagState, filter: string | null, workspaceId: string | undefined): boolean {
+  return filter === null || (workspaceId !== undefined && (state.assignments[workspaceId] ?? []).includes(filter))
 }
 
 /**
- * What a Workspace's Sessions are doing. Each Session counts once, in this
- * order: waiting on the user, running, finished but not yet opened.
+ * Attention across all groups (`null`) and per tag, for the space switcher.
+ * @param groups - every group, unfiltered, with its Sessions unfolded.
  */
-export interface WorkspaceActivity { running: boolean; waiting: boolean; completed: boolean }
-
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+export function attentionBySpace(groups: readonly GroupNode[], state: TagState): Map<string | null, Attention> {
+  const counts = new Map<string | null, Attention>([[null, { waiting: 0, completed: 0 }], ...state.tags.map(tag => [tag.id, { waiting: 0, completed: 0 }] as const)])
+  for (const group of groups) {
+    const spaces = [null, ...group.workspaceId === undefined ? [] : state.assignments[group.workspaceId] ?? []]
+    for (const node of group.sessions) {
+      const activity = sessionActivity(node)
+      if (activity !== 'waiting' && activity !== 'completed') continue
+      for (const space of spaces) {
+        const count = counts.get(space)
+        if (count !== undefined) count[activity]++
+      }
+    }
+  }
+  return counts
+}
 
 /** Tag sections in name order, then Untagged; the ungrouped bucket has no tags. */
 export function tagSections(groups: readonly GroupNode[], state: TagState): BrowserSection[] {
@@ -42,63 +110,60 @@ export function tagSections(groups: readonly GroupNode[], state: TagState): Brow
       else members.push(group)
     }
   }
-  const sections: BrowserSection[] = [...byTag]
-    .map(([id, members]) => ({ key: `tag:${id}`, kind: 'tag' as const, tag: known.get(id)!, groups: members }))
-    .sort((a, b) => collator.compare(a.tag.name, b.tag.name))
-  if (untagged.length > 0) sections.push({ key: 'untagged', kind: 'untagged', groups: untagged })
+  const sections: BrowserSection[] = tagsByName([...byTag.keys()].map(id => known.get(id)!))
+    .map(tag => ({ key: `tag:${tag.id}`, kind: 'tag' as const, tag, groups: byTag.get(tag.id)!, count: byTag.get(tag.id)!.length }))
+  if (untagged.length > 0) sections.push({ key: 'untagged', kind: 'untagged', groups: untagged, count: untagged.length })
   return sections
 }
 
-/** Running first, then waiting for the user, then finished and unread, then idle. */
-export function statusSections(groups: readonly GroupNode[], activityOf: (group: GroupNode) => WorkspaceActivity): BrowserSection[] {
-  const running: GroupNode[] = []
-  const waiting: GroupNode[] = []
-  const completed: GroupNode[] = []
+/**
+ * Waiting for the user, then finished and unread, then running, then Idle,
+ * each listing every Workspace with Sessions in that state and only those
+ * Sessions. Idle also holds Workspaces without Sessions, where a new one starts.
+ * @param groups - the rendered groups, whose Sessions follow their fold state.
+ * @param sessionsOf - a group's Sessions regardless of its fold state.
+ */
+export function statusSections(groups: readonly GroupNode[], sessionsOf: (group: GroupNode) => readonly SessionNode[]): BrowserSection[] {
+  const active = new Map<ActiveStatus, GroupNode[]>(ACTIVE_STATUSES.map(kind => [kind, []]))
   const idle: GroupNode[] = []
   for (const group of groups) {
-    const activity = activityOf(group)
-    if (activity.running) running.push(group)
-    if (activity.waiting) waiting.push(group)
-    if (activity.completed) completed.push(group)
-    if (!activity.running && !activity.waiting && !activity.completed) idle.push(group)
+    const all = sessionsOf(group)
+    const byKind = new Map<ActiveStatus, SessionNode[]>()
+    for (const node of all) {
+      const kind = sessionActivity(node)
+      if (kind === undefined) continue
+      const members = byKind.get(kind)
+      if (members === undefined) byKind.set(kind, [node])
+      else members.push(node)
+    }
+    for (const [kind, sessions] of byKind) active.get(kind)!.push({ ...group, expanded: true, sessions })
+    if (all.length === 0 || all.some(node => sessionActivity(node) === undefined)) {
+      idle.push({ ...group, sessions: group.sessions.filter(node => sessionActivity(node) === undefined) })
+    }
   }
-  return ([['running', running], ['waiting', waiting], ['completed', completed], ['idle', idle]] as const)
+  const sections: BrowserSection[] = [...active]
     .filter(([, members]) => members.length > 0)
-    .map(([kind, members]) => ({ key: `status:${kind}`, kind, groups: members }))
+    .map(([kind, members]) => ({
+      key: `status:${kind}`, kind, groups: members, count: members.reduce((n, member) => n + member.sessions.length, 0),
+    }))
+  if (idle.length > 0) sections.push({ key: 'status:idle', kind: 'idle', groups: idle, count: idle.length })
+  return sections
 }
 
-/**
- * Activity across every member Session, including folded ones, with the same
- * status sources the Session rows use. Subagent children count through their
- * parent; the Ungrouped bucket's members include them, and would otherwise
- * show it running alongside the parent's Workspace. An unread completion
- * counts only on a Session that has a row to open: archived Sessions cannot
- * be opened, so theirs could never be read.
- */
-export function workspaceActivity(
-  sessionIds: readonly SessionId[],
-  list: SessionListState,
-  statuses: SessionStatusSnapshot,
-  archived: ReadonlySet<SessionId> = new Set(),
-): WorkspaceActivity {
-  let running = false
-  let waiting = false
-  let completed = false
-  for (const id of sessionIds) {
-    if (list.byId[id]?.origin === 'subagent') continue
-    const status = statuses.get(id)
-    if (visiblePendingKind(status?.pendingInteraction?.kind) !== undefined) waiting = true
-    else if ((status?.running ?? list.byId[id]?.running) === true || runningChildCount(list, id, statuses) > 0) running = true
-    else if (status?.completionUnread === true && !archived.has(id)) completed = true
-  }
-  return { running, waiting, completed }
+/** Idle starts folded: it is the catch-all, and the sections above it are what needs a look. */
+export function sectionFoldedByDefault(key: string): boolean {
+  return key === 'status:idle'
+}
+
+export function sectionFolded(collapsed: Readonly<Record<string, boolean>>, key: string): boolean {
+  return collapsed[key] ?? sectionFoldedByDefault(key)
 }
 
 export function browserSections(
   mode: SectionMode,
   groups: readonly GroupNode[],
   state: TagState,
-  activityOf: (group: GroupNode) => WorkspaceActivity,
+  sessionsOf: (group: GroupNode) => readonly SessionNode[],
 ): BrowserSection[] {
-  return mode === 'tag' ? tagSections(groups, state) : statusSections(groups, activityOf)
+  return mode === 'tag' ? tagSections(groups, state) : statusSections(groups, sessionsOf)
 }
