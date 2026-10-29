@@ -42,17 +42,17 @@ const REMOTE_TOOL = 'remote_cli';
 export const chatModelId = (projectId, provider, model, serviceTier) => `${projectId}/${encodeURIComponent(provider)}/${encodeURIComponent(model)}${serviceTier ? `/${encodeURIComponent(serviceTier)}` : ''}`;
 /**
  * Remote tools already execute inside the CLI. Record their lifecycle without dispatching a DSH tool: each runs as a
- * nested call under one row per response, which needs no model message while the CLI works. A tool-call message in
- * the streaming step would make a reopened or reconnected DSH chat show that message and hide the CLI's text.
- * The row's call and a summary result join the conversation when the response ends, so its tool calls stay paired.
+ * nested call under one row per response. A tool-call message in the streaming step would make a reopened or
+ * reconnected DSH chat show that message and hide the CLI's text, and DSH rejects a stored log whose tool/call precedes
+ * the message advertising it; its chat also drops nested calls that arrive before their row. So the whole row is
+ * committed when the response ends: its tool-call message, its call, the nested calls, and a summary result.
  */
 class NativeToolRows {
     options;
     title;
     calls = new Map();
+    settled = [];
     finished = new Set();
-    summary = [];
-    root;
     closed = false;
     step;
     session;
@@ -72,42 +72,43 @@ class NativeToolRows {
             return true;
         let call = this.calls.get(key);
         if (!call) {
-            const root = this.root ??= this.open(this.session, this.step);
             // Namespace native ids by DSH step: CLI call ids can repeat after a resume or a replay.
             call = { id: ToolCallId(`remote-${this.step.turn}-${this.step.step}-${hash(key).slice(0, 24)}`), name: typeof item.name === 'string' ? item.name : 'Remote tool',
                 args: typeof item.detail === 'object' && item.detail !== null ? item.detail : {} };
-            this.session.append('tool/ptc-dispatch-start', { rootCallId: root.id, parentCallId: root.id, subCallId: call.id, name: call.name, arguments: call.args });
             this.calls.set(key, call);
         }
         if (item.status !== 'running' && item.status !== 'pending')
             this.finish(key, typeof item.detail === 'string' ? item.detail : JSON.stringify(item.detail ?? {}), item.status === 'failed' || item.status === 'canceled');
         return true;
     }
-    open(session, step) {
-        const id = ToolCallId(`remote-${step.turn}-${step.step}-cli`), args = JSON.stringify({ description: this.title });
-        return { id, seq: session.append('tool/call', { ...step, callId: id, name: REMOTE_TOOL, arguments: args }).seq, arguments: args };
-    }
     finish(key, text, isError) {
-        const call = this.calls.get(key), root = this.root;
-        if (!call || !root || !this.session)
+        const call = this.calls.get(key);
+        if (!call)
             return;
-        this.session.append('tool/ptc-dispatch', { rootCallId: root.id, parentCallId: root.id, subCallId: call.id, name: call.name, arguments: call.args, isError, content: [{ type: 'text', text }] });
-        this.summary.push(`${call.name} ${JSON.stringify(call.args)}${isError ? ' (failed)' : ''}\n${text}`);
+        this.settled.push({ ...call, result: { text, isError } });
         this.calls.delete(key);
         this.finished.add(key);
     }
     close(text = 'Remote tool did not finish before this response ended.', isError = true) {
         for (const key of this.calls.keys())
             this.finish(key, text, isError);
-        const root = this.root;
-        if (!root || !this.session || !this.step || this.closed)
+        const session = this.session, step = this.step;
+        if (!session || !step || this.closed || !this.settled.length)
             return;
         this.closed = true;
-        this.session.append('assistant/message', { ...this.step, message: {
-                id: MessageId(`${root.id}:call`), role: 'assistant', source: { kind: 'model', provider: this.options.provider, model: this.options.model },
-                content: [{ type: 'tool-call', id: root.id, name: REMOTE_TOOL, arguments: root.arguments }],
+        const id = ToolCallId(`remote-${step.turn}-${step.step}-cli`), args = JSON.stringify({ description: this.title });
+        session.append('assistant/message', { ...step, message: {
+                id: MessageId(`${id}:call`), role: 'assistant', source: { kind: 'model', provider: this.options.provider, model: this.options.model },
+                content: [{ type: 'tool-call', id, name: REMOTE_TOOL, arguments: args }],
             }, stream: [] }, { surfaceOp: 'append' });
-        this.session.append('tool/result', { ...this.step, message: createToolResultMessage({ callId: root.id, content: [{ type: 'text', text: this.summary.join('\n\n') }], isError: false }) }, { surfaceOp: 'append', sourceEventSeqs: [root.seq] });
+        const seq = session.append('tool/call', { ...step, callId: id, name: REMOTE_TOOL, arguments: args }).seq;
+        for (const { id: subCallId, name, args: callArgs, result } of this.settled) {
+            const nested = { rootCallId: id, parentCallId: id, subCallId, name, arguments: callArgs };
+            session.append('tool/ptc-dispatch-start', nested);
+            session.append('tool/ptc-dispatch', { ...nested, isError: result.isError, content: [{ type: 'text', text: result.text }] });
+        }
+        const summary = this.settled.map(c => `${c.name} ${JSON.stringify(c.args)}${c.result.isError ? ' (failed)' : ''}\n${c.result.text}`).join('\n\n');
+        session.append('tool/result', { ...step, message: createToolResultMessage({ callId: id, content: [{ type: 'text', text: summary }], isError: false }) }, { surfaceOp: 'append', sourceEventSeqs: [seq] });
     }
 }
 export class RemoteCliAdapter extends LlmAdapter {
