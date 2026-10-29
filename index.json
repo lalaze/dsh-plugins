@@ -27,12 +27,12 @@
       },
       "versions": [
         {
-          "version": "0.2.57",
-          "publishTimestamp": 1793270682,
+          "version": "0.2.58",
+          "publishTimestamp": 1793290999,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "c8b16ed5290a84921a51f13583e661e1a7ce84e7",
+            "commit": "e6472e18c37fbc5c46d656579e6ddb88c171fffc",
             "path": "packages/remote-agents"
           },
           "engines": {
@@ -107,6 +107,42 @@
             "url": "https://github.com/lalaze/dsh-plugins",
             "commit": "c8b16ed5290a84921a51f13583e661e1a7ce84e7",
             "path": "packages/model-groups"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-file-editor",
+      "title": "DSH File Editor",
+      "description": {
+        "en": "Edit code and text files of local workspaces with syntax highlighting, plus Markdown and SVG previews",
+        "zh": "以语法高亮编辑本地工作区的代码和文本文件，并预览 Markdown 与 SVG"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/file-editor",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/file-editor"
+      },
+      "metadata": {
+        "keywords": [
+          "editor",
+          "codemirror",
+          "files"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793290999,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "e6472e18c37fbc5c46d656579e6ddb88c171fffc",
+            "path": "packages/file-editor"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.2 <0.3.0"
