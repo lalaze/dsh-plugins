@@ -248,6 +248,7 @@ export class RemoteAgentsService {
       });
       const connection = this.connections.get(id); this.connections.delete(id);
       await connection?.backend.close();
+      this.sharing?.forget(id);
       this.catalogChanged();
       return this.snapshot();
     });

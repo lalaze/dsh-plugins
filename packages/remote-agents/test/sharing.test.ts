@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter, once } from 'node:events';
-import { access, chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { connect, createConnection, createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,12 +10,12 @@ import { createInterface } from 'node:readline';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as pause } from 'node:timers/promises';
 import { Store } from '../src/store.js';
-import { acpServers, mcpServerOf, Sharing, sharedArguments, type SharedTool, type SkillSummary } from '../src/sharing.js';
+import { acpServers, mcpContent, mcpServerOf, Sharing, sharedArguments, type SharedTool, type SharedToolResult, type SkillSummary } from '../src/sharing.js';
 import type { HostConfig, Task } from '../src/domain.js';
 import type { SshTransport } from '../src/ssh.js';
 
 /** Runs "remote" commands locally under a private HOME, so the bridge script really installs and syncs. */
-function localTransport(home: string): SshTransport {
+function localTransport(home: string, scripts: { exec: string[]; transfer: string[] } = { exec: [], transfer: [] }): SshTransport {
   const run = (script: string, input?: Buffer) => new Promise<Buffer>((resolve, reject) => {
     const child = spawn('sh', ['-c', script], { env: { ...process.env, HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] });
     const out: Buffer[] = []; let err = '';
@@ -24,18 +24,18 @@ function localTransport(home: string): SshTransport {
     child.stdin.end(input);
   });
   return {
-    exec: async script => (await run(script)).toString('utf8'),
+    exec: async script => { scripts.exec.push(script); return (await run(script)).toString('utf8'); },
     start: () => { throw new Error('unused'); },
-    transfer: async (script, options) => { const chunks: Buffer[] = []; for await (const chunk of options.input ?? []) chunks.push(Buffer.from(chunk)); return run(script, Buffer.concat(chunks)); },
+    transfer: async (script, options) => { scripts.transfer.push(script); const chunks: Buffer[] = []; for await (const chunk of options.input ?? []) chunks.push(Buffer.from(chunk)); return run(script, Buffer.concat(chunks)); },
   };
 }
 /** Stands in for `ssh -R <socket>:127.0.0.1:<port>`: a local Unix socket piped to DSH's bridge port. */
-function fakeForward(launched: string[][]) {
+function fakeForward(launched: string[][], killed: string[][] = []) {
   return (args: string[]) => {
     launched.push(args);
     const spec = args[args.indexOf('-R') + 1], portAt = spec.lastIndexOf(':'), port = Number(spec.slice(portAt + 1)), socket = spec.slice(0, spec.lastIndexOf(':', portAt - 1));
     const child = new EventEmitter() as ChildProcess & EventEmitter, stderr = new PassThrough(), open = new Set<Socket>();
-    Object.assign(child, { stderr, kill: () => { server.close(); for (const s of open) s.destroy(); child.emit('close', 0); return true; } });
+    Object.assign(child, { stderr, kill: () => { killed.push(args); server.close(); for (const s of open) s.destroy(); child.emit('close', 0); return true; } });
     const server = createServer(client => {
       const upstream = connect(port, '127.0.0.1'); open.add(client); open.add(upstream);
       client.pipe(upstream).pipe(client); client.on('error', () => {}); upstream.on('error', () => client.destroy());
@@ -77,7 +77,7 @@ async function setup(t: TestContext) {
   const host: HostConfig = { id: 'host-1', label: 'build', connection: 'ssh://dev@build', serverId: 'server-1' } as HostConfig;
   const task = (id: string, extra: Partial<Task> = {}) => ({ id, hostId: host.id, cwd: '/srv/app', provider: 'codex', model: 'm', prompt: 'p', serverId: 'server-1', title: 't', createdAt: '', state: 'ready', ...extra }) as Task;
   await store.update(state => { state.hosts.push(host); state.tasks.push(task('chat-task', { chat: { sessionId: 'session-1', route: 'r' } }), task('panel-task')); });
-  const calls: { name: string; arguments: string; agent: unknown }[] = [];
+  const calls: { name: string; arguments: unknown; agent: unknown }[] = [];
   const tools: SharedTool[] = [
     { name: 'mcp__github__create_issue', description: 'Create an issue', parameters: { type: 'object', properties: { title: { type: 'string' } } } },
     { name: 'mcp__github__search', description: 'Search', parameters: { type: 'object', properties: {} } },
@@ -91,18 +91,22 @@ async function setup(t: TestContext) {
     { name: 'project-only', description: 'Local anchor project', path: join(skillsDir, 'notes.md'), source: 'project-dsh', invocation: { modelInvocable: true } },
     { name: 'human-only', description: 'User command', path: join(skillsDir, 'notes.md'), source: 'user-dsh', invocation: { modelInvocable: false } },
   ];
-  const launched: string[][] = [], agent = { id: 'session-1' };
-  const sharing = new Sharing(store, fakeForward(launched), () => {});
+  const launched: string[][] = [], killed: string[][] = [], agent = { id: 'session-1' }, scripts = { exec: [] as string[], transfer: [] as string[] };
+  const sharing = new Sharing(store, fakeForward(launched, killed), () => {});
   t.after(() => sharing.close());
+  // DSH's MCP client keeps the server's result as the value; post-execute policies shaped the content.
+  const result: SharedToolResult = { isError: false, value: { content: [{ type: 'text', text: 'created #1 with token abc' }] }, content: [{ type: 'text', text: 'created #1 with token [redacted]' }] };
   Object.assign(sharing.host, {
-    tools: { definitions: () => tools, execute: async (input: any) => {
-      calls.push({ name: input.calls[0].name, arguments: input.calls[0].arguments, agent: input.agent });
-      return { results: [{ result: { isError: false, value: { content: [{ type: 'text', text: 'created #1' }] }, content: [{ type: 'text', text: '{}' }] } }] };
+    tools: { schemas: () => tools, execute: async (input: any) => {
+      calls.push({ name: input.name, arguments: input.arguments, agent: input.agent });
+      assert.ok(typeof input.callId === 'string' && input.signal instanceof AbortSignal);
+      return result;
     } },
     skills: { list: async () => summaries, get: async (name: string) => name === 'embedded' ? { content: 'Embedded body.' } : undefined },
     agent: (id: string) => id === 'session-1' ? agent : undefined,
   });
-  return { root, home, store, host, sharing, calls, launched, agent, transport: localTransport(home), task: (id: string) => store.task(t => t.id === id)! };
+  return { root, home, store, host, sharing, calls, launched, killed, agent, tools, skillsDir, scripts, transport: localTransport(home, scripts), task: (id: string) => store.task(t => t.id === id)!,
+    bridge: () => (sharing as unknown as { bridges: Map<string, { retry?: unknown; checked: number }> }).bridges.get(host.id) };
 }
 
 test('MCP tool names map to their DSH server', () => {
@@ -128,7 +132,8 @@ test('each CLI receives the shares in its own launch form; the saved argv is unt
 test('skills are copied once and shared natively with Claude and as load_skill elsewhere; MCP stays off until enabled', async t => {
   const { home, sharing, transport, host, task } = await setup(t);
   const codex = await sharing.prepare(host, transport, task('chat-task'), 'codex');
-  const shared = join(home, '.dsh-remote-agents', 'shared');
+  const shared = codex.servers[0].args[2];
+  assert.match(shared, new RegExp(`^${join(home, '.dsh-remote-agents', 'shared-')}[a-f0-9]{16}$`), 'each DSH instance has its own copy');
   assert.deepEqual(codex.servers.map(s => s.name), ['dsh'], 'no MCP server is shared by default');
   assert.equal(codex.pluginDir, undefined);
   assert.match(await readFile(join(shared, 'skills', 'review', 'scripts', 'check.sh'), 'utf8'), /echo ok/);
@@ -158,24 +163,30 @@ test('skills are copied once and shared natively with Claude and as load_skill e
   assert.equal((await sharing.catalog()).skills.find(s => s.name === 'notes')?.shared, false);
 });
 
+const pointers = async (home: string) => (await readdir(join(home, '.dsh-remote-agents', 'bridge')).catch(() => [])).filter(name => name.startsWith('current'));
+
 test('a shared MCP server runs in DSH with the owning conversation, through one reverse forward per host', async t => {
-  const { home, sharing, transport, host, task, calls, launched, agent } = await setup(t);
+  const { home, sharing, transport, host, task, calls, launched, agent, scripts } = await setup(t);
   await sharing.set('mcp', 'github', true);
   assert.deepEqual((await sharing.catalog()).mcp, [{ name: 'github', tools: 2, shared: true }, { name: 'web', tools: 1, shared: false }]);
   assert.deepEqual((await sharing.prepare(host, transport, task('panel-task'), 'codex')).servers.map(s => s.name), ['dsh'], 'a CLI without a DSH conversation gets no proxies');
   const launch = await sharing.prepare(host, transport, task('chat-task'), 'acp');
   const proxy = launch.servers.find(s => s.name === 'dsh-github')!;
   assert.ok(proxy.command.startsWith('/'), 'ACP requires an absolute command');
-  await until(() => exists(join(home, '.dsh-remote-agents', 'bridge', 'current')));
+  const [pointer, ...others] = await pointers(home);
+  assert.match(pointer, /^current-[a-f0-9]{16}$/, 'the launch waits for the forward; each DSH instance has its own pointer');
+  assert.deepEqual(others, [], 'no shared pointer on a host no earlier version used');
   assert.equal(launched.length, 1);
+  const { token } = JSON.parse(await readFile(proxy.args[2], 'utf8'));
+  assert.ok(![...scripts.exec, ...scripts.transfer].some(script => script.includes(token)), 'the token never appears on a command line');
   assert.deepEqual(launched[0].slice(-2), ['--', 'dev@build']);
 
   const client = mcp(t, proxy.command, proxy.args, home);
   assert.equal((await client.request('initialize', { protocolVersion: '2025-11-25' })).result.protocolVersion, '2025-11-25');
   assert.deepEqual((await client.request('tools/list')).result.tools.map((tool: { name: string }) => tool.name), ['create_issue', 'search']);
   const result = (await client.request('tools/call', { name: 'create_issue', arguments: { title: 'Bug' } })).result;
-  assert.deepEqual(result, { content: [{ type: 'text', text: 'created #1' }] });
-  assert.deepEqual(calls, [{ name: 'mcp__github__create_issue', arguments: '{"title":"Bug"}', agent }]);
+  assert.deepEqual(result, { content: [{ type: 'text', text: 'created #1 with token [redacted]' }] }, 'the CLI receives what DSH policies left for the model');
+  assert.deepEqual(calls, [{ name: 'mcp__github__create_issue', arguments: { title: 'Bug' }, agent }]);
 
   await sharing.set('mcp', 'github', false);
   await until(() => client.notifications.includes('notifications/tools/list_changed'));
@@ -191,6 +202,152 @@ test('a shared MCP server runs in DSH with the owning conversation, through one 
   const offline = (await client.request('tools/call', { name: 'create_issue', arguments: {} })).result;
   assert.equal(offline.isError, true); assert.match(offline.content[0].text, /DSH could not run this tool/);
   assert.deepEqual((await client.request('tools/list')).result.tools.map((tool: { name: string }) => tool.name), ['create_issue', 'search'], 'the last tools are listed while DSH is away');
+});
+
+test('MCP content keeps DSH policies and takes image data from the server result', () => {
+  const png = Buffer.from('png-bytes').toString('base64'), jpeg = Buffer.from('jpeg').toString('base64');
+  const value = { content: [{ type: 'text', text: 'raw' }, { type: 'image', data: jpeg, mimeType: 'image/jpeg' }, { type: 'image', data: png, mimeType: 'image/png' }] };
+  assert.deepEqual(mcpContent({ isError: false, value, content: [
+    { type: 'text', text: 'shaped' },
+    { type: 'image', attachment: { mediaType: 'image/jpeg', bytes: 2 } },
+    { type: 'image', attachment: { mediaType: 'image/png', bytes: 9 } },
+    { type: 'image', offloaded: true, attachment: { mediaType: 'image/jpeg', bytes: 4 } },
+    { type: 'file' },
+  ] }), [{ type: 'text', text: 'shaped' }, { type: 'text', text: '[image omitted]' }, { type: 'image', data: png, mimeType: 'image/png' },
+    { type: 'text', text: '[image omitted]' }, { type: 'text', text: '[file omitted]' }], 'an image a policy replaced is omitted, not sent as the original');
+  assert.deepEqual(mcpContent({ isError: true, content: [{ type: 'image' }] }), [{ type: 'text', text: '[image omitted]' }]);
+});
+
+test('proxies list again when DSH loads or drops a server, and keep its last tools meanwhile', async t => {
+  const { home, sharing, transport, host, task, tools } = await setup(t);
+  await sharing.set('mcp', 'github', true);
+  const proxy = (await sharing.prepare(host, transport, task('chat-task'), 'codex')).servers.find(s => s.name === 'dsh-github')!;
+  const client = mcp(t, proxy.command, proxy.args, home);
+  await client.request('initialize', { protocolVersion: '2025-11-25' });
+  assert.equal((await client.request('tools/list')).result.tools.length, 2);
+  const github = tools.splice(0, 2);
+  sharing.toolsChanged();
+  await until(() => client.notifications.includes('notifications/tools/list_changed'));
+  assert.equal((await client.request('tools/list')).result.tools.length, 2, 'a server DSH has not loaded keeps its last tools');
+  tools.push(...github, { name: 'mcp__github__close_issue', description: 'Close an issue' });
+  sharing.toolsChanged();
+  await until(() => client.notifications.filter(n => n === 'notifications/tools/list_changed').length === 2);
+  assert.equal((await client.request('tools/list')).result.tools.length, 3);
+  tools.push({ name: 'mcp__web__search', description: 'Search' });
+  sharing.toolsChanged(); await pause(400);
+  assert.equal(client.notifications.length, 2, 'other servers changing is not announced');
+});
+
+test('a forward is confirmed only by the server, and retried when it fails', async t => {
+  const { sharing, host, task, home, scripts, bridge } = await setup(t);
+  await sharing.set('mcp', 'github', true);
+  const launched: string[][] = [];
+  // ssh logs this before the server answers the forward request.
+  (sharing as unknown as { launch(args: string[]): ChildProcess }).launch = args => {
+    launched.push(args);
+    const child = new EventEmitter() as ChildProcess & EventEmitter, stderr = new PassThrough();
+    Object.assign(child, { stderr, kill: () => true });
+    setImmediate(() => { stderr.write('debug1: Entering interactive session.\n'); setImmediate(() => { stderr.write('Error: remote port forwarding failed for listen path\n'); setImmediate(() => child.emit('close', 255)); }); });
+    return child;
+  };
+  const transport = localTransport(home, scripts);
+  await sharing.prepare(host, transport, task('chat-task'), 'codex');
+  assert.deepEqual(await pointers(home), [], 'no pointer to an unbound socket');
+  assert.match(sharing.status()[host.id], /remote port forwarding failed/);
+  assert.ok(bridge()?.retry, 'a retry is scheduled');
+
+  // Confirmed, but pointing the proxies at it failed.
+  (sharing as unknown as { launch(args: string[]): ChildProcess }).launch = fakeForward(launched);
+  const { pointer } = JSON.parse(await readFile(join(home, '.dsh-remote-agents', 'bridge', 'tasks', 'chat-task.json'), 'utf8'));
+  await mkdir(`${pointer}.tmp`);
+  await sharing.prepare(host, transport, task('chat-task'), 'codex');
+  assert.match(sharing.status()[host.id], /current-[a-f0-9]{16}\.tmp/);
+  assert.ok(!await exists(pointer));
+  assert.ok(bridge()?.retry, 'a retry is scheduled');
+});
+
+test('reattached CLIs get the forward back before DSH loads its MCP servers; a removed host stops it', async t => {
+  const { home, sharing, host, transport, task, tools, launched, killed, bridge } = await setup(t);
+  await sharing.set('mcp', 'github', true);
+  tools.length = 0;
+  sharing.attached(host, transport, task('panel-task'));
+  sharing.attached(host, transport, task('chat-task'));
+  await until(async () => (await pointers(home)).length === 1);
+  assert.equal(launched.length, 1, 'only the CLI with a DSH conversation needs the forward');
+  sharing.forget(host.id);
+  assert.equal(killed.length, 1);
+  assert.equal(bridge(), undefined);
+  assert.deepEqual(sharing.status(), {});
+  sharing.attached(host, transport, task('chat-task'));
+  await until(() => launched.length === 2);
+});
+
+test('closing while DSH opens its port starts no forward', async t => {
+  const { sharing, host, transport, task } = await setup(t);
+  await sharing.set('mcp', 'github', true);
+  const launched: string[][] = [];
+  (sharing as unknown as { launch(args: string[]): ChildProcess }).launch = args => {
+    launched.push(args); return Object.assign(new EventEmitter(), { stderr: new PassThrough(), kill: () => true }) as unknown as ChildProcess;
+  };
+  let opened!: (port: number) => void, asked = false;
+  (sharing as unknown as { listen(): Promise<number> }).listen = () => { asked = true; return new Promise(resolve => { opened = resolve; }); };
+  sharing.attached(host, transport, task('chat-task'));
+  await until(() => asked);
+  await sharing.close();
+  opened(1); await pause(50);
+  assert.equal(launched.length, 0);
+});
+
+test('skills are read and sent again only when they change, and copied again when the host lost them', async t => {
+  const { home, sharing, transport, host, task, skillsDir, scripts, bridge } = await setup(t);
+  const shared = (await sharing.prepare(host, transport, task('panel-task'), 'codex')).servers[0].args[2];
+  const sent = scripts.transfer.length;
+  await sharing.prepare(host, transport, task('panel-task'), 'codex');
+  assert.equal(scripts.transfer.length, sent, 'nothing changed');
+  await writeFile(join(skillsDir, 'review', 'SKILL.md'), '---\nname: review\ndescription: Review a change\n---\nRun scripts/check.sh twice.\n');
+  await sharing.prepare(host, transport, task('panel-task'), 'codex');
+  assert.match(await readFile(join(shared, 'skills', 'review', 'SKILL.md'), 'utf8'), /twice/);
+
+  await rm(join(home, '.dsh-remote-agents'), { recursive: true });
+  bridge()!.checked = 0; // a minute later
+  const codex = await sharing.prepare(host, transport, task('panel-task'), 'codex');
+  assert.match(await readFile(join(shared, 'skills', 'review', 'SKILL.md'), 'utf8'), /twice/);
+  assert.ok(await exists(codex.servers[0].args[0]), 'the bridge script is installed again');
+});
+
+test('CLIs started by an earlier version still reach DSH through the shared pointer', async t => {
+  const { home, sharing, transport, host, task } = await setup(t);
+  await sharing.set('mcp', 'github', true);
+  const bridgeDir = join(home, '.dsh-remote-agents', 'bridge');
+  await mkdir(bridgeDir, { recursive: true }); await writeFile(join(bridgeDir, 'current'), join(bridgeDir, 's-gone.sock'));
+  const proxy = (await sharing.prepare(host, transport, task('chat-task'), 'codex')).servers.find(s => s.name === 'dsh-github')!;
+  const [pointer] = (await pointers(home)).filter(name => name !== 'current');
+  assert.equal(await readFile(join(bridgeDir, 'current'), 'utf8'), await readFile(join(bridgeDir, pointer), 'utf8'));
+  // Such a task file names the shared pointer.
+  const legacy = join(bridgeDir, 'tasks', 'legacy.json');
+  await writeFile(legacy, JSON.stringify({ ...JSON.parse(await readFile(proxy.args[2], 'utf8')), pointer: join(bridgeDir, 'current') }));
+  const client = mcp(t, proxy.command, [proxy.args[0], 'proxy', legacy, 'github'], home);
+  await client.request('initialize', { protocolVersion: '2025-11-25' });
+  assert.deepEqual((await client.request('tools/list')).result.tools.map((tool: { name: string }) => tool.name), ['create_issue', 'search']);
+});
+
+test('DSH instances sharing a remote account keep their own skills; a skill the host lost is sent again', async t => {
+  const { root, sharing, transport, host, task, skillsDir } = await setup(t);
+  const mine = (await sharing.prepare(host, transport, task('panel-task'), 'codex')).servers[0].args[2];
+  const store = new Store(join(root, 'other.json')); await store.open();
+  const other = new Sharing(store, fakeForward([]), () => {}); t.after(() => other.close());
+  Object.assign(other.host, sharing.host);
+  await other.set('skill', 'review', false); await other.set('skill', 'notes', false);
+  const theirs = (await other.prepare(host, transport, task('panel-task'), 'codex')).servers[0].args[2];
+  assert.notEqual(theirs, mine);
+  assert.ok(await exists(join(mine, 'skills', 'notes', 'SKILL.md')), 'another DSH does not remove them');
+
+  // Lost on the host while DSH still trusts its last check.
+  await rm(join(mine, 'skills', 'notes'), { recursive: true });
+  await writeFile(join(skillsDir, 'review', 'SKILL.md'), '---\nname: review\ndescription: Review a change\n---\nChanged.\n');
+  await sharing.prepare(host, transport, task('panel-task'), 'codex');
+  assert.match(await readFile(join(mine, 'skills', 'notes', 'SKILL.md'), 'utf8'), /Write notes/, 'the lost skill is sent again');
+  assert.deepEqual(Object.keys(JSON.parse(await readFile(join(mine, 'manifest.json'), 'utf8'))).sort(), ['embedded', 'notes', 'review']);
 });
 
 test('the bridge refuses a connection without the task token', async t => {

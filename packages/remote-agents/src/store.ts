@@ -76,6 +76,8 @@ export class Store {
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
   hosts(): HostConfig[] { return structuredClone(this.state.hosts); }
   chatProjects(): ChatProject[] { return structuredClone(this.state.mainChatProjects ?? []); }
+  /** A copy of the sharing settings; read for every shared tool listing and call. */
+  sharing(): SharingSettings { return structuredClone(this.state.sharing ?? {}); }
   /** The reasoning effort a native chat model route last used, if any. */
   /** Whether a DSH conversation's Codex turns use the Fast speed. */
   chatFast(sessionId: string): boolean { return this.state.chatFast?.includes(sessionId) ?? false; }

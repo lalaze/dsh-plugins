@@ -3,6 +3,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { basename, dirname, join, relative, sep } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { BRIDGE_SCRIPT, BRIDGE_VERSION } from './bridge-script.js';
 import { RemoteError, type HostConfig, type NativeProtocol, type Task } from './domain.js';
 import { connectionInput, quote, type SshTransport } from './ssh.js';
@@ -15,16 +16,26 @@ export interface SharedLaunch { pluginDir?: string; servers: SharedServer[] }
 export interface LaunchSharing {
   /** Prepare the host for one CLI launch. Never fails the launch: what cannot be shared is left out. */
   prepare(host: HostConfig, transport: SshTransport, task: Task, protocol: NativeProtocol, signal?: AbortSignal): Promise<SharedLaunch>;
-  /** A CLI kept running while DSH was away was reattached: its proxies need the reverse forward again. */
+  /** A CLI kept running while DSH was away was reattached: its proxies need the reverse forward again. Never throws. */
   attached(host: HostConfig, transport: SshTransport, task: Task): void;
+  /** The host was removed: stop sharing with it. */
+  forget(hostId: string): void;
 }
 
-/** The parts of DSH's tool registry and skill registry the bridge uses. */
+/**
+ * The parts of DSH's tool registry (`ToolRuntime` of `@deepseek-ai/dsh-tools`) and skill registry the bridge uses.
+ * This package does not depend on them, so these mirror their signatures.
+ */
 export interface SharedTool { name: string; description: string; parameters?: unknown }
-export interface ToolBatch { results: readonly { result: { isError: boolean; value?: unknown; content: readonly { type: string; text?: string }[] } }[] }
+/** A content block of a settled call; DSH keeps images as attachment references. */
+export interface SharedContent { type: string; text?: string; offloaded?: boolean; attachment?: { mediaType?: string; bytes?: number } }
+/** A settled call: `value` is the tool's canonical result, `content` what DSH's post-execute policies left for the model. */
+export interface SharedToolResult { isError: boolean; value?: unknown; content: readonly SharedContent[] }
 export interface SharingTools {
-  definitions(): readonly SharedTool[];
-  execute(input: { calls: { type: 'tool-call'; id: string; name: string; arguments: string }[]; signal: AbortSignal; agent?: unknown }): Promise<ToolBatch>;
+  /** Model-facing schemas of the tools visible without an agent scope. */
+  schemas(): readonly SharedTool[];
+  /** One call through DSH's pre-execute policies, approvals, guards and post-execute policies. */
+  execute(input: { callId: string; name: string; arguments: unknown; agent?: unknown; signal: AbortSignal }): Promise<SharedToolResult>;
 }
 export interface SkillSummary { name: string; description: string; whenToUse?: string; path?: string; source: string; invocation: { modelInvocable: boolean } }
 export interface SharingSkills {
@@ -43,8 +54,14 @@ export interface SharingCatalog {
 const BASE = '.dsh-remote-agents', SERVER = /^[A-Za-z0-9_-]{1,32}$/, SKILL = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SKIP = new Set(['.git', 'node_modules', '__pycache__', '.DS_Store', '.venv']);
 const FILE_LIMIT = 4 * 1024 * 1024, SKILL_LIMIT = 16 * 1024 * 1024, TOTAL_LIMIT = 48 * 1024 * 1024, FILE_COUNT = 500;
+/** How long a launch waits for the reverse forward, so the CLI's first tool listing reaches DSH. */
+const FORWARD_WAIT = 10_000;
+/** How long a host's install check is trusted. A deleted ~/.dsh-remote-agents is then installed again, as the relay is. */
+const INSTALL_TTL = 60_000;
 /** Project skills come from the local anchor directory, not the remote project; the remote CLI finds the project's own. */
 const shareableSource = (source: string) => !source.startsWith('project-');
+
+const toolSet = (tools: SharedTool[] | undefined) => tools ? JSON.stringify(tools) : '';
 
 /** `mcp__<server>__<tool>`: DSH's MCP client names every tool after its configured server. */
 export function mcpServerOf(name: string): string | undefined {
@@ -81,11 +98,35 @@ export function bridgeForwardArguments(connection: string, remoteSocket: string,
     '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', ...(url.port ? ['-p', url.port] : []), '-R', `${remoteSocket}:127.0.0.1:${port}`, '--', target];
 }
 
-interface SkillPackage { name: string; description: string; whenToUse?: string; hash: string; files: { path: string; data: Buffer; executable?: boolean }[] }
+interface McpImage { type: 'image'; data: string; mimeType: string }
+/**
+ * MCP content for a settled call: DSH's model-facing content, as its post-execute policies left it. DSH keeps images
+ * as attachments, so their data comes from the server's own result, matched by media type and size. An image a policy
+ * replaced matches none and is omitted, never sent as the original.
+ */
+export function mcpContent(result: SharedToolResult): unknown[] {
+  const value = (result.value as { content?: unknown } | null | undefined)?.content;
+  const images = (Array.isArray(value) ? value as unknown[] : []).filter((block): block is McpImage => !!block && typeof block === 'object'
+    && (block as McpImage).type === 'image' && typeof (block as McpImage).data === 'string' && typeof (block as McpImage).mimeType === 'string');
+  const used = new Set<McpImage>();
+  return result.content.map(block => {
+    if (block.type === 'text') return { type: 'text', text: block.text ?? '' };
+    const image = block.type === 'image' && !block.offloaded ? images.find(i => !used.has(i) && i.mimeType === block.attachment?.mediaType
+      && Buffer.byteLength(i.data, 'base64') === block.attachment?.bytes) : undefined;
+    if (!image) return { type: 'text', text: `[${block.type} omitted]` };
+    used.add(image); return image;
+  });
+}
 
-/** A directory bundle's files, or just its instruction file when the bundle is too large to copy. */
-async function bundleFiles(directory: string): Promise<SkillPackage['files']> {
-  const files: SkillPackage['files'] = []; let total = 0;
+/** One file of a skill bundle: generated `data`, or a `source` file read only when its contents are needed. */
+interface BundleFile { path: string; size: number; source?: string; mtime?: number; data?: Buffer; executable?: boolean }
+interface SkillPackage { name: string; description: string; whenToUse?: string; hash: string; files: BundleFile[] }
+const contents = (file: BundleFile) => file.data ? Promise.resolve(file.data) : readFile(file.source!);
+async function sourceFile(source: string): Promise<BundleFile> { const info = await stat(source); return { path: 'SKILL.md', size: info.size, source, mtime: info.mtimeMs }; }
+
+/** A directory bundle's files, or just its instruction file when the bundle is too large to copy. Only metadata is read. */
+async function bundleFiles(directory: string): Promise<BundleFile[]> {
+  const files: BundleFile[] = []; let total = 0;
   const walk = async (folder: string, depth: number): Promise<boolean> => {
     for (const entry of (await readdir(folder, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
       if (SKIP.has(entry.name)) continue;
@@ -94,22 +135,38 @@ async function bundleFiles(directory: string): Promise<SkillPackage['files']> {
       if (info.isDirectory()) { if (depth < 6 && !await walk(path, depth + 1)) return false; continue; }
       if (!info.isFile()) continue;
       if (info.size > FILE_LIMIT || (total += info.size) > SKILL_LIMIT || files.length >= FILE_COUNT) return false;
-      files.push({ path: relative(directory, path).split(sep).join('/'), data: await readFile(path), ...(info.mode & 0o100 ? { executable: true } : {}) });
+      files.push({ path: relative(directory, path).split(sep).join('/'), size: info.size, source: path, mtime: info.mtimeMs, ...(info.mode & 0o100 ? { executable: true } : {}) });
     }
     return true;
   };
   if (await walk(directory, 0)) return files;
-  return [{ path: 'SKILL.md', data: await readFile(join(directory, 'SKILL.md')) }];
+  return [await sourceFile(join(directory, 'SKILL.md'))];
 }
 
+/** The skills synced to a host, as its `manifest` reported them or the last sync left them. */
+interface RemoteSkills { skills: Record<string, string>; fingerprint?: string }
+function remoteSkills(text: string | undefined): RemoteSkills {
+  try {
+    const value = JSON.parse(text?.trim() || '{}') as { skills?: unknown; fingerprint?: unknown };
+    const skills = value.skills && typeof value.skills === 'object' ? Object.fromEntries(Object.entries(value.skills).filter(([, hash]) => typeof hash === 'string')) : {};
+    return { skills, ...(typeof value.fingerprint === 'string' ? { fingerprint: value.fingerprint } : {}) };
+  } catch { return { skills: {} }; }
+}
+
+interface Forward { ready: Promise<void>; child?: ChildProcess; stopped: boolean }
+/** A host's paths: `shared` is this DSH's skill copy, a Claude Code plugin. */
+interface HostInfo { home: string; node: string; shared: string }
 class HostBridge {
-  info?: Promise<{ home: string; node: string }>;
-  manifest?: string;
+  info?: Promise<HostInfo>;
+  checked = 0;
+  remote?: RemoteSkills;
   syncing = Promise.resolve();
-  forward?: { child: ChildProcess; ready: Promise<void> };
+  forward?: Forward;
   retry?: ReturnType<typeof setTimeout>;
   delay = 2000;
   error?: string;
+  /** Replaced or removed: it never starts a forward again. */
+  stopped = false;
   constructor(public host: HostConfig, public transport: SshTransport) {}
 }
 
@@ -124,17 +181,22 @@ export class Sharing implements LaunchSharing {
   private listening?: Promise<number>;
   private readonly bridges = new Map<string, HostBridge>();
   private readonly connections = new Set<{ socket: Socket; server: string; task: string; calls: Map<number, AbortController> }>();
+  /** Content hashes of skill bundles by file metadata, so unchanged skills are not read again for every launch. */
+  private readonly hashes = new Map<string, { key: string; hash: string }>();
+  /** Each server's tools as its proxies last listed them, so only real changes are announced. */
+  private readonly listed = new Map<string, string>();
+  private toolsTimer?: ReturnType<typeof setTimeout>;
   private closed = false;
   constructor(private readonly store: Store, private readonly launch: (args: string[]) => ChildProcess = args => spawn('ssh', args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true }),
     private readonly log: (message: string) => void = message => console.warn(`[remote-agents] ${message}`)) {}
 
-  private settings() { return this.store.snapshot().sharing ?? {}; }
+  private settings() { return this.store.sharing(); }
   /** MCP is shared only when switched on; skills unless switched off. */
   mcpShared(server: string): boolean { return this.settings().mcp?.[server] === true; }
   skillShared(name: string): boolean { return this.settings().skills?.[name] !== false; }
   private mcpServers(): Map<string, SharedTool[]> {
     const servers = new Map<string, SharedTool[]>();
-    for (const tool of this.host.tools?.definitions() ?? []) {
+    for (const tool of this.host.tools?.schemas() ?? []) {
       const server = mcpServerOf(tool.name);
       if (server) servers.set(server, [...servers.get(server) ?? [], tool]);
     }
@@ -165,6 +227,18 @@ export class Sharing implements LaunchSharing {
   changed(server?: string): void {
     for (const connection of this.connections) if (!server || connection.server === server) connection.socket.write(`${JSON.stringify({ event: 'changed' })}\n`);
   }
+  /** DSH's tools changed, for example once an MCP server connected: the CLIs list the servers whose tools did again. */
+  toolsChanged(): void {
+    clearTimeout(this.toolsTimer);
+    if (this.closed) return;
+    this.toolsTimer = setTimeout(() => {
+      const servers = this.mcpServers();
+      for (const [name, seen] of this.listed) {
+        const now = toolSet(servers.get(name));
+        if (now !== seen) { this.listed.set(name, now); this.changed(name); }
+      }
+    }, 200);
+  }
 
   private async secret(): Promise<Buffer> {
     let value = this.settings().secret;
@@ -178,8 +252,11 @@ export class Sharing implements LaunchSharing {
   private async token(taskId: string): Promise<string> { return createHmac('sha256', await this.secret()).update(taskId).digest('hex'); }
   /** The conversation whose DSH agent runs the CLI's MCP calls: the main chat, or the agent that delegated it. */
   private owner(task: Task): string | undefined { return task.chat?.sessionId ?? task.owner?.sessionId; }
+  /** Names this DSH's socket pointer and tool cache on a host: one remote account may be used from several computers. */
+  private async instance(): Promise<string> { return createHmac('sha256', await this.secret()).update('instance').digest('hex').slice(0, 16); }
 
   private listen(): Promise<number> {
+    if (this.closed) return Promise.reject(new Error('Sharing has stopped'));
     this.listening ??= new Promise<number>((resolve, reject) => {
       const server = createServer(socket => this.accept(socket));
       server.on('error', reject);
@@ -188,6 +265,7 @@ export class Sharing implements LaunchSharing {
     return this.listening;
   }
   private accept(socket: Socket): void {
+    if (this.closed) { socket.destroy(); return; }
     let buffer = '', connection: { socket: Socket; server: string; task: string; calls: Map<number, AbortController> } | undefined;
     const write = (value: unknown) => { if (!socket.destroyed) socket.write(`${JSON.stringify(value)}\n`); };
     socket.setEncoding('utf8');
@@ -226,42 +304,46 @@ export class Sharing implements LaunchSharing {
     return this.store.task(t => t.id === message.task) ? { server: message.server, task: message.task } : undefined;
   }
   private async handle(connection: { server: string; task: string; calls: Map<number, AbortController> }, message: Record<string, any>): Promise<unknown> {
-    const { server } = connection, tools = this.mcpServers().get(server) ?? [], prefix = `mcp__${server}__`;
+    const { server } = connection, tools = this.mcpServers().get(server), prefix = `mcp__${server}__`;
     if (message.op === 'list') {
       if (!this.mcpShared(server)) return { tools: [] };
+      this.listed.set(server, toolSet(tools));
+      // Still connecting, or no longer configured: the proxy keeps the tools it saw last and lists again on `changed`.
+      if (!tools) throw new Error(`DSH has not loaded the "${server}" MCP server`);
       return { tools: tools.map(tool => ({ name: tool.name.slice(prefix.length), description: tool.description,
         inputSchema: tool.parameters && typeof tool.parameters === 'object' ? tool.parameters : { type: 'object', properties: {} } })) };
     }
     if (message.op !== 'call') throw new Error('Unknown bridge request');
     const failure = (text: string) => ({ content: [{ type: 'text', text }], isError: true });
     if (!this.mcpShared(server)) return failure(`The "${server}" MCP server is no longer shared from DSH.`);
-    const tool = tools.find(t => t.name === prefix + String(message.name));
+    const tool = tools?.find(t => t.name === prefix + String(message.name));
     if (!tool || !this.host.tools) return failure(`DSH has no tool named "${String(message.name)}" on the "${server}" MCP server.`);
     const task = this.store.task(t => t.id === connection.task), owner = task && this.owner(task), agent = owner ? this.host.agent?.(owner) : undefined;
     if (!agent) return failure('DSH runs shared tools with the conversation that started this CLI. Open that conversation in DSH, then retry.');
     const controller = new AbortController(); connection.calls.set(message.id, controller);
     try {
-      const batch = await this.host.tools.execute({ calls: [{ type: 'tool-call', id: `remote-mcp-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: JSON.stringify(message.arguments ?? {}) }], signal: controller.signal, agent });
-      const result = batch.results[0]?.result;
-      if (!result) return failure('DSH did not run this tool.');
-      // DSH's MCP client keeps the server's own result as the canonical value, images included.
-      const value = result.value as { content?: unknown } | undefined;
-      if (!result.isError && value && typeof value === 'object' && Array.isArray(value.content)) return value;
-      return { content: result.content.map(block => ({ type: 'text', text: block.type === 'text' ? block.text ?? '' : `[${block.type} omitted]` })), ...(result.isError ? { isError: true } : {}) };
+      const input = message.arguments && typeof message.arguments === 'object' && !Array.isArray(message.arguments) ? message.arguments : {};
+      const result = await this.host.tools.execute({ callId: `remote-mcp-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
+      return { content: mcpContent(result), ...(result.isError ? { isError: true } : {}) };
     } finally { connection.calls.delete(message.id); }
   }
 
   private bridge(host: HostConfig, transport: SshTransport): HostBridge {
     let bridge = this.bridges.get(host.id);
-    if (!bridge || bridge.host.connection !== host.connection) { if (bridge) this.stopForward(bridge); bridge = new HostBridge(host, transport); this.bridges.set(host.id, bridge); }
+    if (!bridge || bridge.host.connection !== host.connection) { if (bridge) this.stop(bridge); bridge = new HostBridge(host, transport); this.bridges.set(host.id, bridge); }
     bridge.transport = transport;
     return bridge;
   }
-  /** Install the bridge script once per version; report the remote home and the absolute Node.js path ACP needs. */
-  private install(bridge: HostBridge): Promise<{ home: string; node: string }> {
-    bridge.info ??= bridge.transport.exec(`umask 077
-mkdir -p "$HOME/${BASE}/bridge/tasks" "$HOME/${BASE}/bridge/cache" "$HOME/${BASE}/shared"
-chmod 700 "$HOME/${BASE}" "$HOME/${BASE}/bridge" "$HOME/${BASE}/bridge/tasks" "$HOME/${BASE}/bridge/cache" "$HOME/${BASE}/shared"
+  /**
+   * Install the bridge script once per version; report the remote home, the absolute Node.js path ACP needs and the
+   * synced skills. Checked again after a while, so a deleted ~/.dsh-remote-agents is installed again. Each DSH instance
+   * copies its skills to its own directory: another one sharing the remote account may share different skills.
+   */
+  private install(bridge: HostBridge): Promise<HostInfo> {
+    if (bridge.info && Date.now() - bridge.checked < INSTALL_TTL) return bridge.info;
+    const info = this.instance().then(instance => bridge.transport.exec(`umask 077
+mkdir -p "$HOME/${BASE}/bridge/tasks" "$HOME/${BASE}/bridge/cache" "$HOME/${BASE}/shared-${instance}"
+chmod 700 "$HOME/${BASE}" "$HOME/${BASE}/bridge" "$HOME/${BASE}/bridge/tasks" "$HOME/${BASE}/bridge/cache" "$HOME/${BASE}/shared-${instance}"
 if [ ! -f "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs" ]; then
   dsh_bridge_tmp="$(mktemp "$HOME/${BASE}/bridge/.bridge.XXXXXXXXXX")"
   cat > "$dsh_bridge_tmp" <<'DSH_BRIDGE_SCRIPT_END'
@@ -269,52 +351,80 @@ ${BRIDGE_SCRIPT}
 DSH_BRIDGE_SCRIPT_END
   mv -f "$dsh_bridge_tmp" "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs"
 fi
-printf '%s\\0%s\\0' "$HOME" "$(command -v node)"`).then(output => {
-      const [home, node] = output.split('\0');
+printf '%s\\0%s\\0' "$HOME" "$(command -v node)"
+node "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs" manifest "$HOME/${BASE}/shared-${instance}" 2>/dev/null || true`).then(output => {
+      const [home, node, synced] = output.split('\0');
       if (!home?.startsWith('/') || !node?.startsWith('/')) throw new Error('The SSH host did not report its home directory and Node.js');
-      return { home, node };
-    });
-    bridge.info.catch(() => { bridge.info = undefined; });
-    return bridge.info;
+      bridge.remote = remoteSkills(synced);
+      return { home, node, shared: `${home}/${BASE}/shared-${instance}` };
+    }));
+    bridge.info = info; bridge.checked = Date.now();
+    info.catch(() => { if (bridge.info === info) bridge.info = undefined; });
+    return info;
   }
 
+  /** A skill bundle's content hash; recomputed only when its files' metadata changed. */
+  private async hashOf(name: string, files: BundleFile[]): Promise<string> {
+    const key = JSON.stringify(files.map(f => [f.path, f.source, f.size, f.mtime, !!f.executable]));
+    const generated = files.some(f => f.data), cached = this.hashes.get(name);
+    if (!generated && cached?.key === key) return cached.hash;
+    const hash = createHash('sha256');
+    for (const file of files) hash.update(file.path).update('\0').update(await contents(file)).update(file.executable ? '\u0001' : '\0');
+    const digest = hash.digest('hex');
+    if (!generated) this.hashes.set(name, { key, hash: digest });
+    return digest;
+  }
   /** Copy the shared skills; unchanged skills are not sent again. */
-  private async syncSkills(bridge: HostBridge, info: { home: string; node: string }, signal?: AbortSignal): Promise<string[]> {
+  private async syncSkills(bridge: HostBridge, info: HostInfo, signal?: AbortSignal): Promise<string[]> {
     const packages: SkillPackage[] = [];
     let total = 0;
     for (const summary of await this.skillList(signal)) {
       if (!this.skillShared(summary.name)) continue;
       try {
-        let files: SkillPackage['files'];
+        let files: BundleFile[];
         if (summary.path && basename(summary.path) === 'SKILL.md') files = await bundleFiles(dirname(summary.path));
-        else if (summary.path?.endsWith('.md')) files = [{ path: 'SKILL.md', data: await readFile(summary.path) }];
+        else if (summary.path?.endsWith('.md')) files = [await sourceFile(summary.path)];
         else {
           const definition = await this.host.skills!.get(summary.name, { signal });
           if (!definition) continue;
-          files = [{ path: 'SKILL.md', data: Buffer.from(`---\nname: ${summary.name}\ndescription: ${JSON.stringify(summary.description)}\n---\n\n${definition.content}`) }];
+          const data = Buffer.from(`---\nname: ${summary.name}\ndescription: ${JSON.stringify(summary.description)}\n---\n\n${definition.content}`);
+          files = [{ path: 'SKILL.md', size: data.length, data }];
         }
-        const size = files.reduce((sum, file) => sum + file.data.length, 0);
-        if ((total += size) > TOTAL_LIMIT) { this.log(`Skipped skill ${summary.name}: the shared skills exceed ${TOTAL_LIMIT / 1024 / 1024} MB`); continue; }
-        const hash = createHash('sha256');
-        for (const file of files) hash.update(file.path).update('\0').update(file.data).update(file.executable ? '\u0001' : '\0');
-        packages.push({ name: summary.name, description: summary.description, ...(summary.whenToUse ? { whenToUse: summary.whenToUse } : {}), hash: hash.digest('hex'), files });
+        const size = files.reduce((sum, file) => sum + file.size, 0);
+        if (total + size > TOTAL_LIMIT) { this.log(`Skipped skill ${summary.name}: the shared skills exceed ${TOTAL_LIMIT / 1024 / 1024} MB`); continue; }
+        const hash = await this.hashOf(summary.name, files);
+        total += size;
+        packages.push({ name: summary.name, description: summary.description, ...(summary.whenToUse ? { whenToUse: summary.whenToUse } : {}), hash, files });
       } catch (error) { this.log(`Skipped skill ${summary.name}: ${String(error)}`); }
     }
+    for (const name of this.hashes.keys()) if (!packages.some(p => p.name === name)) this.hashes.delete(name);
     const manifest = Object.fromEntries(packages.map(p => [p.name, p.hash]));
     const catalog = packages.map(({ name, description, whenToUse }) => ({ name, description, ...(whenToUse ? { whenToUse } : {}) }));
-    const fingerprint = JSON.stringify([manifest, catalog]);
+    const fingerprint = createHash('sha256').update(JSON.stringify([manifest, catalog])).digest('hex');
     const run = bridge.syncing.then(async () => {
-      if (bridge.manifest === fingerprint) return;
-      if (!bridge.transport.transfer) throw new Error('This connection cannot copy skills');
-      const script = `node "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs"`, shared = `"$HOME/${BASE}/shared"`;
-      const remote = JSON.parse((await bridge.transport.exec(`${script} manifest ${shared}`)).trim().split('\n').at(-1) || '{}') as Record<string, string>;
-      const files = Object.fromEntries(packages.filter(p => remote[p.name] !== p.hash).map(p => [p.name, p.files.map(f => ({ path: f.path, data: f.data.toString('base64'), ...(f.executable ? { executable: true } : {}) }))]));
-      const payload = Buffer.from(JSON.stringify({ manifest, catalog, files }));
-      const output = (await bridge.transport.transfer(`${script} sync ${shared}`, { input: (async function* () { yield payload; })(), maxBytes: 64 * 1024, signal })).toString('utf8');
-      if (!output.includes('"ok":true')) throw new Error('The SSH host did not confirm the skill copy');
-      bridge.manifest = fingerprint;
+      let remote = bridge.remote ?? { skills: {} };
+      if (remote.fingerprint === fingerprint) return;
+      const transfer = bridge.transport.transfer?.bind(bridge.transport);
+      if (!transfer) throw new Error('This connection cannot copy skills');
+      const command = `node ${quote(`${info.home}/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs`)} sync ${quote(info.shared)}`;
+      // A skill the host lost since it was last checked is reported missing and sent once more.
+      for (let attempt = 0; ; attempt++) {
+        const sent = remote.skills;
+        const files = Object.fromEntries(await Promise.all(packages.filter(p => sent[p.name] !== p.hash).map(async p => [p.name,
+          await Promise.all(p.files.map(async f => ({ path: f.path, data: (await contents(f)).toString('base64'), ...(f.executable ? { executable: true } : {}) })))] as const)));
+        const payload = Buffer.from(JSON.stringify({ manifest, catalog, fingerprint, files }));
+        const output = (await transfer(command, { input: (async function* () { yield payload; })(), maxBytes: 64 * 1024, signal })).toString('utf8');
+        let reply: { ok?: unknown; missing?: unknown } = {};
+        try { reply = JSON.parse(output.trim().split('\n').at(-1) || '{}'); } catch {}
+        if (reply.ok !== true) throw new Error('The SSH host did not confirm the skill copy');
+        const missing = new Set(Array.isArray(reply.missing) ? reply.missing : []);
+        remote = bridge.remote = missing.size ? { skills: Object.fromEntries(Object.entries(manifest).filter(([name]) => !missing.has(name))) } : { skills: manifest, fingerprint };
+        if (!missing.size) return;
+        if (attempt) throw new Error(`The SSH host did not keep the skills ${[...missing].join(', ')}`);
+      }
     });
-    bridge.syncing = run.catch(() => {});
+    // After a failed copy the host is checked again: its files may be gone.
+    bridge.syncing = run.catch(() => { bridge.info = undefined; });
     await run;
     return packages.map(p => p.name);
   }
@@ -322,44 +432,68 @@ printf '%s\\0%s\\0' "$HOME" "$(command -v node)"`).then(output => {
   /** One reverse-forwarded socket per host; a fresh name each time, since sshd may not unlink a stale one. */
   private ensureForward(bridge: HostBridge, info: { home: string }): Promise<void> {
     if (bridge.forward) return bridge.forward.ready;
-    if (this.closed) return Promise.reject(new Error('Sharing has stopped'));
+    if (this.closed || bridge.stopped) return Promise.reject(new Error('Sharing has stopped'));
     clearTimeout(bridge.retry); bridge.retry = undefined;
-    const directory = `${info.home}/${BASE}/bridge`, socket = `${directory}/s-${randomBytes(4).toString('hex')}.sock`;
-    let child: ChildProcess | undefined;
-    const ready = this.listen().then(port => new Promise<void>((resolve, reject) => {
-      child = this.launch(bridgeForwardArguments(bridge.host.connection, socket, port));
-      const started = Date.now(); let stderr = '', confirmed = false;
-      const timer = setTimeout(() => { child?.kill(); reject(new Error('The reverse forward did not start')); }, 20_000);
+    const directory = `${info.home}/${BASE}/bridge`, socket = `${directory}/s-${randomBytes(4).toString('hex')}.sock`, started = Date.now();
+    const forward: Forward = { stopped: false, ready: Promise.resolve() };
+    forward.ready = Promise.all([this.listen(), this.instance()]).then(([port, instance]) => new Promise<void>((resolve, reject) => {
+      // Stopped while DSH's port was opening.
+      if (forward.stopped) throw new Error('Sharing has stopped');
+      const child = forward.child = this.launch(bridgeForwardArguments(bridge.host.connection, socket, port));
+      let stderr = '', state: 'starting' | 'confirmed' | 'up' | 'failed' = 'starting';
+      const fail = (error: Error) => { if (state === 'up' || state === 'failed') return; state = 'failed'; clearTimeout(timer); reject(error); child.kill(); };
+      const timer = setTimeout(() => fail(new Error('The reverse forward did not start')), 20_000);
       child.stderr?.setEncoding('utf8');
       child.stderr?.on('data', (chunk: string) => {
         stderr = (stderr + chunk).slice(-4000);
-        if (!confirmed && /remote forward success|Entering interactive session/i.test(stderr)) {
-          confirmed = true; clearTimeout(timer);
-          // Point new and running proxies at this socket.
-          void bridge.transport.exec(`printf '%s' ${quote(socket)} > ${quote(`${directory}/current.tmp`)} && mv -f ${quote(`${directory}/current.tmp`)} ${quote(`${directory}/current`)}
+        // Only the server's reply confirms the socket is bound; OpenSSH logs it at debug level, hence `-v`.
+        if (state !== 'starting' || !/remote forward success/i.test(stderr)) return;
+        state = 'confirmed'; clearTimeout(timer);
+        // Point this DSH's proxies, new and running, at the socket. Proxies started by an earlier version read the
+        // shared `current`; it exists only where one ran, and is updated as that version did.
+        const pointer = `${directory}/current-${instance}`, legacy = `${directory}/current`;
+        void bridge.transport.exec(`printf '%s' ${quote(socket)} > ${quote(`${pointer}.tmp`)} && mv -f ${quote(`${pointer}.tmp`)} ${quote(pointer)} || exit 1
+if [ -e ${quote(legacy)} ]; then printf '%s' ${quote(socket)} > ${quote(`${legacy}.tmp`)} && mv -f ${quote(`${legacy}.tmp`)} ${quote(legacy)}; fi
 find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} + 2>/dev/null || true`, 20_000, { login: false })
-            .then(() => { bridge.error = undefined; resolve(); }, error => { child?.kill(); reject(error); });
-        }
+          .then(() => { if (state !== 'confirmed') return; state = 'up'; bridge.error = undefined; resolve(); }, fail);
       });
-      child.on('error', error => { clearTimeout(timer); reject(error); });
+      child.on('error', fail);
       child.on('close', code => {
-        clearTimeout(timer);
         const lines = stderr.split('\n').filter(line => line && !line.startsWith('debug1:'));
         const error = new Error(lines.at(-1) ?? `The reverse forward ended (${code})`);
-        if (!confirmed) reject(error);
-        if (bridge.forward?.ready !== ready) return;
-        bridge.forward = undefined; bridge.error = error.message;
-        if (this.closed) return;
-        // Keep the forward while DSH runs: a reattached CLI may call a shared tool at any time.
-        bridge.delay = Date.now() - started > 60_000 ? 2000 : Math.min(bridge.delay * 2, 60_000);
-        bridge.retry = setTimeout(() => { void this.install(bridge).then(next => this.ensureForward(bridge, next)).catch(() => {}); }, bridge.delay);
+        if (state === 'up') this.ended(bridge, forward, error, started); else fail(error);
       });
     }));
-    bridge.forward = { get child() { return child!; }, ready };
-    ready.catch(error => { bridge.error = String(error instanceof Error ? error.message : error); if (bridge.forward?.ready === ready) { bridge.forward = undefined; } child?.kill(); });
-    return ready;
+    forward.ready.catch(error => this.ended(bridge, forward, error, started));
+    bridge.forward = forward;
+    return forward.ready;
   }
-  private stopForward(bridge: HostBridge): void { clearTimeout(bridge.retry); const forward = bridge.forward; bridge.forward = undefined; forward?.child?.kill(); }
+  /** A forward did not start or dropped. Keep one while DSH runs: a reattached CLI may call a shared tool at any time. */
+  private ended(bridge: HostBridge, forward: Forward, error: unknown, started: number): void {
+    if (bridge.forward !== forward) return;
+    bridge.forward = undefined; bridge.error = error instanceof Error ? error.message : String(error);
+    this.schedule(bridge, Date.now() - started);
+  }
+  private schedule(bridge: HostBridge, lasted = 0): void {
+    if (this.closed || bridge.stopped || bridge.forward || bridge.retry) return;
+    bridge.delay = lasted > 60_000 ? 2000 : Math.min(bridge.delay * 2, 60_000);
+    bridge.retry = setTimeout(() => { bridge.retry = undefined; this.keep(bridge); }, bridge.delay);
+  }
+  /** Bring a host's forward up, retrying with backoff until it is. */
+  private keep(bridge: HostBridge): void {
+    if (this.closed || bridge.stopped || bridge.forward) return;
+    void this.install(bridge).then(info => this.ensureForward(bridge, info)).catch(error => {
+      // A failed forward has scheduled its retry; a failed install schedules one here.
+      bridge.error = error instanceof Error ? error.message : String(error);
+      this.schedule(bridge);
+    });
+  }
+  /** Replaced or removed: end the forward and never start another. */
+  private stop(bridge: HostBridge): void {
+    bridge.stopped = true; clearTimeout(bridge.retry); bridge.retry = undefined;
+    const forward = bridge.forward; bridge.forward = undefined;
+    if (forward) { forward.stopped = true; forward.child?.kill(); }
+  }
 
   async prepare(host: HostConfig, transport: SshTransport, task: Task, protocol: NativeProtocol, signal?: AbortSignal): Promise<SharedLaunch> {
     const servers: SharedServer[] = [], launch: SharedLaunch = { servers };
@@ -369,9 +503,9 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
     const wantsSkills = !!this.host.skills;
     if (!proxies.length && !wantsSkills) return launch;
     const bridge = this.bridge(host, transport);
-    let info: { home: string; node: string };
-    try { info = await this.install(bridge); } catch (error) { this.log(`Sharing with ${host.label} is unavailable: ${String(error)}`); return launch; }
-    const script = `${info.home}/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs`, shared = `${info.home}/${BASE}/shared`;
+    let info: HostInfo;
+    try { info = await this.install(bridge); } catch (error) { signal?.throwIfAborted(); this.log(`Sharing with ${host.label} is unavailable: ${String(error)}`); return launch; }
+    const script = `${info.home}/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs`, shared = info.shared;
     if (wantsSkills) {
       try {
         const names = await this.syncSkills(bridge, info, signal);
@@ -383,27 +517,40 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
     }
     if (proxies.length) {
       try {
-        const directory = `${info.home}/${BASE}/bridge`, file = `${directory}/tasks/${task.id}.json`;
-        const content = JSON.stringify({ task: task.id, token: await this.token(task.id), pointer: `${directory}/current`, cache: `${directory}/cache` });
-        await transport.exec(`umask 077; printf '%s' ${quote(content)} > ${quote(`${file}.tmp`)} && mv -f ${quote(`${file}.tmp`)} ${quote(file)}`, 20_000, { login: false });
-        // A CLI may start before the forward is up: its proxies connect once it is.
-        void this.ensureForward(bridge, info).catch(error => this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`));
+        if (!transport.transfer) throw new Error('This connection cannot pass the bridge token privately');
+        const directory = `${info.home}/${BASE}/bridge`, instance = await this.instance(), file = `${directory}/tasks/${task.id}.json`, cache = `${directory}/cache/${instance}`;
+        const content = Buffer.from(JSON.stringify({ task: task.id, token: await this.token(task.id), pointer: `${directory}/current-${instance}`, cache }));
+        // Through stdin: a command line is visible to other users of either machine.
+        await transport.transfer(`umask 077; mkdir -p ${quote(`${directory}/tasks`)} ${quote(cache)} && cat > ${quote(`${file}.tmp`)} && mv -f ${quote(`${file}.tmp`)} ${quote(file)}`,
+          { input: (async function* () { yield content; })(), maxBytes: 4096, signal, login: false });
+        // Wait a little for the forward, so the CLI's first tool listing reaches DSH; a slow host does not hold up the launch.
+        const forward = this.ensureForward(bridge, info).catch(error => this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`));
+        const timeout = delay(FORWARD_WAIT, undefined, { signal, ref: false }); timeout.catch(() => {});
+        await Promise.race([forward, timeout]);
         for (const name of proxies) servers.push({ name: `dsh-${name}`, command: info.node, args: [script, 'proxy', file, name] });
       } catch (error) { signal?.throwIfAborted(); this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`); }
     }
     return launch;
   }
   attached(host: HostConfig, transport: SshTransport, task: Task): void {
-    if (this.closed || !this.owner(task) || ![...this.mcpServers().keys()].some(name => this.mcpShared(name))) return;
-    const bridge = this.bridge(host, transport);
-    void this.install(bridge).then(info => this.ensureForward(bridge, info)).catch(error => this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`));
+    try {
+      // The settings decide, not DSH's tools: its MCP servers may still be connecting while CLIs are reattached.
+      if (this.closed || !this.owner(task) || !Object.values(this.settings().mcp ?? {}).some(Boolean)) return;
+      this.keep(this.bridge(host, transport));
+    } catch (error) { this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`); }
+  }
+  forget(hostId: string): void {
+    const bridge = this.bridges.get(hostId);
+    if (bridge) { this.bridges.delete(hostId); this.stop(bridge); }
   }
   /** Per-host forward problems, for the settings page. */
   status(): Record<string, string> { return Object.fromEntries([...this.bridges].filter(([, b]) => b.error).map(([id, b]) => [id, b.error!])); }
   async close(): Promise<void> {
-    this.closed = true;
-    for (const bridge of this.bridges.values()) this.stopForward(bridge);
+    this.closed = true; clearTimeout(this.toolsTimer);
+    for (const bridge of this.bridges.values()) this.stop(bridge);
     for (const connection of this.connections) { for (const call of connection.calls.values()) call.abort(); connection.socket.destroy(); }
+    // A listen still under way finishes first, so its server is closed too.
+    await this.listening?.catch(() => {});
     const server = this.server; this.server = undefined;
     await new Promise<void>(resolve => server ? server.close(() => resolve()) : resolve());
   }

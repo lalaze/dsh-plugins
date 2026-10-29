@@ -67,8 +67,8 @@ export interface SshTransport {
   upload?(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
   /** Commands run in a POSIX shell where a detached relay can outlive the connection. */
   readonly relays?: boolean;
-  /** Bounded binary transfer through the same verified SSH connection settings. */
-  transfer?(script: string, options: { input?: AsyncIterable<Uint8Array>; maxBytes: number; signal?: AbortSignal }): Promise<Buffer>;
+  /** Bounded binary transfer through the same verified SSH connection settings; `login` as for `exec`. */
+  transfer?(script: string, options: { input?: AsyncIterable<Uint8Array>; maxBytes: number; signal?: AbortSignal; login?: boolean }): Promise<Buffer>;
 }
 export class OpenSshTransport implements SshTransport {
   readonly relays: boolean = true;
@@ -106,9 +106,9 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
 `;
     return this.spawnRemote(command);
   }
-  async transfer(script: string, options: { input?: AsyncIterable<Uint8Array>; maxBytes: number; signal?: AbortSignal }): Promise<Buffer> {
+  async transfer(script: string, options: { input?: AsyncIterable<Uint8Array>; maxBytes: number; signal?: AbortSignal; login?: boolean }): Promise<Buffer> {
     options.signal?.throwIfAborted();
-    const child = this.spawn(script), chunks: Buffer[] = []; let size = 0, stderr = '', failure: Error | undefined;
+    const child = options.login === false ? this.spawnRemote(script) : this.spawn(script), chunks: Buffer[] = []; let size = 0, stderr = '', failure: Error | undefined;
     const stop = () => child.kill('SIGTERM');
     const timer = setTimeout(() => { failure = new Error('SSH transfer timed out'); stop(); }, 300_000);
     options.signal?.addEventListener('abort', stop, { once: true });

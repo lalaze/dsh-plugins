@@ -30,6 +30,8 @@ declare module '@deepseek-ai/cordis' {
     'remote-agents/usage'(record: RemoteUsageRecord): void;
     /** Emitted by DSH's agent registry for each new or resumed conversation agent. */
     'agent/created'(payload: { agent: SyncAgent }): undefined | Promise<undefined>;
+    /** Emitted by DSH's tool registry when a tool is registered or unregistered. */
+    'tools/change'(): void;
   }
 }
 
@@ -142,6 +144,8 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   // Shared MCP calls run through DSH's tool pipeline with the owning conversation's agent; skills come from its registry.
   ctx.inject(['tools'], scoped => {
     sharing.host.tools = scoped.get('tools') as unknown as SharingTools;
+    // An MCP server connecting or dropping changes the tools its proxies list.
+    scoped.on('tools/change', () => sharing.toolsChanged());
     scoped.effect(() => () => { delete sharing.host.tools; });
   });
   ctx.inject(['skills'], scoped => {

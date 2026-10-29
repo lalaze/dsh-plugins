@@ -10,6 +10,9 @@ import { createHash } from 'node:crypto';
  * - `manifest <shared dir>` / `sync <shared dir>`: report and replace the synced skills; `sync` reads its JSON
  *   payload from stdin. The shared directory is also a Claude Code plugin, so Claude loads the skills natively.
  *
+ * Each DSH instance has its own socket pointer, tool cache and shared directory: one remote account may be
+ * used from several computers.
+ *
  * The source is embedded in a template literal: it must not contain backticks or dollar-brace sequences.
  */
 export const BRIDGE_SCRIPT = String.raw`
@@ -172,11 +175,13 @@ function skills(shared) {
   });
 }
 
-/** Skills whose directory still exists, so a deleted copy is sent again. */
+/** Skills whose directory still exists, so a deleted copy is sent again; the last sync's fingerprint while nothing is missing. */
 function manifest(shared) {
-  const saved = readJson(join(shared, 'manifest.json')) || {}, result = {};
-  for (const [name, hash] of Object.entries(saved)) if (SKILL.test(name) && fs.existsSync(join(shared, 'skills', name, 'SKILL.md'))) result[name] = hash;
-  return result;
+  const saved = readJson(join(shared, 'manifest.json')) || {}, skills = {};
+  for (const [name, hash] of Object.entries(saved)) if (SKILL.test(name) && fs.existsSync(join(shared, 'skills', name, 'SKILL.md'))) skills[name] = hash;
+  const complete = Object.keys(skills).length === Object.keys(saved).length && fs.existsSync(join(shared, 'catalog.json')) && fs.existsSync(join(shared, '.claude-plugin', 'plugin.json'));
+  const fingerprint = complete ? readJson(join(shared, 'fingerprint.json')) : undefined;
+  return { skills, ...(typeof fingerprint === 'string' ? { fingerprint } : {}) };
 }
 
 function sync(shared) {
@@ -186,6 +191,8 @@ function sync(shared) {
     const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     const root = join(shared, 'skills');
     fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+    // An interrupted sync leaves no fingerprint, so the next one checks every skill again.
+    fs.rmSync(join(shared, 'fingerprint.json'), { force: true });
     const before = readJson(join(shared, 'manifest.json')) || {};
     for (const [name, files] of Object.entries(payload.files || {})) {
       if (!SKILL.test(name) || !Array.isArray(files)) throw new Error('Invalid skill ' + name);
@@ -203,11 +210,15 @@ function sync(shared) {
     }
     const next = payload.manifest || {};
     for (const name of Object.keys(before)) if (!Object.hasOwn(next, name) && SKILL.test(name)) fs.rmSync(join(root, name), { recursive: true, force: true });
+    // A skill not sent must already be here as the same version. One that is not is left out and reported, so DSH sends it.
+    const missing = Object.keys(next).filter(name => !Object.hasOwn(payload.files || {}, name) && (before[name] !== next[name] || !fs.existsSync(join(root, name, 'SKILL.md'))));
+    const manifest = Object.fromEntries(Object.entries(next).filter(([name]) => !missing.includes(name)));
     fs.mkdirSync(join(shared, '.claude-plugin'), { recursive: true, mode: 0o700 });
     writeJson(join(shared, '.claude-plugin', 'plugin.json'), { name: 'dsh', version: '1.0.0', description: 'Skills shared from DSH' });
-    writeJson(join(shared, 'manifest.json'), next);
-    writeJson(join(shared, 'catalog.json'), payload.catalog || []);
-    send({ ok: true });
+    writeJson(join(shared, 'manifest.json'), manifest);
+    writeJson(join(shared, 'catalog.json'), (payload.catalog || []).filter(skill => !missing.includes(skill.name)));
+    if (!missing.length && typeof payload.fingerprint === 'string') writeJson(join(shared, 'fingerprint.json'), payload.fingerprint);
+    send({ ok: true, missing });
   });
 }
 
