@@ -108,7 +108,7 @@ describe('sections', () => {
     expect(rowActivity([node('l')])).toBeUndefined()
   })
 
-  it('puts what needs the user first and lists each Session once, under the state it is in', () => {
+  it('puts a Workspace with any running Session only in Running, ahead of every other state', () => {
     const sessions: Record<string, SessionNode[]> = {
       alpha: [node('a1', { running: true }), waiting('a2'), node('a3')],
       beta: [node('b1', { completed: true }), node('b2', { running: true }), node('b3', { runningSubagentCount: 2 })],
@@ -121,11 +121,10 @@ describe('sections', () => {
     expect(sections.map(section => [
       section.kind, section.groups.map(g => [g.key, g.expanded, g.sessions.map(n => n.id)]), section.count,
     ])).toEqual([
-      ['waiting', [['alpha', true, ['a2']], ['gamma', true, ['c1']]], 2],
-      ['completed', [['beta', true, ['b1']]], 1],
+      ['waiting', [['gamma', true, ['c1']]], 1],
       ['running', [['alpha', true, ['a1']], ['beta', true, ['b2', 'b3']], ['delta', true, ['d3']]], 4],
       // Idle follows the sidebar's fold, holds Workspaces without Sessions, and counts Workspaces.
-      ['idle', [['alpha', false, []], ['epsilon', false, []], ['delta', true, ['d1', 'd2']]], 3],
+      ['idle', [['epsilon', false, []]], 1],
     ])
     expect(sectionFolded({}, 'status:idle')).toBe(true)
     expect(sectionFolded({}, 'status:waiting')).toBe(false)
@@ -290,7 +289,7 @@ describe('WorkspaceBrowser with tags', () => {
     expect(sectionNames()).toEqual([['Idle', ['alpha', 'delta']]])
   })
 
-  it('lists only the Sessions in each state, under their Workspace, even where the Workspace is folded', async () => {
+  it('keeps a Workspace with a running Session out of the other Status sections', async () => {
     const { runtime, store } = await mount({
       useSessions: hook(sessionState([summary('a1', { running: true }), summary('a2'), summary('a3'), summary('b1'),
         summary('x1', { origin: 'subagent', running: true })])),
@@ -299,28 +298,25 @@ describe('WorkspaceBrowser with tags', () => {
     })
     act(() => { runtime.setMode('status') })
     expect(store.getSnapshot().groupExpansion).toEqual({})
-    // A subagent has no row of its own, so the bucket holding it shows nowhere.
+    // Alpha's waiting and idle Sessions do not give it Waiting or Idle entries while a1 runs.
     expect(sectionSessions()).toEqual([
-      ['Waiting for you', [['alpha', ['a3']]]],
       ['Running', [['alpha', ['a1']]]],
       ['Idle', []],
     ])
-    expect(within(sectionHeader('Idle')).getByText('2')).toBeTruthy()
+    expect(within(sectionHeader('Idle')).getByText('1')).toBeTruthy()
     expect(within(sectionHeader('Running')).getByText('1')).toBeTruthy()
-    // Folding alpha inside Running leaves it open in Waiting and in Workspace grouping, and marks the folded row.
-    fireEvent.click(workspaceRow('alpha')[1]!)
-    expect(sectionSessions().slice(0, 2)).toEqual([['Waiting for you', [['alpha', ['a3']]]], ['Running', [['alpha', []]]]])
-    expect(within(workspaceRow('alpha')[1]!).getByRole('img', { name: 'Running' })).toBeTruthy()
+    // Folding alpha inside Running does not change the sidebar's own Workspace fold.
     fireEvent.click(workspaceRow('alpha')[0]!)
-    expect(within(workspaceRow('alpha')[0]!).getByRole('img', { name: '1 waiting for you' }).textContent).toBe('1')
+    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', []]]])
+    expect(within(workspaceRow('alpha')[0]!).getByRole('img', { name: 'Running' })).toBeTruthy()
     expect(store.getSnapshot().groupExpansion).toEqual({})
-    // Idle shows alpha's idle Session, under the sidebar's own fold and without the marks of the others.
+    // Only beta, which has no running Session, remains in Idle.
     fireEvent.click(sectionHeader('Idle'))
-    expect(sectionNames().at(-1)).toEqual(['Idle', ['alpha', 'beta']])
-    expect(within(workspaceRow('alpha')[2]!).queryAllByRole('img').map(img => img.getAttribute('aria-label'))).toEqual(['Tags: Urgent, Client'])
-    fireEvent.click(workspaceRow('alpha')[2]!)
-    expect(store.getSnapshot().groupExpansion).toEqual({ alpha: true })
-    expect(sectionSessions().at(-1)).toEqual(['Idle', [['alpha', ['a2']], ['beta', []]]])
+    expect(sectionNames().at(-1)).toEqual(['Idle', ['beta']])
+    expect(workspaceRow('alpha')).toHaveLength(1)
+    fireEvent.click(workspaceRow('beta')[0]!)
+    expect(store.getSnapshot().groupExpansion).toEqual({ beta: true })
+    expect(sectionSessions().at(-1)).toEqual(['Idle', [['beta', ['b1']]]])
   })
 
   it('unfolds the section that holds a revealed search result', async () => {

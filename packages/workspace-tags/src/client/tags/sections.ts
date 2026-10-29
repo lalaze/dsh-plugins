@@ -1,8 +1,9 @@
 /**
  * Tag and Status sections over ui-workspace's Workspace groups, and the space
  * filter that narrows every grouping to one tag. A Workspace appears in every
- * section it qualifies for, keeping the sidebar's Workspace order inside each;
- * empty sections are left out.
+ * Tag section it qualifies for; a running Workspace appears only in Running.
+ * The sidebar's Workspace order is kept inside each section; empty sections
+ * are left out.
  */
 import type { TagState, WorkspaceTag } from '../../shared/tags.ts'
 import type { GroupNode, SessionNode } from '../upstream/tree.ts'
@@ -21,9 +22,9 @@ export interface BrowserSection {
   tag?: WorkspaceTag
   /**
    * Tag sections hold whole Workspaces. Status sections hold each Workspace
-   * with only its Sessions in that state, so every Session shows once:
-   * Waiting, Completed and Running list theirs whether or not the Workspace
-   * is folded elsewhere, and Idle follows the Workspace's own fold.
+   * with only its Sessions in that state. Any running Session puts the whole
+   * Workspace in Running alone; otherwise a Workspace can qualify for several
+   * sections. Idle follows the Workspace's own fold.
    */
   groups: readonly GroupNode[]
   /** Workspaces in Tag and Idle sections, Sessions in the others. */
@@ -117,9 +118,11 @@ export function tagSections(groups: readonly GroupNode[], state: TagState): Brow
 }
 
 /**
- * Waiting for the user, then finished and unread, then running, then Idle,
- * each listing every Workspace with Sessions in that state and only those
- * Sessions. Idle also holds Workspaces without Sessions, where a new one starts.
+ * Waiting for the user, then finished and unread, then running, then Idle.
+ * Any running Session (including a subagent) puts its Workspace only in Running,
+ * with just its running Sessions. Otherwise each state lists every Workspace
+ * with Sessions in that state and only those Sessions. Idle also holds
+ * Workspaces without Sessions, where a new one starts.
  * @param groups - the rendered groups, whose Sessions follow their fold state.
  * @param sessionsOf - a group's Sessions regardless of its fold state.
  */
@@ -128,6 +131,11 @@ export function statusSections(groups: readonly GroupNode[], sessionsOf: (group:
   const idle: GroupNode[] = []
   for (const group of groups) {
     const all = sessionsOf(group)
+    const running = all.filter(node => node.running || node.runningSubagentCount > 0)
+    if (running.length > 0) {
+      active.get('running')!.push({ ...group, expanded: true, sessions: running })
+      continue
+    }
     const byKind = new Map<ActiveStatus, SessionNode[]>()
     for (const node of all) {
       const kind = sessionActivity(node)
