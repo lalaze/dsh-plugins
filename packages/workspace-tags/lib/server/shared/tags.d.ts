@@ -7,7 +7,7 @@
 /** Host route: GET returns `{ state }`, POST applies one {@link TagOperation} and returns `{ state, tag? }` or `{ error }`. */
 export declare const TAGS_ROUTE = "/api/workspace-tags";
 /** Palette ids; the client maps each to a light and a dark color. */
-export declare const TAG_COLORS: readonly ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
+export declare const TAG_COLORS: readonly ["gray", "red", "orange", "yellow", "green", "teal", "blue", "purple", "pink", "amber", "lime", "emerald", "cyan", "sky", "indigo", "violet", "fuchsia", "rose"];
 export type TagColor = typeof TAG_COLORS[number];
 export declare const TAG_NAME_MAX = 40;
 export declare const TAG_LIMIT = 200;

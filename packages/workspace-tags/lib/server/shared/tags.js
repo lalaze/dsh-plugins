@@ -7,7 +7,10 @@
 /** Host route: GET returns `{ state }`, POST applies one {@link TagOperation} and returns `{ state, tag? }` or `{ error }`. */
 export const TAGS_ROUTE = '/api/workspace-tags';
 /** Palette ids; the client maps each to a light and a dark color. */
-export const TAG_COLORS = ['gray', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink'];
+export const TAG_COLORS = [
+    'gray', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink',
+    'amber', 'lime', 'emerald', 'cyan', 'sky', 'indigo', 'violet', 'fuchsia', 'rose',
+];
 export const TAG_NAME_MAX = 40;
 export const TAG_LIMIT = 200;
 /** A rejected operation; its message is shown to the user. */
