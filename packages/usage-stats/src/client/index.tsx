@@ -19,13 +19,13 @@ const timeZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().ti
 function Icon({ kind = 'chart' }: { kind?: 'chart' | 'download' | 'refresh' }) {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{kind === 'chart' ? <><path d="M4 19h16M7 15V9m5 6V5m5 10v-4" /></> : kind === 'download' ? <><path d="M12 3v12m-4-4 4 4 4-4M5 16v4h14v-4" /></> : <><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.2 6.2A8 8 0 0 1 20 12M4 12a8 8 0 0 0 13.8 5.8" /></>}</svg>;
 }
-/** The expand marker of a breakdown row or the data sources: a plus that turns into a minus. */
-function Plus({ open }: { open: boolean }) {
-  return <svg className="us-plus" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><path d="M3 8h10" />{!open && <path d="M8 3v10" />}</svg>;
+/** The expand marker of a breakdown row or the data sources: a chevron that turns down when open. */
+function Chevron({ open }: { open: boolean }) {
+  return <svg className="us-chevron" data-open={open || undefined} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 4l4 4-4 4" /></svg>;
 }
-/** A full-width row of equal choices: the time range and the category. */
-function Tabs<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: readonly (readonly [T, string])[]; onChange: (value: T) => void }) {
-  return <div className="us-tabs" role="group" aria-label={label}>{options.map(([key, text]) => <button key={key} type="button" aria-pressed={value === key} onClick={() => onChange(key)}>{ui(text)}</button>)}</div>;
+/** A row of choices: full-width equal tabs for the time range, a compact control for the category. */
+function Tabs<T extends string>({ label, value, options, onChange, compact }: { label: string; value: T; options: readonly (readonly [T, string])[]; onChange: (value: T) => void; compact?: boolean }) {
+  return <div className={compact ? 'us-segment' : 'us-tabs'} role="group" aria-label={label}>{options.map(([key, text]) => <button key={key} type="button" aria-pressed={value === key} onClick={() => onChange(key)}>{ui(text)}</button>)}</div>;
 }
 function Trend({ data }: { data: UsageReport }) {
   const [metric, setMetric] = useState<'tokens' | 'requests'>('tokens');
@@ -92,8 +92,8 @@ function Breakdown({ data, by }: { data: UsageReport; by: Dimension }) {
     <ol>{(all ? rows : rows.slice(0, BREAKDOWN_ROWS)).map(g => {
       const { name, title } = groupName(g, by), expanded = open.has(g.key), t = g.totals;
       return <li key={g.key}>
-        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={title}>{name}</span><b className="us-number" title={number(t.totalTokens)}>{compact(t.totalTokens)}</b><Plus open={expanded} /></button>
-        <div className="us-row-bar"><span className="us-meter"><span style={{ width: `${total ? t.totalTokens / total * 100 : 0}%` }} /></span><span className="us-number">{percent(t.totalTokens, total)}</span></div>
+        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={title}>{name}</span><b className="us-number" title={number(t.totalTokens)}>{compact(t.totalTokens)}</b><span className="us-row-share us-number">{percent(t.totalTokens, total)}</span><Chevron open={expanded} />
+          <span className="us-meter" aria-hidden="true"><span style={{ width: `${total ? t.totalTokens / total * 100 : 0}%` }} /></span></button>
         {expanded && <dl className="us-row-detail">
           <div><dt>{ui("Requests")}</dt><dd>{number(t.requests)}<small>{ui("Usage reported {0}/{1}", { 0: number(t.withUsage), 1: number(t.requests) })}</small></dd></div>
           <div><dt>{ui("Input · Uncached")}</dt><dd>{number(t.inputTokens)}</dd></div>
@@ -112,7 +112,7 @@ function Sources({ data, open, onToggle, anchor }: { data: UsageReport; open: bo
   const t = data.totals, notes = attention(data);
   return <section ref={anchor} className="us-sources" aria-label={ui("Data sources")}>
     <button type="button" className="us-sources-head" aria-expanded={open} onClick={onToggle}><span className="us-sources-title">{ui("Data sources")}</span>
-      <span className="us-sources-status">{notes.length ? <><i className="us-dot us-warn" />{ui("{0} need attention", { 0: notes.length })}</> : ui("Measurement and scope")}</span><Plus open={open} /></button>
+      <span className="us-sources-status">{notes.length ? <><i className="us-dot us-warn" />{ui("{0} need attention", { 0: notes.length })}</> : ui("Measurement and scope")}</span><Chevron open={open} /></button>
     <ul className="us-source-list">{data.sources.map(s => <li key={s.key}><div><span>{ui(s.label)}</span><small>{ui("{0} requests", { 0: number(s.totals.requests) })} · {ui("Usage reported {0}/{1}", { 0: number(s.totals.withUsage), 1: number(s.totals.requests) })}</small></div><b className="us-number" title={number(s.totals.totalTokens)}>{compact(s.totals.totalTokens)}</b></li>)}</ul>
     {open && <div className="us-sources-detail">
       {notes.map(note => <p key={note} className="us-notice us-warning">{note}</p>)}
@@ -133,6 +133,7 @@ export function Dashboard() {
   const [refresh, setRefresh] = useState(0); const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false); const [exportError, setExportError] = useState('');
   const [sourcesOpen, setSourcesOpen] = useState(false); const sources = useRef<HTMLElement>(null);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const params = new URLSearchParams();
   // Days follow the viewer's time zone, like the header pill.
   for (const [key, value] of Object.entries({ from, to, provider, model, sessionId, tz: localOffset() })) if (value) params.set(key, value);
@@ -184,18 +185,19 @@ export function Dashboard() {
   const range = from && from === to ? from : from || to ? `${from || ui("First record")} → ${to || ui("Latest record")}` : ui("All records");
   return <section className="dsh-usage" aria-label={ui("Usage statistics")}><style>{styles}</style>
     <header className="us-top"><div className="us-title"><h2>{ui("Usage statistics")}</h2><p className="us-subtitle">{data ? ui("Updated {0}", { 0: new Date(data.generatedAt).toLocaleTimeString(formatLocale()) }) + ' · ' : ''}{ui("Updates every 5 seconds")}</p></div>
-      <div className="us-actions"><button type="button" className="us-link us-accent" onClick={() => setRefresh(n => n + 1)}><Icon kind="refresh" />{ui("Refresh")}</button><button type="button" className="us-link" disabled={exporting} onClick={() => void exportCsv()}><Icon kind="download" />{exporting ? ui("Exporting…") : ui("Export CSV")}</button></div></header>
+      <div className="us-actions"><button type="button" className="us-link" onClick={() => setRefresh(n => n + 1)}><Icon kind="refresh" />{ui("Refresh")}</button><button type="button" className="us-link" disabled={exporting} onClick={() => void exportCsv()}><Icon kind="download" />{exporting ? ui("Exporting…") : ui("Export CSV")}</button></div></header>
     <Tabs label={ui("Time range")} value={period} options={PERIODS} onChange={choosePeriod} />
     {period === 'custom' && <div className="us-custom-dates"><label className="us-field">{ui("Start date")}<input aria-label={ui("Start date")} type="date" value={from} onChange={e => setFrom(e.target.value)} /></label><span className="us-muted">—</span><label className="us-field">{ui("End date")}<input aria-label={ui("End date")} type="date" value={to} onChange={e => setTo(e.target.value)} /></label></div>}
-    <div className="us-filter-row"><details className="us-filters"><summary>{ui("More filters")}{filterCount ? ui(" · {0} applied", { 0: filterCount }) : ui(" · Provider, model, session")}</summary><div className="us-filter-grid">{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div></details>
+    <div className="us-filter-row"><button type="button" className="us-filters" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}><Chevron open={filtersOpen} />{ui("More filters")}{filterCount ? ui(" · {0} applied", { 0: filterCount }) : ui(" · Provider, model, session")}</button>
+      <span className="us-range us-number">{range} · {timeZone()}</span>
       {(filterCount > 0 || period === 'custom') && <button type="button" className="us-link" onClick={reset}>{ui("Reset filters")}</button>}</div>
+    {filtersOpen && <div className="us-filter-grid">{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div>}
     {error && <div className="us-notice us-warning" role="alert">{ui("Could not load:")}{ui(error)}<button className="us-button" onClick={() => setRefresh(n => n + 1)}>{ui("Retry")}</button></div>}
     {exportError && <div className="us-notice us-warning" role="alert">{ui(exportError)}</div>}
     {loading && <div className="us-loading" role="status">{ui("Loading usage…")}</div>}
     {data && <>
       <Headline data={data} onPartial={showAttention} />
-      <p className="us-range us-number">{range} · {timeZone()}</p>
-      <Tabs label={ui("Group by")} value={groupBy} options={BREAKDOWNS} onChange={setGroupBy} />
+      <Tabs label={ui("Group by")} value={groupBy} options={BREAKDOWNS} onChange={setGroupBy} compact />
       <Breakdown data={data} by={groupBy} />
       <Trend data={data} />
       <Sources data={data} open={sourcesOpen} onToggle={() => setSourcesOpen(!sourcesOpen)} anchor={sources} />

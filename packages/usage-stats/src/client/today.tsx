@@ -6,11 +6,12 @@ import { compact, localDay, localOffset } from './metrics.js';
 import { usePreferences } from './preferences.js';
 
 const REFRESH_MS = 10_000;
-const CSS = `.us-today{display:inline-flex;align-items:center;gap:6px;flex:none;height:22px;padding:0 9px;border:1px solid color-mix(in srgb,currentColor 14%,transparent);border-radius:999px;background:color-mix(in srgb,currentColor 5%,transparent);color:inherit;font:inherit;font-size:12px;line-height:1;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:pointer;-webkit-app-region:no-drag}
-.us-today:hover,.us-today[aria-expanded=true]{background:color-mix(in srgb,currentColor 10%,transparent)}
-.us-today:focus-visible{outline:2px solid var(--dsw-focus-ring-color,#517ee8);outline-offset:2px}
-.us-today i{width:7px;height:7px;border-radius:50%;background:#2fb47c;flex:none}
-.us-today[data-stale] i{background:#a1a1aa}
+// Sized like the header's other 24px controls: a hairline pill with a 12px label and a 6px state dot.
+const CSS = `.us-today{display:inline-flex;align-items:center;gap:6px;flex:none;box-sizing:border-box;height:24px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4,color-mix(in srgb,currentColor 16%,transparent));border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,inherit);font:inherit;font-family:var(--dsw-font-family,inherit);font-size:12px;line-height:18px;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:pointer;-webkit-app-region:no-drag}
+.us-today:hover,.us-today[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,currentColor 8%,transparent));color:var(--dsw-alias-label-primary,inherit)}
+.us-today:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4176e6));outline-offset:2px}
+.us-today i{width:6px;height:6px;border-radius:50%;background:var(--dsw-alias-state-success-primary,#22a06b);flex:none}
+.us-today[data-stale] i{background:var(--dsw-alias-label-tertiary,#a1a1aa)}
 .us-today sup{margin-left:-3px;font-size:10px;opacity:.75}`;
 
 /**

@@ -64,7 +64,7 @@ try {
   browser('click', tab('按 Workspace')); wait(`${rows} === 1`);
   browser('snapshot', '-i');
   browser('click', tab('按模型'));
-  browser('click', '.us-filters summary');
+  browser('click', '.us-filters');
   browser('fill', '[aria-label="会话 ID"]', 'remote-session');
   wait(requests(2));
   expect(`${total}.textContent === "23" && document.querySelector(".us-sources").textContent.includes("已返回用量 1/2")`);
@@ -138,7 +138,7 @@ try {
   evaluate('window.fixture.workspaces = false; window.fixture.demo = true'); browser('click', 'button:has-text("刷新")');
   browser('click', tab('按 Provider'));
   wait(`document.querySelectorAll(".us-bar-hit").length === 21 && ${rows} === 3`);
-  browser('click', '.us-filters summary');
+  browser('click', '.us-filters');
   browser('set', 'viewport', '1280', '1000'); browser('set', 'media', 'light');
   if (process.env.DSH_TEST_DESKTOP_SCREENSHOT) browser('screenshot', '--full', process.env.DSH_TEST_DESKTOP_SCREENSHOT);
   browser('set', 'media', 'dark');
