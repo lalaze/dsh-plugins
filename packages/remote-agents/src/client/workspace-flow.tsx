@@ -4,7 +4,7 @@ import { FolderSimpleIcon } from '@phosphor-icons/react/dist/csr/FolderSimple';
 import { HardDrivesIcon } from '@phosphor-icons/react/dist/csr/HardDrives';
 import { HouseIcon } from '@phosphor-icons/react/dist/csr/House';
 import { XIcon } from '@phosphor-icons/react/dist/csr/X';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Dashboard, DirectoryListing, Host, RemoteWorkspace } from '../domain.js';
 import { api } from './api.js';
@@ -90,6 +90,89 @@ function FolderBrowser({ list, initialPath, busy, onCommit }: { list: Lister; in
   </div>;
 }
 
+function MachineSelect({ hosts, value, disabled, onChange }: { hosts: Host[]; value?: string; disabled: boolean; onChange(id: string): void }) {
+  const id = useId();
+  const trigger = useRef<HTMLButtonElement>(null), popup = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false), [active, setActive] = useState(value ?? '');
+  const selected = hosts.find(host => host.id === value);
+  const activeId = active ? id + '-option-' + hosts.findIndex(host => host.id === active) : undefined;
+  const close = (restoreFocus = false) => {
+    if (popup.current?.matches(':popover-open')) popup.current.hidePopover();
+    if (restoreFocus) trigger.current?.focus({ preventScroll: true });
+  };
+  useLayoutEffect(() => {
+    const element = popup.current; if (!element) return;
+    // React 18 does not type or forward popover target properties consistently.
+    element.setAttribute('popover', 'auto'); trigger.current?.setAttribute('popovertarget', id);
+    const before = (event: Event) => {
+      if ((event as ToggleEvent).newState === 'open') { setActive(value ?? hosts[0]?.id ?? ''); setOpen(true); } else setOpen(false);
+    };
+    element.addEventListener('beforetoggle', before);
+    return () => element.removeEventListener('beforetoggle', before);
+  }, [value, id, hosts]);
+  useEffect(() => { if (disabled) close(); }, [disabled]);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const anchor = trigger.current, element = popup.current; if (!anchor || !element) return;
+      const rect = anchor.getBoundingClientRect(), gap = 6, margin = 12;
+      const width = Math.min(Math.max(rect.width, 280), window.innerWidth - margin * 2);
+      // A viewport resize can move the trigger offscreen while its top-layer menu stays open.
+      const top = Math.max(margin, Math.min(rect.top, window.innerHeight - margin));
+      const bottom = Math.max(margin, Math.min(rect.bottom, window.innerHeight - margin));
+      const below = window.innerHeight - bottom - margin - gap, above = top - margin - gap;
+      const up = below < 240 && above > below;
+      Object.assign(element.style, {
+        width: width + 'px', left: Math.max(margin, Math.min(rect.left, window.innerWidth - width - margin)) + 'px',
+        top: up ? 'auto' : (bottom + gap) + 'px', bottom: up ? (window.innerHeight - top + gap) + 'px' : 'auto',
+        maxHeight: Math.max(0, Math.min(360, up ? above : below)) + 'px',
+      });
+    };
+    place(); window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
+    // Capture Escape before the dialog's own cancel handler can close the whole flow.
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || !popup.current?.contains(event.target as Node)) return;
+      event.preventDefault(); event.stopPropagation(); close(true);
+    };
+    document.addEventListener('keydown', escape, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); document.removeEventListener('keydown', escape, true); };
+  }, [open]);
+  useEffect(() => { if (open && activeId) document.getElementById(activeId)?.scrollIntoView({ block: 'nearest' }); }, [open, activeId]);
+  const choose = (next: string) => { onChange(next); close(true); };
+  const step = (delta: number) => {
+    if (!hosts.length) return;
+    const index = hosts.findIndex(host => host.id === active);
+    setActive(hosts[(index + delta + hosts.length) % hosts.length]?.id ?? '');
+  };
+  return <div className="ra-field ra-machine-select">
+    <span>{ui('Machine')}</span>
+    <button ref={trigger} type="button" className="ra-machine-trigger" aria-label={ui('Machine')} aria-haspopup="listbox" aria-expanded={open} aria-controls={id} aria-activedescendant={open ? activeId : undefined} disabled={disabled}
+      onKeyDown={event => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (!open) popup.current?.showPopover(); else step(event.key === 'ArrowDown' ? 1 : -1); }
+        else if (open && event.key === 'Enter') { event.preventDefault(); if (active) choose(active); }
+      }}>
+      <span className="ra-machine-trigger-icon"><MachineGlyph kind="server" /></span><span className="ra-machine-trigger-text">
+        <span className="ra-machine-label"><span className="ra-machine-dot" data-status={selected?.status ?? 'disconnected'} /><span className="ra-machine-name">{selected?.label ?? ui('Choose a machine…')}</span></span>
+        {selected && <span className="ra-machine-connection">{selected.connection}</span>}
+      </span><MachineGlyph kind="chevron" />
+    </button>
+    {/* The native top layer stays interactive inside <dialog> and escapes scrolling-panel clipping. */}
+    <div id={id} ref={popup} className="ra-machine-menu" role="listbox" aria-label={ui('Machine')} onBlur={event => { if (event.relatedTarget instanceof Node && !event.currentTarget.contains(event.relatedTarget)) close(); }}>
+      {hosts.map(host => <div key={host.id} id={id + '-option-' + hosts.indexOf(host)} role="option" aria-selected={host.id === value} data-active={host.id === active} className="ra-machine-item" title={host.label}
+        onPointerMove={() => setActive(host.id)} onMouseDown={event => event.preventDefault()} onClick={() => choose(host.id)}>
+        <span className="ra-machine-item-icon"><MachineGlyph kind="server" /></span>
+        <span className="ra-machine-item-text"><span className="ra-machine-item-name"><span className="ra-machine-dot" data-status={host.status} /><span className="ra-machine-name">{host.label}</span></span><span className="ra-machine-item-connection">{host.connection}</span></span>
+        {host.id === value && <MachineGlyph kind="check" />}
+      </div>)}
+    </div>
+  </div>;
+}
+
+function MachineGlyph({ kind }: { kind: 'server' | 'chevron' | 'check' }) {
+  const paths = { server: <><rect x="3" y="4" width="18" height="16" rx="3" /><path d="m7 9 3 3-3 3m6 0h4" /></>, chevron: <path d="m6 9 6 6 6-6" />, check: <path d="m5 12 4 4L19 6" /> };
+  return <svg aria-hidden="true" className={kind === 'chevron' ? 'ra-machine-chevron' : undefined} width={kind === 'chevron' ? 14 : 16} height={kind === 'chevron' ? 14 : 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[kind]}</svg>;
+}
+
 function FlowDialog({ hosts, initialTab, localBrowse, busy, local, onPicked, onCancel }: {
   hosts: Host[]; initialTab: Tab; localBrowse: boolean; busy: boolean; local: () => LocalDirectories | undefined; onPicked(path: string): void; onCancel(): void;
 }) {
@@ -152,11 +235,7 @@ function FlowDialog({ hosts, initialTab, localBrowse, busy, local, onPicked, onC
           <button type="button" className="ra-primary" disabled={locked} onClick={() => void pickLocal()}><FolderSimpleIcon size={16} />{ui('Choose a folder…')}</button>
         </div>)
         : <>
-          <label className="ra-field">{ui('Machine')}
-            <select value={hostId} disabled={locked} onChange={event => { setHostId(event.target.value); setError(''); remember(HOST_KEY, event.target.value); }}>
-              {hosts.map(entry => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
-            </select>
-          </label>
+          <MachineSelect hosts={hosts} value={hostId} disabled={locked} onChange={id => { setHostId(id); setError(''); remember(HOST_KEY, id); }} />
           {hostId && <FolderBrowser key={hostId} list={remoteList} initialPath={recall(pathKey(hostId))} busy={locked} onCommit={path => void adoptRemote(path)} />}
           {host && <p className="ra-foot">{ui('Files stay on {host}. Remote models in this workspace run there.', { host: host.label })}</p>}
         </>}

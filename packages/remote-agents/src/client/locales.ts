@@ -349,6 +349,7 @@ export const zh: Record<string, string> = {
   "Open a folder on this computer with the system folder picker.": "使用系统文件夹选择器打开本机上的文件夹。",
   "Choose a folder…": "选择文件夹…",
   "Machine": "机器",
+  "Choose a machine…": "选择机器…",
   "Up one level": "上一级",
   "Home folder": "主目录",
   "Folder path": "文件夹路径",
