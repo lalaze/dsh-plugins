@@ -36,56 +36,79 @@ function sessionTitleOf(request) {
     }
     return text.replace(/\s+/g, ' ').trim().slice(0, 80) || 'Remote CLI';
 }
+/** The DSH tool row that holds one response's remote tool calls. */
+const REMOTE_TOOL = 'remote_cli';
 /** A speed tier (Codex Fast) is a separate picker row: DSH model selections carry only a model and a reasoning effort. */
 export const chatModelId = (projectId, provider, model, serviceTier) => `${projectId}/${encodeURIComponent(provider)}/${encodeURIComponent(model)}${serviceTier ? `/${encodeURIComponent(serviceTier)}` : ''}`;
-/** Remote tools already execute inside the CLI. Record their lifecycle without dispatching a DSH tool. */
+/**
+ * Remote tools already execute inside the CLI. Record their lifecycle without dispatching a DSH tool: each runs as a
+ * nested call under one row per response, which needs no model message while the CLI works. A tool-call message in
+ * the streaming step would make a reopened or reconnected DSH chat show that message and hide the CLI's text.
+ * The row's call and a summary result join the conversation when the response ends, so its tool calls stay paired.
+ */
 class NativeToolRows {
     options;
+    title;
     calls = new Map();
     finished = new Set();
+    summary = [];
+    root;
+    closed = false;
     step;
     session;
-    constructor(context, options) {
+    constructor(context, options, title) {
         this.options = options;
+        this.title = title;
         if (context) {
             this.session = context.session;
             this.step = { turn: context.turn, step: context.step };
         }
     }
     write(entry) {
-        if (!this.session || !this.step)
+        if (!this.session || !this.step || this.closed)
             return false;
         const item = entry.item, key = String(item.callId ?? entry.seqStart);
         if (this.finished.has(key))
             return true;
         let call = this.calls.get(key);
         if (!call) {
+            const root = this.root ??= this.open(this.session, this.step);
             // Namespace native ids by DSH step: CLI call ids can repeat after a resume or a replay.
-            const id = ToolCallId(`remote-${this.step.turn}-${this.step.step}-${hash(key).slice(0, 24)}`);
-            const name = typeof item.name === 'string' ? item.name : 'Remote tool';
-            const args = JSON.stringify(typeof item.detail === 'object' && item.detail !== null ? item.detail : {});
-            this.session.append('assistant/message', { ...this.step, message: {
-                    id: MessageId(`${id}:call`), role: 'assistant', source: { kind: 'model', provider: this.options.provider, model: this.options.model },
-                    content: [{ type: 'tool-call', id, name, arguments: args }],
-                }, stream: [] }, { surfaceOp: 'append' });
-            const event = this.session.append('tool/call', { ...this.step, callId: id, name, arguments: args });
-            call = { id, seq: event.seq };
+            call = { id: ToolCallId(`remote-${this.step.turn}-${this.step.step}-${hash(key).slice(0, 24)}`), name: typeof item.name === 'string' ? item.name : 'Remote tool',
+                args: typeof item.detail === 'object' && item.detail !== null ? item.detail : {} };
+            this.session.append('tool/ptc-dispatch-start', { rootCallId: root.id, parentCallId: root.id, subCallId: call.id, name: call.name, arguments: call.args });
             this.calls.set(key, call);
         }
         if (item.status !== 'running' && item.status !== 'pending')
             this.finish(key, typeof item.detail === 'string' ? item.detail : JSON.stringify(item.detail ?? {}), item.status === 'failed' || item.status === 'canceled');
         return true;
     }
+    open(session, step) {
+        const id = ToolCallId(`remote-${step.turn}-${step.step}-cli`), args = JSON.stringify({ description: this.title });
+        return { id, seq: session.append('tool/call', { ...step, callId: id, name: REMOTE_TOOL, arguments: args }).seq, arguments: args };
+    }
     finish(key, text, isError) {
-        const call = this.calls.get(key);
-        if (!call || !this.session || !this.step)
+        const call = this.calls.get(key), root = this.root;
+        if (!call || !root || !this.session)
             return;
-        this.session.append('tool/result', { ...this.step, message: createToolResultMessage({ callId: call.id, content: [{ type: 'text', text }], isError }) }, { surfaceOp: 'append', sourceEventSeqs: [call.seq] });
+        this.session.append('tool/ptc-dispatch', { rootCallId: root.id, parentCallId: root.id, subCallId: call.id, name: call.name, arguments: call.args, isError, content: [{ type: 'text', text }] });
+        this.summary.push(`${call.name} ${JSON.stringify(call.args)}${isError ? ' (failed)' : ''}\n${text}`);
         this.calls.delete(key);
         this.finished.add(key);
     }
-    close(text = 'Remote tool did not finish before this response ended.', isError = true) { for (const key of this.calls.keys())
-        this.finish(key, text, isError); }
+    close(text = 'Remote tool did not finish before this response ended.', isError = true) {
+        for (const key of this.calls.keys())
+            this.finish(key, text, isError);
+        const root = this.root;
+        if (!root || !this.session || !this.step || this.closed)
+            return;
+        this.closed = true;
+        this.session.append('assistant/message', { ...this.step, message: {
+                id: MessageId(`${root.id}:call`), role: 'assistant', source: { kind: 'model', provider: this.options.provider, model: this.options.model },
+                content: [{ type: 'tool-call', id: root.id, name: REMOTE_TOOL, arguments: root.arguments }],
+            }, stream: [] }, { surfaceOp: 'append' });
+        this.session.append('tool/result', { ...this.step, message: createToolResultMessage({ callId: root.id, content: [{ type: 'text', text: this.summary.join('\n\n') }], isError: false }) }, { surfaceOp: 'append', sourceEventSeqs: [root.seq] });
+    }
 }
 export class RemoteCliAdapter extends LlmAdapter {
     projects;
@@ -281,7 +304,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         const prompt = previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt;
         const taskId = task?.id ?? messageId;
         let admitted = false, settled = false, index = 0;
-        const rows = new NativeToolRows(this.host.step(sessionId), options);
+        const rows = new NativeToolRows(this.host.step(sessionId), options, `${provider.label} on ${project.label}:${cwd}`);
         const questions = new Map();
         let permissionFailure, permissionNotice = false;
         let open;

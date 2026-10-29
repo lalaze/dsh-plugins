@@ -1,4 +1,4 @@
-import { createUserMessage, LlmAdapter, type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
+import { createUserMessage, LlmAdapter, ToolCallId, type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { type DshPermission } from './domain.js';
 import { type AttachmentAccess } from './attachments.js';
@@ -14,6 +14,23 @@ declare module '@deepseek-ai/dsh-llm' {
             readonly kind: 'remote-cli-sync';
             readonly form: 'notice';
             readonly summary: string;
+        };
+    }
+}
+/** DSH's PTC executor declares these log-only nested-call events; the chat renders them under their root call. */
+interface NestedCall {
+    rootCallId: ReturnType<typeof ToolCallId>;
+    parentCallId: ReturnType<typeof ToolCallId>;
+    subCallId: ReturnType<typeof ToolCallId>;
+    name: string;
+    arguments: unknown;
+}
+declare module '@deepseek-ai/dsh-session/types' {
+    interface SessionEventMap {
+        'tool/ptc-dispatch-start': NestedCall;
+        'tool/ptc-dispatch': NestedCall & {
+            isError: boolean;
+            content: ContentBlock[];
         };
     }
 }
@@ -88,3 +105,4 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     sync(agent: SyncAgent): boolean;
     stream(options: GenerateOptions): AsyncGenerator<StreamChunk>;
 }
+export {};
