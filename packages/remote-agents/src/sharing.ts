@@ -27,10 +27,12 @@ export interface LaunchSharing {
  * This package does not depend on them, so these mirror their signatures.
  */
 export interface SharedTool { name: string; description: string; parameters?: unknown }
+/** An image attachment reference, as DSH content blocks carry it. */
+export interface SharedImageRef { attachmentId?: string; mediaType?: string; bytes?: number; width?: number; height?: number }
 /** A content block of a settled call; DSH keeps images as attachment references. */
-export interface SharedContent { type: string; text?: string; offloaded?: boolean; attachment?: { mediaType?: string; bytes?: number } }
-/** A settled call: `value` is the tool's canonical result, `content` what DSH's post-execute policies left for the model. */
-export interface SharedToolResult { isError: boolean; value?: unknown; content: readonly SharedContent[] }
+export interface SharedContent { type: string; text?: string; offloaded?: boolean; attachment?: SharedImageRef }
+/** A settled call: `content` is what DSH's post-execute policies left for the model. */
+export interface SharedToolResult { isError: boolean; content: readonly SharedContent[] }
 export interface SharingTools {
   /** Model-facing schemas of the tools visible without an agent scope. */
   schemas(): readonly SharedTool[];
@@ -42,7 +44,11 @@ export interface SharingSkills {
   list(options?: { signal?: AbortSignal }): Promise<readonly SkillSummary[]>;
   get(name: string, options?: { signal?: AbortSignal }): Promise<{ content: string } | undefined>;
 }
-export interface SharingHost { tools?: SharingTools; skills?: SharingSkills; agent?(sessionId: string): unknown }
+/** DSH's attachment store (`AttachmentStore` of `@deepseek-ai/dsh-attachment`): image bytes by reference. */
+export interface SharingAttachments {
+  readImageRequest(ref: SharedImageRef, target: { width: number; height: number; maxBytes: number }, signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>;
+}
+export interface SharingHost { tools?: SharingTools; skills?: SharingSkills; attachments?: SharingAttachments; agent?(sessionId: string): unknown }
 
 export interface SharingCatalog {
   /** Whether DSH's tool and skill registries are loaded; without them nothing can be shared. */
@@ -98,24 +104,24 @@ export function bridgeForwardArguments(connection: string, remoteSocket: string,
     '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', ...(url.port ? ['-p', url.port] : []), '-R', `${remoteSocket}:127.0.0.1:${port}`, '--', target];
 }
 
-interface McpImage { type: 'image'; data: string; mimeType: string }
 /**
- * MCP content for a settled call: DSH's model-facing content, as its post-execute policies left it. DSH keeps images
- * as attachments, so their data comes from the server's own result, matched by media type and size. An image a policy
- * replaced matches none and is omitted, never sent as the original.
+ * MCP content for a settled call: DSH's model-facing content, as its post-execute policies left it. Images are read
+ * from DSH's attachment store by the reference in that content, so a replaced image is sent as its replacement. An
+ * offloaded image, or one that cannot be read, is omitted.
  */
-export function mcpContent(result: SharedToolResult): unknown[] {
-  const value = (result.value as { content?: unknown } | null | undefined)?.content;
-  const images = (Array.isArray(value) ? value as unknown[] : []).filter((block): block is McpImage => !!block && typeof block === 'object'
-    && (block as McpImage).type === 'image' && typeof (block as McpImage).data === 'string' && typeof (block as McpImage).mimeType === 'string');
-  const used = new Set<McpImage>();
-  return result.content.map(block => {
+export async function mcpContent(result: SharedToolResult, attachments?: SharingAttachments, signal?: AbortSignal): Promise<unknown[]> {
+  return Promise.all(result.content.map(async block => {
     if (block.type === 'text') return { type: 'text', text: block.text ?? '' };
-    const image = block.type === 'image' && !block.offloaded ? images.find(i => !used.has(i) && i.mimeType === block.attachment?.mediaType
-      && Buffer.byteLength(i.data, 'base64') === block.attachment?.bytes) : undefined;
-    if (!image) return { type: 'text', text: `[${block.type} omitted]` };
-    used.add(image); return image;
-  });
+    const ref = block.attachment;
+    if (block.type === 'image' && !block.offloaded && attachments && ref && typeof ref.width === 'number' && typeof ref.height === 'number' && typeof ref.bytes === 'number') {
+      try {
+        // At its stored dimensions and size.
+        const image = await attachments.readImageRequest(ref, { width: ref.width, height: ref.height, maxBytes: ref.bytes }, signal);
+        return { type: 'image', data: Buffer.from(image.data).toString('base64'), mimeType: image.mediaType };
+      } catch {}
+    }
+    return { type: 'text', text: `[${block.type} omitted]` };
+  }));
 }
 
 /** One file of a skill bundle: generated `data`, or a `source` file read only when its contents are needed. */
@@ -153,7 +159,7 @@ function remoteSkills(text: string | undefined): RemoteSkills {
   } catch { return { skills: {} }; }
 }
 
-interface Forward { ready: Promise<void>; child?: ChildProcess; stopped: boolean }
+interface Forward { ready: Promise<void>; child?: ChildProcess; stopped: boolean; socket: string; pointer?: string; up?: boolean }
 /** A host's paths: `shared` is this DSH's skill copy, a Claude Code plugin. */
 interface HostInfo { home: string; node: string; shared: string }
 class HostBridge {
@@ -324,7 +330,7 @@ export class Sharing implements LaunchSharing {
     try {
       const input = message.arguments && typeof message.arguments === 'object' && !Array.isArray(message.arguments) ? message.arguments : {};
       const result = await this.host.tools.execute({ callId: `remote-mcp-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
-      return { content: mcpContent(result), ...(result.isError ? { isError: true } : {}) };
+      return { content: await mcpContent(result, this.host.attachments, controller.signal), ...(result.isError ? { isError: true } : {}) };
     } finally { connection.calls.delete(message.id); }
   }
 
@@ -338,9 +344,12 @@ export class Sharing implements LaunchSharing {
    * Install the bridge script once per version; report the remote home, the absolute Node.js path ACP needs and the
    * synced skills. Checked again after a while, so a deleted ~/.dsh-remote-agents is installed again. Each DSH instance
    * copies its skills to its own directory: another one sharing the remote account may share different skills.
+   * A forward that is up is checked too: deleting ~/.dsh-remote-agents takes its socket and pointer with it.
    */
   private install(bridge: HostBridge): Promise<HostInfo> {
     if (bridge.info && Date.now() - bridge.checked < INSTALL_TTL) return bridge.info;
+    const live = bridge.forward?.up ? bridge.forward : undefined;
+    const check = live ? `[ -S ${quote(live.socket)} ] && [ "$(cat ${quote(live.pointer ?? '')} 2>/dev/null)" = ${quote(live.socket)} ] && dsh_forward=up || dsh_forward=gone` : 'dsh_forward=';
     const info = this.instance().then(instance => bridge.transport.exec(`umask 077
 mkdir -p "$HOME/${BASE}/bridge/tasks" "$HOME/${BASE}/bridge/cache" "$HOME/${BASE}/shared-${instance}"
 chmod 700 "$HOME/${BASE}" "$HOME/${BASE}/bridge" "$HOME/${BASE}/bridge/tasks" "$HOME/${BASE}/bridge/cache" "$HOME/${BASE}/shared-${instance}"
@@ -351,11 +360,13 @@ ${BRIDGE_SCRIPT}
 DSH_BRIDGE_SCRIPT_END
   mv -f "$dsh_bridge_tmp" "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs"
 fi
-printf '%s\\0%s\\0' "$HOME" "$(command -v node)"
+${check}
+printf '%s\\0%s\\0%s\\0' "$HOME" "$(command -v node)" "$dsh_forward"
 node "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs" manifest "$HOME/${BASE}/shared-${instance}" 2>/dev/null || true`).then(output => {
-      const [home, node, synced] = output.split('\0');
+      const [home, node, forward, synced] = output.split('\0');
       if (!home?.startsWith('/') || !node?.startsWith('/')) throw new Error('The SSH host did not report its home directory and Node.js');
       bridge.remote = remoteSkills(synced);
+      if (forward === 'gone' && live && bridge.forward === live) this.replace(bridge, live);
       return { home, node, shared: `${home}/${BASE}/shared-${instance}` };
     }));
     bridge.info = info; bridge.checked = Date.now();
@@ -435,7 +446,7 @@ node "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs" manifest "$HOME/${BASE}
     if (this.closed || bridge.stopped) return Promise.reject(new Error('Sharing has stopped'));
     clearTimeout(bridge.retry); bridge.retry = undefined;
     const directory = `${info.home}/${BASE}/bridge`, socket = `${directory}/s-${randomBytes(4).toString('hex')}.sock`, started = Date.now();
-    const forward: Forward = { stopped: false, ready: Promise.resolve() };
+    const forward: Forward = { stopped: false, socket, ready: Promise.resolve() };
     forward.ready = Promise.all([this.listen(), this.instance()]).then(([port, instance]) => new Promise<void>((resolve, reject) => {
       // Stopped while DSH's port was opening.
       if (forward.stopped) throw new Error('Sharing has stopped');
@@ -451,11 +462,11 @@ node "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs" manifest "$HOME/${BASE}
         state = 'confirmed'; clearTimeout(timer);
         // Point this DSH's proxies, new and running, at the socket. Proxies started by an earlier version read the
         // shared `current`; it exists only where one ran, and is updated as that version did.
-        const pointer = `${directory}/current-${instance}`, legacy = `${directory}/current`;
+        const pointer = forward.pointer = `${directory}/current-${instance}`, legacy = `${directory}/current`;
         void bridge.transport.exec(`printf '%s' ${quote(socket)} > ${quote(`${pointer}.tmp`)} && mv -f ${quote(`${pointer}.tmp`)} ${quote(pointer)} || exit 1
-if [ -e ${quote(legacy)} ]; then printf '%s' ${quote(socket)} > ${quote(`${legacy}.tmp`)} && mv -f ${quote(`${legacy}.tmp`)} ${quote(legacy)}; fi
+if [ -e ${quote(legacy)} ]; then printf '%s' ${quote(socket)} > ${quote(`${legacy}.tmp`)} && mv -f ${quote(`${legacy}.tmp`)} ${quote(legacy)} || exit 1; fi
 find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} + 2>/dev/null || true`, 20_000, { login: false })
-          .then(() => { if (state !== 'confirmed') return; state = 'up'; bridge.error = undefined; resolve(); }, fail);
+          .then(() => { if (state !== 'confirmed') return; state = 'up'; forward.up = true; bridge.error = undefined; resolve(); }, fail);
       });
       child.on('error', fail);
       child.on('close', code => {
@@ -478,6 +489,12 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
     if (this.closed || bridge.stopped || bridge.forward || bridge.retry) return;
     bridge.delay = lasted > 60_000 ? 2000 : Math.min(bridge.delay * 2, 60_000);
     bridge.retry = setTimeout(() => { bridge.retry = undefined; this.keep(bridge); }, bridge.delay);
+  }
+  /** The host lost a live forward's socket or pointer: end it and bring up another. */
+  private replace(bridge: HostBridge, forward: Forward): void {
+    bridge.forward = undefined; bridge.error = 'The shared socket was removed from the SSH host';
+    forward.stopped = true; forward.child?.kill();
+    this.keep(bridge);
   }
   /** Bring a host's forward up, retrying with backoff until it is. */
   private keep(bridge: HostBridge): void {

@@ -10,7 +10,7 @@ import { createInterface } from 'node:readline';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as pause } from 'node:timers/promises';
 import { Store } from '../src/store.js';
-import { acpServers, mcpContent, mcpServerOf, Sharing, sharedArguments, type SharedTool, type SharedToolResult, type SkillSummary } from '../src/sharing.js';
+import { acpServers, mcpContent, mcpServerOf, Sharing, sharedArguments, type SharedImageRef, type SharedTool, type SharedToolResult, type SkillSummary } from '../src/sharing.js';
 import type { HostConfig, Task } from '../src/domain.js';
 import type { SshTransport } from '../src/ssh.js';
 
@@ -94,8 +94,8 @@ async function setup(t: TestContext) {
   const launched: string[][] = [], killed: string[][] = [], agent = { id: 'session-1' }, scripts = { exec: [] as string[], transfer: [] as string[] };
   const sharing = new Sharing(store, fakeForward(launched, killed), () => {});
   t.after(() => sharing.close());
-  // DSH's MCP client keeps the server's result as the value; post-execute policies shaped the content.
-  const result: SharedToolResult = { isError: false, value: { content: [{ type: 'text', text: 'created #1 with token abc' }] }, content: [{ type: 'text', text: 'created #1 with token [redacted]' }] };
+  // Post-execute policies shaped the content.
+  const result: SharedToolResult = { isError: false, content: [{ type: 'text', text: 'created #1 with token [redacted]' }] };
   Object.assign(sharing.host, {
     tools: { schemas: () => tools, execute: async (input: any) => {
       calls.push({ name: input.name, arguments: input.arguments, agent: input.agent });
@@ -204,18 +204,20 @@ test('a shared MCP server runs in DSH with the owning conversation, through one 
   assert.deepEqual((await client.request('tools/list')).result.tools.map((tool: { name: string }) => tool.name), ['create_issue', 'search'], 'the last tools are listed while DSH is away');
 });
 
-test('MCP content keeps DSH policies and takes image data from the server result', () => {
-  const png = Buffer.from('png-bytes').toString('base64'), jpeg = Buffer.from('jpeg').toString('base64');
-  const value = { content: [{ type: 'text', text: 'raw' }, { type: 'image', data: jpeg, mimeType: 'image/jpeg' }, { type: 'image', data: png, mimeType: 'image/png' }] };
-  assert.deepEqual(mcpContent({ isError: false, value, content: [
-    { type: 'text', text: 'shaped' },
-    { type: 'image', attachment: { mediaType: 'image/jpeg', bytes: 2 } },
-    { type: 'image', attachment: { mediaType: 'image/png', bytes: 9 } },
-    { type: 'image', offloaded: true, attachment: { mediaType: 'image/jpeg', bytes: 4 } },
-    { type: 'file' },
-  ] }), [{ type: 'text', text: 'shaped' }, { type: 'text', text: '[image omitted]' }, { type: 'image', data: png, mimeType: 'image/png' },
-    { type: 'text', text: '[image omitted]' }, { type: 'text', text: '[file omitted]' }], 'an image a policy replaced is omitted, not sent as the original');
-  assert.deepEqual(mcpContent({ isError: true, content: [{ type: 'image' }] }), [{ type: 'text', text: '[image omitted]' }]);
+test('MCP content keeps DSH policies; images are read from DSH by the attachment the content names', async () => {
+  const read: string[] = [];
+  const attachments = { readImageRequest: async (ref: SharedImageRef, target: unknown) => {
+    read.push(ref.attachmentId!); assert.deepEqual(target, { width: 4, height: 3, maxBytes: 9 });
+    if (ref.attachmentId === 'broken') throw new Error('gone');
+    return { data: Buffer.from(`bytes of ${ref.attachmentId}`), mediaType: 'image/png' };
+  } };
+  // Same type and size: only the reference tells them apart.
+  const image = (attachmentId: string, offloaded?: true) => ({ type: 'image', attachment: { attachmentId, mediaType: 'image/png', bytes: 9, width: 4, height: 3 }, ...(offloaded ? { offloaded } : {}) });
+  assert.deepEqual(await mcpContent({ isError: false, content: [{ type: 'text', text: 'shaped' }, image('first', true), image('second'), image('broken'), { type: 'file' }] }, attachments), [
+    { type: 'text', text: 'shaped' }, { type: 'text', text: '[image omitted]' }, { type: 'image', data: Buffer.from('bytes of second').toString('base64'), mimeType: 'image/png' },
+    { type: 'text', text: '[image omitted]' }, { type: 'text', text: '[file omitted]' }]);
+  assert.deepEqual(read, ['second', 'broken'], 'an offloaded image is not read');
+  assert.deepEqual(await mcpContent({ isError: true, content: [image('second')] }), [{ type: 'text', text: '[image omitted]' }], 'without the attachment store');
 });
 
 test('proxies list again when DSH loads or drops a server, and keep its last tools meanwhile', async t => {
@@ -264,6 +266,33 @@ test('a forward is confirmed only by the server, and retried when it fails', asy
   assert.match(sharing.status()[host.id], /current-[a-f0-9]{16}\.tmp/);
   assert.ok(!await exists(pointer));
   assert.ok(bridge()?.retry, 'a retry is scheduled');
+
+  // Pointing an earlier version's proxies at it failed.
+  await rm(`${pointer}.tmp`, { recursive: true });
+  const legacy = join(home, '.dsh-remote-agents', 'bridge', 'current');
+  await writeFile(legacy, 'old'); await mkdir(`${legacy}.tmp`);
+  await sharing.prepare(host, transport, task('chat-task'), 'codex');
+  assert.match(sharing.status()[host.id], /current\.tmp/);
+  assert.equal(await readFile(legacy, 'utf8'), 'old');
+  assert.ok(bridge()?.retry, 'a retry is scheduled');
+});
+
+test('a forward whose socket the host lost is replaced at the next install check', async t => {
+  const { home, sharing, transport, host, task, launched, killed, bridge } = await setup(t);
+  await sharing.set('mcp', 'github', true);
+  await sharing.prepare(host, transport, task('chat-task'), 'codex');
+  bridge()!.checked = 0; // a minute later, nothing changed
+  await sharing.prepare(host, transport, task('chat-task'), 'codex');
+  assert.equal(launched.length, 1, 'a forward the host still has is kept');
+
+  await rm(join(home, '.dsh-remote-agents'), { recursive: true });
+  bridge()!.checked = 0;
+  const proxy = (await sharing.prepare(host, transport, task('chat-task'), 'codex')).servers.find(s => s.name === 'dsh-github')!;
+  assert.equal(launched.length, 2); assert.equal(killed.length, 1);
+  assert.deepEqual(sharing.status(), {});
+  const client = mcp(t, proxy.command, proxy.args, home);
+  await client.request('initialize', { protocolVersion: '2025-11-25' });
+  assert.equal((await client.request('tools/list')).result.tools.length, 2);
 });
 
 test('reattached CLIs get the forward back before DSH loads its MCP servers; a removed host stops it', async t => {

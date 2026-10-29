@@ -22,7 +22,7 @@ import { workspaceTransferHandler } from './workspace-http.js';
 import { installWorkspaceTerminal } from './workspace-terminal.js';
 import { workspaceTools } from './workspace-tools.js';
 import { dshHome, under } from './workspace-access.js';
-import { Sharing, type SharingSkills, type SharingTools } from './sharing.js';
+import { Sharing, type SharingAttachments, type SharingSkills, type SharingTools } from './sharing.js';
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -151,6 +151,11 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   ctx.inject(['skills'], scoped => {
     sharing.host.skills = scoped.get('skills') as unknown as SharingSkills;
     scoped.effect(() => () => { delete sharing.host.skills; });
+  });
+  // Images in shared MCP results are sent as the attachments DSH's policies left.
+  ctx.inject(['attachments'], scoped => {
+    sharing.host.attachments = scoped.get('attachments') as unknown as SharingAttachments;
+    scoped.effect(() => () => { delete sharing.host.attachments; });
   });
   ctx.inject(['agents'], scoped => {
     const agents = scoped.get('agents') as { get(id: string): unknown };
