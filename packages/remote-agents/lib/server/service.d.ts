@@ -36,6 +36,7 @@ export declare class RemoteAgentsService {
     private readonly readSshConfig;
     private readonly connections;
     private readonly locks;
+    private readonly restoring;
     private readonly catalogListeners;
     private closed;
     private readonly factory;
@@ -48,11 +49,16 @@ export declare class RemoteAgentsService {
     hosts(): Host[];
     /** Closed for a plugin reload or DSH shutdown; remote work must not be stopped then. */
     get stopped(): boolean;
+    /** Reattach one saved CLI without making any other saved session connect to its host. */
+    private restore;
     /**
      * Reattach persistent CLIs after a restart and finish queued relay cleanups. Runs in the
      * background: hosts may be offline, and their sessions keep reconnecting until they return.
+     * This is deliberately explicit: plugin startup restores only conversations DSH actually opens.
      */
     resume(hostId?: string): Promise<void>;
+    /** Reattach only the remote tasks behind one open DSH conversation; unrelated hosts stay offline. */
+    resumeConversation(sessionId: string): Promise<void>;
     onCatalogChange(listener: () => void): () => void;
     private catalogChanged;
     /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */

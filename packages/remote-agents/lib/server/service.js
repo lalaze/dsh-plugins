@@ -8,6 +8,7 @@ export class RemoteAgentsService {
     readSshConfig;
     connections = new Map();
     locks = new Map();
+    restoring = new Map();
     catalogListeners = new Set();
     closed = false;
     factory;
@@ -41,9 +42,29 @@ export class RemoteAgentsService {
     }
     /** Closed for a plugin reload or DSH shutdown; remote work must not be stopped then. */
     get stopped() { return this.closed; }
+    /** Reattach one saved CLI without making any other saved session connect to its host. */
+    restore(task) {
+        const pending = this.restoring.get(task.id);
+        if (pending)
+            return pending;
+        const restoring = this.serial(task.id, async () => {
+            const backend = this.connection(task.hostId).backend;
+            if (task.native) {
+                await backend.restore?.(task);
+                return;
+            }
+            // Interrupted before its native session existed: nothing can be resumed, so remove it.
+            await backend.detach(task);
+        }).catch(error => this.updateTask(task.id, next => { next.error = this.safeError(error); }).catch(() => { })).then(() => { })
+            .finally(() => { if (this.restoring.get(task.id) === restoring)
+            this.restoring.delete(task.id); });
+        this.restoring.set(task.id, restoring);
+        return restoring;
+    }
     /**
      * Reattach persistent CLIs after a restart and finish queued relay cleanups. Runs in the
      * background: hosts may be offline, and their sessions keep reconnecting until they return.
+     * This is deliberately explicit: plugin startup restores only conversations DSH actually opens.
      */
     resume(hostId) {
         const tasks = this.store.tasks(t => !!t.relay && (!hostId || t.hostId === hostId));
@@ -52,17 +73,17 @@ export class RemoteAgentsService {
             if (!this.closed && (!hostId || host.id === hostId))
                 this.connection(host.id).backend.startSharing?.();
         return Promise.allSettled([
-            ...tasks.map(task => this.serial(task.id, async () => {
-                const backend = this.connection(task.hostId).backend;
-                if (task.native) {
-                    await backend.restore?.(task);
-                    return;
-                }
-                // Interrupted before its native session existed: nothing can be resumed, so remove it.
-                await backend.detach(task);
-            }).catch(error => this.updateTask(task.id, next => { next.error = this.safeError(error); }).catch(() => { }))),
+            ...tasks.map(task => this.restore(task)),
             ...this.store.hosts().filter(host => !hostId || host.id === hostId).map(host => this.closed ? undefined : this.connection(host.id).backend.cleanup?.()),
         ]).then(() => { });
+    }
+    /** Reattach only the remote tasks behind one open DSH conversation; unrelated hosts stay offline. */
+    resumeConversation(sessionId) {
+        const tasks = this.store.tasks(t => !!t.relay && t.chat?.sessionId === sessionId);
+        for (const hostId of new Set(tasks.map(task => task.hostId)))
+            if (!this.closed)
+                this.connection(hostId).backend.startSharing?.();
+        return Promise.allSettled(tasks.map(task => this.restore(task))).then(() => { });
     }
     onCatalogChange(listener) { this.catalogListeners.add(listener); return () => this.catalogListeners.delete(listener); }
     catalogChanged() { for (const listener of this.catalogListeners)
@@ -482,7 +503,11 @@ export class RemoteAgentsService {
     }
     /** Saved output stays readable while the SSH host is offline. */
     async detail(id, cursor, direction) {
-        const task = this.task(id), live = await this.live(task);
+        const task = this.task(id);
+        // Viewing a panel agent opts into its relay recovery; offline history remains immediately readable.
+        if (task.relay)
+            void this.restore(task);
+        const live = await this.live(task);
         if (live)
             this.assertAgent(task, live);
         const timeline = task.agentId ? await this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
