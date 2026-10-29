@@ -213,10 +213,10 @@ export const inject = ['slots', 'locale'];
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'usage-stats', order: 70, label: () => ui("Usage statistics") }, SettingsWithDashboard));
-  // Today's total at the right of the conversation header, after the overflow menu (order 0) and before the corner.
+  // Today's total first among the conversation header utilities, before the host's buttons and overflow menu (order 0).
   // A host that rejects the entry keeps the rest of the plugin working.
   ctx.slots.inject('conversation.session.header.utilities', () => {
-    try { return ctx.slots.register({ name: 'conversation.session.header.utilities', id: 'usage-stats-today', order: 100, label: () => ui("Today's usage") }, TodayWithDashboard); }
+    try { return ctx.slots.register({ name: 'conversation.session.header.utilities', id: 'usage-stats-today', order: -1000, label: () => ui("Today's usage") }, TodayWithDashboard); }
     catch (error) { console.warn('[dsh-usage-stats] Could not show today\'s usage in the conversation header', error); return undefined; }
   });
 }
