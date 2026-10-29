@@ -55,6 +55,15 @@ export const tagZh = {
   'tags.color.blue': '蓝色',
   'tags.color.purple': '紫色',
   'tags.color.pink': '粉色',
+  'tags.color.amber': '琥珀色',
+  'tags.color.lime': '青柠色',
+  'tags.color.emerald': '翡翠绿',
+  'tags.color.cyan': '水青色',
+  'tags.color.sky': '天蓝色',
+  'tags.color.indigo': '靛蓝色',
+  'tags.color.violet': '紫罗兰色',
+  'tags.color.fuchsia': '洋红色',
+  'tags.color.rose': '玫红色',
 } satisfies Record<string, string>
 
 export const tagEn = {
@@ -109,4 +118,13 @@ export const tagEn = {
   'tags.color.blue': 'Blue',
   'tags.color.purple': 'Purple',
   'tags.color.pink': 'Pink',
+  'tags.color.amber': 'Amber',
+  'tags.color.lime': 'Lime',
+  'tags.color.emerald': 'Emerald',
+  'tags.color.cyan': 'Cyan',
+  'tags.color.sky': 'Sky',
+  'tags.color.indigo': 'Indigo',
+  'tags.color.violet': 'Violet',
+  'tags.color.fuchsia': 'Fuchsia',
+  'tags.color.rose': 'Rose',
 } satisfies Record<keyof typeof tagZh, string>

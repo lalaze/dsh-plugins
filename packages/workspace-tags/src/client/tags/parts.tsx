@@ -19,6 +19,8 @@ export const asTagTranslate = (t: Translate) => t as unknown as TagTranslate
 const colorClass: Record<TagColor, string> = {
   gray: css.gray!, red: css.red!, orange: css.orange!, yellow: css.yellow!, green: css.green!,
   teal: css.teal!, blue: css.blue!, purple: css.purple!, pink: css.pink!,
+  amber: css.amber!, lime: css.lime!, emerald: css.emerald!, cyan: css.cyan!, sky: css.sky!,
+  indigo: css.indigo!, violet: css.violet!, fuchsia: css.fuchsia!, rose: css.rose!,
 }
 
 /** 16px outline tag glyph in the primitives' icon style. */

@@ -8,6 +8,15 @@
 .blue { --tag-color: var(--dsw-static-blue-500, #3b82f6); }
 .purple { --tag-color: #a855f7; }
 .pink { --tag-color: #ec4899; }
+.amber { --tag-color: #f59e0b; }
+.lime { --tag-color: #84cc16; }
+.emerald { --tag-color: #10b981; }
+.cyan { --tag-color: #06b6d4; }
+.sky { --tag-color: #0ea5e9; }
+.indigo { --tag-color: #6366f1; }
+.violet { --tag-color: #8b5cf6; }
+.fuchsia { --tag-color: #d946ef; }
+.rose { --tag-color: #f43f5e; }
 
 .dot {
   display: inline-block;

@@ -9,7 +9,10 @@
 export const TAGS_ROUTE = '/api/workspace-tags'
 
 /** Palette ids; the client maps each to a light and a dark color. */
-export const TAG_COLORS = ['gray', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink'] as const
+export const TAG_COLORS = [
+  'gray', 'red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink',
+  'amber', 'lime', 'emerald', 'cyan', 'sky', 'indigo', 'violet', 'fuchsia', 'rose',
+] as const
 export type TagColor = typeof TAG_COLORS[number]
 
 export const TAG_NAME_MAX = 40
