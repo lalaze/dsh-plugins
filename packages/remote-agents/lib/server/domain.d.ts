@@ -267,6 +267,10 @@ export interface Task extends TaskInput {
     archived?: boolean;
     /** Started by the DSH agent through a delegation tool. */
     origin?: 'dsh';
+    /** The DSH conversation whose agent delegated this task; it runs the task's shared MCP calls. */
+    owner?: {
+        sessionId: string;
+    };
     agentId?: string;
     executionCwd?: string;
     native?: {

@@ -80,14 +80,24 @@ export class Store {
             throw new Error('Invalid saved reasoning efforts');
         if (value.chatFast !== undefined && (!Array.isArray(value.chatFast) || !value.chatFast.every(id => typeof id === 'string')))
             throw new Error('Invalid saved Fast conversations');
+        if (value.sharing !== undefined) {
+            const sharing = record(value.sharing);
+            for (const table of [sharing.mcp, sharing.skills])
+                if (table !== undefined && !Object.values(record(table)).every(shared => typeof shared === 'boolean'))
+                    throw new Error('Invalid saved sharing settings');
+            if (sharing.secret !== undefined && (typeof sharing.secret !== 'string' || !/^[a-f0-9]{64}$/.test(sharing.secret)))
+                throw new Error('Invalid saved sharing secret');
+        }
         this.state = { version: 1, hosts: value.hosts, tasks: value.tasks, ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects } : {}),
             ...(value.relayCleanups ? { relayCleanups: value.relayCleanups } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts } : {}),
-            ...(value.chatFast ? { chatFast: value.chatFast } : {}) };
+            ...(value.chatFast ? { chatFast: value.chatFast } : {}), ...(value.sharing ? { sharing: value.sharing } : {}) };
     }
     snapshot() { return structuredClone(this.state); }
     /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
     hosts() { return structuredClone(this.state.hosts); }
     chatProjects() { return structuredClone(this.state.mainChatProjects ?? []); }
+    /** A copy of the sharing settings; read for every shared tool listing and call. */
+    sharing() { return structuredClone(this.state.sharing ?? {}); }
     /** The reasoning effort a native chat model route last used, if any. */
     /** Whether a DSH conversation's Codex turns use the Fast speed. */
     chatFast(sessionId) { return this.state.chatFast?.includes(sessionId) ?? false; }

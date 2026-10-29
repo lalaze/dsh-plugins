@@ -8,6 +8,8 @@ const timeoutParam = { type: 'integer', description: `Seconds to wait before ret
 const waitParam = { type: 'boolean', description: 'Wait for the agent to finish its turn and return its reply (default true). Use false to fan out several agents, then call remote_agent_wait.' };
 const unrestricted = (mode) => /bypass|full.?access|danger|yolo|^auto$/i.test(mode.id);
 const text = (value) => [{ type: 'text', text: value }];
+/** The delegating conversation, whose agent runs the remote CLI's shared DSH MCP calls. */
+const ownerOf = (agent) => { const id = agent?.session?.id; return typeof id === 'string' && id ? id : undefined; };
 function input(raw) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw))
         throw new Error('Arguments must be an object');
@@ -245,7 +247,7 @@ export function delegationTools(host, service) {
                     if (outcome !== 'allowed-once')
                         throw new Error(`Starting a remote agent in "${mode.label}" mode needs the user's approval (${outcome}). Use a mode that asks before acting.`);
                 }
-                const created = await service.create({ id: randomUUID(), hostId: target.id, cwd, provider: provider.id, model: model.id, prompt, ...(mode ? { modeId: mode.id } : {}), ...(thinking ? { thinkingOptionId: thinking.id } : {}), ...(speed ? { serviceTier: speed.id } : {}) }, { origin: 'dsh', ...(optional(args.title, 'title') ? { title: optional(args.title, 'title').slice(0, 100) } : {}) });
+                const created = await service.create({ id: randomUUID(), hostId: target.id, cwd, provider: provider.id, model: model.id, prompt, ...(mode ? { modeId: mode.id } : {}), ...(thinking ? { thinkingOptionId: thinking.id } : {}), ...(speed ? { serviceTier: speed.id } : {}) }, { origin: 'dsh', ...(ownerOf(exec.agent) ? { owner: { sessionId: ownerOf(exec.agent) } } : {}), ...(optional(args.title, 'title') ? { title: optional(args.title, 'title').slice(0, 100) } : {}) });
                 if (created.status === 'error')
                     throw new Error(`The remote agent did not start: ${created.error ?? 'unknown error'}. Agent ${created.id} is saved; use remote_agent_list to inspect its status.`);
                 return args.wait === false ? report([await service.state(created.id)], new Set(), false) : settle([created.id], exec, timeout);

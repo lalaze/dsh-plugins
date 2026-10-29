@@ -59,7 +59,16 @@ export declare class CliSession {
     /** Process one output line; its history items are saved in one write with the offset after it. */
     private frame;
     private write;
-    initialize(protocol: NativeProtocol, argv: string[], resume?: boolean): Promise<void>;
+    /** `mcpServers` are DSH's shared servers in ACP's stdio form; other protocols receive them as launch options. */
+    initialize(protocol: NativeProtocol, argv: string[], resume?: boolean, mcpServers?: {
+        name: string;
+        command: string;
+        args: string[];
+        env: {
+            name: string;
+            value: string;
+        }[];
+    }[]): Promise<void>;
     /**
      * Reattach to a relay that kept running: rebuild the open turn, its tools and its unanswered
      * permission requests from the history, then resend saved answers (the relay drops duplicates).

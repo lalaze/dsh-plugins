@@ -129,7 +129,8 @@ export class CliSession {
         }
     }
     write(message, id) { this.peer.send(message, this.relay ? id : undefined); }
-    async initialize(protocol, argv, resume = false) {
+    /** `mcpServers` are DSH's shared servers in ACP's stdio form; other protocols receive them as launch options. */
+    async initialize(protocol, argv, resume = false, mcpServers = []) {
         this.agent.resumable = protocol !== 'acp';
         if (protocol === 'codex') {
             await initializeCodex(this.peer);
@@ -163,7 +164,7 @@ export class CliSession {
             this.agent.resumable = !!resumeMethod;
             if (resume && !resumeMethod)
                 throw new Error('This ACP CLI cannot resume sessions. The saved task history remains available.');
-            const response = await this.peer.request(resume ? resumeMethod : 'session/new', { cwd: this.agent.cwd, mcpServers: [], ...(resume ? { sessionId: this.task.native.sessionId } : {}) });
+            const response = await this.peer.request(resume ? resumeMethod : 'session/new', { cwd: this.agent.cwd, mcpServers, ...(resume ? { sessionId: this.task.native.sessionId } : {}) });
             this.nativeId = resume ? this.task.native.sessionId : response?.sessionId;
             await configureAcpSession(this.peer, this.nativeId, this.task, response);
         }

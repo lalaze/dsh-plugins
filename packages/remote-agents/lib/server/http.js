@@ -1,7 +1,7 @@
 import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './domain.js';
 import { ChatProjects } from './chat-projects.js';
 import { workspaceAction } from './workspace-http.js';
-export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features) {
+export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
         try {
@@ -48,6 +48,15 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'hostCatalogs':
                     result = projects.hosts();
                     break;
+                case 'sharing':
+                case 'setSharing': {
+                    if (!sharing)
+                        throw new RemoteError('Sharing with remote CLIs is unavailable', 501);
+                    if (action === 'setSharing')
+                        await sharing.set(input.kind, input.name, input.shared);
+                    result = { ...await sharing.catalog(request.signal), errors: sharing.status() };
+                    break;
+                }
                 case 'usage': {
                     const route = input.model === undefined ? undefined : field(input.model, 'model', 1000);
                     const [projectId, cli] = route?.split('/') ?? [], project = projects.routes().find(p => p.id === projectId);

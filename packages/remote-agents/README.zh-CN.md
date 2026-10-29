@@ -94,6 +94,15 @@ DSH 自己的智能体会获得 6 个工具，用来把任务交给远程 CLI，
 - 停止 DSH 的回复只会停止等待，**不会**停止远程智能体，与 Paseo 中智能体彼此独立一致。可以用 `remote_agent_stop` 停止它们。
 - 这些工具在 DSH 提供智能体工具和授权服务时加载；没有分派工具注册器时，原生模型入口和设置照常可用。
 
+## 共享 DSH 的 MCP 与 skill
+
+**设置 → 远程智能体 → 共享给远程 CLI** 列出 DSH 里配置的 MCP 服务器和个人 skill。勾选的内容会提供给之后启动的远程 CLI，已经在运行的 CLI 保持原样。
+
+- **MCP 服务器（默认关闭）。**工具在本机的 DSH 里执行，远程 CLI 只拿到一个代理。调用以启动该 CLI 的 DSH 对话的身份运行：主对话会话归属它自己的对话，分派任务归属分派它的对话。所以 DSH 的权限规则、审批和 hooks 照常生效，MCP 凭据不会离开本机。CLI 那边预先放行这些代理工具，只由 DSH 决定是否询问。远程 CLI 看到的服务器名为 `dsh-<名称>`，例如 `mcp__dsh-github__create_issue`。从会话面板直接新建、不属于任何 DSH 对话的会话不会收到 MCP 服务器。
+- **Skill（默认开启）。**个人、DSH 自带和插件提供的 skill 会复制到每台机器的 `~/.dsh-remote-agents/shared`，包括 `scripts/` 等资源文件，未改动的不会重复传输。项目 skill 不复制：远程项目自己的 skill 由远程 CLI 直接发现。Claude Code 把它们作为 `dsh` 插件加载（如 `dsh:release-notes`）；Codex、DSH、Grok 和 CodeBuddy 通过名为 `dsh` 的 MCP 服务器提供的 `load_skill` 工具加载，这个服务器在远程运行，不依赖 DSH 连接。
+- **连接方式。**每台机器使用一条 SSH 反向转发，远端是 `~/.dsh-remote-agents/bridge` 下仅本人可访问的 Unix socket；每个任务带独立令牌，多台电脑上的 DSH 可共用同一个远程账号。DSH 未连接时，代理仍列出上次看到的工具，调用会返回 DSH 未连接的说明；重新连上后自动恢复。服务器若禁止 Unix socket 转发（`AllowStreamLocalForwarding no`），设置页会显示错误，skill 不受影响。
+- **各 CLI 的接入方式：**Claude Code 使用 `--plugin-dir`、`--mcp-config` 和 `--allowedTools`；Codex 使用 `-c mcp_servers.<名称>…` 覆盖配置，并设置 `default_tools_approval_mode = "approve"`；ACP CLI（DSH、Grok、CodeBuddy）使用 `session/new` 的 `mcpServers`。这些只是本次启动的参数，不修改远程 CLI 的配置文件。Antigravity 没有按启动传入 MCP 或 skill 的方式，因此不支持。
+
 ## 支持的 CLI
 
 | CLI | 直连协议 |

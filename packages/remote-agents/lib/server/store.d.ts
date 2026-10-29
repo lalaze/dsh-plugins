@@ -8,6 +8,15 @@ export interface RelayCleanup {
  * `chatEfforts` maps a native chat model route to the reasoning effort its last conversation turn used;
  * `chatFast` lists the DSH conversations whose Codex turns run at the Fast speed.
  */
+/**
+ * What DSH shares with remote CLIs: MCP servers switched on (off by default), skills switched off (on by default),
+ * and the secret that derives each task's bridge token.
+ */
+export interface SharingSettings {
+    mcp?: Record<string, boolean>;
+    skills?: Record<string, boolean>;
+    secret?: string;
+}
 export interface State {
     version: 1;
     hosts: HostConfig[];
@@ -16,6 +25,7 @@ export interface State {
     relayCleanups?: RelayCleanup[];
     chatEfforts?: Record<string, string>;
     chatFast?: string[];
+    sharing?: SharingSettings;
 }
 export declare class Store {
     private readonly path;
@@ -33,6 +43,8 @@ export declare class Store {
     /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
     hosts(): HostConfig[];
     chatProjects(): ChatProject[];
+    /** A copy of the sharing settings; read for every shared tool listing and call. */
+    sharing(): SharingSettings;
     /** The reasoning effort a native chat model route last used, if any. */
     /** Whether a DSH conversation's Codex turns use the Fast speed. */
     chatFast(sessionId: string): boolean;

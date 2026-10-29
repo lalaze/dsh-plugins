@@ -11,10 +11,12 @@ export class RemoteAgentsService {
     catalogListeners = new Set();
     closed = false;
     factory;
+    /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
+    sharing;
     constructor(store, factory, readSshConfig = readSshConfigHosts) {
         this.store = store;
         this.readSshConfig = readSshConfig;
-        this.factory = factory ?? (host => new SshBackend(host, store));
+        this.factory = factory ?? (host => new SshBackend(host, store, undefined, () => this.sharing));
     }
     async sshConfig() { return this.readSshConfig(); }
     /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
@@ -284,6 +286,7 @@ export class RemoteAgentsService {
             const connection = this.connections.get(id);
             this.connections.delete(id);
             await connection?.backend.close();
+            this.sharing?.forget(id);
             this.catalogChanged();
             return this.snapshot();
         });
@@ -332,7 +335,7 @@ export class RemoteAgentsService {
                     throw new RemoteError('The selected speed is unavailable', 409);
                 await options.beforeStart?.();
                 const now = new Date().toISOString();
-                const task = { ...request, serverId: host.serverId, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), state: 'creating' };
+                const task = { ...request, serverId: host.serverId, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), ...(options.owner ? { owner: options.owner } : {}), state: 'creating' };
                 // Persist the exact execution intent and idempotency key before any remote mutation.
                 await this.store.update(state => {
                     if (!state.hosts.some(h => h.id === task.hostId && h.serverId === task.serverId))

@@ -98,7 +98,7 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
     }
     async transfer(script, options) {
         options.signal?.throwIfAborted();
-        const child = this.spawn(script), chunks = [];
+        const child = options.login === false ? this.spawnRemote(script) : this.spawn(script), chunks = [];
         let size = 0, stderr = '', failure;
         const stop = () => child.kill('SIGTERM');
         const timer = setTimeout(() => { failure = new Error('SSH transfer timed out'); stop(); }, 300_000);

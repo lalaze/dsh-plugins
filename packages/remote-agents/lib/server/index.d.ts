@@ -10,6 +10,8 @@ declare module '@deepseek-ai/cordis' {
         'agent/created'(payload: {
             agent: SyncAgent;
         }): undefined | Promise<undefined>;
+        /** Emitted by DSH's tool registry when a tool is registered or unregistered. */
+        'tools/change'(): void;
     }
 }
 export declare const name = "dsh-remote-agents";

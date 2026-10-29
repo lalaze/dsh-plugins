@@ -1,4 +1,5 @@
 import { type BackendFactory } from './backend.js';
+import type { LaunchSharing } from './sharing.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
 import type { WorkspaceFiles } from './workspace-files.js';
@@ -19,6 +20,7 @@ export interface CreateOptions {
     title?: string;
     origin?: Task['origin'];
     chat?: Task['chat'];
+    owner?: Task['owner'];
     signal?: AbortSignal;
     /** Recheck a workspace-bound request after discovery and immediately before CLI execution. */
     beforeStart?(): Promise<void>;
@@ -36,6 +38,8 @@ export declare class RemoteAgentsService {
     private readonly catalogListeners;
     private closed;
     private readonly factory;
+    /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
+    sharing?: LaunchSharing;
     constructor(store: Store, factory?: BackendFactory, readSshConfig?: typeof readSshConfigHosts);
     sshConfig(): Promise<import("./domain.js").SshConfigHosts>;
     /** Reuse the agent host's transport and machine-identity checks for workspace operations. */

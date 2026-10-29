@@ -2,6 +2,7 @@ import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing,
 import { type SshTransport } from './ssh.js';
 import type { Store } from './store.js';
 import { WorkspaceFiles } from './workspace-files.js';
+import { type LaunchSharing } from './sharing.js';
 export { connectionInput } from './ssh.js';
 /** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
 export interface Backend {
@@ -68,6 +69,7 @@ export declare function codexServiceTiers(model: Record<string, unknown>): Choic
 export declare class SshBackend implements Backend {
     private readonly host;
     private readonly store;
+    private readonly sharing;
     readonly workspaceFiles: WorkspaceFiles;
     private readonly transport;
     private closed;
@@ -85,7 +87,7 @@ export declare class SshBackend implements Backend {
     private relayUnavailable?;
     private ending;
     private cleaning?;
-    constructor(host: HostConfig, store: Store, transport?: SshTransport);
+    constructor(host: HostConfig, store: Store, transport?: SshTransport, sharing?: () => LaunchSharing | undefined);
     private assertOpen;
     homeDirectory(): Promise<string>;
     listDirectory(path: string | undefined, options?: {
