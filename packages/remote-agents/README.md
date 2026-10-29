@@ -38,7 +38,7 @@ Use DSH's **Add workspace** to work on a directory of a saved machine. With mach
 
 ### Integrated workspace tools
 
-In a conversation on a remote workspace, the right sidebar's **Workspace files** (and its shortcut, ⌘P on macOS) opens the remote files instead of the empty local anchor, and **Remote workspace** there opens sync, tunnels and remote DSH; file links in the conversation open just that file. In local conversations, Workspace files is DSH's own and Remote workspace is not listed. All the tools, files included, are also in **Settings → Remote agents → Remote workspace**. They follow the current conversation's verified machine and directory. No separate `dsh-remote` installation or second machine registry is required.
+In a conversation on a remote workspace, the right sidebar's **Workspace files** (and its shortcut, ⌘P on macOS) opens the remote files instead of the empty local anchor, and each file chosen there opens in a tab of its own beside the list, as in DSH's own file browser. **Remote workspace** there opens sync, tunnels and remote DSH; file links in the conversation open just that file. In local conversations, Workspace files is DSH's own and Remote workspace is not listed. All the tools, files included, are also in **Settings → Remote agents → Remote workspace**. They follow the current conversation's verified machine and directory. No separate `dsh-remote` installation or second machine registry is required.
 
 - **Files:** browse directories, create files/folders, search text, edit UTF-8 files in a code editor with syntax highlighting, preview images, switch Markdown and SVG files between source and rendered view, rename/delete files, and upload/download binary files. CRLF files stay CRLF. A new file opens right away; ⌘/Ctrl+S saves, the close button closes the file, and the clear button or Escape ends a search. Unsaved edits block opening another file but not browsing folders. Saving checks the file's SHA-256 revision and refuses stale edits; **Reload file** fetches the latest version. The editor limit is 256 KiB and the transfer limit is 50 MiB per file. File operations stay inside the verified remote workspace and reject symlinks that escape it. Native session file links open the remote editor after the active workspace has been verified.
 - **Terminal:** in a remote conversation, **New terminal** opens an interactive SSH terminal in the workspace, or choose **Remote workspace** in the native terminal's shell menu. The panel has no separate command runner. Terminals use the remote account's normal privileges. A missing or invalid binding fails explicitly.
@@ -154,7 +154,7 @@ Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.58.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.59.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.

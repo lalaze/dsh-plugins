@@ -24,7 +24,7 @@
 ```sh
 pnpm --filter dsh-file-editor check
 pnpm --filter dsh-file-editor pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.1.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.1.1.tgz"
 ```
 
 需要 Node.js ≥22.15.0，DSH ≥0.2.1-rc.2 且 <0.3.0。重启该 profile 并刷新浏览器。
