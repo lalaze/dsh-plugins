@@ -4,6 +4,7 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { Context } from '@deepseek-ai/cordis';
 import LlmRuntime, { createUserMessage, createAssistantMessage, createSystemMessage, MessageId, ReasoningEffortId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import { Session, SessionId } from '@deepseek-ai/dsh-session';
+import { assertReleasedV4Relationships } from '@deepseek-ai/dsh-session-format-v3-to-v4';
 import { ChatProjects } from '../src/chat-projects.js';
 import { CHAT_PROVIDER, CHAT_PROVIDERS, chatProviderId, chatModelId, RemoteCliAdapter, type ChatHost } from '../src/native-chat.js';
 import { Store } from '../src/store.js';
@@ -488,11 +489,13 @@ test('native tool cards produce a valid DSH session lifecycle and never request 
   }
   assert.equal(chunks.some(c => c.type === 'tool-call-delta'), false); assert.equal(text(chunks), 'All done');
   // A model message in the streaming step would make a reopened DSH chat hide the CLI's text.
-  assert.deepEqual(whileStreaming, ['turn/start', 'step/start', 'tool/call', 'tool/ptc-dispatch-start', 'tool/ptc-dispatch']);
+  assert.deepEqual(whileStreaming, ['turn/start', 'step/start']);
   session.append('step/end', { turn: 1, step: 1 });
   session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
   const events = session.snapshotEvents();
-  assert.deepEqual(events.map(e => e.type), [...whileStreaming, 'assistant/message', 'tool/result', 'step/end', 'turn/end']);
+  // DSH refuses to reopen a log whose tool/call precedes its advertising message; its chat needs the row before nested calls.
+  assert.deepEqual(events.map(e => e.type), [...whileStreaming, 'assistant/message', 'tool/call', 'tool/ptc-dispatch-start', 'tool/ptc-dispatch', 'tool/result', 'step/end', 'turn/end']);
+  assertReleasedV4Relationships({ header: session.header, events, inheritedEventCount: 0 } as unknown as Parameters<typeof assertReleasedV4Relationships>[0], new Set(events.map(e => e.type)));
   const restored = Session.create(session.id, events, session.header), messages = restored.deriveMessages();
   const call = messages.flatMap(m => m.role === 'assistant' ? m.content : []).find(b => b.type === 'tool-call');
   const results = messages.filter(m => m.role === 'tool');
