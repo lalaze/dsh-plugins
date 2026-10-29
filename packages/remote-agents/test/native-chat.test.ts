@@ -481,15 +481,23 @@ test('native tool cards produce a valid DSH session lifecycle and never request 
     remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'completed', detail: '42 tests pass' });
     remote.append(agent.id, { type: 'assistant_message', text: 'All done' });
   };
-  const chunks = await collect(adapter.stream(options('Run tests', { sessionId: session.id })));
+  const chunks: StreamChunk[] = []; let whileStreaming: string[] = [];
+  for await (const chunk of adapter.stream(options('Run tests', { sessionId: session.id }))) {
+    if (chunk.type === 'text-delta' && !whileStreaming.length) whileStreaming = session.snapshotEvents().map(e => e.type);
+    chunks.push(chunk);
+  }
   assert.equal(chunks.some(c => c.type === 'tool-call-delta'), false); assert.equal(text(chunks), 'All done');
+  // A model message in the streaming step would make a reopened DSH chat hide the CLI's text.
+  assert.deepEqual(whileStreaming, ['turn/start', 'step/start', 'tool/call', 'tool/ptc-dispatch-start', 'tool/ptc-dispatch']);
   session.append('step/end', { turn: 1, step: 1 });
   session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
   const events = session.snapshotEvents();
-  assert.deepEqual(events.map(e => e.type), ['turn/start', 'step/start', 'assistant/message', 'tool/call', 'tool/result', 'step/end', 'turn/end']);
-  const restored = Session.create(session.id, events, session.header);
-  assert.equal(restored.deriveMessages().filter(m => m.role === 'tool').length, 1);
-  assert.equal(restored.deriveMessages().find(m => m.role === 'tool')?.content[0].type, 'text');
+  assert.deepEqual(events.map(e => e.type), [...whileStreaming, 'assistant/message', 'tool/result', 'step/end', 'turn/end']);
+  const restored = Session.create(session.id, events, session.header), messages = restored.deriveMessages();
+  const call = messages.flatMap(m => m.role === 'assistant' ? m.content : []).find(b => b.type === 'tool-call');
+  const results = messages.filter(m => m.role === 'tool');
+  assert.equal(results.length, 1); assert.equal(results[0]?.role === 'tool' && results[0].toolCallId, call?.type === 'tool-call' && call.id);
+  assert.match(results[0]?.content[0]?.type === 'text' ? results[0].content[0].text : '', /^Bash \{"command":"pnpm test"\}\n42 tests pass$/);
 });
 
 test('text-only input, auxiliary calls and unavailable routes never start an unintended CLI', async t => {
