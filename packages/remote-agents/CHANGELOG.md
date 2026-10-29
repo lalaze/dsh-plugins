@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.57:** Remote workspace files open in a code editor with syntax highlighting, line numbers, search (⌘/Ctrl+F) and bracket matching, instead of a plain text box. Images show as pictures instead of a note that the file is binary; click one to switch between fitting the pane and its actual size. Markdown and SVG files have an **Edit / Preview** switch. Files saved with CRLF line endings keep them, which the text box did not. For local workspaces, the new `dsh-file-editor` plugin offers the same editor. Refresh the client after updating.
+
 **Upgrading from 0.2.56:** Folding provider groups in the model menu moved to its own plugin, `dsh-model-groups`; install it to keep folding. Choices you saved carry over, and while an older Remote Agents still folds the groups itself, `dsh-model-groups` leaves them to it. A local tunnel's **Open** link and **Start remote DSH** now use the address your browser reaches DSH at instead of an address built into the plugin. A managed remote DSH started earlier still trusts the old address; if it refuses the new one, stop the managed instance and start it again. Restart DSH and refresh the client after updating.
 
 **Upgrading from 0.2.52:** **Import machines from dsh-remote** is removed from Settings; add machines with **Add host**. Workspaces created by dsh-remote keep working. Machine cards are shorter: the sharing explanation is a hover hint, and **Apply selection** appears only after you change a CLI. Refresh the client after updating.

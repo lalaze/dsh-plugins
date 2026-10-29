@@ -1,0 +1,20 @@
+import { LocalFiles } from './files.js';
+import { createHandler } from './http.js';
+export const name = 'dsh-file-editor';
+export const inject = ['connection'];
+/** A conversation's working directory, from the live session or, before it is opened, from saved sessions. */
+async function sessionCwd(ctx, sessionId) {
+    const sessions = ctx.get('sessions');
+    const live = sessions?.get?.(sessionId);
+    if (live)
+        return live.header.cwd;
+    const persistence = ctx.get('sessionPersistence');
+    const stored = (await persistence?.list() ?? []).map(row => 'header' in row ? row.header : row).find(row => row.id === sessionId);
+    // A session activated meanwhile is the authority.
+    return sessions?.get?.(sessionId)?.header.cwd ?? stored?.cwd;
+}
+export function apply(ctx) {
+    const files = new LocalFiles(id => sessionCwd(ctx, id));
+    const log = (message) => ctx.get('logger')?.warn?.(message);
+    ctx.connection.fetch.register({ path: '/api/file-editor', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(files, log) });
+}

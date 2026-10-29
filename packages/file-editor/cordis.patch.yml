@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-file-editor
+      name: dsh-file-editor
+      config: {}
