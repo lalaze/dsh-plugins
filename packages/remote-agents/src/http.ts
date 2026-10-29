@@ -22,7 +22,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
       const hostId = () => identifier(input.hostId), agentId = () => identifier(input.agentId);
       let result: unknown;
       switch (action) {
-        case 'legacyMachines': case 'importLegacyMachine': case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync':
+        case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync':
         case 'workspaceTunnels': case 'addWorkspaceTunnel': case 'startWorkspaceTunnel': case 'stopWorkspaceTunnel': case 'removeWorkspaceTunnel': {
           if (!features) throw new RemoteError('Remote workspaces are unavailable', 501);
           result = await workspaceAction(features, action, input, request.signal); break;

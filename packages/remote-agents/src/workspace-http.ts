@@ -1,12 +1,11 @@
 import { field, identifier, RemoteError } from './domain.js';
 import { FILE_LIMIT, type WorkspaceTarget } from './workspace-domain.js';
-import type { WorkspaceMigration } from './workspace-migration.js';
 import type { WorkspaceService } from './workspace-service.js';
 import { revision, workspacePath } from './workspace-service.js';
 import type { WorkspaceTunnels } from './workspace-tunnels.js';
 
 /** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
-export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; migration: WorkspaceMigration; terminal?: { shell?: string } }
+export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string } }
 export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   if (value === undefined) return;
   if (!value || typeof value !== 'object') throw new RemoteError('Invalid workspace target');
@@ -14,8 +13,6 @@ export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   return { hostId: identifier(v.hostId), cwd: workspacePath(v.cwd, 'remote workspace'), label: '' };
 }
 export async function workspaceAction(features: WorkspaceFeatures, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-  if (action === 'legacyMachines') return features.migration.list();
-  if (action === 'importLegacyMachine') return features.migration.import(field(input.id, 'saved machine ID', 200));
   const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
   if (action === 'workspaceTarget') {
     const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;

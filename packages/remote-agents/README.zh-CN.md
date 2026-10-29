@@ -48,13 +48,13 @@
 
 普通 DSH 模型同时获得 **`remote_workspace`** 工具及读取远程 `AGENTS.md` 的提示，用于会话绑定的文件和命令操作。它的修改与 DSH 自带工具一样遵循对话的 DSH 权限：**完全权限**和**自动审查**时直接修改文件、执行命令，不再询问；**工作区内修改**时直接编辑工作区内的文件，执行命令前询问；**仅可查看**或自定义权限时每次修改前都会询问。远程 CLI 模型继续使用自身工具与审批模式。
 
-### 从 dsh-remote 迁移
+### 支持的主机
 
-在设置中展开「从 dsh-remote 导入机器」。导入复用 SSH 别名、跳过已有端点，新机器默认不启用 CLI；不会修改旧机器清单、当前机器选择或工作区元数据。导入后按需启用 CLI，已有兼容工作区继续可用。
+dsh-remote 创建的工作区可继续使用。
 
-目前支持 **Linux/macOS 远程机器、系统 OpenSSH 密钥/SSH agent 认证**。文件、搜索、同步和命令只需要 POSIX shell、常用命令行工具以及 `sha256sum`、`shasum` 或 `openssl`，没有 Node.js 的主机（例如使用独立 Codex 的 Docker 主机）同样可用。不随 DSH 结束的远程 CLI 和远程 DSH 仍需要登录 PATH 中有 Node.js 18+。不复制密码、系统密钥库或原生后端独有的认证/代理配置；请先将连接配置移至 `~/.ssh/config`，并将加密私钥载入 SSH agent。未包含原生 Windows 远程工作区、密码/OTP 认证及远程 DSH 自动安装。
+目前支持 **Linux/macOS 远程机器、系统 OpenSSH 密钥/SSH agent 认证**。文件、搜索、同步和命令只需要 POSIX shell、常用命令行工具以及 `sha256sum`、`shasum` 或 `openssl`，没有 Node.js 的主机（例如使用独立 Codex 的 Docker 主机）同样可用。不随 DSH 结束的远程 CLI 和远程 DSH 仍需要登录 PATH 中有 Node.js 18+。认证和跳板机配置请写在 `~/.ssh/config` 中，并将加密私钥载入 SSH agent。未包含原生 Windows 远程工作区、密码/OTP 认证及远程 DSH 自动安装。
 
-导入后通过「测试连接」并验证实时文件、终端和模型，再卸载 dsh-remote。保留 `$DSH_HOME/remote-workspaces/` 及其元数据。迁移期间可以共存，本次实现不会自动卸载旧插件。
+请保留 `$DSH_HOME/remote-workspaces/` 及其元数据。
 
 ## 统一远程会话
 
@@ -158,6 +158,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。
+
+**从 0.2.52 升级：** 设置中移除了「从 dsh-remote 导入机器」，请通过「添加机器」添加。dsh-remote 创建的工作区可继续使用。机器卡片更紧凑：共享说明改为悬停提示，修改 CLI 后才显示 **应用选择**。更新后刷新客户端。
 
 **从 0.2.50 升级：** 会话和远程工作区会与连接同一个 SSH 账号的所有 DSH 共享，见[多个 DSH 共享会话](#多个-dsh-共享会话)。更新并重启 DSH 后，DSH 第一次连上机器时会把已有会话连同历史发布到这台机器。某台机器的会话只想留在当前 DSH 时，在机器卡片中关闭共享。
 

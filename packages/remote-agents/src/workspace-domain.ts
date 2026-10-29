@@ -23,7 +23,6 @@ export interface SyncChange { path: string; action: 'copy' | 'delete'; source: s
 export interface SyncResult { direction: 'pull' | 'push'; dryRun: boolean; changes: SyncChange[]; conflicts: string[]; skipped: string[]; planId?: string }
 export interface TunnelConfig { id: string; hostId: string; direction: 'local' | 'reverse'; listenPort: number; targetPort: number; targetHost: string }
 export interface Tunnel extends TunnelConfig { status: 'starting' | 'running' | 'stopped' | 'error'; error?: string }
-export interface LegacyMachine { id: string; label: string; connection: string; available: boolean; reason?: string; imported: boolean }
 /** Address the browser uses for local tunnel listeners; a managed remote DSH must trust it. */
 export const TUNNEL_ACCESS_HOST = '100.96.195.115';
 export const FILE_LIMIT = 50 * 1024 * 1024;

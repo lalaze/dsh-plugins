@@ -17,7 +17,6 @@ import { RemoteWorkspaces } from './remote-workspaces.js';
 import { remoteUsageRecord, type RemoteUsageRecord } from './usage.js';
 import { WorkspaceService } from './workspace-service.js';
 import { WorkspaceTunnels } from './workspace-tunnels.js';
-import { WorkspaceMigration } from './workspace-migration.js';
 import { workspaceTransferHandler } from './workspace-http.js';
 import { installWorkspaceTerminal } from './workspace-terminal.js';
 import { workspaceTools } from './workspace-tools.js';
@@ -72,7 +71,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
   await tunnels.open();
   const terminal: { shell?: string } = {};
-  const features = { files, tunnels, migration: new WorkspaceMigration(service), terminal };
+  const features = { files, tunnels, terminal };
   const sharing = new Sharing(store, undefined, message => (ctx.get('logger') as { warn?(text: string): void } | undefined)?.warn?.(message));
   service.sharing = sharing;
   // Close the store last: a reloaded plugin's new instance owns the state from then on.

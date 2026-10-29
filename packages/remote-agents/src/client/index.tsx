@@ -38,7 +38,7 @@ function Settings({ openSessions, openWorkspace }: { openSessions: () => void; o
     return () => controller.abort();
   }, [revision]);
   return <section className="dsh-ra ra-settings" aria-label={ui('Remote agents')}><style>{styles}</style>
-    <div className="ra-settings-heading"><h2>{ui('Remote agents')}</h2><button data-open-sessions onClick={openSessions}>{ui('Open sessions')}</button><button data-open-workspace onClick={openWorkspace}>{ui('Remote workspace')}</button></div>
+    <div className="ra-settings-heading"><h2>{ui('Remote agents')}</h2><div className="ra-actions"><button data-open-sessions onClick={openSessions}>{ui('Open sessions')}</button><button data-open-workspace onClick={openWorkspace}>{ui('Remote workspace')}</button></div></div>
     <p className="ra-muted ra-intro">{ui('Select remote CLIs in the DSH model picker and chat in the main conversation.')}</p>
     <p className="ra-muted ra-intro">{ui('Remote models are only available in workspaces belonging to the same machine.')}</p>
     {dashboard ? <><HostManager dashboard={dashboard} update={setDashboard} /><SharingSettings dashboard={dashboard} /></>

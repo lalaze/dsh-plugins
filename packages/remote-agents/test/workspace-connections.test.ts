@@ -7,32 +7,10 @@ import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { transform } from 'esbuild';
 import { fixture } from './fakes.js';
-import { WorkspaceMigration } from '../src/workspace-migration.js';
 import { WorkspaceTunnels, tunnelArguments } from '../src/workspace-tunnels.js';
 import { installWorkspaceTerminal } from '../src/workspace-terminal.js';
 import { ensureAnchor } from '../src/remote-workspaces.js';
 import { workspaceAction, type WorkspaceFeatures } from '../src/workspace-http.js';
-
-test('legacy import preserves aliases, skips duplicate endpoints and never returns or copies secrets', async t => {
-  const f = await fixture(t), dir = join(f.directory, 'remote-workspaces'); await mkdir(dir);
-  const entries = [
-    { id: 'alias-machine', name: 'Work box', host: 'work-box', useSshConfig: true },
-    { id: 'duplicate', host: 'build-box', username: 'builder', port: 22 },
-    { id: 'password-machine', name: 'Secret', host: 'password-box', username: 'builder', password: 'must-never-leak' },
-    { id: 'unsafe', host: '-oProxyCommand=bad' },
-  ];
-  const file = join(dir, 'machines.json'), original = JSON.stringify({ list: entries, currentId: 'alias-machine' }); await writeFile(file, original);
-  const migration = new WorkspaceMigration(f.service, f.directory, async connection => ({ host: connection.includes('work-box') ? 'other-box' : new URL(connection.startsWith('ssh:') ? connection : `ssh://${connection}`).hostname, username: 'builder', port: 22 }));
-  const list = await migration.list();
-  assert.equal(list[0].connection, 'ssh://work-box'); assert.equal(list[0].available, true);
-  assert.equal(list[1].imported, true); assert.equal(list[2].available, false); assert.equal(list[3].available, false);
-  assert.equal(JSON.stringify(list).includes('must-never-leak'), false);
-  await assert.rejects(migration.import('password-machine'), /authentication/);
-  await migration.import('alias-machine'); await migration.import('alias-machine');
-  const hosts = f.store.hosts(); assert.equal(hosts.length, 2); assert.equal(hosts[0].id, f.hostId);
-  assert.equal(hosts[1].connection, 'ssh://work-box'); assert.deepEqual(hosts[1].enabledProviders, []);
-  assert.equal(await readFile(file, 'utf8'), original, 'source registry and current selection are untouched');
-});
 
 test('tunnel startup, stop, saved definitions and host removal are independent of remote agents', async t => {
   const f = await fixture(t), path = join(f.directory, 'tunnels.json'); let args: string[] = [];
