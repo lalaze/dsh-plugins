@@ -27,8 +27,6 @@ export function createHandler(service, projects = new ChatProjects(service), wor
             const hostId = () => identifier(input.hostId), agentId = () => identifier(input.agentId);
             let result;
             switch (action) {
-                case 'legacyMachines':
-                case 'importLegacyMachine':
                 case 'workspaceTarget':
                 case 'workspaceFiles':
                 case 'workspaceSync':

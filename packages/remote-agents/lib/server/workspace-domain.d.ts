@@ -102,14 +102,6 @@ export interface Tunnel extends TunnelConfig {
     status: 'starting' | 'running' | 'stopped' | 'error';
     error?: string;
 }
-export interface LegacyMachine {
-    id: string;
-    label: string;
-    connection: string;
-    available: boolean;
-    reason?: string;
-    imported: boolean;
-}
 /** Address the browser uses for local tunnel listeners; a managed remote DSH must trust it. */
 export declare const TUNNEL_ACCESS_HOST = "100.96.195.115";
 export declare const FILE_LIMIT: number;

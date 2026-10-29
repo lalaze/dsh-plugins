@@ -48,13 +48,13 @@ In a conversation on a remote workspace, the right sidebar's **Workspace files**
 
 Ordinary DSH models also receive a **`remote_workspace`** tool for session-scoped file access and commands, plus guidance to read remote `AGENTS.md`. Its changes follow the conversation's DSH permission like DSH's own tools: **Full access** and **Auto review** run file changes and commands without a prompt, **Workspace Write** edits files inside the workspace directly and asks before commands, and **Read Only** or a custom permission asks before every change. Remote CLI models continue using their own native tools and approval modes.
 
-### Moving from dsh-remote
+### Supported hosts
 
-In **Settings → Remote agents**, expand **Import machines from dsh-remote**. Import reuses SSH aliases, skips already registered endpoints, starts with no CLIs enabled, and leaves the old registry, current-machine selection and workspace metadata untouched. Enable the CLIs you need afterward. Existing compatible workspaces continue to work.
+Workspaces created by dsh-remote continue to work.
 
-This implementation supports **Linux/macOS remote hosts with system OpenSSH key/SSH-agent authentication**. Files, search, sync and commands need only a POSIX shell, standard utilities and `sha256sum`, `shasum` or `openssl`, so hosts without Node.js, such as Docker hosts with a standalone Codex, work too. Remote CLIs that outlive DSH and remote DSH still need Node.js 18+ on the login PATH. Passwords, keychain secrets and native-only authentication/proxy settings are not copied. Move such connection settings into `~/.ssh/config` and load encrypted keys into your SSH agent first. Native Windows remote workspaces, password/OTP authentication and automatic remote DSH installation are not included.
+This implementation supports **Linux/macOS remote hosts with system OpenSSH key/SSH-agent authentication**. Files, search, sync and commands need only a POSIX shell, standard utilities and `sha256sum`, `shasum` or `openssl`, so hosts without Node.js, such as Docker hosts with a standalone Codex, work too. Remote CLIs that outlive DSH and remote DSH still need Node.js 18+ on the login PATH. Put authentication and jump-host settings in `~/.ssh/config` and load encrypted keys into your SSH agent. Native Windows remote workspaces, password/OTP authentication and automatic remote DSH installation are not included.
 
-After importing, use **Test connection** and verify live files, terminal and models before uninstalling `dsh-remote`. Keep `$DSH_HOME/remote-workspaces/` and its metadata. The plugin can coexist with `dsh-remote` during migration; uninstalling the old plugin is a separate action.
+Keep `$DSH_HOME/remote-workspaces/` and its metadata.
 
 ## Unified remote sessions
 
@@ -158,6 +158,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.52:** **Import machines from dsh-remote** is removed from Settings; add machines with **Add host**. Workspaces created by dsh-remote keep working. Machine cards are shorter: the sharing explanation is a hover hint, and **Apply selection** appears only after you change a CLI. Refresh the client after updating.
 
 **Upgrading from 0.2.50:** Sessions and remote workspaces are shared with every DSH connected to the same SSH account; see [Sessions shared between DSH instances](#sessions-shared-between-dsh-instances). After updating and restarting DSH, existing sessions are published to their machine with their history the first time DSH connects to it. To keep a machine's sessions to this DSH, turn sharing off in its card.
 

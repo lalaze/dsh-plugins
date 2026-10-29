@@ -10,10 +10,6 @@ export function expectedTarget(value) {
     return { hostId: identifier(v.hostId), cwd: workspacePath(v.cwd, 'remote workspace'), label: '' };
 }
 export async function workspaceAction(features, action, input, signal) {
-    if (action === 'legacyMachines')
-        return features.migration.list();
-    if (action === 'importLegacyMachine')
-        return features.migration.import(field(input.id, 'saved machine ID', 200));
     const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
     if (action === 'workspaceTarget') {
         const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
