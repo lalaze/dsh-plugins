@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { ChatProjects } from '../src/chat-projects.js';
-import { Store } from '../src/store.js';
+import { ChatProjects } from '../src/chat/projects.js';
+import { Store } from '../src/core/store.js';
 import { createHandler } from '../src/http.js';
 import { fixture } from './fakes.js';
 

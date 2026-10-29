@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { workspaceDirectory, type Admission, type Directory } from '../src/client/workspace-models.js';
+import { workspaceDirectory, type Admission, type Directory } from '../src/client/composer/workspace-models.js';
 
 const selection = { provider: 'remote-cli-claude', model: 'machine-one/claude/opus' };
 function fixture() {

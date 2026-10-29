@@ -8,6 +8,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | --- | --- | --- |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.md) | Model icons and status badges on sidebar sessions, with the exact model in the hover card |
+| `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.md) | Collapsible provider groups in DSH's model picker, remembered in each browser |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.md) | Colored workspace tags, with sidebar grouping by tag or by running status |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
@@ -53,13 +54,13 @@ pnpm --filter dsh-remote-agents pack:plugin
 
 ## Installation
 
-Remote Agents **0.2.23** lists only the current workspace machine’s remote models, grouped by Claude, Codex and other CLIs, in DSH's model picker and main conversation. The Open sessions button in settings brings history, follow-ups and pending approvals together; delegation tools remain available. Build `dist/dsh-remote-agents-0.2.23.tgz` with `pnpm --filter dsh-remote-agents pack:plugin`. See [install and upgrade](packages/remote-agents/README.md#install-and-upgrade), including what changed from 0.1.x.
+Build one plugin with `pnpm --filter <package> pack:plugin`, or every plugin with `pnpm pack:plugins`; archives land in `dist/` as `<package>-<version>.tgz`. Each plugin's README covers its own requirements, and Remote Agents lists what changed in each version in its [changelog](packages/remote-agents/CHANGELOG.md). Since 0.2.57, Remote Agents leaves folding the model menu's provider groups to `dsh-model-groups`.
 
 Install an individual built archive into the desired DSH profile:
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.57.tgz"
 ```
 
 For Desktop, fully quit DSH and use the desktop application's bundled `dsh` command with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. For Web, restart the updated profile and refresh the browser. Plugins are not currently published to npm. The repository root is a private workspace; install individual plugin archives rather than the GitHub root.
@@ -82,6 +83,7 @@ Discover marks a newer release **Update available** and opens the installed plug
 packages/
   remote-agents/        # dsh-remote-agents: source, tests, manifest, docs
   session-models/       # Model icons and status badges on sidebar sessions
+  model-groups/         # Collapsible provider groups in the model picker
   workspace-tags/       # Workspace tags and tag/status grouping in the sidebar
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds

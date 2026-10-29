@@ -6,9 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { relayHarness, transcript, waitFor } from './relay-harness.js';
-import { RELAY_UNAVAILABLE } from '../src/domain.js';
-import { RelayClient } from '../src/relay.js';
-import type { SshTransport } from '../src/ssh.js';
+import { RELAY_UNAVAILABLE } from '../src/core/domain.js';
+import { RelayClient } from '../src/agents/relay.js';
+import type { SshTransport } from '../src/core/ssh.js';
 
 /** A relay client on a host that is known to support relays. */
 const openRelay = async (transport: SshTransport) => { const client = await RelayClient.open(transport); assert.ok(client instanceof RelayClient, `relay unavailable: ${client}`); return client; };
@@ -195,8 +195,8 @@ test('a relay started by an interrupted initialization is removed, and retrying 
 });
 
 test('native DSH conversations: shutdown leaves the turn running; it catches up by itself, the next message shows missed output, and a retry replays all of it', async t => {
-  const { ChatProjects } = await import('../src/chat-projects.js');
-  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/native-chat.js');
+  const { ChatProjects } = await import('../src/chat/projects.js');
+  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/chat/native-chat.js');
   const { createUserMessage } = await import('@deepseek-ai/dsh-llm');
   const { SessionId } = await import('@deepseek-ai/dsh-session');
   const h = await relayHarness(t);
@@ -248,8 +248,8 @@ test('native DSH conversations: shutdown leaves the turn running; it catches up 
 });
 
 test('relay links deliver large payloads once, drop partial frames and keep exact UTF-8 byte offsets', async t => {
-  const { RelayLink } = await import('../src/relay.js');
-  const { JsonlPeer } = await import('../src/ssh.js');
+  const { RelayLink } = await import('../src/agents/relay.js');
+  const { JsonlPeer } = await import('../src/core/ssh.js');
   const { writeFile, stat } = await import('node:fs/promises');
   const h = await relayHarness(t);
   const echo = join(h.root, 'echo.mjs');
@@ -327,7 +327,7 @@ test('sessions recover after the relay script is upgraded: the current script is
 });
 
 test('a relay cleanup that finishes after a plugin reload cannot overwrite the new instance’s state', async t => {
-  const { Store } = await import('../src/store.js');
+  const { Store } = await import('../src/core/store.js');
   const h = await relayHarness(t);
   const { service, store, transport } = h.first;
   const agent = await service.create(h.request('codex', 'gate'));

@@ -4,7 +4,7 @@ import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { apply, type Client } from '../src/client/index.js';
-import { ModelLabel, type ModelLabelProps } from '../src/client/model-label.js';
+import { ModelLabel, type ModelLabelProps } from '../src/client/composer/model-label.js';
 
 test('enabling remote agents preserves the native model seat and its already-declared label slot', t => {
   const core = new SlotCore();

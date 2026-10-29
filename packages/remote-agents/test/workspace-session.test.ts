@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createHandler } from '../src/http.js';
-import { ensureAnchor } from '../src/remote-workspaces.js';
-import { RemoteAgentsService } from '../src/service.js';
-import { WorkspaceAccess } from '../src/workspace-access.js';
+import { ensureAnchor } from '../src/workspace/remote-workspaces.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import { WorkspaceAccess } from '../src/workspace/access.js';
 import { fixture } from './fakes.js';
 
 const post = (handler: ReturnType<typeof createHandler>, body: Record<string, unknown>) => handler(new Request('http://dsh.test/api/remote-agents', {

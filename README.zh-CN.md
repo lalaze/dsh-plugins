@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务 |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.zh-CN.md) | 在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型 |
+| `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.zh-CN.md) | DSH 模型选择器中的提供方分组可折叠，并在各浏览器中记住选择 |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
@@ -53,13 +54,13 @@ pnpm --filter dsh-remote-agents pack:plugin
 
 ## 安装插件
 
-远程智能体 **0.2.23** 在 DSH 原生模型选择器中仅显示当前工作区对应机器的模型，并按 Claude、Codex 等 CLI 提供方分组，支持点击标题折叠并记住状态，直接使用主对话；设置中的“打开会话”统一管理历史、续聊与待审批请求，分派工具继续可用。运行 `pnpm --filter dsh-remote-agents pack:plugin` 构建 `dist/dsh-remote-agents-0.2.23.tgz`。安装方法及与 0.1.x 的区别见[安装与升级](packages/remote-agents/README.zh-CN.md#安装与升级)。
+运行 `pnpm --filter <包名> pack:plugin` 构建单个插件，或运行 `pnpm pack:plugins` 构建全部插件；安装包输出到 `dist/`，文件名为 `<包名>-<版本>.tgz`。各插件的 README 说明各自的要求，远程智能体每个版本的变化见其[更新日志](packages/remote-agents/CHANGELOG.zh-CN.md)。自 0.2.57 起，模型菜单提供方分组的折叠交给 `dsh-model-groups` 处理。
 
 构建后按插件安装到目标 DSH profile：
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.57.tgz"
 ```
 
 桌面端请完全退出 DSH，使用桌面应用自带的 `dsh` 命令，将参数改为 `--profile desktop` 后安装并重新打开；npm 版 CLI 不能管理这个保留 profile。Web 端请重启更新的 profile 并刷新浏览器。插件目前未发布到 npm。仓库根目录是私有工作区，安装时应使用各插件的压缩包。
@@ -82,6 +83,7 @@ https://raw.githubusercontent.com/lalaze/dsh-plugins/market/index.json
 packages/
   remote-agents/        # dsh-remote-agents 的源码、测试、清单和文档
   session-models/       # 侧栏会话的模型图标与状态徽标
+  model-groups/         # 模型选择器的提供方分组折叠
   workspace-tags/       # 工作区标签，侧栏按标签或状态分组
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景

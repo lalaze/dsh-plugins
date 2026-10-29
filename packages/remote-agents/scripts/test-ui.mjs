@@ -81,16 +81,16 @@ const workspaceChecks = () => {
   // Add and start saves a tunnel and runs it.
   const tunnel = '.ra-ws-tunnels li', status = value => `document.querySelector("${tunnel}")?.dataset.status === "${value}"`;
   browser('click', '.ra-ws-tabs button:text-is("Tunnels")'); browser('click', 'button:text-is("Add and start")');
-  wait(`${status('running')} && document.querySelector("${tunnel} a")?.href === "http://100.96.195.115:38080/"`);
+  wait(`${status('running')} && document.querySelector("${tunnel} a")?.href === "http://" + location.hostname + ":38080/"`);
   browser('click', `${tunnel} [aria-label="Stop"]`); wait(status('stopped'));
   browser('click', `${tunnel} [aria-label="Remove"]`); wait(`!document.querySelector("${tunnel}")`);
   const webLink = '.ra-ws-section a.ra-ws-button';
   browser('click', '.ra-ws-tabs button:text-is("Remote DSH")'); browser('fill', '[aria-label="Remote login URL"]', 'http://127.0.0.1:3080/?token=test-only'); browser('click', 'button:text-is("Connect remote DSH")');
-  wait(`document.querySelector("${webLink}")?.href === "http://100.96.195.115:38088/?token=test-only"`);
+  wait(`document.querySelector("${webLink}")?.href === "http://" + location.hostname + ":38088/?token=test-only"`);
   // Connecting again reuses the saved tunnel, whether it is still running or was stopped.
   const reconnect = token => {
     browser('fill', '[aria-label="Remote login URL"]', `http://127.0.0.1:3080/?token=${token}`); wait(`!document.querySelector("${webLink}")`);
-    browser('click', 'button:text-is("Connect remote DSH")'); wait(`document.querySelector("${webLink}")?.href === "http://100.96.195.115:38088/?token=${token}"`);
+    browser('click', 'button:text-is("Connect remote DSH")'); wait(`document.querySelector("${webLink}")?.href === "http://" + location.hostname + ":38088/?token=${token}"`);
     expect('!document.querySelector(".ra-workspace-panel [role=alert]")');
   };
   reconnect('running');
@@ -397,35 +397,35 @@ try {
   const trigger = '[data-native-picker] button';
   const menu = '[data-menu-material]';
   const rootModel = `${menu} > button:first-of-type`;
-  const group = provider => `[data-ra-model-provider="${provider}"]`;
+  const group = provider => `[data-model-group="${provider}"]`;
   const heading = provider => `${group(provider)} > [data-menu-group-heading]`;
-  const visible = '[data-ra-model-option]:not([data-ra-model-hidden])';
+  const visible = '[data-model-group-option]:not([data-model-group-hidden])';
   browser('set', 'viewport', '1440', '1000');
   wait('document.querySelector("[data-native-picker] button")');
   expect('window.fixture.slots.length === 6');
   browser('click', trigger); wait('document.querySelector("[data-menu-material] > button")');
   image('model-groups-native-root');
-  browser('click', rootModel); wait('document.querySelector("[data-ra-model-provider]")');
-  expect('document.querySelectorAll("[data-ra-model-provider]").length === 4');
-  expect('document.querySelector("[data-ra-model-provider=remote-cli-codex] [data-menu-group-heading]").getAttribute("aria-expanded") === "true"');
-  expect('document.querySelector("[data-ra-model-provider=remote-cli-codebuddy] [data-menu-group-heading]").getAttribute("aria-expanded") === "false"');
+  browser('click', rootModel); wait('document.querySelector("[data-model-group]")');
+  expect('document.querySelectorAll("[data-model-group]").length === 4');
+  expect('document.querySelector("[data-model-group=remote-cli-codex] [data-menu-group-heading]").getAttribute("aria-expanded") === "true"');
+  expect('document.querySelector("[data-model-group=remote-cli-codebuddy] [data-menu-group-heading]").getAttribute("aria-expanded") === "false"');
   browser('click', heading('remote-cli-codebuddy'));
-  expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-codebuddy] [data-ra-model-option]:not([data-ra-model-hidden])").length === 24');
+  expect('document.querySelectorAll("[data-model-group=remote-cli-codebuddy] [data-model-group-option]:not([data-model-group-hidden])").length === 24');
   browser('set', 'media', 'dark'); image('model-groups-expanded-dark');
   browser('click', heading('remote-cli-codebuddy'));
-  expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-codebuddy] [data-ra-model-option]:not([data-ra-model-hidden])").length === 0');
+  expect('document.querySelectorAll("[data-model-group=remote-cli-codebuddy] [data-model-group-option]:not([data-model-group-hidden])").length === 0');
   browser('set', 'media', 'light'); image('model-groups-collapsed-light');
   browser('fill', `${menu} input`, 'Balanced');
-  expect('document.querySelectorAll("[data-ra-model-option]:not([data-ra-model-hidden])").length === 1');
+  expect('document.querySelectorAll("[data-model-group-option]:not([data-model-group-hidden])").length === 1');
   expect('document.querySelector("[data-menu-group-heading]").getAttribute("aria-expanded") === "true"');
   browser('fill', `${menu} input`, '');
-  expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-codebuddy] [data-ra-model-option]:not([data-ra-model-hidden])").length === 0');
+  expect('document.querySelectorAll("[data-model-group=remote-cli-codebuddy] [data-model-group-option]:not([data-model-group-hidden])").length === 0');
   browser('fill', `${menu} input`, 'Balanced'); browser('press', 'Enter');
   wait('!document.querySelector("[data-menu-material]") && document.querySelector("[data-native-picker] button").textContent.includes("Balanced")');
   expect('window.fixture.picker.selections.at(-1).provider === "remote-cli-codebuddy" && window.fixture.picker.selections.at(-1).model === "macmini/codebuddy/buddy-2"');
   expect('document.activeElement.closest("[data-native-picker]") !== null');
-  browser('click', trigger); browser('click', rootModel); wait('document.querySelector("[data-ra-model-provider]")');
-  expect('document.querySelectorAll("[data-ra-model-option]:not([data-ra-model-hidden])").length === 0');
+  browser('click', trigger); browser('click', rootModel); wait('document.querySelector("[data-model-group]")');
+  expect('document.querySelectorAll("[data-model-group-option]:not([data-model-group-hidden])").length === 0');
   // Enter must never accept the native picker's highlighted but folded-away option.
   const beforeHidden = evaluate('window.fixture.picker.selections.length'); browser('press', 'Enter');
   expect(`window.fixture.picker.selections.length === ${beforeHidden}`);
@@ -442,7 +442,7 @@ try {
   expect('window.fixture.picker.selections.at(-1).reasoningEffort === "high" && document.querySelector("[data-native-picker] button").textContent.includes("High")');
   browser('click', trigger); browser('click', rootModel);
   browser('fill', `${menu} input`, 'no-such-model');
-  expect('document.querySelectorAll("[data-ra-model-option]:not([data-ra-model-hidden])").length === 0');
+  expect('document.querySelectorAll("[data-model-group-option]:not([data-model-group-hidden])").length === 0');
   const beforeEmpty = evaluate('window.fixture.picker.selections.length'); browser('press', 'Enter');
   expect(`window.fixture.picker.selections.length === ${beforeEmpty}`);
   browser('fill', `${menu} input`, 'Codex Fast');
@@ -452,25 +452,25 @@ try {
   browser('press', 'Escape'); browser('press', 'Escape');
   browser('click', trigger); browser('click', rootModel);
   evaluate('window.fixture.picker.addModel()');
-  wait('document.querySelector("[data-ra-model-provider=remote-cli-codebuddy] [data-menu-group-heading]")?.getAttribute("data-ra-model-count") === "25"');
-  expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-codebuddy] [data-ra-model-option]:not([data-ra-model-hidden])").length === 0');
+  wait('document.querySelector("[data-model-group=remote-cli-codebuddy] [data-menu-group-heading]")?.getAttribute("data-model-group-count") === "25"');
+  expect('document.querySelectorAll("[data-model-group=remote-cli-codebuddy] [data-model-group-option]:not([data-model-group-hidden])").length === 0');
   browser('set', 'viewport', '390', '844');
   expect('(()=>{const r=document.querySelector("[data-menu-material]").getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})()');
   image('model-groups-mobile');
   browser('press', 'Escape'); browser('press', 'Escape'); wait('!document.querySelector("[data-menu-material]")');
   browser('open', `${base}?fold-persistence`);
   wait('document.querySelector("[data-native-picker] button")'); browser('click', trigger); browser('click', rootModel);
-  wait('document.querySelector("[data-ra-model-provider]")');
-  expect('document.querySelector("[data-ra-model-provider=remote-cli-codebuddy] [data-menu-group-heading]").getAttribute("aria-expanded") === "false"');
+  wait('document.querySelector("[data-model-group]")');
+  expect('document.querySelector("[data-model-group=remote-cli-codebuddy] [data-menu-group-heading]").getAttribute("aria-expanded") === "false"');
   // The real native menu and shared selection API must both follow workspace admission.
   evaluate('window.fixture.picker.addOtherMachine()');
   expect('!document.querySelector("[data-menu-material]").textContent.includes("ubuntu")');
   evaluate('window.fixture.workspace("ubuntu")');
-  wait('document.querySelectorAll("[data-ra-model-provider]").length === 2');
+  wait('document.querySelectorAll("[data-model-group]").length === 2');
   expect('!document.querySelector("[data-native-picker] button").title.includes("macmini")');
   expect('!document.querySelector("[data-menu-material]").textContent.includes("macmini")');
   browser('click', heading('remote-cli-claude'));
-  expect('document.querySelectorAll("[data-ra-model-provider=remote-cli-claude] [data-ra-model-option]:not([data-ra-model-hidden])").length === 1');
+  expect('document.querySelectorAll("[data-model-group=remote-cli-claude] [data-model-group-option]:not([data-model-group-hidden])").length === 1');
   // Rows keep the host as muted text; the composer caption shows only the model, with the host in its tooltip.
   expect('document.querySelector(\'[data-menu-material] [data-model-id="ubuntu/claude/claude-model"] [data-ra-model-host]\').textContent === "ubuntu"');
   browser('click', `${menu} button[title="Claude model · ubuntu"]`); wait('!document.querySelector("[data-menu-material]")');
@@ -482,8 +482,8 @@ try {
   wait('!document.querySelector("[data-native-picker] button").title.includes("ubuntu")');
   // With no current choice, the native trigger opens the model list directly.
   browser('click', trigger);
-  wait('document.querySelectorAll("[data-ra-model-provider]").length === 1');
-  expect('document.querySelector("[data-ra-model-provider]").dataset.raModelProvider === "deepseek-account"');
+  wait('document.querySelectorAll("[data-model-group]").length === 1');
+  expect('document.querySelector("[data-model-group]").dataset.modelGroup === "deepseek-account"');
   console.log('PASS: native menu filters machines, clears stale captions, rejects cross-machine selection and hides remote models in local workspaces');
   browser('press', 'Escape'); browser('press', 'Escape');
   evaluate('window.fixture.workspace("macmini")');
@@ -526,9 +526,9 @@ try {
   evaluate('window.fixture.picker.current({provider:"remote-cli-codex",model:"macmini/codex/codex-model",reasoningEffort:"medium"})');
   wait('document.querySelector(".ra-usage")');
   console.log('PASS: usage ring reports context, cache reads/writes and token hit rate, distinguishes zero from unknown, opens thread totals and plan limits, fits mobile and hides for non-remote models');
-  browser('click', trigger); browser('click', rootModel); wait('document.querySelectorAll("[data-ra-model-provider]").length === 4');
+  browser('click', trigger); browser('click', rootModel); wait('document.querySelectorAll("[data-model-group]").length === 4');
   evaluate('window.fixture.disablePlugin()');
-  expect('!document.querySelector("[data-ra-model-provider],[data-ra-model-hidden]")');
+  expect('!document.querySelector("[data-model-group],[data-model-group-hidden]")');
   expect('document.querySelectorAll("[data-menu-group] button[role=menuitemradio]").length === 28');
   expect('document.querySelector("[data-menu-group-heading]").getAttribute("role") === null');
   browser('press', 'Escape'); browser('press', 'Escape');
@@ -536,15 +536,15 @@ try {
   console.log('PASS: official DSH rc.3 model menu, real slot registration, persisted provider folding, visible keyboard selection, search, native reasoning/errors, live catalogs, mobile and plugin disposal');
 
   // Some DSH builds render model rows without label ids; folding then keys each group by its heading.
-  const byName = name => `[data-ra-model-provider="name:${name}"]`;
+  const byName = name => `[data-model-group="name:${name}"]`;
   const openNoIds = () => {
     browser('open', `${base}?no-model-ids`);
     wait('document.querySelector("[data-native-picker] button")'); browser('click', trigger); browser('click', rootModel);
-    wait('document.querySelectorAll("[data-ra-model-provider]").length === 4');
+    wait('document.querySelectorAll("[data-model-group]").length === 4');
   };
   openNoIds();
   expect('!document.querySelector("[data-menu-material] [data-provider-id]")');
-  expect('[...document.querySelectorAll("[data-ra-model-provider]")].every(g => g.dataset.raModelProvider === "name:" + g.querySelector(":scope > [data-menu-group-heading]").textContent)');
+  expect('[...document.querySelectorAll("[data-model-group]")].every(g => g.dataset.modelGroup === "name:" + g.querySelector(":scope > [data-menu-group-heading]").textContent)');
   expect(`document.querySelector('${byName('Codex')} > [data-menu-group-heading]').getAttribute("aria-expanded") === "true"`);
   expect(`document.querySelector('${byName('CodeBuddy Code')} > [data-menu-group-heading]').getAttribute("aria-expanded") === "false"`);
   expect(`document.querySelectorAll('${byName('CodeBuddy Code')} ${visible}').length === 0`);

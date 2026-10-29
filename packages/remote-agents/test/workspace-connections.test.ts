@@ -2,15 +2,15 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawn, execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { transform } from 'esbuild';
 import { fixture } from './fakes.js';
-import { WorkspaceTunnels, tunnelArguments } from '../src/workspace-tunnels.js';
-import { installWorkspaceTerminal } from '../src/workspace-terminal.js';
-import { ensureAnchor } from '../src/remote-workspaces.js';
-import { workspaceAction, type WorkspaceFeatures } from '../src/workspace-http.js';
+import { WorkspaceTunnels, tunnelArguments } from '../src/workspace/tunnels.js';
+import { installWorkspaceTerminal } from '../src/workspace/terminal.js';
+import { ensureAnchor } from '../src/workspace/remote-workspaces.js';
+import { workspaceAction, type WorkspaceFeatures } from '../src/workspace/http.js';
 
 test('tunnel startup, stop, saved definitions and host removal are independent of remote agents', async t => {
   const f = await fixture(t), path = join(f.directory, 'tunnels.json'); let args: string[] = [];
@@ -37,8 +37,9 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }
   const f = await fixture(t), modules = join(f.directory, 'modules'), bin = join(f.directory, 'bin'), capture = join(f.directory, 'ssh-args.json');
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
-  for (const name of ['domain', 'store', 'ssh', 'workspace-access']) {
+  for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
+    await mkdir(dirname(join(modules, name)), { recursive: true });
     await writeFile(join(modules, `${name}.js`), (await transform(source, { loader: 'ts', format: 'esm', target: 'node22' })).code);
   }
   await writeFile(join(bin, 'ssh'), `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv.includes('-G'))process.stdout.write('hostname build-box\\nuser builder\\nport 22\\n');else fs.writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify(process.argv.slice(2)));\n`); await chmod(join(bin, 'ssh'), 0o700);

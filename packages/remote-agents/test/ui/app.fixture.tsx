@@ -60,6 +60,17 @@ if (new URLSearchParams(location.search).has('no-model-ids')) new MutationObserv
   for (const label of Array.from(document.querySelectorAll('[data-menu-material] [data-provider-id]'))) { label.removeAttribute('data-provider-id'); label.removeAttribute('data-model-id'); }
 }).observe(document.body, { childList: true, subtree: true });
 apply(context);
+// Provider groups fold through dsh-model-groups; load its built bundle through the ModuleLoader boundary, as DSH does.
+{
+  const target = window as unknown as { __ModuleLoader__?: unknown }, previous = target.__ModuleLoader__;
+  let groups: { apply(ctx: unknown): void } | undefined;
+  target.__ModuleLoader__ = { load: ({ factory }: { factory: (require: (name: string) => unknown) => typeof groups }) => {
+    groups = factory(name => { throw new Error(`Unexpected dsh-model-groups dependency: ${name}`); });
+  } };
+  try { await import('dsh-model-groups/client'); } finally { target.__ModuleLoader__ = previous; }
+  if (!groups) throw new Error('dsh-model-groups client bundle did not register');
+  groups.apply({ effect: context.effect });
+}
 const flowEntry = native.core.entriesOfSlot('sidebar.workspaces.directoryFlow' as Parameters<typeof native.core.entriesOfSlot>[0])[0];
 flow.owner = flowEntry?.component === NativeFlow ? 'native' : 'remote-agents';
 Object.assign(window, { fixture: { setLocale: fixtureLocale.setLocale, slots: [...slots.keys()], navigation, picker: modelFixture, flow,

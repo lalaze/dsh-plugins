@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { requestId } from '../src/client/api.js';
-import { identifier } from '../src/domain.js';
+import { identifier } from '../src/core/domain.js';
 
 test('LAN HTTP clients can create unique valid request IDs without crypto.randomUUID', t => {
   const descriptor = Object.getOwnPropertyDescriptor(crypto, 'randomUUID');

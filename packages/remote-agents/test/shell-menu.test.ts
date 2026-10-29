@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { JSDOM } from 'jsdom';
-import { installShellMenu } from '../src/client/shell-menu.js';
+import { installShellMenu } from '../src/client/workspace/shell-menu.js';
 
 const globals = ['window', 'document', 'MutationObserver', 'HTMLElement', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame'] as const;
 let dispose = () => {};

@@ -4,14 +4,14 @@ import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child
 import { mkdtemp, mkdir, readFile, writeFile, symlink, rm, readdir, realpath, chmod, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { tmpdir } from 'node:os';
-import { OpenSshTransport } from '../src/ssh.js';
-import { WorkspaceFiles } from '../src/workspace-files.js';
-import { fileOperation, hash, WorkspaceService } from '../src/workspace-service.js';
-import { RemoteAgentsService } from '../src/service.js';
-import { expectedTarget, workspaceTransferHandler } from '../src/workspace-http.js';
-import type { WorkspaceFile, WorkspaceManifest } from '../src/workspace-domain.js';
+import { OpenSshTransport } from '../src/core/ssh.js';
+import { WorkspaceFiles } from '../src/workspace/files.js';
+import { fileOperation, hash, WorkspaceService } from '../src/workspace/service.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import { expectedTarget, workspaceTransferHandler } from '../src/workspace/http.js';
+import type { WorkspaceFile, WorkspaceManifest } from '../src/workspace/domain.js';
 import { fixture } from './fakes.js';
-import { REMOTE_DSH_RUNNER } from '../src/workspace-runner.js';
+import { REMOTE_DSH_RUNNER } from '../src/workspace/runner.js';
 import { promisify } from 'node:util';
 
 class LocalTransport extends OpenSshTransport {
@@ -114,13 +114,13 @@ test('managed remote DSH startup is isolated, idempotent, scoped to its workspac
   await writeFile(join(bin, 'dsh'), `#!${process.execPath}\nconst port=process.argv[process.argv.indexOf('--port')+1];console.log(process.argv.slice(2).join(' '));console.log('http://127.0.0.1:'+port+'/?token=fixture-only');setInterval(()=>{},1000);\n`, { mode: 0o700 });
   await writeFile(join(bin, 'ps'), `#!${process.execPath}\ntry{process.kill(Number(process.argv[process.argv.indexOf('-p')+1]),0);console.log('fixed-test-start-stamp');}catch{process.exit(1);}\n`, { mode: 0o700 });
   const source = `require('node:os').homedir=()=>${JSON.stringify(root)};\n${REMOTE_DSH_RUNNER}`;
-  const run = async (op: string, cwd = remote, host = '100.96.195.115') => JSON.parse((await promisify(execFile)(process.execPath, ['-e', source, JSON.stringify({ op, cwd, path: '.', port: 3080, host })], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 10000 })).stdout);
+  const run = async (op: string, cwd = remote, host = 'dsh.example.test') => JSON.parse((await promisify(execFile)(process.execPath, ['-e', source, JSON.stringify({ op, cwd, path: '.', port: 3080, host })], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 10000 })).stdout);
   let pid: number | undefined;
   t.after(() => { if (pid) try { process.kill(-pid, 'SIGKILL'); } catch {} });
   assert.equal((await run('webStart')).result.url, 'http://127.0.0.1:3080/?token=fixture-only');
   pid = JSON.parse(await readFile(join(root, '.dsh-remote-agents/web-ui/3080/process.json'), 'utf8')).pid;
   // The browser reaches the instance through a tunnel on the access address, which it must trust.
-  assert.match(await readFile(join(root, '.dsh-remote-agents/web-ui/3080/output.log'), 'utf8'), /--trusted-host 100\.96\.195\.115\b/);
+  assert.match(await readFile(join(root, '.dsh-remote-agents/web-ui/3080/output.log'), 'utf8'), /--trusted-host dsh\.example\.test\b/);
   assert.equal((await run('webStart', remote, 'other.example')).status, 409);
   assert.throws(() => fileOperation({ op: 'webStart', path: '.', port: 3080, host: '-oProxyCommand=x' }), /address/);
   assert.equal((await run('webStart')).result.managed, true);

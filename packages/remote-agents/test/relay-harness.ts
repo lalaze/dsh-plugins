@@ -6,11 +6,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as pause } from 'node:timers/promises';
 import type { TestContext } from 'node:test';
-import { SshBackend } from '../src/backend.js';
-import { OpenSshTransport } from '../src/ssh.js';
-import { RemoteAgentsService } from '../src/service.js';
-import type { Cursor } from '../src/domain.js';
-import { Store } from '../src/store.js';
+import { SshBackend } from '../src/agents/backend.js';
+import { OpenSshTransport } from '../src/core/ssh.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import type { Cursor } from '../src/core/domain.js';
+import { Store } from '../src/core/store.js';
 
 /**
  * The production SSH command wrapper and relay, run by a local shell with its own HOME instead of

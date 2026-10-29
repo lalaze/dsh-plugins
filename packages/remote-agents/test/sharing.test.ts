@@ -9,10 +9,10 @@ import { PassThrough } from 'node:stream';
 import { createInterface } from 'node:readline';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as pause } from 'node:timers/promises';
-import { Store } from '../src/store.js';
-import { acpServers, mcpContent, mcpServerOf, Sharing, sharedArguments, type SharedImageRef, type SharedTool, type SharedToolResult, type SkillSummary } from '../src/sharing.js';
-import type { HostConfig, Task } from '../src/domain.js';
-import type { SshTransport } from '../src/ssh.js';
+import { Store } from '../src/core/store.js';
+import { acpServers, mcpContent, mcpServerOf, Sharing, sharedArguments, type SharedImageRef, type SharedTool, type SharedToolResult, type SkillSummary } from '../src/sharing/sharing.js';
+import type { HostConfig, Task } from '../src/core/domain.js';
+import type { SshTransport } from '../src/core/ssh.js';
 
 /** Runs "remote" commands locally under a private HOME, so the bridge script really installs and syncs. */
 function localTransport(home: string, scripts: { exec: string[]; transfer: string[] } = { exec: [], transfer: [] }): SshTransport {

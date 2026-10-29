@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { test } from 'node:test';
-import { ANTIGRAVITY_RUNNER } from '../src/antigravity.js';
-import { JsonlPeer } from '../src/ssh.js';
+import { ANTIGRAVITY_RUNNER } from '../src/agents/antigravity.js';
+import { JsonlPeer } from '../src/core/ssh.js';
 
 test('the remote Antigravity runner forwards native JSONL and signals its owned child on interrupt', async t => {
   const fake = `

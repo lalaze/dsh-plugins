@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { installWorkspaceImport } from '../src/client/workspace-import.js';
+import { installWorkspaceImport } from '../src/client/workspace/import.js';
 
 test('shared remote workspaces are added to the sidebar once, and a failed addition is offered again', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });

@@ -6,9 +6,9 @@ import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
-import { SshBackend } from '../src/backend.js';
-import { quote, type SshTransport } from '../src/ssh.js';
-import { Store } from '../src/store.js';
+import { SshBackend } from '../src/agents/backend.js';
+import { quote, type SshTransport } from '../src/core/ssh.js';
+import { Store } from '../src/core/store.js';
 
 const run = promisify(execFile);
 const expected = (unique: string) => `ssh-${createHash('sha256').update(JSON.stringify(['test-macmini', 'test-user', unique])).digest('hex')}`;

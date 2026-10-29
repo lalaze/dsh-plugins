@@ -5,11 +5,11 @@ import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'nod
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { LocalTransport, relayHarness, transcript, waitFor } from './relay-harness.js';
-import { SshBackend } from '../src/backend.js';
-import type { SharedSessions } from '../src/shared.js';
-import { RemoteWorkspaces } from '../src/remote-workspaces.js';
-import { WorkspaceAccess } from '../src/workspace-access.js';
-import { Store } from '../src/store.js';
+import { SshBackend } from '../src/agents/backend.js';
+import type { SharedSessions } from '../src/agents/shared-sessions.js';
+import { RemoteWorkspaces } from '../src/workspace/remote-workspaces.js';
+import { WorkspaceAccess } from '../src/workspace/access.js';
+import { Store } from '../src/core/store.js';
 
 const supported = process.platform !== 'win32';
 /** Short lease and scan intervals, so takeovers and expiry happen within a test. */

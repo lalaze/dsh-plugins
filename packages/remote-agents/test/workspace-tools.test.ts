@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { fixture } from './fakes.js';
-import { RemoteAgentsService } from '../src/service.js';
-import { WorkspaceService } from '../src/workspace-service.js';
-import { WorkspaceFiles } from '../src/workspace-files.js';
-import { workspaceTools } from '../src/workspace-tools.js';
-import type { ToolHost } from '../src/tools.js';
-import type { DshPermission } from '../src/domain.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import { WorkspaceService } from '../src/workspace/service.js';
+import { WorkspaceFiles } from '../src/workspace/files.js';
+import { workspaceTools } from '../src/workspace/tools.js';
+import type { ToolHost } from '../src/core/dsh-host.js';
+import type { DshPermission } from '../src/core/domain.js';
 
 // Answers each workspace operation as the remote shell program would.
 const RESPONSES: Record<string, string> = { list: 'ok\n\0', command: 'ok\n0 0 3 0\nran', upload: `ok\n${'a'.repeat(64)} 5\n` };

@@ -2,11 +2,11 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { SshBackend } from '../src/backend.js';
-import { TaskHistory } from '../src/history.js';
+import { SshBackend } from '../src/agents/backend.js';
+import { TaskHistory } from '../src/agents/history.js';
 import { createHandler } from '../src/http.js';
-import { RemoteAgentsService } from '../src/service.js';
-import { Store } from '../src/store.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import { Store } from '../src/core/store.js';
 import { fixture } from './fakes.js';
 
 test('the SSH backend removes saved output for an offline host without remote execution', async t => {

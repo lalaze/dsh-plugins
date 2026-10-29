@@ -4,12 +4,12 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SshBackend, CLI_PROVIDERS } from '../src/backend.js';
-import { JsonlPeer, quote, type Child, type SshTransport, type WireMessage } from '../src/ssh.js';
-import { Store } from '../src/store.js';
-import { TaskHistory } from '../src/history.js';
-import { RemoteAgentsService } from '../src/service.js';
-import { decodeAntigravityModels } from '../src/antigravity.js';
+import { SshBackend, CLI_PROVIDERS } from '../src/agents/backend.js';
+import { JsonlPeer, quote, type Child, type SshTransport, type WireMessage } from '../src/core/ssh.js';
+import { Store } from '../src/core/store.js';
+import { TaskHistory } from '../src/agents/history.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import { decodeAntigravityModels } from '../src/agents/antigravity.js';
 
 class FakeCli implements Child {
   sent: WireMessage[] = [];
@@ -828,8 +828,8 @@ test('history is durable, private, paginated and rejects truncated logs before a
 });
 
 test('a missing workspace path is reported without executing in the discovery directory', async t => {
-  const { ChatProjects } = await import('../src/chat-projects.js');
-  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/native-chat.js');
+  const { ChatProjects } = await import('../src/chat/projects.js');
+  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/chat/native-chat.js');
   const { createUserMessage } = await import('@deepseek-ai/dsh-llm');
   const { SessionId } = await import('@deepseek-ai/dsh-session');
   const { service, ssh, hostId, request, store } = await fixture(t);
@@ -842,8 +842,8 @@ test('a missing workspace path is reported without executing in the discovery di
 });
 
 for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigravity']) test(`${provider}: DSH native model streams through the real SSH backend and resumes the same conversation`, async t => {
-  const { ChatProjects } = await import('../src/chat-projects.js');
-  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/native-chat.js');
+  const { ChatProjects } = await import('../src/chat/projects.js');
+  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/chat/native-chat.js');
   const { createUserMessage } = await import('@deepseek-ai/dsh-llm');
   const { SessionId } = await import('@deepseek-ai/dsh-session');
   const { service, ssh, hostId, request, store, directory } = await fixture(t, provider);

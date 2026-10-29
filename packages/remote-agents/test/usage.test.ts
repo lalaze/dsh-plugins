@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTurnUsage, remoteUsageRecord } from '../src/usage.js';
-import type { HostConfig, Task } from '../src/domain.js';
-import { CacheSection, formatReset, formatTokens } from '../src/client/usage.js';
+import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTurnUsage, remoteUsageRecord } from '../src/agents/usage.js';
+import type { HostConfig, Task } from '../src/core/domain.js';
+import { CacheSection, formatReset, formatTokens } from '../src/client/composer/usage.js';
 import { fixture } from './fakes.js';
 
 const checkedAt = '2026-10-26T00:00:00.000Z';

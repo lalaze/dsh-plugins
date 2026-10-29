@@ -3,11 +3,11 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
-import type { Backend } from '../src/backend.js';
-import { enabledProvidersOf, type AccountUsage, type Agent, type Cursor, type HostConfig, type PermissionAnswer, type Provider, type Task, type TaskInput, type TimelineEntry, type TimelinePage } from '../src/domain.js';
-import { RemoteAgentsService } from '../src/service.js';
-import { Store } from '../src/store.js';
-import { messageTimeline } from '../src/history.js';
+import type { Backend } from '../src/agents/backend.js';
+import { enabledProvidersOf, type AccountUsage, type Agent, type Cursor, type HostConfig, type PermissionAnswer, type Provider, type Task, type TaskInput, type TimelineEntry, type TimelinePage } from '../src/core/domain.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import { Store } from '../src/core/store.js';
+import { messageTimeline } from '../src/agents/history.js';
 
 export const providers: Provider[] = [{ id: 'codex', label: 'Codex', status: 'ready', models: [{ id: 'remote-model', label: 'Remote model', isDefault: true, thinkingOptions: [{ id: 'high', label: 'High' }] }], modes: [{ id: 'ask', label: 'Ask before commands' }, { id: 'full-access', label: 'Full access' }], defaultModeId: 'ask' }, { id: 'claude', label: 'Claude Code', status: 'unavailable', models: [], modes: [] }];
 /** In-memory backend mirroring SshBackend semantics: sends interrupt running turns and are idempotent by message ID. */

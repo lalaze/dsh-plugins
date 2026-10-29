@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
-import { Store } from '../src/store.js';
-import { RemoteAgentsService } from '../src/service.js';
-import { connectionInput } from '../src/backend.js';
+import { Store } from '../src/core/store.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import { connectionInput } from '../src/agents/backend.js';
 import { createHandler } from '../src/http.js';
 import { FakeRemote, fixture } from './fakes.js';
 

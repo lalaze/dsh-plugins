@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
-import { installWorkspaceSidebar, workspaceFileAddress } from '../src/client/workspace-sidebar.js';
+import { installWorkspaceSidebar, workspaceFileAddress } from '../src/client/workspace/sidebar.js';
 import type { Client } from '../src/client/index.js';
 
 test('native file addresses preserve remote relative and absolute paths and reject other scopes', () => {

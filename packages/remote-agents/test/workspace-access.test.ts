@@ -8,8 +8,8 @@ import { hostname, userInfo } from 'node:os';
 import { Context } from '@deepseek-ai/cordis';
 import * as plugin from '../src/index.js';
 import { fixture } from './fakes.js';
-import { WorkspaceAccess } from '../src/workspace-access.js';
-import { SshBackend } from '../src/backend.js';
+import { WorkspaceAccess } from '../src/workspace/access.js';
+import { SshBackend } from '../src/agents/backend.js';
 
 test('workspace models match SSH host, user and port and translate placeholder subdirectories', async t => {
   const { directory, store, hostId, service } = await fixture(t);

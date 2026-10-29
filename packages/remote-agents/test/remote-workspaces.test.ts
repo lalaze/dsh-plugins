@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdir, readdir, readFile, realpath, stat, symlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { SshBackend } from '../src/backend.js';
+import { SshBackend } from '../src/agents/backend.js';
 import { createHandler } from '../src/http.js';
-import { anchorCandidates, ensureAnchor, RemoteWorkspaces, shortHash } from '../src/remote-workspaces.js';
-import { WorkspaceAccess } from '../src/workspace-access.js';
+import { anchorCandidates, ensureAnchor, RemoteWorkspaces, shortHash } from '../src/workspace/remote-workspaces.js';
+import { WorkspaceAccess } from '../src/workspace/access.js';
 import { fixture } from './fakes.js';
 import { LocalTransport } from './relay-harness.js';
 

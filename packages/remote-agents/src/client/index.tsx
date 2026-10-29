@@ -2,25 +2,24 @@ import { XIcon } from '@phosphor-icons/react/dist/csr/X';
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { LocaleContext } from '@dsh-plugins/i18n';
-import type { Dashboard } from '../domain.js';
+import type { Dashboard } from '../core/domain.js';
 import { api } from './api.js';
 import { installLocale, localizeError, ui, useLocale } from './i18n.js';
-import { HostManager } from './hosts.js';
-import { SharingSettings } from './sharing.js';
+import { HostManager } from './settings/hosts.js';
+import { SharingSettings } from './settings/sharing.js';
 import { styles } from './styles.js';
-import { Sessions } from './sessions.js';
-import { installModelGroups } from './model-groups.js';
-import { ModelLabel } from './model-label.js';
-import { installCustomModelLabels } from './custom-model-label.js';
-import { installWorkspaceModels, type WorkspaceClient } from './workspace-models.js';
-import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './usage.js';
-import { FastToggle } from './fast.js';
-import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDirectories } from './workspace-flow.js';
+import { Sessions } from './sessions/sessions.js';
+import { ModelLabel } from './composer/model-label.js';
+import { installCustomModelLabels } from './composer/custom-model-label.js';
+import { installWorkspaceModels, type WorkspaceClient } from './composer/workspace-models.js';
+import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './composer/usage.js';
+import { FastToggle } from './composer/fast.js';
+import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDirectories } from './workspace/flow.js';
 import { symbols } from '@deepseek-ai/cordis';
-import { WorkspacePanel } from './workspace.js';
-import { installWorkspaceSidebar } from './workspace-sidebar.js';
-import { installShellMenu } from './shell-menu.js';
-import { installWorkspaceImport, type WorkspaceList } from './workspace-import.js';
+import { WorkspacePanel } from './workspace/panel.js';
+import { installWorkspaceSidebar } from './workspace/sidebar.js';
+import { installShellMenu } from './workspace/shell-menu.js';
+import { installWorkspaceImport, type WorkspaceList } from './workspace/import.js';
 
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -80,7 +79,6 @@ export function apply(ctx: Client): void {
     return <><Settings openSessions={() => { setWorkspace(false); setVisible(true); }} openWorkspace={() => { setWorkspace(true); setVisible(true); }} />{visible && <SessionDialog close={() => setVisible(false)} openChat={openChat} sessionId={sessionId} cwd={cwd} workspace={workspace} />}</>;
   };
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, Surface));
-  ctx.effect(installModelGroups);
   // A native label contribution is a fallback; another plugin may already own priority 0.
   ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({ name: 'conversation.input.model.label', id: 'remote-agents-model-label', priority: 50 }, ModelLabel));
   ctx.effect(installCustomModelLabels);

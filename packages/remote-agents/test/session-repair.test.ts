@@ -7,7 +7,7 @@ import { constants, zstdCompressSync, zstdDecompressSync } from 'node:zlib';
 import { createToolResultMessage, MessageId, ToolCallId } from '@deepseek-ai/dsh-llm';
 import { interruptedTurnClosers, KNOWN_SESSION_EVENT_TYPES, Session, SessionId } from '@deepseek-ai/dsh-session';
 import { assertReleasedV4Relationships } from '@deepseek-ai/dsh-session-format-v3-to-v4';
-import { repairRows, repairStoredSessions, zstdFrames, type Row } from '../src/session-repair.js';
+import { repairRows, repairStoredSessions, zstdFrames, type Row } from '../src/chat/session-repair.js';
 
 const step = { turn: 1, step: 1 }, id = ToolCallId('remote-1-1-cli'), args = JSON.stringify({ description: 'Codex on Build server:/srv/project' });
 const nested = { rootCallId: id, parentCallId: id, subCallId: ToolCallId('remote-1-1-0123456789abcdef01234567'), name: 'Bash', arguments: { command: 'pnpm test' } };

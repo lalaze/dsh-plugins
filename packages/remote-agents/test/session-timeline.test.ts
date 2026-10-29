@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { emptyTimeline, mergeTimeline, timelineRows } from '../src/client/timeline.js';
-import type { TimelineEntry, TimelinePage } from '../src/domain.js';
+import { emptyTimeline, mergeTimeline, timelineRows } from '../src/client/sessions/timeline.js';
+import type { TimelineEntry, TimelinePage } from '../src/core/domain.js';
 
 const entry = (seq: number, item: TimelineEntry['item']): TimelineEntry => ({ seqStart: seq, seqEnd: seq, timestamp: '', item });
 const page = (entries: TimelineEntry[], more: Partial<TimelinePage> = {}): TimelinePage => ({ epoch: 'one', entries, startCursor: entries.length ? { epoch: 'one', seq: entries[0].seqStart } : null, endCursor: entries.length ? { epoch: 'one', seq: entries.at(-1)!.seqEnd } : null, hasOlder: false, hasNewer: false, reset: false, staleCursor: false, gap: false, ...more });

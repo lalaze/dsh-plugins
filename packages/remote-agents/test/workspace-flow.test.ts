@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots';
 import { apply, type Client } from '../src/client/index.js';
-import { DIRECTORY_FLOWS } from '../src/client/workspace-flow.js';
+import { DIRECTORY_FLOWS } from '../src/client/workspace/flow.js';
 
 test('Add workspace shadows DSH\'s own picker, yields to dsh-remote and restores the picker on unload', () => {
   for (const withDshRemote of [false, true]) {

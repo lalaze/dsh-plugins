@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { AgentSummary } from '../src/domain.js';
-import { projectName, sessionPriority, sessionView, visibleSession } from '../src/client/session-list.js';
+import type { AgentSummary } from '../src/core/domain.js';
+import { projectName, sessionPriority, sessionView, visibleSession } from '../src/client/sessions/session-list.js';
 
 const agent = (overrides: Partial<AgentSummary> = {}): AgentSummary => ({
   id: 'session-1', hostId: 'host-1', cwd: '/srv/project', provider: 'codex', model: 'model', modes: [], title: 'Test task',

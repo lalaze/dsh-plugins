@@ -3,10 +3,10 @@ import { test } from 'node:test';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { readSshConfigHosts } from '../src/ssh-config.js';
+import { readSshConfigHosts } from '../src/core/ssh-config.js';
 import { createHandler } from '../src/http.js';
-import { RemoteAgentsService } from '../src/service.js';
-import { Store } from '../src/store.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
+import { Store } from '../src/core/store.js';
 
 async function fixture(t: { after: (fn: () => Promise<void>) => void }) {
   const home = await mkdtemp(join(tmpdir(), 'remote-ssh-config-'));

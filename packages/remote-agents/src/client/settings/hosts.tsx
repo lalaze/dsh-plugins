@@ -1,0 +1,85 @@
+import React, { useState } from 'react';
+import { enabledProvidersOf, PROVIDER_LABELS, type Dashboard, type Host } from '../../core/domain.js';
+import { api } from '../api.js';
+import { localizeError, ui } from '../i18n.js';
+import { SshHostPicker } from './ssh-host-picker.js';
+
+function CliChoices({ value, change, disabled, inline = false }: { value: string[]; change(next: string[]): void; disabled: boolean; inline?: boolean }) {
+  return <fieldset className="ra-cli-options" disabled={disabled} aria-label={inline ? ui('Enabled CLIs') : undefined}>
+    {inline ? <span className="ra-cli-label" aria-hidden="true">{ui('Enabled CLIs')}</span> : <legend>{ui('Enabled CLIs')}</legend>}{Object.entries(PROVIDER_LABELS).map(([id, label]) => <label key={id}>
+    <input type="checkbox" value={id} checked={value.includes(id)} onChange={e => change(e.target.checked ? [...value, id] : value.filter(p => p !== id))} /><span>{label}</span>
+  </label>)}</fieldset>;
+}
+function HostProviders({ host, busy, apply }: { host: Host; busy: boolean; apply(providers: string[]): void }) {
+  const enabled = enabledProvidersOf(host), [selection, setSelection] = useState(enabled);
+  const changed = selection.length !== enabled.length || selection.some(id => !enabled.includes(id));
+  // The apply row appears only for an unsaved selection, so an unchanged machine stays one line.
+  return <div className="ra-cli-settings"><CliChoices value={selection} change={setSelection} disabled={busy} inline />{changed && <div className="ra-actions">
+    <span className="ra-muted">{ui('Only selected CLIs are detected and shown in the model picker.')}</span>
+    <button type="button" disabled={busy} onClick={() => apply(selection)}>{ui('Apply selection')}</button>
+  </div>}</div>;
+}
+
+/** SSH configuration for the native model routes and delegation tools. */
+export function HostManager({ dashboard, update }: { dashboard: Dashboard; update(next: Dashboard): void }) {
+  const [label, setLabel] = useState(''), [connection, setConnection] = useState('');
+  const [selection, setSelection] = useState<string[]>([]);
+  const [busy, setBusy] = useState(''), [error, setError] = useState('');
+  const [removing, setRemoving] = useState('');
+  const run = async (key: string, action: () => Promise<void>) => {
+    setBusy(key); setError('');
+    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(''); }
+  };
+  const hosts = dashboard.hosts;
+  const remove = (hostId: string, deleteAgents = false, everywhere = false) => void run(`remove:${hostId}`, async () => {
+    update(await api<Dashboard>('removeHost', { hostId, deleteAgents, everywhere })); setRemoving('');
+  });
+  return <div className="ra-page ra-hosts">
+    <h2>{ui('Hosts')}</h2>
+    <p className="ra-muted">{ui('Choose which CLIs to enable on each machine. No project registration is needed.')}</p>
+    {error && <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}</div>}
+    {hosts.length > 0 && <ul className="ra-host-list" aria-label={ui('Saved hosts')}>{hosts.map(host => {
+      const agents = dashboard.agents.filter(a => a.hostId === host.id).length;
+      return <li className="ra-host-row ra-host-with-clis" key={host.id}><div className="ra-host-top">
+        <div className="ra-host-name"><div className="ra-host-title"><strong>{host.label}</strong><span className="ra-mono ra-muted">{host.connection}</span><span className="ra-badge" data-status={host.status}>{ui(host.status)}</span></div>
+          <span className="ra-muted">{host.modelCount === undefined ? ui('Models have not been detected yet.') : ui('{count} models in the DSH picker', { count: host.modelCount })}</span>
+          {host.modelCount === 0 && <span className="ra-muted">{ui(enabledProvidersOf(host).length ? 'Install and sign in to a CLI on this machine, then refresh models.' : 'No CLIs enabled. Select the ones you want to use.')}</span>}
+          {(host.modelError || host.error) && <span className="ra-host-error">{localizeError(host.modelError ?? host.error ?? '')}</span>}
+          {host.providerErrors?.map(p => <span key={p.label} className="ra-host-error">{p.label}: {localizeError(p.error)}</span>)}
+        </div>
+        <button type="button" disabled={!!busy} onClick={() => void run(`connect:${host.id}`, async () => update(await api<Dashboard>('connect', { hostId: host.id })))}>{ui('Test connection')}</button>
+        <button type="button" disabled={!!busy || !enabledProvidersOf(host).length} onClick={() => void run(`discover:${host.id}`, async () => update(await api<Dashboard>('discoverHost', { hostId: host.id })))}>{ui(busy === `discover:${host.id}` ? 'Detecting models…' : 'Refresh models')}</button>
+        <button type="button" className="ra-danger" disabled={!!busy}
+          onClick={() => agents ? setRemoving(host.id) : remove(host.id)}>{ui('Remove')}</button></div>
+        {removing === host.id && <div className="ra-banner ra-remove-confirm" role="alert">
+          {host.share ? <><span>{ui('Remove {host} from this DSH? Its {count} sessions can stay on the machine for the other DSH instances, with their CLIs running, or be deleted in every DSH, which stops their CLIs.', { host: host.label, count: agents })}</span>
+            <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
+              <button type="button" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove from this DSH only')}</button>
+              <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true, true)}>{ui('Delete sessions everywhere')}</button></div></>
+          : <><span>{ui('Remove {host} and permanently delete its {count} saved sessions, including archived sessions, and their output? Attached CLI processes will be stopped.', { host: host.label, count: agents })}</span>
+            <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
+              <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove host and sessions')}</button></div></>}
+        </div>}
+        <div className="ra-host-settings"><div className="ra-share-setting"><label title={ui(host.share ? 'Every DSH connected to this SSH account sees its history, running tasks and remote workspaces, and can continue them.' : 'Sessions started here stay in this DSH, and sessions from other DSH instances are not shown.')}><input type="checkbox" checked={host.share} disabled={!!busy} onChange={event => { const share = event.target.checked; void run(`share:${host.id}`, async () => update(await api<Dashboard>('setHostSharing', { hostId: host.id, share }))); }} />
+          <span>{ui('Share sessions and workspaces with other DSH instances')}</span></label>
+          {host.share && host.shareError && <span className="ra-host-error">{localizeError(host.shareError)}</span>}
+        </div>
+        <HostProviders key={enabledProvidersOf(host).join(',')} host={host} busy={!!busy} apply={providers => void run(`providers:${host.id}`, async () => update(await api<Dashboard>('setHostProviders', { hostId: host.id, providers })))} /></div>
+      </li>;
+    })}</ul>}
+    <form className="ra-host-form" onSubmit={event => { event.preventDefault(); void run('add', async () => {
+      const next = await api<Dashboard>('addHost', { host: { label, connection, enabledProviders: selection } });
+      update(next); setLabel(''); setConnection(''); setSelection([]);
+    }); }}>
+      <h3>{ui('Add host')}</h3>
+      <SshHostPicker hosts={hosts} connection={connection} disabled={!!busy} select={host => { setLabel(host.alias.slice(0, 100)); setConnection(host.connection); }} />
+      <div className="ra-grid">
+        <label className="ra-field">{ui('Host name')}<input aria-label={ui('Host name')} required maxLength={100} value={label} onChange={event => setLabel(event.target.value)} placeholder="build-box" /></label>
+        <label className="ra-field">{ui('Connection')}<input aria-label={ui('Connection')} required value={connection} onChange={event => setConnection(event.target.value)} placeholder="ssh://user@build-box:22" autoComplete="off" /></label>
+      </div>
+      <CliChoices value={selection} change={setSelection} disabled={!!busy} />
+      <div className="ra-actions"><button className="ra-primary" disabled={!!busy || !label.trim() || !connection.trim()}>{ui(busy === 'add' ? 'Saving and detecting models…' : 'Save host')}</button></div>
+      <p className="ra-foot">{ui('SSH uses the DSH server’s keys and SSH config: BatchMode, verified host keys, aliases and ProxyJump.')}</p>
+    </form>
+  </div>;
+}

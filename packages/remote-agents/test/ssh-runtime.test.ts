@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { REMOTE_PATH, quote } from '../src/ssh.js';
+import { REMOTE_PATH, quote } from '../src/core/ssh.js';
 
 const run = promisify(execFile);
 for (const shell of ['/bin/sh', '/bin/zsh']) {

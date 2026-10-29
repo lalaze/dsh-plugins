@@ -1,8 +1,8 @@
 // A DSH process for crash tests: starts one remote agent through the relay and keeps running until killed.
 import { join } from 'node:path';
-import { SshBackend } from '../../src/backend.js';
-import { RemoteAgentsService } from '../../src/service.js';
-import { Store } from '../../src/store.js';
+import { SshBackend } from '../../src/agents/backend.js';
+import { RemoteAgentsService } from '../../src/agents/service.js';
+import { Store } from '../../src/core/store.js';
 import { LocalTransport } from '../relay-harness.js';
 
 const [home, state, hostId, provider, prompt, id] = process.argv.slice(2);

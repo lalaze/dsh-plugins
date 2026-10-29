@@ -5,22 +5,22 @@ import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
-import { Store } from '../src/store.ts';
-import { RemoteAgentsService } from '../src/service.ts';
+import { Store } from '../src/core/store.ts';
+import { RemoteAgentsService } from '../src/agents/service.ts';
 import { createHandler } from '../src/http.ts';
-import { Sharing } from '../src/sharing.ts';
+import { Sharing } from '../src/sharing/sharing.ts';
 import { FakeRemote } from '../test/fakes.ts';
-import { ANTIGRAVITY_NOTICE } from '../src/antigravity.ts';
-import { CHAT_PROVIDERS, RemoteCliAdapter } from '../src/native-chat.ts';
-import { ChatProjects } from '../src/chat-projects.ts';
-import { RemoteWorkspaces } from '../src/remote-workspaces.ts';
-import { WorkspaceAccess } from '../src/workspace-access.ts';
+import { ANTIGRAVITY_NOTICE } from '../src/agents/antigravity.ts';
+import { CHAT_PROVIDERS, RemoteCliAdapter } from '../src/chat/native-chat.ts';
+import { ChatProjects } from '../src/chat/projects.ts';
+import { RemoteWorkspaces } from '../src/workspace/remote-workspaces.ts';
+import { WorkspaceAccess } from '../src/workspace/access.ts';
 import { randomUUID } from 'node:crypto';
-import { OpenSshTransport } from '../src/ssh.ts';
-import { WorkspaceFiles } from '../src/workspace-files.ts';
-import { WorkspaceService } from '../src/workspace-service.ts';
-import { WorkspaceTunnels } from '../src/workspace-tunnels.ts';
-import { workspaceTransferHandler } from '../src/workspace-http.ts';
+import { OpenSshTransport } from '../src/core/ssh.ts';
+import { WorkspaceFiles } from '../src/workspace/files.ts';
+import { WorkspaceService } from '../src/workspace/service.ts';
+import { WorkspaceTunnels } from '../src/workspace/tunnels.ts';
+import { workspaceTransferHandler } from '../src/workspace/http.ts';
 
 const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-preview-'));
 const workspaceRoot = join(directory, 'remote-project'), mirrorRoot = join(directory, 'local-mirror');
@@ -179,7 +179,7 @@ const server = createServer(async (request, response) => {
   } catch (error) { response.writeHead(500); response.end(String(error)); }
 });
 await new Promise((resolve, reject) => { server.once('error', reject); server.listen(Number(process.env.DSH_REMOTE_PREVIEW_PORT ?? 4187), '0.0.0.0', resolve); });
-console.log(`Remote agents preview: http://100.96.195.115:${server.address().port}/ (local http://127.0.0.1:${server.address().port}/)`);
+console.log(`Remote agents preview on every interface (local http://127.0.0.1:${server.address().port}/)`);
 let stopping = false;
 async function stop() {
   if (stopping) return; stopping = true;

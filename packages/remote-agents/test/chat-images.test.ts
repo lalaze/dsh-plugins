@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { ChatImageLinks, imagePathOf, saveChatImage } from '../src/chat-images.js';
+import { ChatImageLinks, imagePathOf, saveChatImage } from '../src/chat/images.js';
 
 test('only workspace image paths are copied; URLs, anchors and other files stay as written', () => {
   assert.equal(imagePathOf('.dsh/shots/a.png'), '.dsh/shots/a.png');

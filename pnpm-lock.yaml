@@ -83,6 +83,15 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1
 
+  packages/model-groups:
+    devDependencies:
+      '@types/jsdom':
+        specifier: ^21.1.7
+        version: 21.1.7
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
+
   packages/remote-agents:
     devDependencies:
       '@deepseek-ai/cordis':
@@ -130,6 +139,9 @@ importers:
       '@types/react-dom':
         specifier: ^18.3.7
         version: 18.3.7(@types/react@18.3.31)
+      dsh-model-groups:
+        specifier: workspace:*
+        version: link:../model-groups
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
