@@ -3,6 +3,7 @@ import type { LaunchSharing } from './sharing.js';
 import { Store } from './store.js';
 import { readSshConfigHosts } from './ssh-config.js';
 import type { WorkspaceFiles } from './workspace-files.js';
+import type { SharedWorkspace } from './shared.js';
 import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type Task, type UsageReport } from './domain.js';
 export interface UsageOptions {
     /** The conversation's selected route; picks its CLI when the conversation used several. */
@@ -51,7 +52,7 @@ export declare class RemoteAgentsService {
      * Reattach persistent CLIs after a restart and finish queued relay cleanups. Runs in the
      * background: hosts may be offline, and their sessions keep reconnecting until they return.
      */
-    resume(): Promise<void>;
+    resume(hostId?: string): Promise<void>;
     onCatalogChange(listener: () => void): () => void;
     private catalogChanged;
     /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */
@@ -75,9 +76,20 @@ export declare class RemoteAgentsService {
     addHost(input: unknown, options?: {
         discoverModels?: boolean;
     }): Promise<Dashboard>;
+    /** `everywhere` also deletes a shared host's sessions for the other DSH instances. */
     removeHost(id: string, options?: {
         deleteAgents?: boolean;
+        everywhere?: boolean;
     }): Promise<Dashboard>;
+    /** Share this host's sessions and workspaces with other DSH instances, or stop. CLIs keep running either way. */
+    setHostSharing(hostId: string, share: unknown): Promise<Dashboard>;
+    private forgetLocal;
+    /** Remote workspaces other DSH instances added on this host that were not offered to this DSH yet. */
+    sharedWorkspaces(hostId: string): Promise<SharedWorkspace[]>;
+    /** Offered to DSH: not offered again, even when removed from the sidebar. */
+    seeWorkspaces(hostId: string, paths: string[]): Promise<void>;
+    /** Record a remote workspace on its host so other DSH instances offer it too. */
+    shareWorkspace(hostId: string, path: string): Promise<void>;
     connect(hostId: string): Promise<Dashboard>;
     providers(hostId: string, cwd: string, refresh?: boolean): Promise<import("./domain.js").Provider[]>;
     private updateTask;

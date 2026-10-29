@@ -17,6 +17,15 @@ export interface SharingSettings {
     skills?: Record<string, boolean>;
     secret?: string;
 }
+/** This DSH instance, as other instances sharing an SSH host's sessions see it. */
+export interface Instance {
+    id: string;
+    label: string;
+}
+/**
+ * `instance` identifies this DSH to others sharing a host's sessions; `seenWorkspaces` lists, per host, the
+ * shared remote workspaces already offered to DSH, so one removed from the sidebar is not added again.
+ */
 export interface State {
     version: 1;
     hosts: HostConfig[];
@@ -26,6 +35,14 @@ export interface State {
     chatEfforts?: Record<string, string>;
     chatFast?: string[];
     sharing?: SharingSettings;
+    instance?: Instance;
+    seenWorkspaces?: Record<string, string[]>;
+    sharedDeletions?: SharedDeletion[];
+}
+/** A deleted shared session whose deletion has not reached its SSH host yet. */
+export interface SharedDeletion {
+    hostId: string;
+    id: string;
 }
 export declare class Store {
     private readonly path;
@@ -36,6 +53,8 @@ export declare class Store {
     private closed;
     /** Listeners for the tokens each finished CLI turn used; the plugin forwards them to usage statistics. */
     readonly usageListeners: Set<(taskId: string, usage: TurnUsage, turn: FinishedTurn) => void>;
+    /** Called after every saved change; shared hosts publish the task records that changed. */
+    readonly changeListeners: Set<() => void>;
     constructor(path: string);
     get directory(): string;
     open(): Promise<void>;
@@ -49,6 +68,10 @@ export declare class Store {
     /** Whether a DSH conversation's Codex turns use the Fast speed. */
     chatFast(sessionId: string): boolean;
     chatEffort(route: string): string | undefined;
+    /** This DSH's identity for shared hosts, created on first use. */
+    instance(): Promise<Instance>;
+    seenWorkspaces(hostId: string): string[];
+    sharedDeletions(hostId: string): string[];
     relayCleanups(hostId: string): RelayCleanup[];
     /** A copy of one saved agent record, without cloning the whole registry. */
     task(predicate: (task: Task) => boolean): Task | undefined;

@@ -103,7 +103,7 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     break;
                 case 'removeHost': {
                     const id = hostId();
-                    result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true });
+                    result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true, everywhere: input.everywhere === true });
                     await features?.tunnels.removeHost(id);
                     break;
                 }
@@ -114,9 +114,29 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     result = await service.browse(hostId(), input.path === undefined ? undefined : browsePath(input.path));
                     break;
                 case 'createWorkspace': {
-                    if (!workspaces)
+                    if (!workspaces?.create)
                         throw new RemoteError('Remote workspaces are unavailable', 501);
                     result = await workspaces.create(hostId(), browsePath(input.path), request.signal);
+                    break;
+                }
+                case 'setHostSharing':
+                    result = await service.setHostSharing(hostId(), input.share);
+                    break;
+                case 'sharedWorkspaces':
+                    result = workspaces?.shared ? await workspaces.shared(request.signal) : [];
+                    break;
+                case 'publishWorkspaces': {
+                    if (!Array.isArray(input.paths) || input.paths.length > 500 || input.paths.some(path => typeof path !== 'string' || path.length > 4096))
+                        throw new RemoteError('Invalid workspace paths');
+                    await workspaces?.publish?.(input.paths, request.signal);
+                    result = { ok: true };
+                    break;
+                }
+                case 'seeWorkspaces': {
+                    if (!Array.isArray(input.paths) || input.paths.length > 500)
+                        throw new RemoteError('Invalid workspace paths');
+                    await service.seeWorkspaces(hostId(), input.paths.map(path => remotePath(path)));
+                    result = { ok: true };
                     break;
                 }
                 case 'providers':

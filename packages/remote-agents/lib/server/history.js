@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile, rm } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 export class TaskHistory {
     directory;
@@ -6,12 +7,16 @@ export class TaskHistory {
     entries = [];
     queue = Promise.resolve();
     failure;
-    epoch;
+    /** Raised when entries are replaced, so readers holding cursors start over. */
+    generation = 0;
+    /** Called after entries written here are saved; a shared host copies them to its registry. Not called for imports. */
+    onAppend;
     constructor(directory, taskId) {
         this.directory = directory;
         this.taskId = taskId;
-        this.epoch = `task-${taskId}`;
     }
+    get epoch() { return `task-${this.taskId}${this.generation ? `-${this.generation}` : ''}`; }
+    get file() { return join(this.directory, 'events', `${this.taskId}.jsonl`); }
     async open() {
         let data;
         try {
@@ -57,6 +62,65 @@ export class TaskHistory {
             await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
             await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
             this.entries.push(...entries);
+            try {
+                this.onAppend?.();
+            }
+            catch { /* Copying is retried by its owner. */ }
+        });
+        this.queue = next.catch(error => { this.failure = error; });
+        return next;
+    }
+    /** Number of saved entries, once queued writes finished. */
+    async length() { await this.queue; return this.entries.length; }
+    /** Entries `from`…`to` (1-based, inclusive) as saved lines. */
+    async lines(from, to = Infinity) {
+        await this.queue;
+        return this.entries.slice(Math.max(0, from - 1), Math.min(this.entries.length, to)).map(e => JSON.stringify(e));
+    }
+    /** Append entries another DSH recorded. They must continue this history's sequence. */
+    importLines(lines) {
+        const next = this.queue.then(async () => {
+            if (this.failure)
+                throw this.failure;
+            const entries = lines.map((line, index) => {
+                let entry;
+                try {
+                    entry = JSON.parse(line);
+                }
+                catch {
+                    throw new Error('A shared history entry is damaged');
+                }
+                if (entry?.seqStart !== this.entries.length + index + 1 || entry.seqEnd !== entry.seqStart || typeof entry.item?.type !== 'string')
+                    throw new Error('A shared history entry is out of sequence');
+                return entry;
+            });
+            if (!entries.length)
+                return;
+            await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
+            await appendFile(this.file, entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
+            this.entries.push(...entries);
+        });
+        this.queue = next.catch(error => { this.failure = error; });
+        return next;
+    }
+    /** Keep only the first `seq` entries: what this DSH recorded after losing a shared session is replaced by the shared history. */
+    truncate(seq) {
+        const next = this.queue.then(async () => {
+            if (this.failure)
+                throw this.failure;
+            if (seq >= this.entries.length)
+                return;
+            const kept = this.entries.slice(0, Math.max(0, seq)), temporary = `${this.file}.${randomUUID()}.tmp`;
+            await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
+            try {
+                await writeFile(temporary, kept.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600, flag: 'wx' });
+                await rename(temporary, this.file);
+            }
+            finally {
+                await rm(temporary, { force: true });
+            }
+            this.entries = kept;
+            this.generation++;
         });
         this.queue = next.catch(error => { this.failure = error; });
         return next;

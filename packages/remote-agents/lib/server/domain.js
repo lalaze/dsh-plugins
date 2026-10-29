@@ -1,3 +1,4 @@
+export const sharesSessions = (host) => host.share !== false;
 /** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export function permissionModes(provider, modes) {
     // Codex's inherit mode leaves approval policy and sandbox to the remote config.toml.

@@ -87,6 +87,8 @@ export class CliSession {
         });
     }
     get alive() { return this.peer.alive && !this.released; }
+    /** Disconnected on purpose, leaving the CLI running for DSH to reattach later or for another DSH. */
+    get detached() { return this.released; }
     /** A turn, approval or message admission is in progress. */
     get busy() { return this.admitting || this.agent.status === 'running' || this.agent.status === 'initializing' || !!this.agent.activeTurn || this.agent.pendingPermissions.length > 0; }
     /** Only sessions that can be resumed later may be closed to free a connection slot. */

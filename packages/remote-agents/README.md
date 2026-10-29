@@ -74,6 +74,20 @@ Native DSH approvals remain one-time grants. When Claude supplies matching allow
 
 Closing the panel leaves background work running, and so do quitting DSH and losing SSH; see [Persistence and recovery](#persistence-and-recovery). Sessions show **Reconnecting** while DSH re-establishes their SSH connection.
 
+## Sessions shared between DSH instances
+
+Every DSH connected to the same SSH account sees the same sessions on that machine: their history, tasks in progress, approvals waiting for an answer, and the remote workspaces added there. Add the machine in each DSH; SSH keys and settings are not shared. Sharing is on for every machine by default. Clear **Share sessions and workspaces with other DSH instances** in its card to keep its sessions to this DSH.
+
+- **Where it is kept.** The SSH host keeps a registry in `~/.dsh-remote-agents/shared-v1`: a record and the history of each session, and the list of shared remote workspaces. Its files are private to the SSH account (`0700`/`0600`); anyone who can sign in as that account can read them, as they can read the CLIs' own history. Secrets, sharing tokens, uploaded image data and usage counters are not written there, and only the first 2,000 characters of the first prompt are. Like the relays, it needs Node.js 18 or newer on the host.
+- **Histories are copied when opened.** Sessions another DSH started appear in the list right away; a session's history is copied to this DSH the first time it is opened, and follows from then on. While the host is offline, only sessions opened before can be read.
+- **One DSH drives each CLI.** The DSH that last sent a message, answered an approval or stopped a turn drives the CLI and records its history; the others follow it and show which DSH uses it (**In use on …**). Sending, answering or stopping in any DSH takes the session over without restarting the CLI: that DSH continues from the shared history, so nothing is repeated or lost, and the previous one follows. While a turn runs elsewhere, wait for it or stop it before sending, as with a single DSH.
+- **When a DSH goes away.** If the DSH driving a CLI quits or loses its network, another open DSH takes over after three to four minutes and records the rest of the turn. The first DSH does not take it back when it returns; it follows.
+- **Main chat.** A session bound to a DSH main chat appears in other DSH instances as an ordinary session under **Open sessions**, where it can be read and continued. The original DSH still continues it from its main chat.
+- **Renaming, archiving and deleting** apply in every DSH. Deleting stops the CLI and removes the session everywhere; a session deleted while the host is unreachable is removed from the host the next time DSH reaches it.
+- **Removing a shared machine** offers a choice: **Remove from this DSH only** keeps its sessions on the host for the other DSH instances, with their CLIs running; **Delete sessions everywhere** deletes them in every DSH and stops their CLIs.
+- **Remote workspaces** added on a shared machine appear once in the sidebar of the other DSH instances connected to it. A workspace removed from a sidebar is not added again.
+- **Turning sharing off** first catches up on the sessions started here, then withdraws them from the registry: the other DSH instances stop showing them, and this DSH keeps them and can continue them. Copies of sessions other DSH instances started are removed from this DSH. Turning sharing off needs the machine to be reachable, unless sharing never worked there. Turned on again, the withdrawn sessions are shared again.
+
 ## Delegation from DSH
 
 DSH's own agent gets six tools to hand work to remote CLIs, the counterpart of Paseo's `create_agent` and `send_agent_prompt`:
@@ -120,7 +134,7 @@ DSH uses the remote `acp` profile's providers, models and credentials. Antigravi
 
 ## Hosts
 
-**Remove** stays available when a host is offline or SSH fails. Hosts with saved sessions ask for confirmation first. **Remove host and sessions** stops attached CLI processes and permanently deletes that host’s plugin sessions (including archived sessions), saved output and model catalog without reconnecting over SSH.
+**Remove** stays available when a host is offline or SSH fails. Hosts with saved sessions ask for confirmation first. **Remove host and sessions** stops attached CLI processes and permanently deletes that host’s plugin sessions (including archived sessions), saved output and model catalog without reconnecting over SSH. A machine with sharing on can instead be removed from this DSH only, leaving its sessions on the host; see [Sessions shared between DSH instances](#sessions-shared-between-dsh-instances).
 
 Add machines under **Settings → Remote agents**. Pick a `Host` alias from the DSH machine's `~/.ssh/config` (including `Include` files) or enter `build-box`, `user@build-box` or `ssh://user@build-box:2222`. The original alias is saved, so OpenSSH resolves `HostName`, `User`, `Port`, `IdentityFile` and `ProxyJump` when connecting. The picker never expands wildcards, runs `Match exec` or opens a connection.
 
@@ -144,6 +158,8 @@ dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.23.tgz"
 ```
 
 Restart that profile and refresh the browser. For the Desktop app, fully quit it and use the app's bundled `dsh` with `--profile desktop`.
+
+**Upgrading from 0.2.50:** Sessions and remote workspaces are shared with every DSH connected to the same SSH account; see [Sessions shared between DSH instances](#sessions-shared-between-dsh-instances). After updating and restarting DSH, existing sessions are published to their machine with their history the first time DSH connects to it. To keep a machine's sessions to this DSH, turn sharing off in its card.
 
 **Upgrading from 0.2.41:** Claude Code turns are recorded in usage statistics under the model that answered, so a model chosen by its alias, such as `opus`, appears as its full model ID, such as `claude-opus-5-5`, under **By model**. Turns recorded earlier keep the alias. Restart DSH after updating.
 
@@ -225,7 +241,7 @@ Restart that profile and refresh the browser. For the Desktop app, fully quit it
 
 ## Persistence and recovery
 
-State lives at `$DSH_HOME/storages/dsh-remote-agents/state.json` (default `~/.dsh`), with output in adjacent `events/*.jsonl`. Files use mode `0600`, and `stateDir` overrides the directory. Saved output stays readable while a host is offline.
+State lives at `$DSH_HOME/storages/dsh-remote-agents/state.json` (default `~/.dsh`), with output in adjacent `events/*.jsonl`. Machines with sharing on also keep each session's record and history on the host; see [Sessions shared between DSH instances](#sessions-shared-between-dsh-instances). Files use mode `0600`, and `stateDir` overrides the directory. Saved output stays readable while a host is offline.
 
 - Creation persists the request ID before any remote action, then the native session ID before any prompt, so retrying a lost response never starts a second agent. A start interrupted by a DSH restart remains saved so retrying the response can finish it.
 - Each message is recorded by ID before it is sent and is never resent automatically. Only the CLI's own acknowledgment marks it delivered; otherwise the message shows **Delivery not confirmed**.

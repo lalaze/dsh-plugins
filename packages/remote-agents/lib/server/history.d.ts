@@ -5,8 +5,13 @@ export declare class TaskHistory {
     private entries;
     private queue;
     private failure?;
-    readonly epoch: string;
+    /** Raised when entries are replaced, so readers holding cursors start over. */
+    private generation;
+    /** Called after entries written here are saved; a shared host copies them to its registry. Not called for imports. */
+    onAppend?: () => void;
     constructor(directory: string, taskId: string);
+    get epoch(): string;
+    private get file();
     open(): Promise<void>;
     append(item: TimelineEntry['item'], turnId?: string, relay?: RelayPosition): Promise<void>;
     /**
@@ -17,6 +22,14 @@ export declare class TaskHistory {
         item: TimelineEntry['item'];
         turnId?: string;
     }[], relay?: RelayPosition): Promise<void>;
+    /** Number of saved entries, once queued writes finished. */
+    length(): Promise<number>;
+    /** Entries `from`…`to` (1-based, inclusive) as saved lines. */
+    lines(from: number, to?: number): Promise<string[]>;
+    /** Append entries another DSH recorded. They must continue this history's sequence. */
+    importLines(lines: string[]): Promise<void>;
+    /** Keep only the first `seq` entries: what this DSH recorded after losing a shared session is replaced by the shared history. */
+    truncate(seq: number): Promise<void>;
     /** Where to resume reading a relay: after the last output line whose entries were saved. */
     checkpoint(relayId: string): Promise<RelayPosition | undefined>;
     /** The latest submitted message and everything recorded after it. */

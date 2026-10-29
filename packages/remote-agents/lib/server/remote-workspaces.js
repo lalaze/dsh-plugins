@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { RemoteError, remotePath } from './domain.js';
-import { dshHome, sameEndpoint, sshEndpoint } from './workspace-access.js';
+import { RemoteError, remotePath, sharesSessions } from './domain.js';
+import { dshHome, sameEndpoint, sshEndpoint, under } from './workspace-access.js';
 /** dsh-remote's anchor format: either plugin finds and reuses the other's workspace folders. */
 const META = '.dsh-remote-meta.json';
 /** dsh-remote's POSIX normalization: `.` and `..` segments resolve lexically. */
@@ -121,10 +121,72 @@ export class RemoteWorkspaces {
     service;
     access;
     options;
+    /** Offers handed to a client recently; another client open at the same time does not add them again. */
+    offered = new Map();
+    /** Local workspace folders already shared, keyed with the sharing hosts, so each is resolved once. */
+    published = new Set();
     constructor(service, access, options = {}) {
         this.service = service;
         this.access = access;
         this.options = options;
+    }
+    /** Workspaces other DSH instances added on shared hosts, not yet offered here. Their anchors are created. */
+    async shared(signal) {
+        const hosts = this.service.store.hosts().filter(sharesSessions);
+        const lists = await Promise.allSettled(hosts.map(async (host) => {
+            const offers = [];
+            for (const workspace of await this.service.sharedWorkspaces(host.id)) {
+                const key = `${host.id}\0${workspace.path}`;
+                if (Date.now() - (this.offered.get(key) ?? 0) < 120_000)
+                    continue;
+                signal?.throwIfAborted();
+                this.offered.set(key, Date.now());
+                // A folder removed from the machine since it was shared is not offered; one that cannot be checked now is offered later.
+                const listing = await this.service.browse(host.id, workspace.path, { entries: false }).catch((error) => error instanceof Error && /Not a readable directory/.test(error.message) ? 'gone' : undefined);
+                if (listing === 'gone') {
+                    await this.service.seeWorkspaces(host.id, [workspace.path]);
+                    continue;
+                }
+                if (!listing) {
+                    this.offered.delete(key);
+                    continue;
+                }
+                const endpoint = await (this.options.endpoint ?? sshEndpoint)(host.connection, signal);
+                const path = await ensureAnchor(this.options.home ?? dshHome(), endpoint, listing.path).catch(() => undefined);
+                if (!path)
+                    continue;
+                offers.push({ hostId: host.id, host: host.label, remotePath: workspace.path, path, ...(workspace.by ? { by: workspace.by } : {}) });
+            }
+            return offers;
+        }));
+        return lists.flatMap(result => result.status === 'fulfilled' ? result.value : []);
+    }
+    /** Share the remote workspaces this DSH already has, such as ones added before sharing existed. */
+    async publish(paths, signal) {
+        // Only this plugin's anchors; resolving other folders would start processes on every round.
+        const root = join(this.options.home ?? dshHome(), 'remote-workspaces');
+        // Switching sharing on for another host checks every folder again.
+        const sharing = this.service.store.hosts().filter(sharesSessions).map(h => h.id).sort().join(',');
+        if (!sharing)
+            return;
+        for (const path of paths.slice(0, 500)) {
+            const key = `${path}\0${sharing}`;
+            if (this.published.has(key) || !under(root, path))
+                continue;
+            const placement = await this.access.resolve(path, signal).catch(() => undefined);
+            signal?.throwIfAborted();
+            if (!placement)
+                continue;
+            let done = true;
+            for (const hostId of placement.cwd ? placement.hostIds : []) {
+                const host = this.service.store.hosts().find(h => h.id === hostId);
+                if (!host || !sharesSessions(host) || this.service.store.seenWorkspaces(hostId).includes(placement.cwd))
+                    continue;
+                await this.service.shareWorkspace(hostId, placement.cwd).catch(() => { done = false; });
+            }
+            if (done)
+                this.published.add(key);
+        }
     }
     /** Canonicalize the directory on the verified host, then create or reuse its anchor. */
     async create(hostId, path, signal) {
@@ -139,6 +201,8 @@ export class RemoteWorkspaces {
         const placement = await this.access.resolve(local, signal);
         if (placement.cwd !== normalizeRemotePath(remote) || !placement.hostIds.includes(hostId))
             throw new RemoteError('The workspace could not be matched to this machine', 409);
+        // Other DSH instances connected to this machine offer it too.
+        void this.service.shareWorkspace(hostId, placement.cwd).catch(() => { });
         return { hostId, path: local, remotePath: remote };
     }
 }

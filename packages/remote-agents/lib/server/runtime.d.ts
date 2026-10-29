@@ -49,6 +49,8 @@ export declare class CliSession {
     private stopWaiters;
     constructor(peer: JsonlPeer, task: Task, history: TaskHistory, store: Store, hooks?: SessionHooks, relay?: RelayLink | undefined);
     get alive(): boolean;
+    /** Disconnected on purpose, leaving the CLI running for DSH to reattach later or for another DSH. */
+    get detached(): boolean;
     /** A turn, approval or message admission is in progress. */
     get busy(): boolean;
     /** Only sessions that can be resumed later may be closed to free a connection slot. */

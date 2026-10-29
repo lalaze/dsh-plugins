@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { connectionInput, SshBackend } from './backend.js';
 import { readSshConfigHosts } from './ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from './domain.js';
-import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, taskInput } from './domain.js';
+import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput } from './domain.js';
 export class RemoteAgentsService {
     store;
     readSshConfig;
@@ -31,7 +31,9 @@ export class RemoteAgentsService {
     hosts() {
         return this.store.hosts().map(({ password, catalog, ...host }) => {
             const enabled = enabledProvidersOf(host), providers = catalog?.providers.filter(p => enabled.includes(p.id)) ?? [];
-            return { ...host, enabledProviders: enabled, status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
+            // An unreachable host already reports its own error.
+            const connection = this.connections.get(host.id), shareError = sharesSessions(host) && connection?.status === 'connected' ? connection.backend.sharingError?.() : undefined;
+            return { ...host, enabledProviders: enabled, share: sharesSessions(host), ...(shareError ? { shareError: this.safeError(shareError) } : {}), status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
                 ...(!enabled.length ? { modelCount: 0 } : {}),
                 ...(catalog ? { modelsCheckedAt: catalog.checkedAt, modelCount: providers.filter(p => p.status === 'ready').reduce((n, p) => n + p.models.length, 0),
                     providerErrors: providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) };
@@ -43,8 +45,12 @@ export class RemoteAgentsService {
      * Reattach persistent CLIs after a restart and finish queued relay cleanups. Runs in the
      * background: hosts may be offline, and their sessions keep reconnecting until they return.
      */
-    resume() {
-        const tasks = this.store.tasks(t => !!t.relay);
+    resume(hostId) {
+        const tasks = this.store.tasks(t => !!t.relay && (!hostId || t.hostId === hostId));
+        // Sharing hosts list the sessions other DSH instances started, whether or not this one has any.
+        for (const host of this.store.hosts())
+            if (!this.closed && (!hostId || host.id === hostId))
+                this.connection(host.id).backend.startSharing?.();
         return Promise.allSettled([
             ...tasks.map(task => this.serial(task.id, async () => {
                 const backend = this.connection(task.hostId).backend;
@@ -55,7 +61,7 @@ export class RemoteAgentsService {
                 // Interrupted before its native session existed: nothing can be resumed, so remove it.
                 await backend.detach(task);
             }).catch(error => this.updateTask(task.id, next => { next.error = this.safeError(error); }).catch(() => { }))),
-            ...this.store.hosts().map(host => this.closed ? undefined : this.connection(host.id).backend.cleanup?.()),
+            ...this.store.hosts().filter(host => !hostId || host.id === hostId).map(host => this.closed ? undefined : this.connection(host.id).backend.cleanup?.()),
         ]).then(() => { });
     }
     onCatalogChange(listener) { this.catalogListeners.add(listener); return () => this.catalogListeners.delete(listener); }
@@ -174,6 +180,7 @@ export class RemoteAgentsService {
                         });
                     current.status = 'connected';
                     current.error = undefined;
+                    current.backend.startSharing?.();
                 })();
             }
             await current.ready;
@@ -218,6 +225,7 @@ export class RemoteAgentsService {
                             : live?.status === 'closed' && resumable === false ? 'closed' : 'idle';
         const error = status === 'error' ? live?.lastError ?? task.error ?? 'Starting this agent was interrupted. Retry to finish starting it.'
             : status === 'closed' || (status === 'idle' && live?.lastError) ? live?.lastError : undefined;
+        const controller = this.closed ? undefined : this.connections.get(task.hostId)?.backend.controller?.(task.id);
         return {
             id: task.id, hostId: task.hostId, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model,
             ...(task.chat ? { chatSessionId: task.chat.sessionId } : {}),
@@ -227,6 +235,7 @@ export class RemoteAgentsService {
             archived: task.archived === true, delegated: task.origin === 'dsh', started: !!task.agentId, attached: !!live && live.status !== 'closed', status, pendingPermissions: pending,
             ...(error ? { error } : {}), ...(resumable !== undefined ? { resumable } : {}), ...(task.native?.sessionId ? { nativeSessionId: task.native.sessionId } : {}),
             ...(live?.persistent ? { persistent: true } : {}), ...(live?.reconnecting && live.status !== 'closed' ? { reconnecting: true } : {}),
+            ...(task.shared?.imported && task.shared.creator ? { creator: task.shared.creator } : {}), ...(controller ? { controller } : {}),
         };
     }
     async summary(id) { const task = this.task(id); return this.summarize(task, await this.live(task)); }
@@ -262,13 +271,23 @@ export class RemoteAgentsService {
             return this.discoverHost(host.id);
         return this.snapshot();
     }
+    /** `everywhere` also deletes a shared host's sessions for the other DSH instances. */
     async removeHost(id, options = {}) {
         return this.serial(`catalog:${id}`, async () => {
             this.host(id);
-            // Forget local sessions and output without probing an unreachable SSH host.
+            // Forget local sessions and output without probing an unreachable SSH host. Shared sessions stay on the host
+            // for the other DSH instances, and their CLIs keep running, unless deleted everywhere, which needs the host.
+            const shared = sharesSessions(this.host(id)) && this.store.tasks(t => t.hostId === id).length > 0;
+            if (options.deleteAgents && options.everywhere && shared && !await this.connection(id).backend.sharingReachable?.(10_000)) {
+                throw new RemoteError('Connect to this machine to delete its sessions in every DSH, or remove it from this DSH only.', 409);
+            }
             if (options.deleteAgents)
-                for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id))
-                    await this.delete(task.id);
+                for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id)) {
+                    if (sharesSessions(this.host(id)) && !options.everywhere)
+                        await this.forgetLocal(task.id);
+                    else
+                        await this.delete(task.id);
+                }
             // Give queued relay removals a short chance; an offline host never blocks removing it.
             const queued = this.connections.get(id)?.backend.cleanup?.();
             if (queued)
@@ -282,6 +301,10 @@ export class RemoteAgentsService {
                 state.relayCleanups = state.relayCleanups?.filter(c => c.hostId !== id);
                 if (!state.relayCleanups?.length)
                     delete state.relayCleanups;
+                state.sharedDeletions = state.sharedDeletions?.filter(d => d.hostId !== id);
+                if (!state.sharedDeletions?.length)
+                    delete state.sharedDeletions;
+                delete state.seenWorkspaces?.[id];
             });
             const connection = this.connections.get(id);
             this.connections.delete(id);
@@ -290,6 +313,77 @@ export class RemoteAgentsService {
             this.catalogChanged();
             return this.snapshot();
         });
+    }
+    /** Share this host's sessions and workspaces with other DSH instances, or stop. CLIs keep running either way. */
+    async setHostSharing(hostId, share) {
+        if (typeof share !== 'boolean')
+            throw new RemoteError('Invalid sharing setting');
+        await this.serial(`catalog:${hostId}`, async () => {
+            if (sharesSessions(this.host(hostId)) === share)
+                return;
+            if (!share) {
+                // Sessions started here are withdrawn, so the other DSH instances stop showing them; this DSH keeps them.
+                await this.connection(hostId).backend.withdrawSharing?.(this.store.tasks(t => t.hostId === hostId && !t.shared?.imported).map(t => t.id));
+                // Copies of sessions other DSH instances started are theirs.
+                for (const task of this.store.tasks(t => t.hostId === hostId && !!t.shared?.imported))
+                    await this.forgetLocal(task.id);
+            }
+            await this.store.update(state => {
+                const host = state.hosts.find(h => h.id === hostId);
+                if (!host)
+                    throw new RemoteError('Remote host was removed', 409);
+                if (share)
+                    delete host.share;
+                else
+                    host.share = false;
+                if (!share)
+                    delete state.seenWorkspaces?.[hostId];
+            });
+            // A new backend starts or stops sharing, and reattaches the CLIs the old one released.
+            const connection = this.connections.get(hostId);
+            this.connections.delete(hostId);
+            await connection?.backend.close();
+            void this.resume(hostId);
+        });
+        return this.snapshot();
+    }
+    async forgetLocal(id) {
+        return this.serial(id, async () => {
+            const task = this.task(id), backend = this.connection(task.hostId).backend;
+            if (backend.forgetLocal)
+                await backend.forgetLocal(task);
+            else
+                await backend.forget(task);
+            await this.store.update(state => { state.tasks = state.tasks.filter(t => t.id !== id); });
+        });
+    }
+    /** Remote workspaces other DSH instances added on this host that were not offered to this DSH yet. */
+    async sharedWorkspaces(hostId) {
+        const host = this.host(hostId);
+        if (!sharesSessions(host))
+            return [];
+        const backend = this.connection(hostId).backend;
+        backend.startSharing?.();
+        const seen = new Set(this.store.seenWorkspaces(hostId));
+        return (await backend.sharedWorkspaces?.() ?? []).filter(w => !seen.has(w.path));
+    }
+    /** Offered to DSH: not offered again, even when removed from the sidebar. */
+    async seeWorkspaces(hostId, paths) {
+        this.host(hostId);
+        await this.store.update(state => {
+            const seen = new Set(state.seenWorkspaces?.[hostId] ?? []);
+            for (const path of paths)
+                seen.add(path);
+            (state.seenWorkspaces ??= {})[hostId] = [...seen].slice(-2000);
+        });
+    }
+    /** Record a remote workspace on its host so other DSH instances offer it too. */
+    async shareWorkspace(hostId, path) {
+        if (!sharesSessions(this.host(hostId)))
+            return;
+        await this.connection(hostId).backend.shareWorkspace?.(path);
+        // Only once it reached the host; a failed attempt is repeated later.
+        await this.seeWorkspaces(hostId, [path]);
     }
     async connect(hostId) {
         await this.use(hostId, async () => { });
