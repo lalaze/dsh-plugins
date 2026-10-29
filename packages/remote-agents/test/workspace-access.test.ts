@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { mkdir, writeFile, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { PassThrough } from 'node:stream';
 import { hostname, userInfo } from 'node:os';
 import { Context } from '@deepseek-ai/cordis';
 import * as plugin from '../src/index.js';
 import { fixture } from './fakes.js';
 import { WorkspaceAccess } from '../src/workspace-access.js';
+import { SshBackend } from '../src/backend.js';
 
 test('workspace models match SSH host, user and port and translate placeholder subdirectories', async t => {
   const { directory, store, hostId, service } = await fixture(t);
@@ -76,6 +77,26 @@ test('process-routed workspaces match the saved machine identity and reject loca
   output = [hostname(), userInfo().username, 'local-machine', directory, ''].join('\0');
   assert.deepEqual(await access.resolve('/virtual/workspace'), { hostIds: [] });
   output = 'invalid'; await assert.rejects(access.resolve('/virtual/workspace'), /identity/);
+});
+
+test('plugin startup leaves saved relay sessions and their SSH hosts dormant', async t => {
+  const { directory, service, store, request } = await fixture(t);
+  const agent = await service.create(request());
+  await store.update(state => {
+    const task = state.tasks.find(task => task.id === agent.id)!;
+    task.relay = { id: randomUUID() };
+    task.native = { protocol: 'codex', sessionId: 'saved-native-session', argv: ['codex', 'app-server'], initialSent: true };
+  });
+  await service.close();
+  const restore = t.mock.method(SshBackend.prototype, 'restore', async () => null);
+  const share = t.mock.method(SshBackend.prototype, 'startSharing', () => {});
+  const cleanup = t.mock.method(SshBackend.prototype, 'cleanup', async () => {});
+  const ctx = new Context(); t.after(() => ctx.fiber.dispose());
+  ctx.provide('connection', { fetch: { register() {} } });
+  const mounted = ctx.plugin(plugin, { stateDir: directory }); await mounted.await();
+  assert.equal(restore.mock.callCount(), 0, 'startup does not attach saved CLIs');
+  assert.equal(share.mock.callCount(), 0, 'startup does not connect shared registries');
+  assert.equal(cleanup.mock.callCount(), 0, 'startup does not probe hosts for relay cleanup');
 });
 
 test('the mounted workspace API uses live or persisted session placement and rejects a concurrent switch', async t => {

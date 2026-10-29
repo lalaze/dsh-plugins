@@ -19,6 +19,7 @@ export class FakeRemote {
   receipts = new Map<string, Agent>();
   entries = new Map<string, TimelineEntry[]>();
   answers: { id: string; requestId: string; answer: PermissionAnswer }[] = [];
+  restores: string[] = [];
   catalog = structuredClone(providers);
   home = '/home/builder';
   homeError?: string;
@@ -71,6 +72,12 @@ export class FakeRemote {
       if (!agent) throw new Error('No saved native session');
       if (agent.status === 'closed') agent.status = 'idle';
       return structuredClone(agent);
+    },
+    restore: async task => {
+      this.restores.push(task.id);
+      const agent = this.receipts.get(task.id);
+      if (agent?.status === 'closed') agent.status = 'idle';
+      return structuredClone(agent ?? null);
     },
     agent: async id => structuredClone(this.agents.get(id) ?? null),
     timeline: async (id, cursor, direction = 'before') => this.page(id, cursor, direction),

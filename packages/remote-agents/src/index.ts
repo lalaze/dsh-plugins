@@ -54,9 +54,14 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   // Conversations saved by 0.2.53 and earlier stored a remote tool row out of order, and DSH refuses to reopen them.
   const persistence = ctx.get('sessionPersistence') as { root?: unknown } | undefined;
   const open = (id: string) => !!(ctx.get('sessions') as { get?(id: string): unknown } | undefined)?.get?.(id);
-  void repairStoredSessions(typeof persistence?.root === 'string' ? persistence.root : join(dshHome(), 'sessions'), store.directory, open)
-    .then(paths => { if (paths.length) logger()?.info?.(`Repaired ${paths.length} remote CLI conversation log(s) DSH could not reopen; originals kept in ${join(store.directory, 'session-backups')}`); })
-    .catch(error => logger()?.warn?.(`Remote CLI conversation repair failed: ${String(error)}`));
+  // Let DSH finish opening before a one-time scan competes for filesystem and compression workers.
+  const repairTimer = setTimeout(() => {
+    void repairStoredSessions(typeof persistence?.root === 'string' ? persistence.root : join(dshHome(), 'sessions'), store.directory, open)
+      .then(paths => { if (paths.length) logger()?.info?.(`Repaired ${paths.length} remote CLI conversation log(s) DSH could not reopen; originals kept in ${join(store.directory, 'session-backups')}`); })
+      .catch(error => logger()?.warn?.(`Remote CLI conversation repair failed: ${String(error)}`));
+  }, 2000);
+  repairTimer.unref?.();
+  ctx.effect(() => () => clearTimeout(repairTimer));
   const service = new RemoteAgentsService(store);
   const projects = new ChatProjects(service);
   const workspace = new WorkspaceAccess(() => store.hosts(), { runtime: () => ctx.get('subprocess') as WorkspaceRuntime | undefined });
@@ -90,8 +95,6 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     const task = store.task(t => t.id === taskId);
     if (task) ctx.emit('remote-agents/usage', remoteUsageRecord(task, store.hosts(), usage, turn));
   });
-  // Persistent CLIs kept running while DSH was away; reattach and catch up in the background.
-  const resumed = service.resume();
   ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(service, projects, placement, workspaces, features, sharing) });
   ctx.connection.fetch.register({ path: '/api/remote-agents/files', methods: ['GET', 'POST'], requestBody: 'streaming', fetch: workspaceTransferHandler(files) });
   ctx.inject(['terminalController'], scoped => {
@@ -142,9 +145,9 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     // A model's remembered reasoning effort is its advertised default; DSH reloads the catalog on replace.
     scoped.effect(() => adapter.onModelInfoChange(() => registration.replace(CHAT_PROVIDERS)));
     scoped.effect(() => () => adapter.close());
-    // A response cut off by quitting DSH or reloading the plugin catches up by itself once its CLI is reattached:
-    // when DSH opens the conversation, or right away for conversations already open.
-    const wake = (agent: SyncAgent) => { void resumed.then(() => adapter.sync(agent)).catch(() => {}); };
+    // A response cut off by quitting DSH or reloading the plugin catches up when its conversation opens.
+    // Restore only that conversation: eagerly attaching every saved relay would start an SSH storm on launch.
+    const wake = (agent: SyncAgent) => { void service.resumeConversation(agent.session.id).then(() => adapter.sync(agent)).catch(() => {}); };
     scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
     for (const agent of host.agents.list?.() ?? []) wake(agent);
   });

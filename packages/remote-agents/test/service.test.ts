@@ -88,6 +88,25 @@ test('creation saves titles, discovered modes and the delegation origin', async 
   assert.equal(store.snapshot().tasks[1].origin, 'dsh');
 });
 
+test('opening one conversation restores only its own persistent remote task', async t => {
+  const { service, remote, request, store } = await fixture(t);
+  const first = await service.create(request(), { chat: { sessionId: 'conversation-one', route: 'route-one' } });
+  const second = await service.create(request(), { chat: { sessionId: 'conversation-two', route: 'route-two' } });
+  await store.update(state => {
+    for (const task of state.tasks) {
+      task.relay = { id: randomUUID() };
+      task.native = { protocol: 'codex', sessionId: `native-${task.id}`, argv: ['codex', 'app-server'], initialSent: true };
+    }
+  });
+
+  await service.resumeConversation('conversation-two');
+  assert.deepEqual(remote.restores, [second.id], 'the other saved conversation did not connect');
+  await service.resumeConversation('not-a-remote-conversation');
+  assert.deepEqual(remote.restores, [second.id], 'a local conversation starts no remote recovery');
+  await service.detail(first.id);
+  assert.deepEqual(remote.restores, [second.id, first.id], 'viewing a panel agent restores only that agent');
+});
+
 test('sending to a working agent interrupts its turn, like Paseo; delegated sends can refuse instead', async t => {
   const { service, remote, request } = await fixture(t);
   const agent = await service.create(request()), live = remote.live(agent.id);
