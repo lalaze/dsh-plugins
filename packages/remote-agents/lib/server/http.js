@@ -1,6 +1,6 @@
-import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './domain.js';
-import { ChatProjects } from './chat-projects.js';
-import { workspaceAction } from './workspace-http.js';
+import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './core/domain.js';
+import { ChatProjects } from './chat/projects.js';
+import { workspaceAction } from './workspace/http.js';
 export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };

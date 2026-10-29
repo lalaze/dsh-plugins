@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
-import { type SyncAgent } from './native-chat.js';
-import { type RemoteUsageRecord } from './usage.js';
+import { type RemoteUsageRecord } from './agents/usage.js';
+import type { SyncAgent } from './chat/native-chat.js';
 declare module '@deepseek-ai/cordis' {
     interface Events {
         /** Every finished remote CLI turn: main-chat replies, delegated agents and turns sent from the sessions panel. */
