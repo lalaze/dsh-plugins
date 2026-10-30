@@ -6,7 +6,7 @@ Supports English and Simplified Chinese, following DSH’s language setting with
 
 `dsh-workspace-tags` adds colored tags to the workspaces in the DeepSeek Harness sidebar, a row of tag chips that narrows the sidebar to one tag, and two more **Group by** choices in the sidebar’s view options.
 
-Under the sidebar header, **All** and one chip per tag pick which workspaces the sidebar shows, in every grouping, so tags such as “Work” and “Personal” act as separate spaces. Pick a chip again to go back to All. A chip you are not in shows how many of its sessions need you (waiting for you, or finished and not opened yet), orange when any is waiting. Search still covers every workspace; opening a result from another space switches back to All.
+Under the sidebar header, **All** and one chip per tag pick which workspaces the sidebar shows, in every grouping, so tags such as “Work” and “Personal” act as separate spaces. Pick a chip again to go back to All. A chip you are not in shows a spinner while any of its sessions runs, and how many of its sessions need you (waiting for you, or finished and not opened yet), orange when any is waiting. Search still covers every workspace; opening a result from another space switches back to All.
 
 - **Tag**: one section per tag, in name order, then **Untagged**. A workspace with several tags appears under each of them.
 - **Status**: **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Completed** (a session finished and you have not opened it yet), **Running** (an agent is executing, itself or through a subagent), then **Idle**. A workspace with any running session appears only in **Running**, with all its sessions folded behind **Show more** as in the sidebar; the section badge counts only running sessions. Otherwise a workspace appears in each state its sessions qualify for, listing only the sessions in that state. **Idle** also holds workspaces without sessions, counts workspaces where the others count sessions, and starts folded. Each status has its own icon, and the sections follow live as agents start and stop.
@@ -20,10 +20,14 @@ Build and install:
 ```sh
 pnpm --filter dsh-workspace-tags check
 pnpm --filter dsh-workspace-tags pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.8.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.9.tgz"
 ```
 
 Requires DSH 0.2.1-rc.3 or a later 0.2 release.
+
+## 0.1.9 release notes
+
+- A tag chip you are not in shows a spinner while any session in its space runs, beside its attention badge.
 
 ## 0.1.8 release notes
 
