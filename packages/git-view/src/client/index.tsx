@@ -1,20 +1,21 @@
 import React from 'react';
 import type { LocaleContext } from '@dsh-plugins/i18n';
 import { languageOf } from '@dsh-plugins/file-view/kinds';
-import { Dock } from './chip.js';
 import { installDecorations } from './decorations.js';
 import { DiffTab, fileAddress, sessionFileAddress } from './diff-tab.js';
+import { ComposerBridge } from './dock.js';
 import { installLocale, ui, useLocale } from './i18n.js';
 import { GitArtwork } from './icons.js';
 import { GitPanel } from './panel.js';
 import { cwdOf, rootsInView, setSessions, useCwd, type Sessions } from './sessions.js';
 import { StatusCache } from './status.js';
 import { styles } from './styles.js';
+import { takeOverGitPanel, type ViewSlots } from './takeover.js';
 
 interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
   inject?(services: string[], factory: (scoped: Client) => void): unknown;
-  slots: { inject(name: string, factory: () => unknown): unknown; register(spec: Record<string, unknown>, component: React.FC<any>): unknown };
+  slots: ViewSlots & { inject(name: string, factory: () => unknown): unknown };
 }
 type Definition = Record<string, unknown> & { id: string; kind: string };
 interface Tabs { register(definition: Definition): () => void; candidates?(address: string): readonly unknown[] }
@@ -37,7 +38,7 @@ const POLL_MS = 4000;
 const cache = new StatusCache();
 
 /** The Git view of the conversation the tab belongs to; a changed file opens its diff beside it. */
-function GitTab({ sessionId, openResource }: TabProps & { openResource: OpenResource }) {
+function GitTab({ sessionId, openResource }: { sessionId: string; openResource: OpenResource }) {
   useLocale();
   const cwd = useCwd(sessionId);
   const openDiff = (path: string) => { openResource(sessionFileAddress(sessionId, path), { kind: DIFF_KIND }); return true; };
@@ -58,7 +59,8 @@ export const name = 'dsh-git-view-client';
 export const inject = ['slots', 'locale'];
 /**
  * Git for each conversation's workspace, on this machine or on a Remote Agents remote machine: a Git tab in the right
- * sidebar, a branch button above the composer, diffs of changed files and change marks in file lists.
+ * sidebar, diffs of changed files and change marks in file lists. In Remote Agents workspaces it also stands in for
+ * dsh-git-panel's tab, see takeover.tsx.
  */
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
@@ -108,6 +110,7 @@ export function apply(ctx: Client): void {
       const disposers = [scoped.slots.register({ name: 'sidebar.right.pane.tab', key: GIT_KIND }, Git), scoped.slots.register({ name: 'sidebar.right.pane.tab', key: DIFF_KIND }, Diff)];
       return () => { for (const dispose of disposers) if (typeof dispose === 'function') dispose(); };
     });
+    scoped.slots.inject('conversation.view', () => takeOverGitPanel(scoped.slots, ({ sessionId }) => <GitTab sessionId={sessionId} openResource={openResource} />));
   });
   // DSH's file preview offers the diff among its viewers, also for a file whose changes are not known yet.
   ctx.inject?.(['documentPreviews'], scoped => {
@@ -131,5 +134,5 @@ export function apply(ctx: Client): void {
     scoped.slots.inject('sidebar.right.tab.document', () => scoped.slots.register({ name: 'sidebar.right.tab.document', key: PREVIEW_ID },
       ({ resourceAddress }: { resourceAddress?: string }) => resourceAddress ? <DiffTab key={resourceAddress} address={resourceAddress} cache={cache} /> : null));
   });
-  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'git-view-branch', order: 100 }, Dock));
+  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'git-view-composer', order: 100 }, ComposerBridge));
 }

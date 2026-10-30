@@ -327,31 +327,49 @@ test('change marks follow DSH’s file tree and Remote Agents’ remote list, an
   off();
 });
 
-test('the branch button shows the current branch, switches from its list, and hides outside Git', async () => {
-  const { Dock } = await import('../src/client/chip.js');
-  let current = 'main';
-  routes.summary = () => ({ location: { kind: 'local' }, repo: 'repo', current });
-  routes.branches = () => ({ ...overview(), local: overview().local });
-  routes.switch = body => { current = String(body.branch); return { output: '' }; };
-  await mount(<Dock sessionId="s1" />);
-  const chip = container.querySelector<HTMLButtonElement>('.gv-chip > button')!;
-  assert.equal(chip.textContent, 'main');
-  await click(chip); await settle();
-  assert.deepEqual([...container.querySelectorAll('[role=option]')].map(o => o.textContent), ['main↑1↓2', 'topic']);
-  // Nothing covers the page: a press anywhere else closes the list, a press inside does not.
-  assert.equal(container.querySelector('.gv-chip-backdrop'), null);
-  await act(async () => { container.querySelector('[role=option]')!.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true })); });
-  assert.ok(container.querySelector('.gv-chip-pop'));
-  await act(async () => { document.body.dispatchEvent(new window.MouseEvent('pointerdown', { bubbles: true })); });
-  assert.equal(container.querySelector('.gv-chip-pop'), null);
-  await click(chip); await settle();
-  await click([...container.querySelectorAll('[role=option]')][1]); await settle();
-  assert.equal(requests.find(r => r.action === 'switch')!.branch, 'topic');
-  assert.equal(container.querySelector('.gv-chip > button')!.textContent, 'topic');
-  await act(async () => root!.unmount());
-  routes.summary = () => ({ status: 404, error: 'This folder is not a Git repository', code: 'not-a-repo' });
-  await mount(<Dock sessionId="s1" />);
-  assert.equal(container.querySelector('.gv-chip'), null);
+test('the composer bridge shows nothing and lends the composer to "send to chat"', async () => {
+  const { ComposerBridge } = await import('../src/client/dock.js');
+  let draft = 'draft';
+  const actions = { setDraft: (text: string) => { draft = text; } };
+  await mount(<ComposerBridge sessionId="s1" inputActions={actions} useInput={select => select({ draft })} />);
+  assert.equal(container.innerHTML, '');
+  assert.equal(sendToComposer('s1', 'review'), true);
+  assert.equal(draft, 'draft\n\nreview');
+});
+
+test('in a Remote Agents workspace, dsh-git-panel\'s tab shows this Git view; elsewhere its own', async () => {
+  const { takeOverGitPanel, GIT_PANEL_VIEW } = await import('../src/client/takeover.js');
+  type Entry = { component: React.FC<any>; options: Record<string, unknown> };
+  let entries: Entry[] = [];
+  const listeners = new Set<() => void>(), notify = () => { for (const listener of [...listeners]) listener(); };
+  const slots = {
+    entries: () => entries,
+    subscribe: (_key: string, listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    register: (spec: Record<string, unknown>, component: React.FC<any>) => {
+      const { name: _, ...options } = spec, entry = { component, options };
+      entries = [...entries, entry]; queueMicrotask(notify);
+      return () => { entries = entries.filter(e => e !== entry); queueMicrotask(notify); };
+    },
+  };
+  const label = () => 'Git';
+  const Theirs: React.FC<{ sessionId: string }> = ({ sessionId }) => <p>theirs {sessionId}</p>;
+  const Remote: React.FC<{ sessionId: string }> = ({ sessionId }) => <p>ours {sessionId}</p>;
+  const off = takeOverGitPanel(slots, Remote);
+  assert.equal(entries.length, 0, 'nothing to stand in for without dsh-git-panel');
+  const disposeTheirs = slots.register({ name: 'conversation.view', id: GIT_PANEL_VIEW, order: 30, label }, Theirs);
+  await settle();
+  const ours = entries.find(e => e.component !== Theirs)!;
+  assert.deepEqual(ours.options, { id: GIT_PANEL_VIEW, priority: -1, order: 30, label });
+  sessions({ s1: { cwd: '/repo' }, s2: { cwd: '/home/me/.dsh/remote-workspaces/box/app' } });
+  const View = ours.component;
+  await mount(<><View sessionId="s1" /><View sessionId="s2" /></>);
+  assert.deepEqual([...container.querySelectorAll('p')].map(p => p.textContent), ['theirs s1', 'ours s2']);
+  disposeTheirs(); await settle();
+  assert.equal(entries.length, 0, 'leaves with dsh-git-panel');
+  slots.register({ name: 'conversation.view', id: GIT_PANEL_VIEW, order: 30, label }, Theirs); await settle();
+  assert.equal(entries.length, 2);
+  off();
+  assert.deepEqual(entries.map(e => e.component), [Theirs]);
 });
 
 test('the plugin adds the Git tab with its guide entry and claims only changed text files', async () => {
@@ -378,7 +396,7 @@ test('the plugin adds the Git tab with its guide entry and claims only changed t
   await settle();
   assert.deepEqual(definitions.map(d => d.kind), ['git-view/git', 'git-view/diff']);
   assert.equal((definitions[0].guide as { id: string }[])[0].id, 'git-view');
-  assert.deepEqual(slots, ['git-view/git', 'git-view/diff', 'git-view/preview', 'git-view-branch']);
+  assert.deepEqual(slots, ['git-view/git', 'git-view/diff', 'git-view/preview', 'git-view-composer']);
   // Only beside DSH's own viewers, in their band, so it never becomes the viewer a file opens with.
   assert.deepEqual(previews.map(p => [p.id, p.priority, p.extensions]), [['git-view/preview', 'builtin', ['ts', 'md']]]);
   const canOpen = definitions[1].canOpen as (address: string) => boolean;

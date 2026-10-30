@@ -8,7 +8,7 @@ Reference: [dsh-git-panel 0.1.20, commit 661685f4dc53eae3ccf9d16358911024dcfcde9
 
 | Reference capability | Git View implementation |
 | --- | --- |
-| Branch list/search/status; switch/tracking checkout, pull/fetch/rename/delete/merge; composer branch button | Implemented for local and verified SSH workspaces |
+| Branch list/search/status; switch/tracking checkout, pull/fetch/rename/delete/merge | Implemented for local and verified SSH workspaces |
 | Graph lanes, virtualized rows, remembered column widths, commit details/cherry-pick/revert | Implemented; explicit 300-commit bound |
 | Grouped changes, commit-all/push/stash/pop; per-file stage/unstage/discard/copy/chat actions | Implemented; rename unstaging handles both literal paths |
 | HEAD/worktree split/inline editor, counts/wrap/folds/font/edit controls, original viewer, file decorations | Implemented; staged sidebar patches separately compare index to HEAD |

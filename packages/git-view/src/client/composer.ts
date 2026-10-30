@@ -1,4 +1,4 @@
-/** DSH's composer actions, which the branch button's dock slot receives for its conversation. */
+/** DSH's composer actions, which the composer bridge's dock slot receives for its conversation. */
 export interface InputActions { captureInsertion?(): unknown; insertText?(text: string, span: unknown): boolean; setDraft(text: string): void }
 interface Composer { actions: InputActions; draft(): string }
 const composers = new Map<string, Composer>();
