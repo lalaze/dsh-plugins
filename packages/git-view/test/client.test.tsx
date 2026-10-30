@@ -337,39 +337,71 @@ test('the composer bridge shows nothing and lends the composer to "send to chat"
   assert.equal(draft, 'draft\n\nreview');
 });
 
-test('in a Remote Agents workspace, dsh-git-panel\'s tab shows this Git view; elsewhere its own', async () => {
-  const { takeOverGitPanel, GIT_PANEL_VIEW } = await import('../src/client/takeover.js');
+/** A slot store with DSH's shadow-free entry list and batched change notifications. */
+function fakeSlots() {
   type Entry = { component: React.FC<any>; options: Record<string, unknown> };
-  let entries: Entry[] = [];
-  const listeners = new Set<() => void>(), notify = () => { for (const listener of [...listeners]) listener(); };
-  const slots = {
-    entries: () => entries,
-    subscribe: (_key: string, listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    register: (spec: Record<string, unknown>, component: React.FC<any>) => {
-      const { name: _, ...options } = spec, entry = { component, options };
-      entries = [...entries, entry]; queueMicrotask(notify);
-      return () => { entries = entries.filter(e => e !== entry); queueMicrotask(notify); };
+  const lists = new Map<string, Entry[]>(), listeners = new Map<string, Set<() => void>>();
+  const notify = (key: string) => queueMicrotask(() => { for (const listener of [...listeners.get(key) ?? []]) listener(); });
+  return {
+    entries: (key: string) => lists.get(key) ?? [],
+    subscribe: (key: string, listener: () => void) => {
+      if (!listeners.has(key)) listeners.set(key, new Set());
+      listeners.get(key)!.add(listener); return () => { listeners.get(key)!.delete(listener); };
     },
+    register: (spec: Record<string, unknown>, component: React.FC<any>) => {
+      const { name, ...options } = spec, key = String(name), entry = { component, options };
+      lists.set(key, [...lists.get(key) ?? [], entry]); notify(key);
+      return () => { lists.set(key, (lists.get(key) ?? []).filter(e => e !== entry)); notify(key); };
+    },
+    inject: (_name: string, factory: () => unknown) => factory(),
   };
-  const label = () => 'Git';
+}
+
+test('in a Remote Agents workspace, dsh-git-panel\'s tab shows this Git view; elsewhere its own, with one tab', async () => {
+  const { takeOverGitPanel, GIT_PANEL_VIEW } = await import('../src/client/takeover.js');
+  const slots = fakeSlots(), present: boolean[] = [];
   const Theirs: React.FC<{ sessionId: string }> = ({ sessionId }) => <p>theirs {sessionId}</p>;
   const Remote: React.FC<{ sessionId: string }> = ({ sessionId }) => <p>ours {sessionId}</p>;
-  const off = takeOverGitPanel(slots, Remote);
-  assert.equal(entries.length, 0, 'nothing to stand in for without dsh-git-panel');
-  const disposeTheirs = slots.register({ name: 'conversation.view', id: GIT_PANEL_VIEW, order: 30, label }, Theirs);
+  const off = takeOverGitPanel(slots, 'conversation.view', entry => entry.options.id === GIT_PANEL_VIEW, Remote, value => present.push(value));
+  const disposeTheirs = slots.register({ name: 'conversation.view', id: GIT_PANEL_VIEW, order: 30 }, Theirs);
   await settle();
-  const ours = entries.find(e => e.component !== Theirs)!;
-  assert.deepEqual(ours.options, { id: GIT_PANEL_VIEW, priority: -1, order: 30, label });
+  // DSH lists every entry as a tab, so the view keeps its single entry.
+  const [entry] = slots.entries('conversation.view');
+  assert.equal(slots.entries('conversation.view').length, 1);
+  assert.notEqual(entry.component, Theirs);
+  assert.deepEqual(present, [true]);
   sessions({ s1: { cwd: '/repo' }, s2: { cwd: '/home/me/.dsh/remote-workspaces/box/app' } });
-  const View = ours.component;
+  const View = entry.component;
   await mount(<><View sessionId="s1" /><View sessionId="s2" /></>);
   assert.deepEqual([...container.querySelectorAll('p')].map(p => p.textContent), ['theirs s1', 'ours s2']);
-  disposeTheirs(); await settle();
-  assert.equal(entries.length, 0, 'leaves with dsh-git-panel');
-  slots.register({ name: 'conversation.view', id: GIT_PANEL_VIEW, order: 30, label }, Theirs); await settle();
-  assert.equal(entries.length, 2);
   off();
-  assert.deepEqual(entries.map(e => e.component), [Theirs]);
+  assert.equal(entry.component, Theirs, 'gives the entry back its component');
+  disposeTheirs();
+});
+
+test('dsh-git-panel\'s sidebar tab replaces this plugin\'s own while it is installed', async () => {
+  const client = await import('../src/client/index.js');
+  const { GIT_PANEL_TAB } = await import('../src/client/takeover.js');
+  const slots = fakeSlots(), kinds = new Set<string>(), disposers: (() => void)[] = [];
+  const services: Record<string, unknown> = {
+    sessions: { list: { getSnapshot: () => ({ ids: [], byId: {} }), subscribe: () => () => {} } },
+    sidebarRight: { openResource: () => {} },
+    sidebarRightTabs: { register: (definition: { kind: string }) => { kinds.add(definition.kind); return () => { kinds.delete(definition.kind); }; } },
+  };
+  const ctx = {
+    get: (name: string) => services[name], slots,
+    effect: (factory: () => () => void) => { disposers.push(factory()); },
+    inject: (names: string[], factory: (scoped: unknown) => void) => { if (names.every(name => services[name])) factory(ctx); },
+  };
+  client.apply(ctx as never);
+  assert.deepEqual([...kinds].sort(), [client.DIFF_KIND, client.GIT_KIND]);
+  const Theirs: React.FC = () => null;
+  const dispose = slots.register({ name: 'sidebar.right.pane.tab', key: GIT_PANEL_TAB }, Theirs); await settle();
+  assert.deepEqual([...kinds], [client.DIFF_KIND]);
+  assert.notEqual(slots.entries('sidebar.right.pane.tab').find(e => e.options.key === GIT_PANEL_TAB)!.component, Theirs);
+  dispose(); await settle();
+  assert.deepEqual([...kinds].sort(), [client.DIFF_KIND, client.GIT_KIND]);
+  for (const off of disposers) off();
 });
 
 test('the plugin adds the Git tab with its guide entry and claims only changed text files', async () => {

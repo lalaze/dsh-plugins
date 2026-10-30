@@ -10,7 +10,7 @@ import { GitPanel } from './panel.js';
 import { cwdOf, rootsInView, setSessions, useCwd, type Sessions } from './sessions.js';
 import { StatusCache } from './status.js';
 import { styles } from './styles.js';
-import { takeOverGitPanel, type ViewSlots } from './takeover.js';
+import { GIT_PANEL_TAB, GIT_PANEL_VIEW, takeOverGitPanel, type ViewSlots } from './takeover.js';
 
 interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -60,7 +60,7 @@ export const inject = ['slots', 'locale'];
 /**
  * Git for each conversation's workspace, on this machine or on a Remote Agents remote machine: a Git tab in the right
  * sidebar, diffs of changed files and change marks in file lists. In Remote Agents workspaces it also stands in for
- * dsh-git-panel's tab, see takeover.tsx.
+ * dsh-git-panel's views, see takeover.tsx.
  */
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
@@ -91,26 +91,33 @@ export function apply(ctx: Client): void {
         if (typeof kind === 'string' && kind !== DIFF_KIND) return kind;
       }
     };
+    // With dsh-git-panel's own sidebar tab, which shows this view in remote workspaces, the sidebar offers that one only.
+    let mounted = false, gitPanelTab = false, gitTab: (() => void) | undefined;
+    const updateGitTab = () => {
+      const show = mounted && !gitPanelTab;
+      if (show && !gitTab) gitTab = tabs.register({ id: GIT_KIND, kind: GIT_KIND, priority: 'extension', title: () => 'Git',
+        guide: [{ id: 'git-view', order: 12, title: () => ui('Git'), description: () => ui('Branches, commits, changes and conflicts'), icon: GitArtwork }] });
+      else if (!show && gitTab) { gitTab(); gitTab = undefined; }
+    };
     scoped.effect(() => {
-      const disposers = [
-        tabs.register({ id: GIT_KIND, kind: GIT_KIND, priority: 'extension', title: () => 'Git',
-          guide: [{ id: 'git-view', order: 12, title: () => ui('Git'), description: () => ui('Branches, commits, changes and conflicts'), icon: GitArtwork }] }),
-        // A longer pattern than other file viewers', so a changed file opens as its diff.
-        tabs.register({ id: DIFF_KIND, kind: DIFF_KIND, priority: 'extension', patterns: ['dsh-resource://file/session/**'], canOpen: claims,
-          title: (address: string) => `± ${fileAddress(address)?.path.split('/').pop() ?? ui('Changes')}` }),
-      ];
-      return () => { for (const dispose of disposers) dispose(); };
+      mounted = true; updateGitTab();
+      // A longer pattern than other file viewers', so a changed file opens as its diff.
+      const diff = tabs.register({ id: DIFF_KIND, kind: DIFF_KIND, priority: 'extension', patterns: ['dsh-resource://file/session/**'], canOpen: claims,
+        title: (address: string) => `± ${fileAddress(address)?.path.split('/').pop() ?? ui('Changes')}` });
+      return () => { mounted = false; updateGitTab(); diff(); };
     });
+    const Remote: React.FC<{ sessionId: string }> = ({ sessionId }) => <GitTab sessionId={sessionId} openResource={openResource} />;
     scoped.slots.inject('sidebar.right.pane.tab', () => {
       const Git: React.FC<TabProps> = props => <GitTab {...props} openResource={openResource} />;
       const Diff: React.FC<TabProps> = ({ useTabInfo }) => {
         const { tab } = useTabInfo();
         return <DiffTab key={tab.navigation.address} address={tab.navigation.address} revision={tab.navigation.revision} cache={cache} tools={{ ...tab.actions, openResource }} viewers={viewer} />;
       };
-      const disposers = [scoped.slots.register({ name: 'sidebar.right.pane.tab', key: GIT_KIND }, Git), scoped.slots.register({ name: 'sidebar.right.pane.tab', key: DIFF_KIND }, Diff)];
+      const disposers = [scoped.slots.register({ name: 'sidebar.right.pane.tab', key: GIT_KIND }, Git), scoped.slots.register({ name: 'sidebar.right.pane.tab', key: DIFF_KIND }, Diff),
+        takeOverGitPanel(scoped.slots, 'sidebar.right.pane.tab', entry => entry.options.key === GIT_PANEL_TAB, Remote, present => { gitPanelTab = present; updateGitTab(); })];
       return () => { for (const dispose of disposers) if (typeof dispose === 'function') dispose(); };
     });
-    scoped.slots.inject('conversation.view', () => takeOverGitPanel(scoped.slots, ({ sessionId }) => <GitTab sessionId={sessionId} openResource={openResource} />));
+    scoped.slots.inject('conversation.view', () => takeOverGitPanel(scoped.slots, 'conversation.view', entry => entry.options.id === GIT_PANEL_VIEW, Remote));
   });
   // DSH's file preview offers the diff among its viewers, also for a file whose changes are not known yet.
   ctx.inject?.(['documentPreviews'], scoped => {

@@ -14,7 +14,7 @@ From the workspace root, build an installable archive:
 
 ```sh
 pnpm --filter dsh-git-view pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-git-view-0.1.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-git-view-0.1.2.tgz"
 ```
 
 For remote support, also build `pnpm --filter dsh-remote-agents pack:plugin` from this checkout and install that newly built archive into the **same DSH profile**. Choose the archive matching the version in the [Remote Agents manifest](../remote-agents/package.json), not an older download. Follow the [repository installation instructions](../../README.md#installation) when replacing an already installed plugin.
@@ -25,7 +25,7 @@ Restart the updated Web profile and refresh the browser. For Desktop, fully quit
 
 Open a conversation in a Git project and choose **Git** in the right sidebar.
 
-With [`@xbzbing/dsh-git-panel`](https://www.npmjs.com/package/@xbzbing/dsh-git-panel) installed, its **Git** tab beside Chat shows Git View in Remote Agents workspaces. That plugin runs Git only on the DSH host, where a remote workspace is just a local anchor folder, so it would otherwise read whatever repository that folder holds instead of the remote one. Elsewhere its tab shows its own view.
+With [`@xbzbing/dsh-git-panel`](https://www.npmjs.com/package/@xbzbing/dsh-git-panel) installed, its **Git** tab beside Chat and its right sidebar tab show Git View in Remote Agents workspaces. That plugin runs Git only on the DSH host, where a remote workspace is just a local anchor folder, so it would otherwise read whatever repository that folder holds instead of the remote one. Elsewhere its tabs show its own view. While its sidebar tab exists, the sidebar lists that one Git entry instead of Git View's own.
 
 There is no local/remote toggle:
 
