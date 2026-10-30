@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.63:** The `remoteAgentsWorkspaces` service also lists a remote workspace folder and deletes a file read at a given revision, for the Git panel of `dsh-git-view` 0.2.0: its file browser, its file sizes and times, and discarding untracked files in remote workspaces. Nothing else changes. Restart DSH after updating.
+
 **Upgrading from 0.2.62:** Files dragged, picked or pasted into a remote CLI conversation reach the remote CLI. DSH Desktop sends a non-image file as an `@path` reference to the file on your computer rather than uploading it, so the remote CLI was given a path that does not exist on its machine. Each referenced file that exists on the DSH machine is now uploaded to the remote workspace with the message, and the message points at the uploaded copy; references to paths in the remote workspace are left alone. Folders are still sent as paths. Clicking such a file reference opens DSH's own preview of the file on your computer instead of failing with “Path is outside the remote workspace”. Restart DSH and refresh the client after updating.
 
 **0.2.62 — Git workspace integration:** Adds the versioned `remoteAgentsWorkspaces` service used by `dsh-git-view`: bounded Git batches, cancellation and revision-checked file transfers on the verified SSH target. Requests reject a switched target; cancellation remains bound to the original active session/job, even if its conversation changes workspace. Remote file rows expose stable markers for Git status decorations. Install this release together with Git view for remote repositories; restart DSH and refresh the client. Existing remote workspaces and credentials need no migration.

@@ -7,7 +7,7 @@ import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type Workspac
 import { editorHandler } from './editor-route.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { workspaceTransferHandler, type WorkspaceFeatures } from './http.js';
-import type { GitBatch, GitRun, WorkspaceTarget } from './domain.js';
+import type { GitBatch, GitRun, WorkspaceEntry, WorkspaceTarget } from './domain.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
@@ -30,6 +30,10 @@ export interface RemoteAgentsWorkspaces {
   download(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<Buffer>;
   /** Replaces the file read at `revision`, or creates it with null; a file changed since is refused. */
   upload(sessionId: string, path: string, revision: string | null, data: Uint8Array, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{ path: string; revision: string; size: number }>;
+  /** A folder's entries, folders first. Absent before Remote Agents 0.2.64. */
+  list?(sessionId: string, path: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{ path: string; entries: WorkspaceEntry[] }>;
+  /** Deletes the file read at `revision`; a file changed since is refused. Absent before Remote Agents 0.2.64. */
+  remove?(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{ path: string }>;
 }
 export interface Workspaces {
   /** Which saved machines and remote directory a local workspace path stands for. */
@@ -72,6 +76,8 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     download: (id, path, revision, signal = unbounded(), expected) => files.download(id, path, revision, signal, expected),
     upload: async (id, path, revision, data, signal = unbounded(), expected) =>
       await files.upload(id, path, revision, data.length, (async function* () { yield data; })(), signal, expected) as { path: string; revision: string; size: number },
+    list: async (id, path, signal = unbounded(), expected) => await files.operate(id, { op: 'list', path }, signal, expected) as { path: string; entries: WorkspaceEntry[] },
+    remove: async (id, path, revision, signal = unbounded(), expected) => await files.operate(id, { op: 'remove', path, revision }, signal, expected) as { path: string },
   } satisfies RemoteAgentsWorkspaces);
   const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
   await tunnels.open();
