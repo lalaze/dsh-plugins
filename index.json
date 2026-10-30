@@ -215,12 +215,12 @@
       },
       "versions": [
         {
-          "version": "0.1.8",
-          "publishTimestamp": 1793351086,
+          "version": "0.1.9",
+          "publishTimestamp": 1793354533,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "d188d75793d149efa507f6a71365bcbf5117d79b",
+            "commit": "7ccf1afcb21d07d95b1d7eb15af81a9fd6eec8bd",
             "path": "packages/workspace-tags"
           },
           "engines": {
