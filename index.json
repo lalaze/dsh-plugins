@@ -27,12 +27,12 @@
       },
       "versions": [
         {
-          "version": "0.2.59",
-          "publishTimestamp": 1793292046,
+          "version": "0.2.60",
+          "publishTimestamp": 1793329824,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "4f8d427a76c406b5b2e25ac38c51798917157a38",
+            "commit": "08d8c9a47a94292862335731a8df5936215e0bc8",
             "path": "packages/remote-agents"
           },
           "engines": {
@@ -118,8 +118,8 @@
       "name": "dsh-file-editor",
       "title": "DSH File Editor",
       "description": {
-        "en": "Edit code and text files of local workspaces with syntax highlighting, plus Markdown and SVG previews",
-        "zh": "以语法高亮编辑本地工作区的代码和文本文件，并预览 Markdown 与 SVG"
+        "en": "Edit code and text files of local workspaces in VS Code's editor (Monaco), plus Markdown and SVG previews",
+        "zh": "用 VS Code 的编辑器（Monaco）编辑本地工作区的代码和文本文件，并预览 Markdown 与 SVG"
       },
       "author": "lalaze",
       "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/file-editor",
@@ -130,18 +130,18 @@
       "metadata": {
         "keywords": [
           "editor",
-          "codemirror",
+          "monaco",
           "files"
         ]
       },
       "versions": [
         {
-          "version": "0.1.1",
-          "publishTimestamp": 1793292046,
+          "version": "0.2.0",
+          "publishTimestamp": 1793329824,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "4f8d427a76c406b5b2e25ac38c51798917157a38",
+            "commit": "08d8c9a47a94292862335731a8df5936215e0bc8",
             "path": "packages/file-editor"
           },
           "engines": {
