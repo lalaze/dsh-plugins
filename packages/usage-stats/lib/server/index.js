@@ -26,6 +26,31 @@ export async function apply(ctx, config = {}) {
                 return undefined;
             }
         };
+        /**
+         * DSH's workspaces as the sidebar lists them, read per report: a record belongs to the workspace holding its
+         * conversation, or else the one at the directory it recorded. Without DSH's registry, records keep their directory.
+         */
+        const workspaceNames = () => {
+            let list;
+            try {
+                list = ctx.get('workspaceRegistry')?.list?.() ?? [];
+            }
+            catch {
+                return undefined;
+            }
+            if (!list.length)
+                return undefined;
+            const bySession = new Map(), byPath = new Map();
+            for (const workspace of list) {
+                for (const id of workspace.sessionIds)
+                    bySession.set(id, workspace);
+                byPath.set(workspace.path, workspace);
+            }
+            return r => {
+                const workspace = (r.sessionId ? bySession.get(r.sessionId) : undefined) ?? (r.workspace ? byPath.get(r.workspace) : undefined);
+                return workspace && workspace.title ? { key: workspace.id, title: workspace.title } : undefined;
+            };
+        };
         ctx.on('llm/stream', (options, next) => {
             // Remote CLI turns are recorded once from dsh-remote-agents' event, with their machine and remote directory.
             if (options.provider.startsWith('remote-cli-'))
@@ -56,7 +81,7 @@ export async function apply(ctx, config = {}) {
                     const format = url.searchParams.get('format');
                     if (format && format !== 'csv')
                         throw new Error("Unsupported export format");
-                    const data = report(store.snapshot(), parseQuery(url), store.failedWrites);
+                    const data = report(store.snapshot(), parseQuery(url), store.failedWrites, workspaceNames());
                     const headers = { 'Cache-Control': 'no-store' };
                     if (format === 'csv')
                         return new Response(toCsv(data), { headers: { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="dsh-usage.csv"' } });

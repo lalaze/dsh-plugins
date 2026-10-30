@@ -39,14 +39,19 @@ export function vendorOf(r) {
     const model = modelOf(r), provider = r.provider.replace(/^remote-cli-/, '');
     return MODEL_VENDORS.find(([pattern]) => pattern.test(model))?.[1] ?? PROVIDER_VENDORS.find(([pattern]) => pattern.test(provider))?.[1] ?? 'Other';
 }
-/** Group key and label; placeholder labels (empty or `?` keys) are translated by the dashboard. */
-function dimension(r, by) {
+/**
+ * Group key and label; placeholder labels (empty or `?` keys) are translated by the dashboard. A record is grouped under
+ * its DSH workspace when one is known, otherwise under the directory it recorded.
+ */
+function dimension(r, by, workspaces) {
     if (by === 'provider') {
         const label = providerLabel(r.provider);
         return [label, label];
     }
-    if (by === 'workspace')
-        return r.workspace ? [r.workspace, r.workspace] : ['', "No workspace"];
+    if (by === 'workspace') {
+        const named = workspaces?.(r);
+        return named ? [`workspace:${named.key}`, named.title] : r.workspace ? [r.workspace, r.workspace] : ['', "No workspace"];
+    }
     if (by === 'model') {
         const model = modelOf(r);
         return [model, model];
@@ -124,7 +129,7 @@ export function parseQuery(url) {
     }
     return { from, to, groupBy: groupBy, source, provider: filter('provider'), model: filter('model'), sessionId: filter('sessionId'), ...(tzOffset ? { tzOffset } : {}) };
 }
-export function report(records, query, failedWrites = 0) {
+export function report(records, query, failedWrites = 0, workspaces) {
     const totals = emptyTotals();
     const groups = new Map();
     const series = new Map();
@@ -151,7 +156,7 @@ export function report(records, query, failedWrites = 0) {
         accumulate(series, day, day, r);
         accumulate(sources, sourceOf(r.provider), SOURCE_LABELS[sourceOf(r.provider)], r);
         for (const by of DIMENSIONS)
-            accumulate(breakdowns[by], ...dimension(r, by), r);
+            accumulate(breakdowns[by], ...dimension(r, by, workspaces), r);
     }
     const largest = (map) => [...map.values()].sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || b.totals.requests - a.totals.requests || a.label.localeCompare(b.label));
     const by = query.groupBy;

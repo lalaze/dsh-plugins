@@ -76,8 +76,13 @@ export declare function providerLabel(provider: string): string;
 /** Older remote main-chat records kept the chat route as their model. */
 export declare const modelOf: (r: Pick<UsageRecord, "provider" | "model">) => string;
 export declare function vendorOf(r: Pick<UsageRecord, 'provider' | 'model'>): string;
+/** The DSH workspace a record belongs to, as the sidebar names it; `key` is stable across renames. */
+export type WorkspaceNames = (r: UsageRecord) => {
+    key: string;
+    title: string;
+} | undefined;
 export declare function validUsage(value: unknown): value is TokenUsage;
 export declare function validRecord(value: unknown): value is UsageRecord;
 export declare function parseQuery(url: URL): Query;
-export declare function report(records: readonly UsageRecord[], query: Query, failedWrites?: number): UsageReport;
+export declare function report(records: readonly UsageRecord[], query: Query, failedWrites?: number, workspaces?: WorkspaceNames): UsageReport;
 export declare function toCsv(data: UsageReport): string;
