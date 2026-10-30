@@ -505,7 +505,7 @@
   border: none;
   border-radius: var(--dsw-radius-sm);
   /* workspace-tags: lines up with the indented session titles. */
-  padding: 0 12px 0 calc(28px + var(--dsh-session-indent, 0px) + var(--dsh-workspace-indent, 0px));
+  padding: 0 12px 0 calc(28px + var(--dsh-section-indent, 0px) + var(--dsh-session-indent, 0px) + var(--dsh-workspace-indent, 0px));
   background: transparent;
   cursor: pointer;
   text-align: left;

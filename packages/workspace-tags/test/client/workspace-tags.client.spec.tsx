@@ -319,6 +319,22 @@ describe('WorkspaceBrowser with tags', () => {
     expect(sectionSessions().at(-1)).toEqual(['Idle', [['beta', ['b1']]]])
   })
 
+  it('folds a running Workspace\'s other Sessions behind Show more, keeping its running one in view', async () => {
+    const ids = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8']
+    const { runtime } = await mount({
+      useSessions: hook(sessionState(ids.map(id => summary(id, { running: id === 'a7' })))),
+      useSessionStatus: hook(statuses({})),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ids)])),
+    })
+    act(() => { runtime.setMode('status') })
+    // The sidebar's own alpha is folded; the Running section still shows down to a7.
+    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ids.slice(0, 7)]]])
+    fireEvent.click(within(section('Running')).getByRole('button', { name: 'Show 1 more sessions' }))
+    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ids]]])
+    fireEvent.click(within(section('Running')).getByRole('button', { name: 'Show less' }))
+    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ids.slice(0, 7)]]])
+  })
+
   it('unfolds the section that holds a revealed search result', async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView

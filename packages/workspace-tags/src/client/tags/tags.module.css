@@ -153,6 +153,11 @@
 }
 
 /* Sections: the fold header reads like the browser's own section label. */
+.section {
+  /* Workspaces sit one 12px level inside their section's header. */
+  --dsh-section-indent: 12px;
+}
+
 .section + .section {
   margin-top: 10px;
 }

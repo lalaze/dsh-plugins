@@ -570,20 +570,29 @@ function SessionTree({
   const rowKeys: string[] = groups.length === 0 ? ['empty'] : []
   // workspace-tags: `section` marks a Workspace in a Status section, whose Sessions are only
   // those in the section's state: none drag, and a folded row's mark counts only them.
-  // Waiting, Completed and Running pass `toggle`: all their rows show, and they fold on their own.
+  // Waiting, Completed and Running pass `toggle` and fold on their own. Waiting and Completed show all
+  // their rows; Running, which lists every Session of its Workspaces, passes `limit` to keep the
+  // sidebar's "Show more", raised from its own rows since the sidebar's may be folded.
   const renderGroup = (
     group: GroupNode,
     depth: number,
-    section?: { activity: RowActivity | undefined; toggle?: () => void },
+    section?: { activity: RowActivity | undefined; toggle?: () => void; limit?: boolean },
   ): ReactNode => {
     const workspaceId = group.workspaceId
     const children = childrenByParent.get(group.key) ?? []
     const compatibleDrag = workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key)
-    const watermark = sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE
-    const collapsed = section?.toggle === undefined
-      ? watermarkRows(group.sessions, baselines.get(group.key) ?? SESSION_WATERMARK_BASE)
-      : { rows: group.sessions, hiddenCount: 0 }
-    const visible = section?.toggle === undefined ? watermarkRows(group.sessions, watermark) : collapsed
+    const baseline = section?.limit === true
+      ? Math.max(SESSION_WATERMARK_BASE, requiredWatermark(
+        group.sessions,
+        current,
+        group.key === revealGroup ? revealSessionId : undefined,
+      ))
+      : baselines.get(group.key) ?? SESSION_WATERMARK_BASE
+    const stored = sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE
+    const watermark = section?.limit === true ? Math.max(stored, baseline) : stored
+    const limited = section?.toggle === undefined || section.limit === true
+    const collapsed = limited ? watermarkRows(group.sessions, baseline) : { rows: group.sessions, hiddenCount: 0 }
+    const visible = limited ? watermarkRows(group.sessions, watermark) : collapsed
     const sessionsExpanded = visible.hiddenCount === 0
     rowKeys.push(`workspace:${group.key}`)
     const childRows = group.expanded ? children.map(child => renderGroup(child, depth + 1)) : []
@@ -801,6 +810,7 @@ function SessionTree({
             return renderGroup(folded ? { ...group, expanded: false, sessions: [] } : group, 0, {
               activity: rowActivity(group.sessions),
               toggle: () => { toggleSectionFold(foldKey) },
+              limit: section.kind === 'running',
             })
           })}
         </SectionBlock>
