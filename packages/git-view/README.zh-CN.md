@@ -14,7 +14,7 @@
 
 ```sh
 pnpm --filter dsh-git-view pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-git-view-0.1.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-git-view-0.1.2.tgz"
 ```
 
 使用远程功能时，还需在同一份 checkout 中执行 `pnpm --filter dsh-remote-agents pack:plugin`，将新构建的压缩包安装到**同一个 DSH profile**。文件名中的版本以 [Remote Agents 清单](../remote-agents/package.json)为准，不要使用之前下载的旧包。替换已安装插件时请遵循[仓库安装说明](../../README.zh-CN.md#安装插件)。
@@ -25,7 +25,7 @@ Web 端重启更新的 profile 并刷新浏览器。Desktop 端先完全退出 D
 
 在 Git 项目中打开一个会话，从右侧栏选择 **Git**。
 
-如果同时安装了 [`@xbzbing/dsh-git-panel`](https://www.npmjs.com/package/@xbzbing/dsh-git-panel)，在 Remote Agents 工作区中，它在“对话”旁的 **Git** 标签会显示 Git 视图。该插件只在 DSH 宿主机器上运行 Git，而远程工作区在宿主机上只是一个本地锚点目录，否则它读到的是这个目录里的仓库，而不是远程仓库。其他会话中，该标签仍显示它自己的界面。
+如果同时安装了 [`@xbzbing/dsh-git-panel`](https://www.npmjs.com/package/@xbzbing/dsh-git-panel)，在 Remote Agents 工作区中，它在“对话”旁的 **Git** 标签和右侧栏的 Git 标签都会显示 Git 视图。该插件只在 DSH 宿主机器上运行 Git，而远程工作区在宿主机上只是一个本地锚点目录，否则它读到的是这个目录里的仓库，而不是远程仓库。其他会话中，这些标签仍显示它自己的界面。它的右侧栏标签存在时，右侧栏只列出这一个 Git 入口，不再显示 Git 视图自己的入口。
 
 无需切换本地/远程模式：
 
