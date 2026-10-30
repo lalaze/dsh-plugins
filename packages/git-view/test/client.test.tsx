@@ -8,10 +8,8 @@ import type { Root } from 'react-dom/client';
 import { installFakeMonaco, type FakeMonaco } from '@dsh-plugins/file-view/testing';
 import type { Overview } from '../src/domain.js';
 import { parseConflicts, resolveConflict } from '../src/client/conflicts.js';
-import { layoutGraph } from '../src/client/graph.js';
 import { setSessions, type SessionSummary } from '../src/client/sessions.js';
 import { StatusCache, statusLetter } from '../src/client/status.js';
-import { registerComposer, sendToComposer } from '../src/client/composer.js';
 import { zh } from '../src/client/locales.js';
 
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -81,12 +79,8 @@ test('conflict blocks resolve to either side or both, keeping CRLF and ignoring 
   assert.equal(resolveConflict(text, block, 'both'), 'top\r\nours\r\ntheirs\r\nend\r\n');
   assert.deepEqual(parseConflicts('no markers\n'), []);
 });
-test('graph lanes: a merge opens a second lane and the main line keeps the first', () => {
-  const layout = layoutGraph([commit('Merge', 'm', ['a', 'b']), commit('Side', 'b', ['r']), commit('Main', 'a', ['r']), commit('Root', 'r')]);
-  assert.deepEqual(layout.map(c => [c.sha, c.row, c.lane]), [['m', 0, 0], ['b', 1, 1], ['a', 2, 0], ['r', 3, 0]]);
-  assert.deepEqual(['??', 'UU', ' D', 'R ', 'A ', ' M'].map(statusLetter), ['U', 'C', 'D', 'R', 'A', 'M']);
-});
 test('the status cache refreshes a folder through a conversation working in it and reports changes once', async () => {
+  assert.deepEqual(['??', 'UU', ' D', 'R ', 'A ', ' M'].map(statusLetter), ['U', 'C', 'D', 'R', 'A', 'M']);
   const asked: unknown[] = [];
   const cache = new StatusCache(async (_action, data) => { asked.push(data); return { prefix: '', changes: [{ code: ' M', path: 'src/a.ts', local: 'src/a.ts' }] } as never; });
   let notified = 0;
@@ -107,135 +101,6 @@ test('the status cache refreshes a folder through a conversation working in it a
   await outside.ensure('/plain', true);
   assert.equal(failures, 2, 'a forced refresh still asks');
 });
-test('text goes into the conversation’s composer after its draft, as one insertion', () => {
-  const inserted: string[] = [];
-  const off = registerComposer('s1', { actions: { captureInsertion: () => 'span', insertText: (text, span) => { inserted.push(`${span}:${text}`); return true; }, setDraft: () => assert.fail() }, draft: () => 'draft' });
-  assert.equal(sendToComposer('s1', 'prompt'), true);
-  assert.deepEqual(inserted, ['span:\n\nprompt']);
-  off();
-  let draft = '';
-  registerComposer('s1', { actions: { setDraft: text => { draft = text; } }, draft: () => '' });
-  sendToComposer('s1', 'only');
-  assert.equal(draft, 'only');
-});
-
-test('the Git view shows branches and changes, commits, stages and opens a changed file’s diff', async () => {
-  const { GitPanel } = await import('../src/client/panel.js');
-  let reloads = 0;
-  routes.overview = () => { reloads++; return overview(); };
-  routes.commit = () => ({ output: '[main 1234567] Fix it' });
-  routes.stage = () => ({ output: '' });
-  routes.status = () => ({ prefix: '', changes: [] });
-  const opened: string[] = [];
-  await mount(<GitPanel sessionId="s1" cwd="/repo" cache={new StatusCache()} openDiff={path => { opened.push(path); return true; }} />);
-  assert.equal(container.querySelector('.gv-repo')!.textContent, 'repo');
-  assert.deepEqual([...container.querySelectorAll('.gv-branch-name')].map(e => e.textContent), ['main', 'topic', 'origin/main']);
-  assert.deepEqual([...container.querySelectorAll('.gv-group-head')].map(e => e.textContent), ['Merge conflicts (1)', 'Staged changes (1)', 'Changes (1)']);
-  assert.ok(container.querySelector('.gv-banner'));
-  await type(container.querySelector<HTMLInputElement>('input[aria-label="Commit message"]')!, 'Fix it');
-  await click(button('Commit')); await settle();
-  const committed = requests.find(r => r.action === 'commit')!;
-  assert.equal(committed.message, 'Fix it'); assert.match(String(committed.requestId), /^[0-9a-f-]{36}$/);
-  assert.equal(container.querySelector('.gv-notice')!.textContent, '[main 1234567] Fix it');
-  assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Commit message"]')!.value, '');
-  assert.ok(reloads >= 2, 'the view reloads after a change');
-  const rows = [...container.querySelectorAll<HTMLElement>('.gv-change')];
-  await click(rows[2]);
-  assert.deepEqual(opened, ['src/a.ts']);
-  await click(rows[2].querySelector('[aria-label="Stage"]')!); await settle();
-  assert.equal(requests.find(r => r.action === 'stage')!.path, 'src/a.ts');
-  routes.diff = () => ({ output: '@@ -1,2 +1,2 @@\n a\n-b\n+B\n' });
-  await click(rows[1]); await settle();
-  assert.equal(requests.findLast(r => r.action === 'diff')!.staged, true);
-  await click(rows[2].querySelector('[aria-label="Show the diff here"]')!); await settle();
-  assert.equal(requests.findLast(r => r.action === 'diff')!.staged, false);
-  assert.deepEqual([...container.querySelectorAll('.gv-line')].map(e => e.getAttribute('data-kind')), ['hunk', null, 'del', 'add', null]);
-});
-
-test('a running pull is cancelled with its own request ID, and the result stays with the folder', async () => {
-  const { GitPanel } = await import('../src/client/panel.js');
-  routes.overview = () => overview();
-  let release = () => {};
-  routes.pull = () => new Promise(resolve => { release = () => resolve({ status: 409, error: 'The Git operation was cancelled', code: 'cancelled' }); });
-  routes.cancel = () => { release(); return { ok: true }; };
-  await mount(<GitPanel sessionId="s1" cwd="/repo" cache={new StatusCache()} />);
-  await click(container.querySelector('button[data-kind="behind"]')!); await settle();
-  assert.ok(container.querySelector('.gv-progress'));
-  assert.match(container.querySelector('.gv-notice')!.textContent!, /Running Pull…/);
-  await click(button('Cancel')); await settle();
-  const pull = requests.find(r => r.action === 'pull')!, cancel = requests.find(r => r.action === 'cancel')!;
-  assert.equal(cancel.requestId, pull.requestId);
-  assert.equal(container.querySelector('.gv-notice')!.textContent, 'The Git operation was cancelled');
-  assert.equal(container.querySelector('.gv-progress'), null);
-  // Reopening the tab shows the folder's last message again.
-  await act(async () => root!.unmount());
-  await mount(<GitPanel sessionId="s1" cwd="/repo" cache={new StatusCache()} />);
-  assert.equal(container.querySelector('.gv-notice')!.textContent, 'The Git operation was cancelled');
-});
-
-test('a local HTTPS sign-in failure offers to save a credential and retries; a remote one explains what to set up there', async () => {
-  const { GitPanel } = await import('../src/client/panel.js');
-  routes.overview = () => overview();
-  let pushes = 0;
-  routes.push = () => ++pushes === 1 ? { status: 422, error: "fatal: could not read Username for 'https://git.example.com': terminal prompts disabled", auth: 'https' } : { output: 'pushed' };
-  routes.credentialTarget = () => ({ host: 'git.example.com', username: 'bob' });
-  routes.saveCredential = () => ({ ok: true });
-  await mount(<GitPanel sessionId="s1" cwd="/repo" cache={new StatusCache()} />);
-  await click(button('Push')); await settle();
-  assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Host"]')!.value, 'git.example.com');
-  assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Username"]')!.value, 'bob');
-  await type(container.querySelector<HTMLInputElement>('input[aria-label="Password or access token"]')!, 'token');
-  await click(button('Save and retry')); await settle();
-  assert.deepEqual(requests.find(r => r.action === 'saveCredential'), { action: 'saveCredential', sessionId: 's1', host: 'git.example.com', username: 'bob', password: 'token' });
-  assert.equal(pushes, 2);
-  assert.equal(container.querySelector('.gv-notice')!.textContent, 'pushed');
-  await act(async () => root!.unmount());
-  sessions({ s2: { cwd: '/home/me/.dsh/remote-workspaces/devbox-me-22/app', retainedBy: { mainView: 1 } } });
-  routes.overview = () => overview({ location: { kind: 'remote', host: 'devbox', cwd: '/srv/app' } });
-  routes.push = () => ({ status: 422, error: 'remote: HTTP Basic: Access denied', auth: 'https' });
-  await mount(<GitPanel sessionId="s2" cwd="/home/me/.dsh/remote-workspaces/devbox-me-22/app" cache={new StatusCache()} />);
-  assert.equal(container.querySelector('.gv-host')!.textContent, 'devbox');
-  await click(button('Push')); await settle();
-  assert.equal(container.querySelector('input[aria-label="Host"]'), null, 'remote machines keep their own credentials');
-  assert.match(container.querySelector('.gv-auth')!.textContent!, /Git on devbox could not sign in/);
-});
-
-test('the branch menu renames, deletes and merges; double-clicking a remote branch checks it out', async () => {
-  const { GitPanel } = await import('../src/client/panel.js');
-  routes.overview = () => overview();
-  for (const action of ['rename', 'deleteBranch', 'merge', 'switch', 'deleteRemoteBranch']) routes[action] = () => ({ output: '' });
-  await mount(<GitPanel sessionId="s1" cwd="/repo" cache={new StatusCache()} />);
-  const branch = (name: string) => [...container.querySelectorAll('.gv-branch')].find(b => b.querySelector('.gv-branch-name')!.textContent === name)!;
-  const menu = (name: string) => act(async () => { branch(name).dispatchEvent(new window.MouseEvent('contextmenu', { bubbles: true, clientX: 10, clientY: 10 })); });
-  await menu('topic');
-  await click(button('Rename…'));
-  await type(container.querySelector<HTMLInputElement>('input[aria-label="New branch name"]')!, 'renamed');
-  await act(async () => { container.querySelector('.gv-menu form')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }); await settle();
-  assert.deepEqual(requests.filter(r => r.action === 'rename').map(r => [r.branch, r.to]), [['topic', 'renamed']]);
-  await menu('topic'); await click(button('Merge into the current branch')); await settle();
-  await menu('topic'); await click(button('Delete branch')); await click(button('Delete')); await settle();
-  await menu('origin/main'); await click(button('Delete remote branch')); await click(button('Delete')); await settle();
-  await menu('main');
-  assert.equal(button('Delete branch'), undefined, 'the current branch cannot be deleted');
-  assert.equal(button('Merge into the current branch'), undefined);
-  await click(container.querySelector('.gv-menu-backdrop')!);
-  await act(async () => { branch('origin/main').dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true })); }); await settle();
-  assert.deepEqual(requests.filter(r => ['merge', 'deleteBranch', 'deleteRemoteBranch', 'switch'].includes(String(r.action))).map(r => [r.action, r.branch, r.remote]),
-    [['merge', 'topic', undefined], ['deleteBranch', 'topic', undefined], ['deleteRemoteBranch', 'origin/main', undefined], ['switch', 'origin/main', true]]);
-});
-
-test('changes and conflicts are sent to the conversation’s composer', async () => {
-  const { GitPanel } = await import('../src/client/panel.js');
-  routes.overview = () => overview();
-  const inserted: string[] = [];
-  const off = registerComposer('s1', { actions: { captureInsertion: () => 0, insertText: text => { inserted.push(text); return true; }, setDraft: () => {} }, draft: () => '' });
-  await mount(<GitPanel sessionId="s1" cwd="/repo" cache={new StatusCache()} />);
-  await click(button('Send conflict analysis to chat'));
-  assert.match(inserted[0], /merge conflicts in these files:\n- `src\/conflict\.ts` \(CONFLICT\)\n\nOther changed files: 2\./);
-  assert.equal(container.querySelector('.gv-notice')!.textContent, 'Added to the message box');
-  off();
-});
-
 test('the diff tab compares with HEAD, saves edits over the version read, and refuses a stale save', async () => {
   const { DiffTab } = await import('../src/client/diff-tab.js');
   const opened: unknown[] = [];
@@ -327,17 +192,18 @@ test('change marks follow DSH’s file tree and Remote Agents’ remote list, an
   off();
 });
 
-test('the composer bridge shows nothing and lends the composer to "send to chat"', async () => {
-  const { ComposerBridge } = await import('../src/client/dock.js');
-  let draft = 'draft';
-  const actions = { setDraft: (text: string) => { draft = text; } };
-  await mount(<ComposerBridge sessionId="s1" inputActions={actions} useInput={select => select({ draft })} />);
-  assert.equal(container.innerHTML, '');
-  assert.equal(sendToComposer('s1', 'review'), true);
-  assert.equal(draft, 'draft\n\nreview');
-});
-
-/** A slot store with DSH's shadow-free entry list and batched change notifications. */
+/** DSH's client context as the plugin uses it: services, effects, slots and the locale service of the ported panel. */
+function fakeContext(services: Record<string, unknown>, slots: ReturnType<typeof fakeSlots>) {
+  const disposers: (() => void)[] = [];
+  const ctx = {
+    get: (name: string) => services[name], slots,
+    effect: (factory: () => (() => void) | void) => { const off = factory(); if (off) disposers.push(off); },
+    inject: (names: string[], factory: (scoped: unknown) => void) => { if (names.every(name => services[name])) factory(ctx); },
+    on: () => () => {},
+    locale: { register: () => () => {}, bind: () => (key: string) => key },
+  };
+  return { ctx, dispose: () => { for (const off of disposers.reverse()) off(); } };
+}
 function fakeSlots() {
   type Entry = { component: React.FC<any>; options: Record<string, unknown> };
   const lists = new Map<string, Entry[]>(), listeners = new Map<string, Set<() => void>>();
@@ -357,12 +223,12 @@ function fakeSlots() {
   };
 }
 
-test('in a Remote Agents workspace, dsh-git-panel\'s tab shows this Git view; elsewhere its own, with one tab', async () => {
+test('while dsh-git-panel is installed, its tab shows this panel in every conversation, with one tab', async () => {
   const { takeOverGitPanel, GIT_PANEL_VIEW } = await import('../src/client/takeover.js');
   const slots = fakeSlots(), present: boolean[] = [];
-  const Theirs: React.FC<{ sessionId: string }> = ({ sessionId }) => <p>theirs {sessionId}</p>;
-  const Remote: React.FC<{ sessionId: string }> = ({ sessionId }) => <p>ours {sessionId}</p>;
-  const off = takeOverGitPanel(slots, 'conversation.view', entry => entry.options.id === GIT_PANEL_VIEW, Remote, value => present.push(value));
+  const Theirs: React.FC<{ sessionId?: string }> = ({ sessionId }) => <p>theirs {sessionId}</p>;
+  const Ours: React.FC<{ sessionId?: string }> = ({ sessionId }) => <p>ours {sessionId}</p>;
+  const off = takeOverGitPanel(slots, 'conversation.view', entry => entry.options.id === GIT_PANEL_VIEW, Ours, value => present.push(value));
   const disposeTheirs = slots.register({ name: 'conversation.view', id: GIT_PANEL_VIEW, order: 30 }, Theirs);
   await settle();
   // DSH lists every entry as a tab, so the view keeps its single entry.
@@ -370,38 +236,61 @@ test('in a Remote Agents workspace, dsh-git-panel\'s tab shows this Git view; el
   assert.equal(slots.entries('conversation.view').length, 1);
   assert.notEqual(entry.component, Theirs);
   assert.deepEqual(present, [true]);
-  sessions({ s1: { cwd: '/repo' }, s2: { cwd: '/home/me/.dsh/remote-workspaces/box/app' } });
   const View = entry.component;
   await mount(<><View sessionId="s1" /><View sessionId="s2" /></>);
-  assert.deepEqual([...container.querySelectorAll('p')].map(p => p.textContent), ['theirs s1', 'ours s2']);
+  assert.deepEqual([...container.querySelectorAll('p')].map(p => p.textContent), ['ours s1', 'ours s2']);
   off();
   assert.equal(entry.component, Theirs, 'gives the entry back its component');
   disposeTheirs();
 });
 
-test('dsh-git-panel\'s sidebar tab replaces this plugin\'s own while it is installed', async () => {
+test('the panel registers its tab, sidebar page, marker and settings, and steps aside while dsh-git-panel is installed', async () => {
   const client = await import('../src/client/index.js');
-  const { GIT_PANEL_TAB } = await import('../src/client/takeover.js');
-  const slots = fakeSlots(), kinds = new Set<string>(), disposers: (() => void)[] = [];
+  const { GIT_PANEL_PILL, GIT_PANEL_TAB, GIT_PANEL_VIEW } = await import('../src/client/takeover.js');
+  const slots = fakeSlots(), kinds = new Set<string>();
   const services: Record<string, unknown> = {
     sessions: { list: { getSnapshot: () => ({ ids: [], byId: {} }), subscribe: () => () => {} } },
     sidebarRight: { openResource: () => {} },
     sidebarRightTabs: { register: (definition: { kind: string }) => { kinds.add(definition.kind); return () => { kinds.delete(definition.kind); }; } },
   };
-  const ctx = {
-    get: (name: string) => services[name], slots,
-    effect: (factory: () => () => void) => { disposers.push(factory()); },
-    inject: (names: string[], factory: (scoped: unknown) => void) => { if (names.every(name => services[name])) factory(ctx); },
-  };
+  const { ctx, dispose } = fakeContext(services, slots);
   client.apply(ctx as never);
+  const keys = (slot: string) => slots.entries(slot).map(e => String(e.options.key ?? e.options.id)).sort();
   assert.deepEqual([...kinds].sort(), [client.DIFF_KIND, client.GIT_KIND]);
+  assert.deepEqual(keys('conversation.view'), ['git-view']);
+  assert.deepEqual(keys('conversation.input.left'), ['git-view-pill']);
+  assert.deepEqual(keys('plugins.bundle.config'), ['dsh-git-view']);
+  assert.deepEqual(keys('sidebar.right.pane.tab'), [client.DIFF_KIND, client.GIT_KIND].sort());
+  // dsh-git-panel's entries arrive: they show this panel, and this plugin's own leave.
   const Theirs: React.FC = () => null;
-  const dispose = slots.register({ name: 'sidebar.right.pane.tab', key: GIT_PANEL_TAB }, Theirs); await settle();
+  const off = [slots.register({ name: 'conversation.view', id: GIT_PANEL_VIEW }, Theirs), slots.register({ name: 'sidebar.right.pane.tab', key: GIT_PANEL_TAB }, Theirs),
+    slots.register({ name: 'conversation.input.left', id: GIT_PANEL_PILL }, Theirs)];
+  await settle();
+  assert.deepEqual(keys('conversation.view'), [GIT_PANEL_VIEW]);
+  assert.deepEqual(keys('conversation.input.left'), [GIT_PANEL_PILL]);
   assert.deepEqual([...kinds], [client.DIFF_KIND]);
-  assert.notEqual(slots.entries('sidebar.right.pane.tab').find(e => e.options.key === GIT_PANEL_TAB)!.component, Theirs);
-  dispose(); await settle();
+  for (const slot of ['conversation.view', 'sidebar.right.pane.tab', 'conversation.input.left']) {
+    assert.ok(slots.entries(slot).every(e => e.component !== Theirs), `${slot} shows this panel`);
+  }
+  for (const remove of off) remove();
+  await settle();
+  assert.deepEqual(keys('conversation.view'), ['git-view']);
   assert.deepEqual([...kinds].sort(), [client.DIFF_KIND, client.GIT_KIND]);
-  for (const off of disposers) off();
+  dispose();
+});
+
+test('the panel’s requests go to this plugin’s route with its client header and come back in the panel’s envelope', async () => {
+  const { gitPanelRemoteOf } = await import('../src/gp/client/rpc.js');
+  const sent: { url: string; headers: Record<string, string>; body: unknown }[] = [];
+  (globalThis as { fetch: unknown }).fetch = async (url: string, init: { headers: Record<string, string>; body: string }) => {
+    sent.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+    return Response.json({ ok: true, value: { ok: true, value: { kind: 'branches' } } });
+  };
+  const remote = gitPanelRemoteOf({ get: () => undefined } as never);
+  assert.deepEqual(await remote.query({ sessionId: 's1', query: { kind: 'branches' } } as never), { ok: true, value: { kind: 'branches' } });
+  assert.deepEqual(sent, [{ url: '/api/git-view/gp', headers: { 'X-DSH-Git-View': '1', 'content-type': 'application/json' }, body: { method: 'query', request: { sessionId: 's1', query: { kind: 'branches' } } } }]);
+  (globalThis as { fetch: unknown }).fetch = async () => Response.json({ ok: false, error: { code: 'git-unavailable', message: 'down' } });
+  assert.deepEqual(await remote.snapshot({ sessionId: 's1' }), { ok: false, error: { code: 'git-unavailable', message: 'down' } });
 });
 
 test('the plugin adds the Git tab with its guide entry and claims only changed text files', async () => {
@@ -417,30 +306,25 @@ test('the plugin adds the Git tab with its guide entry and claims only changed t
     },
   };
   routes.status = () => ({ prefix: '', changes: [{ code: ' M', path: 'src/a.ts', local: 'src/a.ts' }, { code: ' M', path: 'logo.png', local: 'logo.png' }] });
-  const disposers: (() => void)[] = [];
-  const ctx = {
-    get: (name: string) => services[name],
-    effect: (factory: () => () => void) => { disposers.push(factory()); },
-    inject: (names: string[], factory: (scoped: unknown) => void) => { if (names.every(name => services[name])) factory(ctx); },
-    slots: { inject: (_name: string, factory: () => unknown) => factory(), register: (spec: Record<string, unknown>) => { slots.push(String(spec.key ?? spec.id)); return () => {}; } },
-  };
+  const fake = fakeSlots(), { ctx, dispose } = fakeContext(services, fake);
   client.apply(ctx as never);
   await settle();
+  for (const name of ['conversation.view', 'sidebar.right.pane.tab', 'sidebar.right.tab.document', 'conversation.input.left']) slots.push(...fake.entries(name).map(e => String(e.options.key ?? e.options.id)));
   assert.deepEqual(definitions.map(d => d.kind), ['git-view/git', 'git-view/diff']);
   assert.equal((definitions[0].guide as { id: string }[])[0].id, 'git-view');
-  assert.deepEqual(slots, ['git-view/git', 'git-view/diff', 'git-view/preview', 'git-view-composer']);
+  assert.deepEqual(slots, ['git-view', 'git-view/git', 'git-view/diff', 'git-view/preview', 'git-view-pill']);
   // Only beside DSH's own viewers, in their band, so it never becomes the viewer a file opens with.
   assert.deepEqual(previews.map(p => [p.id, p.priority, p.extensions]), [['git-view/preview', 'builtin', ['ts', 'md']]]);
   const canOpen = definitions[1].canOpen as (address: string) => boolean;
   assert.equal(canOpen('dsh-resource://file/session/s1/src/a.ts'), true);
   assert.equal(canOpen('dsh-resource://file/session/s1/logo.png'), false, 'images keep DSH’s preview');
   assert.equal(canOpen('dsh-resource://file/session/s1/README.md'), false, 'unchanged files keep their viewer');
-  for (const dispose of disposers) dispose();
+  dispose();
 });
 
 test('explicit diff and ordinary viewers use the public navigator, not kind-dropping tab actions', async () => {
   const client = await import('../src/client/index.js');
-  const opened: unknown[] = [], components = new Map<string, React.ComponentType<any>>(), disposers: (() => void)[] = [];
+  const opened: unknown[] = [];
   const sidebar = { openResource(address: string, options?: Record<string, unknown>) {
     assert.equal(this, sidebar, 'the public service retains its method receiver'); opened.push([address, options]);
   } };
@@ -449,14 +333,8 @@ test('explicit diff and ordinary viewers use the public navigator, not kind-drop
     sidebarRight: sidebar,
     sidebarRightTabs: { register: () => () => {}, candidates: () => [{ kind: client.DIFF_KIND }, { kind: 'text' }] },
   };
-  const ctx = {
-    get: (name: string) => services[name],
-    effect: (factory: () => () => void) => { disposers.push(factory()); },
-    inject: (names: string[], factory: (scope: unknown) => void) => { if (names.every(name => services[name])) factory(ctx); },
-    slots: { inject: (_name: string, factory: () => unknown) => factory(), register: (spec: Record<string, unknown>, component: React.ComponentType<any>) => {
-      components.set(String(spec.key ?? spec.id), component); return () => {};
-    } },
-  };
+  const slots = fakeSlots(), { ctx, dispose } = fakeContext(services, slots);
+  const component = (key: string) => slots.entries('sidebar.right.pane.tab').find(e => e.options.key === key)!.component;
   routes.status = () => ({ prefix: '', changes: [{ code: ' M', path: 'src/a.ts', local: 'src/a.ts' }] });
   routes.overview = () => overview();
   routes.compare = () => ({ location: { kind: 'local' }, path: 'src/a.ts', repoPath: 'src/a.ts', code: ' M',
@@ -466,18 +344,13 @@ test('explicit diff and ordinary viewers use the public navigator, not kind-drop
   const useTabInfo = () => ({ tab: { navigation: { address }, actions: { openResource: () => assert.fail('tab action loses explicit kind') } } });
   client.apply(ctx as never);
   try {
-    const Git = components.get(client.GIT_KIND)!;
-    await mount(<Git sessionId="s1" useTabInfo={useTabInfo} />);
-    await click([...container.querySelectorAll('.gv-change')].find(row => row.textContent?.includes('src/a.ts'))!);
-    assert.deepEqual(opened, [[address, { kind: client.DIFF_KIND }]]);
-    await act(async () => root!.unmount()); root = undefined;
-    const Diff = components.get(client.DIFF_KIND)!;
+    const Diff = component(client.DIFF_KIND);
     await mount(<Diff sessionId="s1" useTabInfo={useTabInfo} />);
     await click(button('Open the file'));
     assert.deepEqual(opened.at(-1), [address, { kind: 'text' }]);
   } finally {
     await act(async () => root?.unmount()); root = undefined;
-    for (const dispose of disposers.reverse()) dispose();
+    dispose();
   }
 });
 

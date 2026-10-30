@@ -1,0 +1,408 @@
+/**
+ * Data hooks backing OverviewTab. Each owns one concern's state + fetch timing,
+ * lifted verbatim from the component so the view layer is a thin composition.
+ * Behavior (generation guards, LRU cache, debounced paging) is unchanged.
+ */
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { queryAs, type GitPanelRemote } from './rpc.js'
+import { DIFF_EXPAND_CONTEXT, type GitBranch, type GitCommit, type GitDiffPayload, type GitFileStat, type GitGraphNode, type GraphCommit, type DiffViewMode } from './types.js'
+import type { DiffMode } from './DiffView.js'
+import { useVisibleRequest } from './use-visible-request.js'
+import { pageVisibility } from './visibility.js'
+import type { QueryKey } from './query-key.js'
+
+const PAGE = 100
+
+export interface BranchTree {
+  current: string | null
+  defaultBranch: string | null
+  local: readonly GitBranch[]
+  remote: readonly GitBranch[]
+  tags: readonly GitBranch[]
+}
+
+export interface HistoryFilter {
+  ref: string | null
+  search: string
+  author: string
+  since: string
+}
+
+type CommitDetail = { commit: GitCommit | null; body: string; stats: readonly GitFileStat[]; insertions: number; deletions: number }
+
+/**
+ * Left column: branch/tag tree + author list. Reloads on `queryKey` (commit
+ * landed / poll) and on mount; a fetch failure surfaces `treeError` with retry.
+ */
+export function useBranchTree(remote: GitPanelRemote, sessionId: string, queryKey: QueryKey, visible = true): {
+  tree: BranchTree | null
+  treeError: boolean
+  authors: readonly string[]
+  reload: () => void
+} {
+  const [tree, setTree] = useState<BranchTree | null>(null)
+  const [treeError, setTreeError] = useState(false)
+  const [authors, setAuthors] = useState<readonly string[]>([])
+
+  const reload = useVisibleRequest([sessionId, ...queryKey], visible, async (isCurrent, canContinue) => {
+    setTreeError(false)
+    const [branchesRes, tagsRes] = await Promise.all([
+      remote.query({ sessionId, query: { kind: 'branches' } }),
+      remote.query({ sessionId, query: { kind: 'tags' } }),
+    ])
+    if (!isCurrent()) return
+    const branches = queryAs(branchesRes, 'branches')
+    const tags = queryAs(tagsRes, 'tags')
+    if (branches === null) { setTreeError(true); return }
+    setTree({
+      current: branches.current,
+      defaultBranch: branches.defaultBranch,
+      local: branches.local,
+      remote: branches.remote,
+      tags: tags?.tags ?? tree?.tags ?? [],
+    })
+    // Secondary queries must not hide successful branches; authors cannot start
+    // after a hide while refs load.
+    if (!canContinue()) return
+    const res = await remote.query({ sessionId, query: { kind: 'authors' } })
+    if (!isCurrent()) return
+    const result = queryAs(res, 'authors')
+    setAuthors(result?.authors ?? [])
+  }, () => setTreeError(true))
+
+  return { tree, treeError, authors, reload }
+}
+
+/** Hidden (non-visible) topology nodes kept across pages. Visible commits never
+ * spend this budget and are never dropped; an over-budget ancestry simply ends
+ * as a shorter boundary in the projection (no extra query is issued to refill). */
+const HIDDEN_TOPOLOGY_CAP = 20000
+
+/**
+ * Merge one page's raw ancestry into the accumulated topology.
+ *
+ * `pageTopology === undefined` means the response carried no topology data at
+ * all; the projection stays undefined and the caller decides what to draw. Page 0
+ * starts a fresh generation (replace); later pages merge by hash.
+ *
+ * Visible commits are authoritative and go in first: the page's own `%P` is the
+ * truth for a commit we actually show, even when the bounded walk reported
+ * different parents for the same hash (shallow boundary, budget truncation) or
+ * dropped the seed entirely. Hidden nodes then fill only what the page does not
+ * own, capped so a long scroll cannot grow the cache without bound.
+ *
+ * For a hidden hash the NEWEST record wins: an earlier page can only see a
+ * shallow boundary (no parents) while a later one has the real links, so a
+ * first-wins rule would freeze the empty record and truncate the path.
+ */
+function mergeTopology(
+  previous: readonly GitGraphNode[] | undefined,
+  pageTopology: readonly GitGraphNode[] | undefined,
+  commits: readonly GraphCommit[],
+): readonly GitGraphNode[] | undefined {
+  if (pageTopology === undefined) return previous
+  const visible = commits.map((commit) => ({ hash: commit.hash, parents: commit.parents }))
+  const visibleHashes = new Set(visible.map((node) => node.hash))
+  // Re-inserting moves a re-seen hash to the tail, so the cap keeps the newest.
+  const hidden = new Map<string, readonly string[]>()
+  for (const node of [...(previous ?? []), ...pageTopology]) {
+    if (visibleHashes.has(node.hash)) continue
+    hidden.delete(node.hash)
+    hidden.set(node.hash, node.parents)
+  }
+  const entries = [...hidden]
+  const kept = entries.length > HIDDEN_TOPOLOGY_CAP ? entries.slice(entries.length - HIDDEN_TOPOLOGY_CAP) : entries
+  return [...visible, ...kept.map(([hash, parents]) => ({ hash, parents }))]
+}
+
+interface HistoryData {
+  readonly commits: readonly GraphCommit[]
+  readonly topology: readonly GitGraphNode[] | undefined
+  readonly total: number
+  readonly appliedFilter: HistoryFilter
+}
+
+/**
+ * Middle column: paged commit history. One effect owns page 0 (keyed on
+ * filter + queryKey) so a filter change and a snapshot advance can't race and
+ * discard each other; `seqRef` drops stale responses, `loadingRef` guards a
+ * double page-append from two scroll events in one frame.
+ *
+ * `onReset` fires only when the *filter* changed (branch / search / author /
+ * date), where the selected commit may have dropped out of the new list. A
+ * content tick reloads page 0 to pick up new commits but preserves the
+ * selection and scroll — otherwise a background poll would wipe the commit the
+ * user is reading.
+ */
+export function useHistory(
+  remote: GitPanelRemote,
+  sessionId: string,
+  filter: HistoryFilter,
+  queryKey: QueryKey,
+  onReset: () => void,
+  visible = true,
+): {
+  commits: readonly GraphCommit[]
+  /** Raw ancestry accumulated across the pages of one generation; undefined when
+   * the responses carried no topology data. */
+  topology: readonly GitGraphNode[] | undefined
+  /** Filter that produced the published rows and topology, not the pending request. */
+  appliedFilter: HistoryFilter
+  total: number
+  loading: boolean
+  listError: boolean
+  hasMore: boolean
+  listRef: React.RefObject<HTMLDivElement>
+  loadMore: () => void
+} {
+  // The layout policy travels with its data, so a pending toolbar filter cannot
+  // reinterpret the previous rows, even when React does not batch state updates.
+  const [history, setHistory] = useState<HistoryData>({ commits: [], topology: undefined, total: 0, appliedFilter: filter })
+  const { commits, topology, total, appliedFilter } = history
+  const [loading, setLoading] = useState(false)
+  const [listError, setListError] = useState(false)
+  const seqRef = useRef(0)
+  const loadingRef = useRef(false)
+  // Pagination merges against the last complete publication, not render timing.
+  const historyRef = useRef(history)
+  const appendReady = useRef(false)
+  const currentPage = useRef<() => boolean>(() => false)
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const loadPage = useCallback(async (skip: number, f: HistoryFilter, isCurrent: () => boolean) => {
+    if (loadingRef.current) return
+    loadingRef.current = true
+    const seq = seqRef.current
+    setLoading(true)
+    setListError(false)
+    const res = await remote.query({
+      sessionId,
+      query: {
+        kind: 'history', limit: PAGE, skip,
+        ...(f.ref ? { ref: f.ref } : {}),
+        ...(f.search ? { search: f.search } : {}),
+        ...(f.author ? { author: f.author } : {}),
+        ...(f.since ? { since: f.since } : {}),
+      },
+    })
+    if (!isCurrent() || seq !== seqRef.current) return
+    loadingRef.current = false
+    setLoading(false)
+    const history = queryAs(res, 'history')
+    if (history === null) { setListError(true); return }
+    const previous = historyRef.current
+    const commits = skip === 0 ? history.commits : [...previous.commits, ...history.commits]
+    const next: HistoryData = {
+      commits,
+      topology: mergeTopology(skip === 0 ? undefined : previous.topology, history.topology, commits),
+      total: history.total,
+      appliedFilter: f,
+    }
+    historyRef.current = next
+    appendReady.current = true
+    setHistory(next)
+  }, [remote, sessionId])
+
+  const prevFilter = useRef(filter)
+  useVisibleRequest([sessionId, ...queryKey, filter.ref, filter.search, filter.author, filter.since], visible, async (isCurrent) => {
+    seqRef.current += 1
+    loadingRef.current = false
+    currentPage.current = isCurrent
+    // A failed replacement may leave old rows visible, but cannot append a page
+    // from the new filter/session to that retained result.
+    appendReady.current = false
+    // Only a changed filter clears selection/scroll; poll and visibility do not.
+    if (prevFilter.current !== filter) {
+      prevFilter.current = filter
+      onReset()
+      if (listRef.current) listRef.current.scrollTop = 0
+    }
+    await loadPage(0, filter, isCurrent)
+  }, () => { loadingRef.current = false; setLoading(false); setListError(true) })
+
+  const hasMore = total < 0 ? true : commits.length < total
+  const loadMore = useCallback(() => {
+    if (!visibleRef.current || !pageVisibility.isVisible() || loadingRef.current || !appendReady.current || !hasMore || !currentPage.current()) return
+    const isCurrent = currentPage.current
+    void loadPage(commits.length, filter, isCurrent).catch(() => {
+      if (!isCurrent()) return
+      loadingRef.current = false
+      setLoading(false)
+      setListError(true)
+    })
+  }, [loadPage, commits.length, filter, hasMore])
+
+  return { commits, topology, appliedFilter, total, loading, listError, hasMore, listRef, loadMore }
+}
+
+/**
+ * Right column + hover card: the selected commit's detail and its changed-file
+ * diffs. Owns an LRU `show` cache (immutable per hash) shared by the detail
+ * pane and the hover card, the full-width file-diff overlay (generation-guarded
+ * + Esc-to-close), and the hover fetch (debounced, unmount-safe).
+ */
+export function useCommitDetail(remote: GitPanelRemote, sessionId: string, defaultDiffView: DiffViewMode, visible = true): {
+  selected: GraphCommit | null
+  detail: CommitDetail | null
+  detailError: boolean
+  select: (commit: GraphCommit) => void
+  /** Replace the selected row object (e.g. after a reload brought fresh refs)
+   *  without refetching detail; no-op unless the hash matches the selection. */
+  resyncSelected: (commit: GraphCommit) => void
+  clearSelection: () => void
+  fileDiff: { path: string; hash: string; shortHash: string } | null
+  /** Diff text + its new-side line count (one query result; the gap logic
+   * needs both, so they are stored and cleared together). */
+  fileDiffData: GitDiffPayload | null
+  fileDiffError: boolean
+  fileDiffMode: DiffMode
+  setFileDiffMode: (m: DiffMode) => void
+  fileDiffExpanded: boolean
+  openFileDiff: (path: string, hash: string, shortHash: string, expand?: boolean) => void
+  closeFileDiff: () => void
+  hover: { commit: GraphCommit; x: number; y: number } | null
+  hoverBody: string | null
+  onHoverEnter: (commit: GraphCommit, x: number, y: number) => void
+  onHoverLeave: () => void
+} {
+  const [selected, setSelected] = useState<GraphCommit | null>(null)
+  const [detail, setDetail] = useState<CommitDetail | null>(null)
+  const [detailError, setDetailError] = useState(false)
+  const [fileDiff, setFileDiff] = useState<{ path: string; hash: string; shortHash: string } | null>(null)
+  const [fileDiffData, setFileDiffData] = useState<GitDiffPayload | null>(null)
+  const [fileDiffError, setFileDiffError] = useState(false)
+  const [fileDiffMode, setFileDiffMode] = useState<DiffMode>(defaultDiffView)
+  const [fileDiffExpanded, setFileDiffExpanded] = useState(false)
+  const fileDiffSeq = useRef(0)
+  const selectedHash = useRef<string | null>(null)
+  const detailCache = useRef(new Map<string, CommitDetail>())
+
+  // Write a commit's detail into the LRU cache, evicting oldest past the cap.
+  // Both the select and hover paths fetch `show`, so both must go through here
+  // — the hover path used to write without eviction and could grow unbounded.
+  const putDetail = useCallback((hash: string, d: CommitDetail) => {
+    const cache = detailCache.current
+    cache.set(hash, d)
+    while (cache.size > 50) {
+      const first = cache.keys().next().value
+      if (first === undefined) break
+      cache.delete(first)
+    }
+  }, [])
+
+  const clearSelection = useCallback(() => {
+    setSelected(null)
+    setDetail(null)
+    selectedHash.current = null
+  }, [])
+
+  // After a history reload (e.g. a tag create/delete bumped the list) the
+  // selected row object is stale — its `refs` no longer reflect the repo. Swap
+  // in the fresh row for the same hash so the detail's tag chips stay correct;
+  // detail body/stats are unaffected (keyed by hash, served from the LRU cache).
+  const resyncSelected = useCallback((commit: GraphCommit) => {
+    if (selectedHash.current !== commit.hash) return
+    setSelected(commit)
+  }, [])
+
+  const select = useCallback(async (commit: GraphCommit) => {
+    selectedHash.current = commit.hash
+    setSelected(commit)
+    setDetailError(false)
+    // Selecting a different commit drops any open file-diff overlay.
+    fileDiffSeq.current += 1
+    setFileDiff(null)
+    setFileDiffData(null)
+    setFileDiffError(false)
+    const cached = detailCache.current.get(commit.hash)
+    if (cached !== undefined) { setDetail(cached); return }
+    setDetail(null)
+    const res = await remote.query({ sessionId, query: { kind: 'show', ref: commit.hash } })
+    if (selectedHash.current !== commit.hash) return
+    const show = queryAs(res, 'show')
+    if (show !== null) {
+      const d = { commit: show.commit, body: show.body, stats: show.stats, insertions: show.insertions, deletions: show.deletions }
+      putDetail(commit.hash, d)
+      setDetail(d)
+    } else {
+      setDetailError(true)
+    }
+  }, [remote, sessionId, putDetail])
+
+  const openFileDiff = useCallback(async (path: string, hash: string, shortHash: string, expand = false) => {
+    const seq = ++fileDiffSeq.current
+    setFileDiff({ path, hash, shortHash })
+    setFileDiffData(null)
+    setFileDiffError(false)
+    setFileDiffExpanded(expand)
+    const res = await remote.query({ sessionId, query: { kind: 'diff', path, base: 'commit', commit: hash, ...(expand ? { context: DIFF_EXPAND_CONTEXT } : {}) } })
+    if (seq !== fileDiffSeq.current) return
+    const diff = queryAs(res, 'diff')
+    if (diff !== null) setFileDiffData({ text: diff.text, newLines: diff.newLines, truncated: diff.truncated })
+    else setFileDiffError(true)
+  }, [remote, sessionId])
+
+  const closeFileDiff = useCallback(() => {
+    fileDiffSeq.current += 1
+    setFileDiff(null)
+    setFileDiffData(null)
+    setFileDiffError(false)
+    setFileDiffExpanded(false)
+  }, [])
+
+  // Esc closes the file-diff modal.
+  useEffect(() => {
+    if (fileDiff === null) return
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') closeFileDiff() }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [fileDiff, closeFileDiff])
+
+  const [hover, setHover] = useState<{ commit: GraphCommit; x: number; y: number } | null>(null)
+  const [hoverBody, setHoverBody] = useState<string | null>(null)
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const hoverHash = useRef<string | null>(null)
+  const visibleRef = useRef(visible)
+  visibleRef.current = visible
+
+  const onHoverEnter = useCallback((commit: GraphCommit, x: number, y: number) => {
+    if (hoverTimer.current !== undefined) clearTimeout(hoverTimer.current)
+    hoverTimer.current = setTimeout(() => {
+      if (!visibleRef.current || !pageVisibility.isVisible()) return
+      hoverHash.current = commit.hash
+      setHover({ commit, x, y })
+      const cached = detailCache.current.get(commit.hash)
+      if (cached !== undefined) { setHoverBody(cached.body); return }
+      setHoverBody(null)
+      void remote.query({ sessionId, query: { kind: 'show', ref: commit.hash } }).then((res) => {
+        if (hoverHash.current !== commit.hash) return
+        const show = queryAs(res, 'show')
+        if (show !== null) {
+          putDetail(commit.hash, { commit: show.commit, body: show.body, stats: show.stats, insertions: show.insertions, deletions: show.deletions })
+          setHoverBody(show.body)
+        } else setHoverBody('')
+      })
+    }, 260)
+  }, [remote, sessionId, putDetail])
+
+  const onHoverLeave = useCallback(() => {
+    if (hoverTimer.current !== undefined) clearTimeout(hoverTimer.current)
+    hoverHash.current = null
+    setHover(null)
+    setHoverBody(null)
+  }, [])
+
+  useEffect(() => { if (!visible) onHoverLeave() }, [visible, onHoverLeave])
+
+  // Clear a pending hover timer on unmount so it can't setState after teardown.
+  useEffect(() => () => { if (hoverTimer.current !== undefined) clearTimeout(hoverTimer.current) }, [])
+
+  return {
+    selected, detail, detailError, select, resyncSelected, clearSelection,
+    fileDiff, fileDiffData, fileDiffError, fileDiffMode, setFileDiffMode, fileDiffExpanded, openFileDiff, closeFileDiff,
+    hover, hoverBody, onHoverEnter, onHoverLeave,
+  }
+}
+

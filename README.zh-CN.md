@@ -10,7 +10,7 @@
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.zh-CN.md) | 在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型 |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.zh-CN.md) | DSH 模型选择器中的提供方分组可折叠，并在各浏览器中记住选择 |
 | `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.zh-CN.md) | 用 VS Code 的编辑器（Monaco）编辑本地工作区的代码和文本文件，并预览 Markdown 与 SVG |
-| `dsh-git-view` | [packages/git-view](packages/git-view/README.zh-CN.md) | 本地/远程工作区的 Git 分支、提交图、改动、Monaco 差异与冲突处理；远程功能需搭配 Remote Agents 0.2.62 或更新版本 |
+| `dsh-git-view` | [packages/git-view](packages/git-view/README.zh-CN.md) | 移植自 dsh-git-panel 的 IDE 风格 Git 面板（分支树与提交图总览、提交与 Amend、文件浏览、AI 生成提交信息、输入框标记），适用于本地与远程工作区，并提供 Monaco 差异与冲突处理；远程功能需搭配 Remote Agents 0.2.62 或更新版本 |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |

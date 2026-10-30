@@ -10,7 +10,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.md) | Model icons and status badges on sidebar sessions, with the exact model in the hover card |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.md) | Collapsible provider groups in DSH's model picker, remembered in each browser |
 | `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.md) | Edit code and text files of local workspaces in VS Code's editor (Monaco), plus Markdown and SVG previews |
-| `dsh-git-view` | [packages/git-view](packages/git-view/README.md) | Git branches, commit graph, changes, Monaco diffs and conflict resolution for local and remote workspaces; remote support requires Remote Agents 0.2.62 or newer |
+| `dsh-git-view` | [packages/git-view](packages/git-view/README.md) | IDE-style Git panel ported from dsh-git-panel (overview with branch tree and commit graph, changes with commit and amend, file browser, AI commit messages, input-bar marker) for local and remote workspaces, with Monaco diffs and conflict resolution; remote support requires Remote Agents 0.2.62 or newer |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.md) | Colored workspace tags, with sidebar grouping by tag or by running status |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |

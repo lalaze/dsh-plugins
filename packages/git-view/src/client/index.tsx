@@ -3,14 +3,11 @@ import type { LocaleContext } from '@dsh-plugins/i18n';
 import { languageOf } from '@dsh-plugins/file-view/kinds';
 import { installDecorations } from './decorations.js';
 import { DiffTab, fileAddress, sessionFileAddress } from './diff-tab.js';
-import { ComposerBridge } from './dock.js';
-import { installLocale, ui, useLocale } from './i18n.js';
-import { GitArtwork } from './icons.js';
-import { GitPanel } from './panel.js';
-import { cwdOf, rootsInView, setSessions, useCwd, type Sessions } from './sessions.js';
+import { installLocale, ui } from './i18n.js';
+import { applyPanel, type ClientCtx } from '../gp/client/index.js';
+import { cwdOf, rootsInView, setSessions, type Sessions } from './sessions.js';
 import { StatusCache } from './status.js';
-import { styles } from './styles.js';
-import { GIT_PANEL_TAB, GIT_PANEL_VIEW, takeOverGitPanel, type ViewSlots } from './takeover.js';
+import { GIT_PANEL_PILL, GIT_PANEL_TAB, GIT_PANEL_VIEW, takeOverGitPanel, type ViewSlots } from './takeover.js';
 
 interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -28,7 +25,7 @@ type OpenResource = (address: string, options?: Record<string, unknown>) => void
 interface SidebarRight { openResource: OpenResource }
 type TabProps = { sessionId: string; useTabInfo(): { tab: { navigation: { address: string; revision?: number }; actions?: { openResource?(address: string, options?: Record<string, unknown>): void } } } };
 
-/** The tab kinds this plugin adds: the Git view, and a changed file's diff. */
+/** The tab kinds this plugin adds: the Git panel (see gp/client/sidebar.ts), and a changed file's diff. */
 export const GIT_KIND = 'git-view/git', DIFF_KIND = 'git-view/diff', PREVIEW_ID = 'git-view/preview';
 /** In DSH's own file preview, the diff is one of the viewers to choose from for these code and text files. */
 const PREVIEW_EXTENSIONS = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'json', 'py', 'rb', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'h', 'cc', 'cpp', 'hpp', 'cs', 'php', 'dart', 'lua', 'pl', 'r',
@@ -37,15 +34,6 @@ const PREVIEW_EXTENSIONS = ['ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'json', 'py'
 const POLL_MS = 4000;
 const cache = new StatusCache();
 
-/** The Git view of the conversation the tab belongs to; a changed file opens its diff beside it. */
-function GitTab({ sessionId, openResource }: { sessionId: string; openResource: OpenResource }) {
-  useLocale();
-  const cwd = useCwd(sessionId);
-  const openDiff = (path: string) => { openResource(sessionFileAddress(sessionId, path), { kind: DIFF_KIND }); return true; };
-  return <><style>{styles}</style>{cwd
-    ? <GitPanel key={`${sessionId}\0${cwd}`} sessionId={sessionId} cwd={cwd} cache={cache} openDiff={openDiff} />
-    : <div className="gv"><div className="gv-head"><span>Git</span></div><p className="gv-empty">{ui('Open a conversation in a project folder to see its Git repository')}</p></div>}</>;
-}
 /** A changed file is a diff only while Git reports it changed; DSH's other viewers keep every other file. */
 const claims = (address: string) => {
   const parsed = fileAddress(address), cwd = parsed && cwdOf(parsed.sessionId);
@@ -58,12 +46,14 @@ export const name = 'dsh-git-view-client';
 // The desktop language bridge initializes asynchronously; wait for it before registering UI.
 export const inject = ['slots', 'locale'];
 /**
- * Git for each conversation's workspace, on this machine or on a Remote Agents remote machine: a Git tab in the right
- * sidebar, diffs of changed files and change marks in file lists. In Remote Agents workspaces it also stands in for
- * dsh-git-panel's views, see takeover.tsx.
+ * Git for each conversation's workspace, on this machine or on a Remote Agents remote machine: the Git panel ported from
+ * dsh-git-panel (a tab beside Chat, a right sidebar page and an input-bar marker), diffs of changed files beside the
+ * conversation, and change marks in file lists. While dsh-git-panel is installed, its entries show this panel, see
+ * takeover.tsx.
  */
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
+  const panel = applyPanel(ctx as unknown as ClientCtx);
   ctx.inject?.(['sessions'], scoped => {
     const sessions = (scoped as { get?(name: string): unknown }).get?.('sessions') as Sessions | undefined;
     if (!sessions?.list) return;
@@ -91,33 +81,19 @@ export function apply(ctx: Client): void {
         if (typeof kind === 'string' && kind !== DIFF_KIND) return kind;
       }
     };
-    // With dsh-git-panel's own sidebar tab, which shows this view in remote workspaces, the sidebar offers that one only.
-    let mounted = false, gitPanelTab = false, gitTab: (() => void) | undefined;
-    const updateGitTab = () => {
-      const show = mounted && !gitPanelTab;
-      if (show && !gitTab) gitTab = tabs.register({ id: GIT_KIND, kind: GIT_KIND, priority: 'extension', title: () => 'Git',
-        guide: [{ id: 'git-view', order: 12, title: () => ui('Git'), description: () => ui('Branches, commits, changes and conflicts'), icon: GitArtwork }] });
-      else if (!show && gitTab) { gitTab(); gitTab = undefined; }
-    };
-    scoped.effect(() => {
-      mounted = true; updateGitTab();
+    scoped.effect(() =>
       // A longer pattern than other file viewers', so a changed file opens as its diff.
-      const diff = tabs.register({ id: DIFF_KIND, kind: DIFF_KIND, priority: 'extension', patterns: ['dsh-resource://file/session/**'], canOpen: claims,
-        title: (address: string) => `± ${fileAddress(address)?.path.split('/').pop() ?? ui('Changes')}` });
-      return () => { mounted = false; updateGitTab(); diff(); };
-    });
-    const Remote: React.FC<{ sessionId: string }> = ({ sessionId }) => <GitTab sessionId={sessionId} openResource={openResource} />;
+      tabs.register({ id: DIFF_KIND, kind: DIFF_KIND, priority: 'extension', patterns: ['dsh-resource://file/session/**'], canOpen: claims,
+        title: (address: string) => `± ${fileAddress(address)?.path.split('/').pop() ?? ui('Changes')}` }));
     scoped.slots.inject('sidebar.right.pane.tab', () => {
-      const Git: React.FC<TabProps> = props => <GitTab {...props} openResource={openResource} />;
       const Diff: React.FC<TabProps> = ({ useTabInfo }) => {
         const { tab } = useTabInfo();
         return <DiffTab key={tab.navigation.address} address={tab.navigation.address} revision={tab.navigation.revision} cache={cache} tools={{ ...tab.actions, openResource }} viewers={viewer} />;
       };
-      const disposers = [scoped.slots.register({ name: 'sidebar.right.pane.tab', key: GIT_KIND }, Git), scoped.slots.register({ name: 'sidebar.right.pane.tab', key: DIFF_KIND }, Diff),
-        takeOverGitPanel(scoped.slots, 'sidebar.right.pane.tab', entry => entry.options.key === GIT_PANEL_TAB, Remote, present => { gitPanelTab = present; updateGitTab(); })];
+      const disposers = [scoped.slots.register({ name: 'sidebar.right.pane.tab', key: DIFF_KIND }, Diff),
+        takeOverGitPanel(scoped.slots, 'sidebar.right.pane.tab', entry => entry.options.key === GIT_PANEL_TAB, panel.Sidebar as React.FC<any>)];
       return () => { for (const dispose of disposers) if (typeof dispose === 'function') dispose(); };
     });
-    scoped.slots.inject('conversation.view', () => takeOverGitPanel(scoped.slots, 'conversation.view', entry => entry.options.id === GIT_PANEL_VIEW, Remote));
   });
   // DSH's file preview offers the diff among its viewers, also for a file whose changes are not known yet.
   ctx.inject?.(['documentPreviews'], scoped => {
@@ -141,5 +117,8 @@ export function apply(ctx: Client): void {
     scoped.slots.inject('sidebar.right.tab.document', () => scoped.slots.register({ name: 'sidebar.right.tab.document', key: PREVIEW_ID },
       ({ resourceAddress }: { resourceAddress?: string }) => resourceAddress ? <DiffTab key={resourceAddress} address={resourceAddress} cache={cache} /> : null));
   });
-  ctx.slots.inject('conversation.input.dock', () => ctx.slots.register({ name: 'conversation.input.dock', id: 'git-view-composer', order: 100 }, ComposerBridge));
+  // dsh-git-panel's tab, sidebar page and marker show this panel; while its tab exists, this plugin's own entries step aside.
+  ctx.slots.inject('conversation.view', () => takeOverGitPanel(ctx.slots, 'conversation.view', entry => entry.options.id === GIT_PANEL_VIEW, panel.View,
+    present => panel.setSuppressed(present)));
+  ctx.slots.inject('conversation.input.left', () => takeOverGitPanel(ctx.slots, 'conversation.input.left', entry => entry.options.id === GIT_PANEL_PILL, panel.Pill));
 }

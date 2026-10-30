@@ -1,0 +1,843 @@
+/**
+ * dsh-git-panel host wire data model — the authoritative type source.
+ * The client half (src/client/rpc.ts) reuses these types directly, so the
+ * wire contract has a single definition and cannot drift.
+ */
+
+// ── snapshot ─────────────────────────────────────────────────────────────
+
+/** Diff layout: `unified` = single inline column, `split` = side-by-side. */
+export type DiffViewMode = 'unified' | 'split'
+
+/** Commit-graph line style: `compact` = converge a shared ancestor into one
+ * lane (git log --graph); `parallel` = keep each merge's first parent in its
+ * own lane, converging only at the ancestor (VSCode / GUI tools). */
+export type GraphStyle = 'compact' | 'parallel'
+
+/** Panel font-size step: -1 smaller, 0 default, +1 larger (CSS zoom on .gp-panel). */
+export type FontDelta = -1 | 0 | 1
+
+/**
+ * Where the Git panel is mounted: the conversation's view tab (`tab`), the
+ * right sidebar's page type (`sidebar`), or both (`all`). The client half
+ * resolves the effective mount from this preference and what the running
+ * harness actually offers (ADR-0022).
+ */
+export type GitPanelPlacement = 'all' | 'tab' | 'sidebar'
+
+/**
+ * Diff context (-U) values shared by both halves. `DEFAULT` matches git's own
+ * default and is what the host applies when a request omits `context`.
+ * `MAX` is the host's clamp ceiling. `EXPAND` is what the "expand all" button
+ * asks for: deliberately bounded, because a -U window wide enough to cover a
+ * huge file makes the host emit that whole file as one hunk — megabytes of
+ * text, and past the runner's stdout cap a silently truncated diff. Whatever
+ * the window does not reach stays a collapsed gap the view reveals on demand.
+ */
+export const DIFF_CONTEXT_DEFAULT = 3
+export const DIFF_CONTEXT_MAX = 100000
+export const DIFF_EXPAND_CONTEXT = 2000
+
+/**
+ * Ceiling for the working-file read taken only to count the diff's new-side
+ * lines. That count decides whether hidden context follows the last hunk, so it
+ * is read on every diff query — including the changes tab's poll while a diff is
+ * open — while `file-lines` (the on-demand expansion) stays uncapped. Above this
+ * size the count reports 0 (unknown) and no trailing control is offered.
+ */
+export const DIFF_COUNT_READ_MAX = 8 * 1024 * 1024
+
+/** Hard ceiling for a `fullChanges` snapshot (the client's "expand all"):
+ * well above the default `maxChanges` (1000) so a big-but-sane change set
+ * expands completely, while an absurd one stays bounded on the wire. */
+export const FULL_CHANGES_MAX = 10_000
+
+/** Wire request: the browser sends only session identity, never a path.
+ * `fullChanges` asks the host to skip the `maxChanges` slice (still bounded
+ * by `FULL_CHANGES_MAX`) so the client can expand a truncated list once. */
+export interface GitSnapshotRequest {
+  readonly sessionId: string
+  readonly fullChanges?: boolean
+  /** Which repository to sample (GitRepoEntry.path); absent = the default one,
+   * i.e. what the cwd's own `git rev-parse` resolves. */
+  readonly repo?: string
+}
+
+export type GitSnapshotResult =
+  | { readonly ok: true; readonly value: GitSnapshot }
+  | { readonly ok: false; readonly error: GitFailure }
+
+export type GitFailure =
+  | { readonly code: 'cwd-unavailable'; readonly sessionId: string }
+  | { readonly code: 'not-a-git-repo'; readonly cwd?: string; readonly showInputPill?: boolean }
+  // A repository selector (GitRepoEntry.path) that no longer resolves: outside
+  // the cwd, deleted, not a work-tree top, or bare. The client re-lists the
+  // repositories and falls back to the workspace one.
+  | { readonly code: 'invalid-repo'; readonly cwd?: string }
+  // git not installed / not on PATH: the spawn itself failed, so neither the
+  // work-tree root nor repo membership can be learned from git. `cwd` carries
+  // the session directory (so the browser can still file-browse it); `isGitRepo`
+  // is a filesystem-only probe (`.git` found walking up) telling the client
+  // whether to surface the "git not installed" notice (inside a repo) or
+  // degrade silently to the file browser (outside one).
+  | { readonly code: 'git-unavailable'; readonly detail: string; readonly cwd?: string; readonly isGitRepo?: boolean }
+  | { readonly code: 'timeout' }
+  | { readonly code: 'cancelled' }
+
+/** Host classification for a remote URL (drives the status-bar icon). */
+export type RemoteHostKind = 'github' | 'gitlab' | 'gitee' | 'bitbucket' | 'other'
+
+/** The repository's primary remote (origin, else the first remote). */
+export interface GitRemote {
+  /** Remote name (`origin`, or the first configured remote). */
+  readonly name: string
+  /** The configured fetch URL, verbatim (ssh/scp/https/git form). */
+  readonly url: string
+  /** A browsable https URL for the repo page; null when unparseable. */
+  readonly webUrl: string | null
+  /** The remote hostname (e.g. `github.com`); null when unparseable. */
+  readonly host: string | null
+  /** Known-host classification, for the status-bar icon. */
+  readonly hostKind: RemoteHostKind
+}
+
+/** Why the change list is incomplete: capped at `maxChanges`, or the status
+ * stream itself was clipped (a lossy read drops the head). */
+export type TruncationReason = 'cap' | 'lossy'
+
+/** Immutable snapshot of one repository's status at `checkedAt`. */
+export interface GitSnapshot {
+  /** Realpath of the repository root (work tree top). */
+  readonly root: string
+  /** Current branch name; null when detached. */
+  readonly branch: string | null
+  /** Short HEAD hash; null when the repository has no commits (unborn). */
+  readonly head: string | null
+  /** True when the repository has no commits yet. */
+  readonly unborn: boolean
+  /** staged + modified + untracked > 0. */
+  readonly dirty: boolean
+  readonly staged: number
+  readonly modified: number
+  readonly untracked: number
+  readonly ahead: number
+  readonly behind: number
+  /** True when the current branch tracks an upstream (@{upstream} resolves). */
+  readonly hasUpstream: boolean
+  /** The repository's primary remote; null when none is configured. */
+  readonly remote: GitRemote | null
+  readonly lastCommit: GitCommit | null
+  readonly changes: readonly GitChange[]
+  /** Working-tree statistics for the changes-page header (single source). */
+  readonly stats: WorktreeStats
+  /** True when the change list is incomplete (capped or clipped). */
+  readonly truncated: boolean
+  /** Which limit produced `truncated`; absent on older hosts. */
+  readonly truncatedReason?: TruncationReason
+  /** True when untracked files fell back to git's collapsed `?? dir/` entries
+   * because expanding them would overflow `maxChanges` (or the status stream).
+   * Older hosts never set it. */
+  readonly untrackedCollapsed?: boolean
+  /** Polling interval the client should use after this snapshot (0 = off). */
+  readonly refreshIntervalMs: number
+  /** Whether the input-bar git marker pill should render (user preference). */
+  readonly showInputPill: boolean
+  /** Default diff layout the views open with (user preference). */
+  readonly defaultDiffView: DiffViewMode
+  /** Commit-graph line style (user preference). */
+  readonly graphStyle: GraphStyle
+  /** Panel font-size step (user preference). */
+  readonly fontDelta: FontDelta
+  /** Whether the commit box shows the AI-suggest button (user preference). */
+  readonly suggestEnabled: boolean
+  /** Whether the repository list probes worktrees and nested repositories
+   * (user preference). Absent on older hosts. */
+  readonly detectCheckouts?: boolean
+  /** Whether the file browser follows repository switches (user preference);
+   * absent on older hosts → off, the browser stays at the project root. */
+  readonly filesFollowRepo?: boolean
+  /** SHA-256 of the final business snapshot, excluding checkedAt and itself.
+   * Optional for compatibility with hosts that do not provide fingerprints. */
+  readonly stateFingerprint?: string
+  /** Epoch millis of the snapshot. */
+  readonly checkedAt: number
+}
+
+export interface GitCommit {
+  readonly hash: string
+  readonly shortHash: string
+  readonly subject: string
+  readonly author: string
+  readonly dateIso: string
+}
+
+/** One node of the commit graph's raw ancestry: a full hash and its raw parent
+ * hashes. `parents` is empty for a true root — and equally for a shallow
+ * boundary, which git cannot tell apart from a root. */
+export interface GitGraphNode {
+  readonly hash: string
+  readonly parents: readonly string[]
+}
+
+/** A commit with parent links and ref decorations (graph rendering). */
+export interface GraphCommit extends GitCommit, GitGraphNode {
+  readonly refs: readonly GitRef[]
+}
+
+export interface GitRef {
+  readonly kind: 'branch' | 'remote' | 'tag'
+  readonly name: string
+  /** True for the `HEAD -> name` current branch. */
+  readonly head: boolean
+}
+
+export type GitChangeStatus =
+  | 'added'
+  | 'modified'
+  | 'deleted'
+  | 'renamed'
+  | 'untracked'
+  | 'conflicted'
+  | 'typechange'
+
+/**
+ * One changed-file entry. A mixed porcelain XY (e.g. MM/AM) is split into two
+ * entries: a `staged: true` side (X column) and a `staged: false` side (Y
+ * column), so the UI can list "Staged" vs "Changes" IDE-style.
+ */
+export interface GitChange {
+  readonly path: string
+  readonly status: GitChangeStatus
+  readonly staged: boolean
+  readonly isDirectory: boolean
+}
+
+// ── actions (run endpoint) ────────────────────────────────────────────────
+
+export type GitAction =
+  | { readonly kind: 'stage'; readonly paths: readonly string[] }
+  | { readonly kind: 'stage-all' }
+  | { readonly kind: 'unstage'; readonly paths: readonly string[] }
+  | { readonly kind: 'unstage-all' }
+  | { readonly kind: 'discard'; readonly paths: readonly string[] }
+  // Discard every working-tree change in one action, with no path list on the
+  // wire: the host re-runs status itself and refuses when the status stream was
+  // lossy (it cannot honestly claim "all" over an incomplete read). The
+  // confirmation UI shows the counts the snapshot already carries.
+  | { readonly kind: 'discard-all' }
+  | {
+    readonly kind: 'commit'
+    readonly message: string
+    /** Commit only these paths; absent/empty commits everything staged. */
+    readonly paths?: readonly string[]
+    /** True → git commit --amend (replace the previous commit). */
+    readonly amend?: boolean
+  }
+  // Switch the work tree to `name`. `createFrom` (a remote-tracking ref such as
+  // `origin/x`) means the local branch does not exist yet: it is created from
+  // that ref and set to track it (`git checkout -b x --track origin/x`) instead
+  // of detaching HEAD on the remote ref. `stashMessage` is the dirty-work-tree
+  // path: the local changes are stashed first (labelled with that message) so
+  // the switch can proceed — the UI only offers it on explicit user choice.
+  | {
+    readonly kind: 'branch-checkout'
+    readonly name: string
+    readonly createFrom?: string
+    readonly stashMessage?: string
+  }
+  | { readonly kind: 'fetch' }
+  // Fast-forward-only pull of the current branch from its upstream. `--ff-only`
+  // refuses when local and remote diverged, so it can only ever advance the
+  // branch to the remote tip (never a merge/rebase) — the safe "catch up to
+  // remote" the UI offers when the branch is strictly behind.
+  | { readonly kind: 'pull-ff' }
+  // Push the current branch to its upstream (plain `git push`, never --force).
+  // The UI offers it only when the branch is strictly ahead (ahead>0, behind=0),
+  // so the push can only fast-forward the remote; a diverged branch is refused
+  // by the remote and never offered.
+  | { readonly kind: 'push' }
+  // Publish a branch with no upstream: `git push -u <remote> HEAD` creates the
+  // remote branch (named after the current one) and sets it as upstream. The
+  // remote name comes from the primary-remote the client already holds; the host
+  // revalidates it. Offered only when the branch has no upstream yet.
+  | { readonly kind: 'publish'; readonly remote: string }
+  // Tag write operations (issue #12). `message` non-empty → annotated tag (-a).
+  | { readonly kind: 'tag-create'; readonly name: string; readonly commit: string; readonly message?: string }
+  | { readonly kind: 'tag-delete'; readonly name: string }
+  // Stash operations (issue #12). `index` is the stash stack position (0 = top);
+  // `sha` is the stash commit the client saw, so the host can reject a stale
+  // index (the stack may have shifted under a shared worktree) before acting.
+  | { readonly kind: 'stash-push'; readonly message?: string }
+  | { readonly kind: 'stash-apply'; readonly index: number; readonly sha: string }
+  | { readonly kind: 'stash-pop'; readonly index: number; readonly sha: string }
+  | { readonly kind: 'stash-drop'; readonly index: number; readonly sha: string }
+  // Commit undo operations (issue #12 P2). `revert` appends a reverse commit
+  // (keeps the work tree); `reset` moves the current branch HEAD to `commit`.
+  // `hard` additionally discards every uncommitted change — the one mode that
+  // can wipe in-flight work (incl. the dsh AI's), so the UI gates it hardest.
+  | { readonly kind: 'revert'; readonly commit: string }
+  | { readonly kind: 'reset'; readonly commit: string; readonly mode: ResetMode }
+
+/** `git reset` modes, from least to most destructive. Single source so the
+ * client dialog and the command builder cannot drift. */
+export type ResetMode = 'soft' | 'mixed' | 'hard'
+
+export type GitErrorCode =
+  | 'cwd-unavailable'
+  | 'not-a-git-repo'
+  | 'git-unavailable'
+  | 'invalid-path'
+  | 'invalid-name'
+  | 'invalid-index'
+  | 'git-error'
+  | 'timeout'
+  | 'cancelled'
+  | 'empty-message'
+  // `commit` found nothing to record: nothing staged, and no selected path with
+  // a change. git writes this refusal to stdout (exit 1), not stderr.
+  | 'nothing-to-commit'
+  | 'local-changes-block'
+  // A fast-forward-only pull could not fast-forward (local/remote diverged).
+  | 'not-ff'
+  // A push was rejected by the remote (non-fast-forward: the remote advanced).
+  | 'push-rejected'
+  // A network git command failed on authentication (no usable credentials;
+  // GIT_TERMINAL_PROMPT=0 makes an interactive prompt fail fast instead).
+  | 'auth-failed'
+  // Stash apply/pop left the work tree with merge conflicts (stash kept).
+  | 'conflict'
+  // A revert hit a content conflict and was auto-aborted (work tree restored).
+  | 'revert-conflict'
+  // A revert conflicted AND the auto-abort failed: the repo is still mid-revert.
+  | 'revert-stuck'
+  // Reverting a merge commit needs a mainline parent the panel can't choose.
+  | 'revert-merge'
+  // A named tag / stash entry does not exist.
+  | 'not-found'
+  // The requested working-tree file (or its directory) is gone: deleted or
+  // moved between the directory listing and the read.
+  | 'file-not-found'
+  // The repo selector named a directory this session may not use: outside the
+  // cwd, not a work-tree top (a plain subdirectory of a repository), a bare
+  // repository, or gone between the repository listing and the request. The
+  // client re-lists repositories and falls back to the default one.
+  | 'invalid-repo'
+  // The target branch is checked out in another worktree of the same repo, so
+  // git refuses to switch to it here.
+  | 'branch-in-use'
+  // A stash-then-switch checkout stashed the local changes but the switch still
+  // failed: the work tree changed, and the stash is kept (recoverable).
+  | 'stash-switch-failed'
+  // Another git process holds the index lock (.git/index.lock).
+  | 'index-busy'
+  // Discarding a work-tree path that is itself a repository (a nested repo or a
+  // submodule): a recursive delete would take the whole inner repository with
+  // it, so the action is refused before anything is removed.
+  | 'nested-repo'
+  // Same refusal, but raised inside the remove loop: the repository appeared
+  // after the batch pre-flight and paths earlier in the batch were already
+  // deleted, so the copy must say so instead of implying nothing happened.
+  | 'nested-repo-partial'
+  // `discard-all` re-runs status itself; a lossy read (the status stream was
+  // clipped) means "every change" cannot be proven, so the action is refused
+  // instead of silently discarding a prefix.
+  | 'status-lossy'
+  // A publish was requested but HEAD names no branch to create on the remote:
+  // a detached HEAD, or a repository with no commits yet (unborn).
+  | 'no-branch'
+  // AI commit-message suggestion endpoint.
+  | 'empty-diff'
+  | 'llm-unavailable'
+  | 'llm-error'
+  | 'llm-output'
+  | 'suggest-disabled'
+
+export type GitActionResult =
+  | { readonly ok: true; readonly snapshot: GitSnapshot; readonly output?: string }
+  | { readonly ok: false; readonly error: { readonly code: GitErrorCode; readonly message?: string } }
+
+export interface GitActionRequest {
+  readonly sessionId: string
+  readonly action: GitAction
+  /** Repository the action runs in (GitRepoEntry.path); absent = the default. */
+  readonly repo?: string
+}
+
+// ── queries (read-only endpoint) ──────────────────────────────────────────
+
+/**
+ * True when a history `search` is a commit-hash prefix jump rather than a
+ * message regex: 7–40 hex chars after trimming.
+ */
+export function isHistoryHashSearch(search: string): boolean {
+  return /^[0-9a-fA-F]{7,40}$/.test(search.trim())
+}
+
+/** Whether Git's effective content filters hide commits; hash jumps ignore them.
+ * Shared with clients receiving history from a host that omits topology. */
+export function isHistoryFiltered(query: Pick<Extract<GitQuery, { kind: 'history' }>, 'search' | 'author' | 'since'>): boolean {
+  const search = query.search?.trim() ?? ''
+  return !isHistoryHashSearch(search) && (search !== '' || (query.author ?? '') !== '' || (query.since ?? '') !== '')
+}
+
+/**
+ * One repository a session's cwd offers.
+ *
+ * The wire addresses a repository by 'path', a path *relative to the session
+ * cwd* (POSIX separators, '' = the repository the cwd itself belongs to) —
+ * never an absolute path: the cwd is the only directory the browser may reach,
+ * so a relative path plus the host's containment check is the whole trust
+ * boundary (issue #83).
+ */
+export interface GitRepoEntry {
+  /** cwd-relative path; '' when the cwd belongs to a repository. */
+  readonly path: string
+  /** Absolute realpath of the work-tree top (display only). */
+  readonly root: string
+  /** Display name: the work-tree top's basename. */
+  readonly name: string
+  /** 'workspace' = the cwd's own (or enclosing) repository; 'nested' = a
+   * repository found inside the cwd. */
+  readonly kind: 'workspace' | 'nested'
+  /** Which checkout this row is inside a repository family: `main` = the
+   * primary work tree, `linked` = a worktree of a repository, `repo` = a
+   * repository of its own. Absent on hosts that predate the field. */
+  readonly role?: 'main' | 'linked' | 'repo'
+  /** HEAD branch of this checkout from `git worktree list`; null = detached.
+   * Absent = unknown (an older host, or a repository with no worktree data). */
+  readonly branch?: string | null
+  /** Why the row cannot be chosen: `outside` = the directory sits outside the
+   * session cwd subtree, `stale` = its directory is gone. Absent = selectable. */
+  readonly disabled?: 'outside' | 'stale'
+  /** git's `locked` flag on this worktree (display only). */
+  readonly locked?: boolean
+}
+
+/** Repositories a session's cwd offers, ordered for the switcher. */
+export interface GitRepoList {
+  readonly cwd: string
+  /** The workspace repository first (when the cwd is inside one), then nested
+   * ones by path. Empty outside any repository with no nested repositories. */
+  readonly repos: readonly GitRepoEntry[]
+}
+
+export type GitQuery =
+  | {
+    readonly kind: 'history'
+    readonly limit: number
+    readonly skip: number
+    /** Optional ref filter (branch/remote/tag); absent = --all. */
+    readonly ref?: string
+    /** Text search: 7+ hex chars = hash prefix jump; else message regex (-i -E). */
+    readonly search?: string
+    /** Author filter (--author). */
+    readonly author?: string
+    /** Date lower bound (--since). */
+    readonly since?: string
+  }
+  // Unified-diff context (-U) when the caller does not ask for a specific
+  // window; `DiffView` renders the trailing gap from the reported new-side line
+  // count, so this only controls how much git shows, not what the view decides.
+  | { readonly kind: 'diff'; readonly path: string; readonly base: 'worktree' | 'staged'; readonly context?: number }
+  | { readonly kind: 'diff'; readonly path: string; readonly base: 'commit'; readonly commit: string; readonly context?: number }
+  // On-demand hidden-context expansion: a slice of the post-change file, by
+  // 1-based new-side line numbers. `base`/`commit` mirror the diff request so
+  // the revealed lines come from the exact version the diff compared against.
+  | { readonly kind: 'file-lines'; readonly path: string; readonly base: 'worktree' | 'staged'; readonly start: number; readonly end: number }
+  | { readonly kind: 'file-lines'; readonly path: string; readonly base: 'commit'; readonly commit: string; readonly start: number; readonly end: number }
+  | { readonly kind: 'image-diff'; readonly path: string; readonly base: 'worktree' | 'staged' }
+  | { readonly kind: 'image-diff'; readonly path: string; readonly base: 'commit'; readonly commit: string }
+  // File browser: list one working-tree directory (lazy, one level down), and
+  // read one working-tree file (text slice / image data URL / binary marker).
+  // Both take an in-tree relative path; `''` is the repository root.
+  | { readonly kind: 'dir-list'; readonly path: string }
+  | { readonly kind: 'file-content'; readonly path: string }
+  | { readonly kind: 'show'; readonly ref: string }
+  | { readonly kind: 'branches' }
+  | { readonly kind: 'tags' }
+  | { readonly kind: 'stash-list' }
+  | { readonly kind: 'authors' }
+  | { readonly kind: 'last-commit-message' }
+  | { readonly kind: 'worktree-stats' }
+  // Scope of the incoming fast-forward: diffstat between HEAD and its upstream
+  // (commits / files / +- lines). Local-only (objects already fetched when
+  // behind > 0), so it previews what a pull would bring in.
+  | { readonly kind: 'pull-preview' }
+  // Scope of the outgoing push: diffstat between the upstream and HEAD
+  // (commits / files / +- lines). Local-only, so it previews what a push would
+  // publish. No upstream → hasUpstream:false and zeroed counts.
+  | { readonly kind: 'push-preview' }
+  // Model catalog for the config form. No workspace required — reads ctx.llm only.
+  | { readonly kind: 'model-catalog' }
+  // Nested-repository discovery for the panel's repository switcher. Does not
+  // take a repo (it is what populates the selector), and works outside a
+  // repository too: a workspace that holds several projects is the whole point.
+  | { readonly kind: 'repo-list' }
+
+/** One entry in a `dir-list` result. */
+export interface DirEntry {
+  readonly name: string
+  readonly dir: boolean
+  /** File byte size; absent for directories. */
+  readonly size?: number
+  /** True when Git excludes an untracked item; absent outside a repository. */
+  readonly ignored?: boolean
+}
+
+/** One commit's changed-file line (from --name-status). */
+export interface GitFileStat {
+  readonly path: string
+  readonly status: GitChangeStatus
+}
+
+export interface GitBranch {
+  readonly name: string
+  readonly shortHash: string | null
+  readonly ahead?: number
+  readonly behind?: number
+}
+
+/** One entry in the stash stack (`git stash list`). */
+export interface StashEntry {
+  /** Stack position (0 = most recent). */
+  readonly index: number
+  /** The stash commit SHA — a stable id the index position is not (see run). */
+  readonly sha: string
+  /** The stash message (custom `-m` text, or the auto "WIP on …" subject). */
+  readonly message: string
+  /** Branch the stash was taken on; null when it could not be parsed. */
+  readonly branch: string | null
+  /** Human relative time (e.g. "2 hours ago"). */
+  readonly relTime: string
+}
+
+/** Selectable reasoning effort for one exact model route (ids go straight
+ * into `GenerateOptions.reasoningEffort`). */
+export interface ModelCatalogEffort {
+  readonly id: string
+  readonly name: string
+}
+
+/** One model inside a provider group of the host-level catalog. */
+export interface ModelCatalogModel {
+  readonly id: string
+  readonly name: string
+  /** Adapter-advertised efforts; absent when the model exposes none. */
+  readonly reasoning?: {
+    readonly efforts: readonly ModelCatalogEffort[]
+  }
+}
+
+/** One provider and its successfully listed models. */
+export interface ModelCatalogGroup {
+  readonly id: string
+  readonly name: string
+  readonly models: readonly ModelCatalogModel[]
+}
+
+/** One provider / model whose catalog lookup failed in isolation. */
+export interface ModelCatalogFailure {
+  readonly id: string
+  readonly name: string
+  readonly message: string
+}
+
+/** Working-tree statistics for the changes page header. */
+export interface WorktreeStats {
+  /** Distinct changed-file paths (staged ∪ modified ∪ untracked). */
+  readonly fileCount: number
+  readonly staged: number
+  readonly modified: number
+  readonly untracked: number
+  /** Summed added lines across worktree + index diff (binary skipped). */
+  readonly insertions: number
+  /** Summed deleted lines. */
+  readonly deletions: number
+  /** Max mtime (epoch ms) among changed files; null when none/unavailable. */
+  readonly lastChangeAt: number | null
+  /** HEAD commit time ISO; null when unborn. */
+  readonly headCommittedAt: string | null
+  /**
+   * True when the per-file fan-outs were skipped because the change set was too
+   * large (issue #16): `insertions` then omits untracked lines and
+   * `lastChangeAt` is null. Counts (fileCount/staged/modified/untracked) and
+   * tracked insertions/deletions stay exact.
+   */
+  readonly partial: boolean
+}
+
+export type GitQueryResult =
+  | {
+    readonly kind: 'history'
+    readonly commits: readonly GraphCommit[]
+    readonly total: number
+    /** Raw ancestry for a filtered page: the page's commits plus the ancestors
+     * an effective search/author/since filter hid from the page itself. Absent
+     * when no effective filter is active (or on a hash jump); `[]` means the
+     * bounded auxiliary walk failed, so the graph is incomplete. */
+    readonly topology?: readonly GitGraphNode[]
+  }
+  /**
+   * Unified diff text plus the new-side line count. The count is the fact the
+   * view needs to decide whether hidden context can follow the LAST hunk: git
+   * caps trailing context at -U, so a full trailing run is ambiguous from the
+   * text alone (it may be mid-file, or the file may end exactly there), while
+   * `newLines` makes it provable.
+   *
+   * 0 means "no trailing control is possible, or the count is not trustworthy":
+   * the side does not exist (a deleted file), the read failed or was truncated,
+   * the diff has no hunk at all, or the working file is above
+   * DIFF_COUNT_READ_MAX. The view treats all of those the same way — no
+   * trailing gap rather than a speculative one.
+   *
+   * `truncated` marks the one case where the text itself is incomplete: the
+   * runner dropped output at its collect/spill ceiling, which discards the
+   * *head* of the stream, so `text` is a tail that still parses like a real
+   * diff — the surviving hunks carry git's own line numbers — while the header
+   * and opening hunks are gone and the +/- counts under-report. It is flagged
+   * rather than refused (the partial hunks stay readable), but the view must say
+   * so: it would otherwise present the lost opening as ordinary folded context,
+   * as if the diff were whole.
+   */
+  | { readonly kind: 'diff'; readonly path: string; readonly text: string; readonly newLines: number; readonly truncated?: true }
+  // A slice of a file's post-change content for on-demand context expansion:
+  // `lines` are 1-based new-side numbers `start..end` (clamped to the file);
+  // `eof` marks that `end` reached the last line (no more to reveal below).
+  | { readonly kind: 'file-lines'; readonly path: string; readonly start: number; readonly lines: readonly string[]; readonly eof: boolean }
+  | {
+    /**
+     * Old/new images for a binary image diff, as data URLs. The sides mirror
+     * what the text diff compares: worktree rows read index vs working file,
+     * staged rows read HEAD vs index, commit rows read parent vs commit.
+     */
+    readonly kind: 'image-diff'
+    readonly path: string
+    /** null → the extension is not a browser-renderable image. */
+    readonly mime: string | null
+    /** Pre-change image; absent when that side does not exist (added/untracked/root). */
+    readonly old?: string
+    /** Post-change image; absent when that side does not exist (deleted). */
+    readonly new?: string
+    /** A side exceeded the byte cap, so no URLs are returned. */
+    readonly tooLarge?: true
+  }
+  | {
+    readonly kind: 'show'
+    readonly ref: string
+    readonly commit: GitCommit | null
+    /** Full commit body (without the subject line); right-pane comment. */
+    readonly body: string
+    readonly stats: readonly GitFileStat[]
+    /**
+     * Aggregate line counts for this commit (`git show --numstat` summed).
+     * Binary files contribute 0 lines (numstat emits `-`), matching the
+     * sync-preview convention. Bound to the name-status file list: an empty
+     * list (e.g. a clean merge, whose combined diff lists no files) forces
+     * 0/0, so the summary stays consistent with the file tree.
+     */
+    readonly insertions: number
+    readonly deletions: number
+  }
+  | { readonly kind: 'branches'; readonly current: string | null; readonly defaultBranch: string | null; readonly local: readonly GitBranch[]; readonly remote: readonly GitBranch[] }
+  | { readonly kind: 'tags'; readonly tags: readonly GitBranch[] }
+  | { readonly kind: 'stash-list'; readonly entries: readonly StashEntry[] }
+  | { readonly kind: 'authors'; readonly authors: readonly string[] }
+  | { readonly kind: 'last-commit-message'; readonly message: string }
+  | { readonly kind: 'worktree-stats'; readonly stats: WorktreeStats }
+  // Incoming fast-forward scope (HEAD..@{upstream}). `hasUpstream` false when
+  // the branch tracks nothing (then the counts are all 0).
+  | { readonly kind: 'pull-preview'; readonly hasUpstream: boolean; readonly commits: number; readonly files: number; readonly insertions: number; readonly deletions: number }
+  | { readonly kind: 'push-preview'; readonly hasUpstream: boolean; readonly commits: number; readonly files: number; readonly insertions: number; readonly deletions: number }
+  // Model catalog. `groups` only carries providers that yielded at least one
+  // model; isolated per-provider / per-model failures land in `failures`.
+  | {
+    readonly kind: 'model-catalog'
+    readonly groups: readonly ModelCatalogGroup[]
+    readonly failures: readonly ModelCatalogFailure[]
+  }
+  // Repository discovery (see GitRepoList).
+  | { readonly kind: 'repo-list'; readonly cwd: string; readonly repos: readonly GitRepoEntry[] }
+  // File-browser directory listing (one level). `truncated` is set when the
+  // entry count was capped.
+  | { readonly kind: 'dir-list'; readonly path: string; readonly entries: readonly DirEntry[]; readonly truncated: boolean }
+  // File-browser file content. Exactly one shape applies:
+  //   text  → a UTF-8 text file (`content` is the whole file, `lines` its count)
+  //   image → a browser-renderable image (`dataUrl` is a data: URL); an SVG also
+  //           carries `content`/`lines`, because an SVG is a picture and markup
+  //           and the preview offers both faces from this one read
+  //   binary→ neither (no preview); tooLarge → over the byte cap.
+  // An image past the byte cap is `tooLarge`, except an SVG: its markup is still
+  // readable, so it arrives as the text shape instead of failing the preview.
+  | {
+    readonly kind: 'file-content'
+    readonly path: string
+    readonly variant: 'text' | 'image' | 'binary'
+    /** text variant (including an SVG above the image cap, served as source
+     * rather than as a picture), and the image variant of a smaller SVG: the
+     * full UTF-8 content. */
+    readonly content?: string
+    /** text variant (same SVG case) and the image variant of an SVG: total line
+     * count. */
+    readonly lines?: number
+    /** text variant: absolute path of this file — the rendered-Markdown
+     * image resolver needs the document's own location to resolve relative
+     * destinations onto the authenticated `api/file` route. Absent on older
+     * hosts; the client then keeps the alt-text fallback. */
+    readonly absolutePath?: string
+    /** image variant: a `data:<mime>;base64,…` URL. */
+    readonly dataUrl?: string
+    /** The file exceeded the byte cap, so no content is returned. */
+    readonly tooLarge?: true
+    /** Byte size from the stat the read already performs (all variants). */
+    readonly size?: number
+    /** Modification time (epoch ms) from the same stat (all variants). */
+    readonly mtimeMs?: number
+  }
+
+/**
+ * Byte envelope of the file browser's "copy file content" action: a text
+ * document is copyable strictly below this size. Shared by both halves —
+ * the host floors its text read here (so every copyable document can
+ * actually load) and the client hides the copy button at/above it, keeping
+ * one boundary for load and copy. An SVG is a copyable document too: the host
+ * floors its read here and serves it as source once it passes the image cap.
+ */
+export const FILE_COPY_MAX_BYTES = 10 * 1024 * 1024
+
+/**
+ * Range of the profile's `maxBytes` — the per-command stdout cap, which also
+ * caps each image-diff side and each image preview. Below the floor nearly every
+ * command's output turns lossy (the runner marks it, so the views degrade to
+ * empty), and above the ceiling one command could collect that much into the
+ * host. Out-of-range values clamp into the range: a typo must not be able to
+ * disable the panel or exhaust memory.
+ */
+export const MAX_BYTES_LIMITS = { min: 64 * 1024, max: 64 * 1024 * 1024, default: 4 * 1024 * 1024 } as const
+
+export type GitQueryResponse =
+  | { readonly ok: true; readonly value: GitQueryResult }
+  | { readonly ok: false; readonly error: { readonly code: GitErrorCode; readonly message?: string } }
+
+export interface GitQueryRequest {
+  readonly sessionId: string
+  readonly query: GitQuery
+  /** Repository the query reads (GitRepoEntry.path); absent = the default.
+   * Ignored by `repo-list`, which discovers repositories instead. */
+  readonly repo?: string
+}
+
+// ── AI commit-message suggestion ─────────────────────────────────────────
+
+/**
+ * Suggest-limit ranges and defaults, in host storage units (bytes / tokens /
+ * ms) — the single source shared by both plugin halves (the client bundle
+ * imports this value, like imageMimeFor below): the host's DEFAULT_CONFIG and
+ * normalizeConfig clamp every read into [min, max], and the detail-page form
+ * derives its display units from it (the /1024 and /1000 divisions are exact
+ * and guarded by test).
+ */
+export const SUGGEST_LIMITS = {
+  maxBytes: { min: 16 * 1024, max: 512 * 1024, default: 200 * 1024 },
+  maxOutputTokens: { min: 256, max: 16384, default: 4096 },
+  timeoutMs: { min: 5000, max: 120000, default: 15000 },
+} as const
+
+/**
+ * Selectable commit-message languages. `auto` infers the language from the
+ * repository's own commit history (see resolveSuggestLanguage); `zh` / `en`
+ * pin it. Shared by both halves like SUGGEST_LIMITS — the detail-page form
+ * renders one segment per entry.
+ */
+export const SUGGEST_LANGUAGES = ['auto', 'zh', 'en'] as const
+
+export type SuggestLanguage = (typeof SUGGEST_LANGUAGES)[number]
+
+/** Default is `auto`: follow the style the repository is already written in. */
+export const SUGGEST_LANGUAGE_DEFAULT: SuggestLanguage = 'auto'
+
+/** A language a suggestion is actually written in — `auto` is always resolved. */
+export type ResolvedLanguage = Exclude<SuggestLanguage, 'auto'>
+
+/**
+ * Wire request for the suggest endpoint: ask the configured model to write a
+ * commit message from the repository's uncommitted changes. `paths` restricts
+ * the diff to the user's selection (bare repo-relative paths); absent means
+ * all uncommitted changes.
+ */
+export interface GitSuggestRequest {
+  readonly sessionId: string
+  readonly paths?: readonly string[]
+  /** Repository whose uncommitted changes feed the model (GitRepoEntry.path). */
+  readonly repo?: string
+}
+
+export type GitSuggestResult =
+  | { readonly ok: true; readonly value: {
+      /** The generated message, ready for the user to edit and commit. */
+      readonly message: string
+      /** Actual provider/model route used (display only). */
+      readonly provider?: string
+      readonly model?: string
+      /** Effort actually sent; absent when the request omitted it. */
+      readonly reasoningEffort?: string
+      /** The diff reached the model truncated: over the input cap, or cut
+       * by the per-command runner stdout cap before it. */
+      readonly truncated?: boolean
+    } }
+  | { readonly ok: false; readonly error: { readonly code: GitErrorCode; readonly message?: string } }
+
+/** MIME of an SVG: the one served image whose bytes are also text. */
+export const SVG_MIME = 'image/svg+xml'
+
+/**
+ * Extensions the image-diff query serves, mapped to MIME types. Part of the
+ * query's contract, so both halves gate on this one list and cannot drift.
+ */
+export const IMAGE_MIME: Readonly<Record<string, string>> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+  webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp', svg: SVG_MIME,
+  ico: 'image/x-icon', tif: 'image/tiff', tiff: 'image/tiff',
+}
+
+/** MIME for a path's extension; null when it is not a served image type. */
+export function imageMimeFor(path: string): string | null {
+  const dot = path.lastIndexOf('.')
+  if (dot < 0) return null
+  return IMAGE_MIME[path.slice(dot + 1).toLowerCase()] ?? null
+}
+
+// ── open in the OS default application ────────────────────────────────────
+
+/**
+ * Hand one browsable file to the operating system so it opens outside the
+ * panel. The path is validated and confirmed inside the browse root before the
+ * OS sees it; `sessionId` picks that root.
+ */
+export interface GitOpenFileRequest {
+  readonly sessionId: string
+  /** Browse-root-relative path of the file to open. */
+  readonly path: string
+  /** Repository whose browse root contains the file (GitRepoEntry.path). */
+  readonly repo?: string
+}
+
+export type GitOpenFileResult =
+  | { readonly ok: true; readonly absolutePath: string }
+  | { readonly ok: false; readonly error: { readonly code: GitErrorCode; readonly message?: string } }
+
+// ── version (update check) ────────────────────────────────────────────────
+
+export interface GitVersionRequest {
+  /** True → query the GitHub releases API; false/absent → local view only. */
+  readonly check?: boolean
+}
+
+export interface GitVersionInfo {
+  readonly current: string
+  readonly repositoryUrl?: string
+  readonly latest?: string
+  readonly updateAvailable: boolean
+  readonly releaseUrl?: string
+  readonly checkedRemote: boolean
+  readonly error?: string
+}

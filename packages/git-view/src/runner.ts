@@ -35,6 +35,10 @@ export interface RemoteWorkspaces {
   stat(sessionId: string, path: string, signal?: AbortSignal, expected?: RemoteTarget): Promise<{ path: string; revision: string; size: number }>;
   download(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: RemoteTarget): Promise<Buffer>;
   upload(sessionId: string, path: string, revision: string | null, data: Uint8Array, signal?: AbortSignal, expected?: RemoteTarget): Promise<{ path: string; revision: string; size: number }>;
+  /** A folder's entries; Remote Agents 0.2.64 and newer. */
+  list?(sessionId: string, path: string, signal?: AbortSignal, expected?: RemoteTarget): Promise<{ path: string; entries: { name: string; kind: string; size: number; modified: string }[] }>;
+  /** Deletes the file read at `revision`; Remote Agents 0.2.64 and newer. */
+  remove?(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: RemoteTarget): Promise<{ path: string }>;
 }
 
 /**
