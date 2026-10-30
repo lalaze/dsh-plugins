@@ -17,7 +17,7 @@ import { WorkspaceBrowser } from '../../src/client/upstream/rows/WorkspaceBrowse
 import { en } from '../../src/client/upstream/locales.ts'
 import { createTagRuntime } from '../../src/client/tags/runtime.ts'
 import {
-  attentionBySpace, inSpace, liveFilter, rowActivity, sectionFolded, sessionActivity, statusSections, tagSections,
+  activityBySpace, inSpace, liveFilter, rowActivity, sectionFolded, sessionActivity, statusSections, tagSections,
 } from '../../src/client/tags/sections.ts'
 import { TagDialogOverlay, TagMenuOverlay, type TagOverlayProps } from '../../src/client/tags/overlays.tsx'
 
@@ -131,18 +131,18 @@ describe('sections', () => {
     expect(sectionFolded({ 'status:idle': false }, 'status:idle')).toBe(false)
   })
 
-  it('counts what needs the user in every space, whatever the filter hides', () => {
+  it('counts what needs the user and what runs in every space, whatever the filter hides', () => {
     const groups: GroupNode[] = [
       { ...group('alpha'), sessions: [waiting('a1'), node('a2', { completed: true })] },
       { ...group('beta'), sessions: [node('b1', { running: true }), node('b2', { completed: true })] },
       { ...group('gamma'), sessions: [waiting('c1')] },
       { ...group(UNGROUPED_KEY), sessions: [node('u1', { completed: true })] },
     ]
-    expect(Object.fromEntries(attentionBySpace(groups, tagged))).toEqual({
-      null: { waiting: 2, completed: 3 },
-      urgent: { waiting: 1, completed: 1 },
-      client: { waiting: 1, completed: 2 },
-      unused: { waiting: 0, completed: 0 },
+    expect(Object.fromEntries(activityBySpace(groups, tagged))).toEqual({
+      null: { waiting: 2, completed: 3, running: 1 },
+      urgent: { waiting: 1, completed: 1, running: 0 },
+      client: { waiting: 1, completed: 2, running: 1 },
+      unused: { waiting: 0, completed: 0, running: 0 },
     })
   })
 
@@ -375,20 +375,22 @@ describe('WorkspaceBrowser with tags', () => {
     const { runtime, store } = await mount({ open }, spaces)
     const chips = within(screen.getByRole('group', { name: 'Show workspaces by tag' })).getAllByRole('button')
     expect(chips.map(button => [button.getAttribute('aria-label'), button.getAttribute('aria-pressed')])).toEqual([
-      ['All', 'true'], ['Empty', 'false'], ['Home, 2 items need you', 'false'], ['Work', 'false'],
+      ['All', 'true'], ['Empty', 'false'], ['Home, 2 items need you', 'false'], ['Work, running', 'false'],
     ])
-    fireEvent.click(chip(/^Work$/))
+    fireEvent.click(chip(/^Work/))
     expect(runtime.view.getSnapshot().filter).toBe('work')
     expect(sectionNames()).toEqual([])
     expect(workspaceRow('alpha')).toHaveLength(1)
     expect(['gamma', 'delta'].map(name => workspaceRow(name).length)).toEqual([0, 0])
-    expect(chip(/^All/).getAttribute('aria-label')).toBe('All, 2 items need you')
+    // A selected space drops its marks; All now runs and needs the user.
+    expect(chip(/^Work/).getAttribute('aria-label')).toBe('Work')
+    expect(chip(/^All/).getAttribute('aria-label')).toBe('All, 2 items need you, running')
     act(() => { runtime.setMode('status') })
     expect(sectionNames()).toEqual([['Running', ['beta']], ['Idle', []]])
     act(() => { runtime.setMode(null); store.actions.setGroupBy('flat') })
     expect(sessionTitles(screen.getByRole('tree'))).toEqual(['a1', 'b1'])
     // Picking the selected space again shows everything.
-    fireEvent.click(chip(/^Work$/))
+    fireEvent.click(chip(/^Work/))
     expect(sessionTitles(screen.getByRole('tree'))).toEqual(['a1', 'b1', 'c1', 'd1'])
     fireEvent.click(chip(/^Empty$/))
     expect(screen.getByText('No workspaces tagged “Empty”')).toBeTruthy()
@@ -398,7 +400,7 @@ describe('WorkspaceBrowser with tags', () => {
     // Search covers every space, and opening a result from another one shows All so the list can reveal it.
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
-    fireEvent.click(chip(/^Work$/))
+    fireEvent.click(chip(/^Work/))
     fireEvent.change(screen.getByPlaceholderText('Search session names'), { target: { value: 'c1' } })
     expect(screen.queryByRole('group', { name: 'Show workspaces by tag' })).toBeNull()
     await act(async () => { await Promise.resolve() })

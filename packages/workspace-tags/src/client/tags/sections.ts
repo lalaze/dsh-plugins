@@ -37,6 +37,9 @@ export interface Attention { waiting: number; completed: number }
 /** What a folded Workspace row shows: its Sessions that need the user, else whether one runs. */
 export interface RowActivity extends Attention { running: boolean }
 
+/** What a space chip shows: its Sessions that need the user, and how many only run. */
+export interface SpaceActivity extends Attention { running: number }
+
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
 
 export const tagsByName = (tags: readonly WorkspaceTag[]): WorkspaceTag[] =>
@@ -78,16 +81,17 @@ export function inSpace(state: TagState, filter: string | null, workspaceId: str
 }
 
 /**
- * Attention across all groups (`null`) and per tag, for the space switcher.
+ * Activity across all groups (`null`) and per tag, for the space switcher.
  * @param groups - every group, unfiltered, with its Sessions unfolded.
  */
-export function attentionBySpace(groups: readonly GroupNode[], state: TagState): Map<string | null, Attention> {
-  const counts = new Map<string | null, Attention>([[null, { waiting: 0, completed: 0 }], ...state.tags.map(tag => [tag.id, { waiting: 0, completed: 0 }] as const)])
+export function activityBySpace(groups: readonly GroupNode[], state: TagState): Map<string | null, SpaceActivity> {
+  const idle = (): SpaceActivity => ({ waiting: 0, completed: 0, running: 0 })
+  const counts = new Map<string | null, SpaceActivity>([[null, idle()], ...state.tags.map(tag => [tag.id, idle()] as const)])
   for (const group of groups) {
     const spaces = [null, ...group.workspaceId === undefined ? [] : state.assignments[group.workspaceId] ?? []]
     for (const node of group.sessions) {
       const activity = sessionActivity(node)
-      if (activity !== 'waiting' && activity !== 'completed') continue
+      if (activity === undefined) continue
       for (const space of spaces) {
         const count = counts.get(space)
         if (count !== undefined) count[activity]++

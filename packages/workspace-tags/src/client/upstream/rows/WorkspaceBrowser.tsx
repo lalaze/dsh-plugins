@@ -47,7 +47,7 @@ import {
   asTagTranslate, RowTrail, SectionBlock, SpaceSwitcher, TagIcon, useTagging, workspaceTags,
 } from '../../tags/parts.tsx'
 import {
-  attentionBySpace, browserSections, inSpace, isActiveStatus, liveFilter, rowActivity, sectionFolded, sessionActivity,
+  activityBySpace, browserSections, inSpace, isActiveStatus, liveFilter, rowActivity, sectionFolded, sessionActivity,
   tagsByName, type RowActivity,
 } from '../../tags/sections.ts'
 
@@ -1064,12 +1064,12 @@ function SpaceSwitcherSeat({ runtime, state, filter, list, workspaces, ungrouped
   filter: WorkspaceTag | null
 }) {
   const statuses = useSessionStatus(s => s)
-  const attention = useMemo(() => attentionBySpace(deriveGroups(list, workspaces, rowState, statuses, {
+  const activity = useMemo(() => activityBySpace(deriveGroups(list, workspaces, rowState, statuses, {
     expandedGroups: [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY],
     ungroupedOrder: ungroupedSessionIds,
   }), state), [list, workspaces, rowState, statuses, ungroupedSessionIds, state])
   const tags = useMemo(() => tagsByName(state.tags), [state.tags])
-  return <SpaceSwitcher tags={tags} filter={filter?.id ?? null} attention={attention} onPick={runtime.setFilter} t={asTagTranslate(t)} />
+  return <SpaceSwitcher tags={tags} filter={filter?.id ?? null} activity={activity} onPick={runtime.setFilter} t={asTagTranslate(t)} />
 }
 
 /**

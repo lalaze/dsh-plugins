@@ -8,7 +8,7 @@ import {
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { emptyTagState, type TagColor, type TagState, type WorkspaceTag } from '../../shared/tags.ts'
 import type { TagRuntime, TagSnapshot, TagViewState } from './contract.ts'
-import type { Attention, BrowserSection, RowActivity } from './sections.ts'
+import type { Attention, BrowserSection, RowActivity, SpaceActivity } from './sections.ts'
 import css from './tags.module.css'
 
 type Translate = (key: never, vars?: Record<string, string | number>) => string
@@ -95,20 +95,23 @@ export function RowTrail({ activity, tags, t }: { activity: RowActivity | undefi
  * tag narrows every grouping to its Workspaces; picking it again goes back
  * to All. A chip that is not selected carries a count of the Sessions in its
  * space that wait for the user or finished unread, tinted for waiting when
- * any does, so a filtered-out space still asks for attention.
+ * any does, and the running spinner while any of its Sessions runs, so a
+ * filtered-out space still shows what goes on in it.
  */
-export function SpaceSwitcher({ tags, filter, attention, onPick, t }: {
+export function SpaceSwitcher({ tags, filter, activity, onPick, t }: {
   tags: readonly WorkspaceTag[]
   filter: string | null
-  attention: ReadonlyMap<string | null, Attention>
+  activity: ReadonlyMap<string | null, SpaceActivity>
   onPick: (tagId: string | null) => void
   t: TagTranslate
 }) {
   const chip = (id: string | null, name: string, marker: ReactNode) => {
     const selected = id === filter
-    const count = attention.get(id) ?? { waiting: 0, completed: 0 }
+    const count = activity.get(id) ?? { waiting: 0, completed: 0, running: 0 }
     const n = selected ? 0 : count.waiting + count.completed
-    const label = n === 0 ? name : t(n === 1 ? 'tags.filter.attention.one' : 'tags.filter.attention.other', { name, n })
+    const running = !selected && count.running > 0
+    const attention = n === 0 ? name : t(n === 1 ? 'tags.filter.attention.one' : 'tags.filter.attention.other', { name, n })
+    const label = running ? t('tags.filter.running', { label: attention }) : attention
     return (
       <button
         key={id ?? ''}
@@ -121,6 +124,7 @@ export function SpaceSwitcher({ tags, filter, attention, onPick, t }: {
       >
         {marker}
         <span className={css.chipLabel}>{name}</span>
+        {running && <StateDot state="ongoing" size={12} />}
         {n > 0 && <AttentionBadge attention={count} />}
       </button>
     )
