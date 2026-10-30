@@ -442,6 +442,9 @@
 /* One workspace section: header row + a compact expanded session run. */
 .groupSection {
   position: relative;
+  /* workspace-tags: a Workspace's own Sessions sit one 12px level inside its row, as child Workspaces do;
+     the flat list, outside any group, keeps them flush. */
+  --dsh-session-indent: 12px;
 }
 
 .groupSection + .groupSection {
@@ -501,7 +504,8 @@
   height: 28px;
   border: none;
   border-radius: var(--dsw-radius-sm);
-  padding: 0 12px 0 calc(28px + var(--dsh-workspace-indent, 0px));
+  /* workspace-tags: lines up with the indented session titles. */
+  padding: 0 12px 0 calc(28px + var(--dsh-session-indent, 0px) + var(--dsh-workspace-indent, 0px));
   background: transparent;
   cursor: pointer;
   text-align: left;

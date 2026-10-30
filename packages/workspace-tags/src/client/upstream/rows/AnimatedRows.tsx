@@ -65,9 +65,9 @@ export class AnimatedRows extends Component<AnimatedRowsProps> {
       const clone = row.element.cloneNode(true) as HTMLElement
       clone.removeAttribute('data-row-key')
       clone.inert = true
-      clone.style.setProperty(
-        '--dsh-workspace-indent', getComputedStyle(row.element).getPropertyValue('--dsh-workspace-indent'),
-      )
+      const style = getComputedStyle(row.element)
+      // workspace-tags: a leaving Session row keeps its indent inside its Workspace too.
+      for (const name of ['--dsh-workspace-indent', '--dsh-session-indent']) clone.style.setProperty(name, style.getPropertyValue(name))
       removed.set(key, { ...row, element: clone })
     }
     return { positions, removed }

@@ -20,7 +20,7 @@ Build and install:
 ```sh
 pnpm --filter dsh-workspace-tags check
 pnpm --filter dsh-workspace-tags pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.6.tgz"
 ```
 
 Requires DSH 0.2.1-rc.3 or a later 0.2 release.
