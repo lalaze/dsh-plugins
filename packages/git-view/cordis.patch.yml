@@ -1,4 +1,10 @@
 - insert:
     - id: dsh-git-view
       name: dsh-git-view
-      config: {}
+      # The Git panel's limits, as dsh-git-panel ships them; a remote workspace's commands get at least 30 seconds.
+      config:
+        timeoutMs: 20000
+        maxBytes: 4194304
+        maxChanges: 1000
+        refreshIntervalMs: 30000
+        defaultDiffView: unified

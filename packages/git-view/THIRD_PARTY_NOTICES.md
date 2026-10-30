@@ -1,10 +1,38 @@
 # Third-party notices
 
-The browser artifact bundles this workspace’s private `@dsh-plugins/i18n` and `@dsh-plugins/file-view` helpers. React, React DOM and DSH host modules remain external; the server entry uses Node.js and DSH host services. Git is invoked as an external executable and is not bundled.
+The browser artifact bundles this workspace’s private `@dsh-plugins/i18n` and `@dsh-plugins/file-view` helpers, and the Git panel ported from `@xbzbing/dsh-git-panel` (see below). React, React DOM and DSH host modules, including `@deepseek-ai/dsh-client-ui-primitives`, remain external; the server entry uses Node.js and DSH host services. Git is invoked as an external executable and is not bundled.
 
 [lib/editor.js](lib/editor.js), the on-demand code and diff editor, is built from [Monaco Editor](https://github.com/microsoft/monaco-editor) (`monaco-editor` 0.57.0, MIT License, Copyright (c) 2016 - present Microsoft Corporation). Its license and the notices of its included components, including marked (MIT) and DOMPurify (used under Apache License 2.0), are shipped in [lib/editor-notices.txt](lib/editor-notices.txt) by the editor build.
 
-Source comments also reference GitLens/gitk and VS Code for interaction or visual conventions. These acknowledgments do not assert verified feature parity, affiliation or endorsement. When regenerating this file, pass the introductory editor and upstream attribution sections to the generator again so they are retained.
+[lib/client.mermaid.js](lib/client.mermaid.js), loaded only to draw mermaid diagrams in previewed Markdown, is built from [mermaid](https://github.com/mermaid-js/mermaid) 12.2.0 (MIT) and the packages it includes, some under the Apache License 2.0, EPL-2.0, BSD-3-Clause, MPL-2.0 or Unlicense. Each package's license text is shipped in [lib/client.mermaid-notices.txt](lib/client.mermaid-notices.txt) by the build.
+
+Source comments also reference GitLens/gitk and VS Code for interaction or visual conventions. These acknowledgments do not assert verified feature parity, affiliation or endorsement. When regenerating this file, pass the introductory, ported-source and upstream attribution sections to the generator again so they are retained.
+
+## dsh-git-panel by xbzbing (MIT)
+
+The Git panel under `src/gp/` (its client in the browser bundle, its host in `lib/server/gp/`) is ported from [`@xbzbing/dsh-git-panel`](https://github.com/xbzbing/dsh-git-panel) 1.10.0, commit `3e7c566`. Changes: its requests go to this plugin's route instead of a typert service, its commands and file reads run through this plugin's local and Remote Agents runners (`src/gp-host.ts`), its identities and settings are this plugin's, its version check is removed, and its mermaid module loads where no module loader is present. Its license:
+
+MIT License
+
+Copyright (c) 2026 xbzbing
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ## dsh-git-panel acknowledgment (MIT)
 
@@ -29,8 +57,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-## Bundled client dependencies
 
 The browser bundle includes the packages below, each under the license of its section; their copyright notices are listed with them. Regenerate this file with `node ../../scripts/third-party-notices.mjs`.
 

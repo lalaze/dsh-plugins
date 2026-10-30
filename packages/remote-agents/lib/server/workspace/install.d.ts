@@ -3,7 +3,7 @@ import type { Store } from '../core/store.js';
 import { WorkspaceAccess, type WorkspacePlacement } from './access.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { type WorkspaceFeatures } from './http.js';
-import type { GitBatch, GitRun, WorkspaceTarget } from './domain.js';
+import type { GitBatch, GitRun, WorkspaceEntry, WorkspaceTarget } from './domain.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTunnels } from './tunnels.js';
 /**
@@ -29,6 +29,15 @@ export interface RemoteAgentsWorkspaces {
         path: string;
         revision: string;
         size: number;
+    }>;
+    /** A folder's entries, folders first. Absent before Remote Agents 0.2.64. */
+    list?(sessionId: string, path: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{
+        path: string;
+        entries: WorkspaceEntry[];
+    }>;
+    /** Deletes the file read at `revision`; a file changed since is refused. Absent before Remote Agents 0.2.64. */
+    remove?(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{
+        path: string;
     }>;
 }
 export interface Workspaces {

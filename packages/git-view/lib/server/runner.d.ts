@@ -95,6 +95,20 @@ export interface RemoteWorkspaces {
         revision: string;
         size: number;
     }>;
+    /** A folder's entries; Remote Agents 0.2.64 and newer. */
+    list?(sessionId: string, path: string, signal?: AbortSignal, expected?: RemoteTarget): Promise<{
+        path: string;
+        entries: {
+            name: string;
+            kind: string;
+            size: number;
+            modified: string;
+        }[];
+    }>;
+    /** Deletes the file read at `revision`; Remote Agents 0.2.64 and newer. */
+    remove?(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: RemoteTarget): Promise<{
+        path: string;
+    }>;
 }
 /**
  * Git never waits for a password, an editor or a pager, and reports in English so its messages can be recognized; the

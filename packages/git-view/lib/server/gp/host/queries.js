@@ -1,0 +1,925 @@
+/**
+ * Read-only query endpoint: history / diff / image-diff / show / branches /
+ * tags / authors / last-commit-message / worktree-stats.
+ */
+import { join, sep } from 'node:path';
+import { listSessionRepos, mapWorkspaceFailure, resolveBrowseRoot, resolveWorkspace, runCommand, snapshotForSession } from './core.js';
+import { isSafePath, isSafeRev } from './validate.js';
+import { walkHistoryTopology } from './history-topology.js';
+import { commitFromFields, parseBranches, parseGraphLog, parseNameStatus, parseStashList, parseTags, sumNumstat } from './parser.js';
+import { imageMimeFor, isHistoryHashSearch, isHistoryFiltered, DIFF_CONTEXT_DEFAULT, DIFF_CONTEXT_MAX, DIFF_COUNT_READ_MAX, FILE_COPY_MAX_BYTES, SVG_MIME } from './types.js';
+const GRAPH_FORMAT = '--format=%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%D%x1f%s%x1e';
+/**
+ * Merge commits: git's default diff is the *combined* one, which lists only
+ * files that differ from every parent and has hunks only where the result
+ * differs from all of them — a per-file `git show <merge> -- <path>` therefore
+ * often serves just the commit header, i.e. no code. Every commit surface of
+ * the panel is a first-parent reader instead (the change set the merge brought
+ * into its first parent), so the file list, the +/- totals and the per-file
+ * diff all describe the same diff. `--numstat` already defaults to first-parent
+ * for merges; this flag pins all three commands to that same view, matching
+ * image-diff's explicit `<commit>^1` side.
+ */
+const FIRST_PARENT_DIFF = '--diff-merges=first-parent';
+/**
+ * Refs the history graph and the author dropdown both walk: the standard
+ * visible branches/remotes/tags plus HEAD. `--all` officially means "refs/
+ * along with HEAD", so HEAD must ride along — otherwise a detached-HEAD
+ * chain (bisect, rebase in flight, checkout <sha>) disappears from both
+ * surfaces — while the hidden refs `--all` drags in (refs/original from a
+ * rebase, refs/notes) stay excluded (issue #9 follow-up).
+ */
+const VISIBLE_REFS = ['--branches', '--remotes', '--tags', 'HEAD'];
+export async function runQuery(deps, config, request) {
+    const q = request.query;
+    // Model catalog for the config form: reads ctx.llm only, no workspace.
+    if (q.kind === 'model-catalog') {
+        try {
+            return await queryModelCatalog(deps);
+        }
+        catch (error) {
+            return { ok: false, error: { code: 'git-error', message: error instanceof Error ? error.message : String(error) } };
+        }
+    }
+    // Repository discovery needs no work tree: it reports the cwd's own
+    // repository (when it has one) plus, when `detectCheckouts` is on, the
+    // worktrees and nested repositories below it — which is what lets the panel
+    // offer a repository picker before anything is selected.
+    if (q.kind === 'repo-list') {
+        const listed = await listSessionRepos(deps, request.sessionId, config.detectCheckouts);
+        if (!listed.ok)
+            return { ok: false, error: listed.error };
+        return { ok: true, value: { kind: 'repo-list', cwd: listed.value.cwd, repos: listed.value.repos } };
+    }
+    // The file browser works outside a git repository too: resolve a plain
+    // directory root (work-tree top when in a repo, else the session cwd) so
+    // dir-list / file-content still function; every git-backed query keeps
+    // requiring a real work tree.
+    if (q.kind === 'dir-list' || q.kind === 'file-content') {
+        const browse = await resolveBrowseRoot(deps, request.sessionId, request.repo);
+        if (!browse.ok)
+            return { ok: false, error: browse.error };
+        try {
+            return q.kind === 'dir-list'
+                ? await queryDirList(deps, browse.root, q, browse.isGitRepo)
+                : await queryFileContent(deps, config, browse.root, q);
+        }
+        catch (error) {
+            return { ok: false, error: { code: 'git-error', message: error instanceof Error ? error.message : String(error) } };
+        }
+    }
+    const workspace = await resolveWorkspace(deps, request.sessionId, request.repo);
+    if (!workspace.ok)
+        return { ok: false, error: mapWorkspaceFailure(workspace.failure) };
+    const root = workspace.root;
+    try {
+        switch (q.kind) {
+            case 'history': return await queryHistory(deps, root, q);
+            case 'diff': return await queryDiff(deps, root, q);
+            case 'file-lines': return await queryFileLines(deps, root, q);
+            case 'image-diff': return await queryImageDiff(deps, config, root, q);
+            case 'show': return await queryShow(deps, root, q.ref);
+            case 'branches': return await queryBranches(deps, root);
+            case 'tags': return await queryTags(deps, root);
+            case 'stash-list': return await queryStashList(deps, root);
+            case 'authors': return await queryAuthors(deps, root);
+            case 'last-commit-message': return await queryLastCommitMessage(deps, root);
+            case 'worktree-stats': return await queryWorktreeStats(deps, config, request.sessionId, request.repo);
+            case 'pull-preview': return await queryPullPreview(deps, root);
+            case 'push-preview': return await queryPushPreview(deps, root);
+        }
+    }
+    catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { ok: false, error: { code: 'git-error', message } };
+    }
+}
+async function queryHistory(deps, root, q) {
+    // Clamp paging: the host is the trust boundary; a huge limit walks all of
+    // history into the output cap, a non-number is a git fatal.
+    const limit = Number.isFinite(q.limit) ? Math.min(500, Math.max(1, Math.trunc(q.limit))) : 100;
+    const skip = Number.isFinite(q.skip) ? Math.max(0, Math.trunc(q.skip)) : 0;
+    // Topological order is layoutGraph's contract (children before parents);
+    // the default date order interleaves rebased chains once committer dates
+    // skew, splitting a linear history into phantom parallel lanes.
+    // `--decorate=full` makes %D emit full ref paths (refs/heads/…, refs/remotes/…,
+    // refs/tags/…) so parseRefs can tell a slashed local branch from a remote ref
+    // and not misclassify it (which mislabeled the current-branch chip).
+    const args = ['git', 'log', '--topo-order', '--decorate=full', GRAPH_FORMAT, `--max-count=${limit}`, `--skip=${skip}`];
+    const search = q.search?.trim() ?? '';
+    const hexJump = isHistoryHashSearch(search);
+    const filtered = isHistoryFiltered(q);
+    // Exactly the flags pushed below (one source, so they can never disagree). An
+    // effective filter hides commits — and therefore parents — from the page
+    // itself, which is what makes the raw-ancestry walk necessary; a ref-only walk
+    // still sees every commit. A whitespace-only author/since is a real filter
+    // (`--author=' '` matches names containing a space), so only undefined/'' are
+    // absent.
+    const author = q.author ?? '';
+    const since = q.since ?? '';
+    const searchFilter = search !== '';
+    const authorFilter = author !== '';
+    const sinceFilter = since !== '';
+    const countArgs = ['git', 'rev-list', '--count'];
+    // Untrusted ref/author filters must never reach an option position: reject a
+    // dash-prefixed / metacharacter ref (the `--output=` file-write vector) and
+    // pass the ref after `--end-of-options`, which git treats as a bare operand.
+    // The trailing `--` ends the revision list, so an operand that shares its
+    // name with a work-tree path stays a revision instead of becoming an
+    // ambiguous argument (a branch like `observatory` next to `observatory/`, or
+    // the literal HEAD next to a file named `HEAD`). Both the page log and the
+    // count walk need it.
+    if (!hexJump) {
+        // The same filter set feeds both the page log and the total-count walk.
+        const filters = [];
+        if (searchFilter)
+            filters.push('-i', '-E', `--grep=${search}`);
+        if (authorFilter)
+            filters.push(`--author=${author}`);
+        if (sinceFilter)
+            filters.push(`--since=${since}`);
+        if (q.ref !== undefined && q.ref !== '') {
+            if (!isSafeRev(q.ref))
+                return { ok: false, error: { code: 'invalid-name', message: `unsafe ref: ${q.ref}` } };
+            filters.push('--end-of-options', q.ref);
+        }
+        else {
+            filters.push(...VISIBLE_REFS);
+        }
+        filters.push('--');
+        args.push(...filters);
+        countArgs.push(...filters);
+    }
+    else {
+        // Hash jump: `search` is already constrained to [0-9a-f]{7,40} by
+        // isHistoryHashSearch. The trailing `--` ends the revision list, so a
+        // work-tree file named like the hash cannot make the argument ambiguous.
+        args.push('--end-of-options', search, '--');
+    }
+    // Run the page log and the total count concurrently (the count is a second
+    // full history walk; serializing it roughly doubled the first-page latency).
+    const [res, countRes] = await Promise.all([
+        runCommand(deps.run, args, root, 'history', deps.signal),
+        hexJump ? Promise.resolve(null) : runCommand(deps.run, countArgs, root, 'history-count', deps.signal),
+    ]);
+    if (!('run' in res))
+        return { ok: false, error: { code: 'git-unavailable' } };
+    if (res.run.cancelled)
+        return { ok: false, error: { code: 'cancelled' } };
+    if (res.run.timedOut)
+        return { ok: false, error: { code: 'timeout' } };
+    if (res.run.exitCode !== 0) {
+        // Only a hash-jump miss or a genuine unknown/empty ref is an empty page;
+        // every other non-zero exit surfaces as an error instead of a silent
+        // "no commits" that would also mask malformed input. "ambiguous argument"
+        // is deliberately not an empty page: with the `--` above it means git
+        // really could not decide what the operand was, and hiding that is what
+        // made a broken ref filter look like a branch without commits.
+        const stderr = res.run.stderr.trim();
+        if (hexJump || /unknown revision|bad revision|does not have any commits/i.test(stderr)) {
+            // A filtered empty page still carries the field, so the client can tell
+            // "filtered, no ancestry" from "unfiltered / old host".
+            return { ok: true, value: { kind: 'history', commits: [], total: 0, ...(filtered ? { topology: [] } : {}) } };
+        }
+        return { ok: false, error: { code: 'git-error', message: stderr || `git exited ${res.run.exitCode}` } };
+    }
+    const commits = parseGraphLog(res.run.stdout);
+    // Hash-jump ignores ref/author/since filters and starts the walk at the
+    // commit itself, so a total is meaningless; -1 (the initial value) tells the
+    // client to page by "did the last page fill" instead of a fixed count.
+    let total = -1;
+    if (!hexJump && countRes !== null && 'run' in countRes && countRes.run.exitCode === 0) {
+        const n = Number(countRes.run.stdout.trim());
+        if (Number.isFinite(n))
+            total = n;
+    }
+    // A filtered page is missing most of its parents, so one bounded auxiliary
+    // walk supplies the raw ancestry. An empty page has nothing to walk, and an
+    // unfiltered/hash-jump page omits the field entirely (no extra command).
+    const topology = filtered
+        ? (commits.length === 0 ? [] : await walkHistoryTopology(deps.run, root, commits.map((c) => c.hash), deps.signal))
+        : undefined;
+    return { ok: true, value: { kind: 'history', commits, total, ...(topology !== undefined ? { topology } : {}) } };
+}
+async function queryDiff(deps, root, q) {
+    if (!isSafePath(q.path))
+        return { ok: false, error: { code: 'invalid-path', message: q.path } };
+    // Context lines around each change; DIFF_CONTEXT_MAX shows the whole file
+    // (expand-all). Clamp to a sane ceiling to bound output.
+    const ctx = q.context !== undefined && Number.isFinite(q.context)
+        ? Math.max(0, Math.min(DIFF_CONTEXT_MAX, Math.floor(q.context)))
+        : DIFF_CONTEXT_DEFAULT;
+    const unified = `-U${ctx}`;
+    let args;
+    if (q.base === 'staged') {
+        args = ['git', 'diff', unified, '--cached', '--', q.path];
+    }
+    else if (q.base === 'commit') {
+        if (!isSafeRev(q.commit))
+            return { ok: false, error: { code: 'invalid-name', message: `unsafe commit: ${q.commit}` } };
+        args = ['git', 'show', unified, FIRST_PARENT_DIFF, '--end-of-options', q.commit, '--', q.path];
+    }
+    else {
+        // worktree: unstaged diff; for untracked files use --no-index against /dev/null.
+        args = ['git', 'diff', unified, '--', q.path];
+    }
+    const res = await runCommand(deps.run, args, root, 'diff', deps.signal);
+    if (!('run' in res))
+        return { ok: false, error: { code: 'git-unavailable' } };
+    if (res.run.cancelled)
+        return { ok: false, error: { code: 'cancelled' } };
+    if (res.run.timedOut)
+        return { ok: false, error: { code: 'timeout' } };
+    // A lossy run dropped output at the runner's collect/spill ceiling, and a
+    // lossy read keeps the stream's *tail*: this single-file diff lost its header
+    // and opening hunks, so what survived starts mid-diff. Surviving hunks still
+    // carry git's own line numbers, but the +/- counts under-report, and the lost
+    // opening returns as an ordinary collapsible gap whose revealed lines come
+    // from the new side — a changed line would show as unchanged context. Serve it
+    // (the remaining hunks are readable) but flag it: `readNewSide` refuses a
+    // lossy `git show` (count → 0), while a worktree side is read off disk and its
+    // count does not degrade.
+    let truncated = res.run.stdoutLossy;
+    let text = res.run.stdout;
+    // A truly untracked file produces no `git diff` output; synthesize one with
+    // --no-index. Gate on the file being untracked (ls-files --error-unmatch
+    // fails for it) so a clean *tracked* path isn't rendered as an all-new file.
+    if (q.base === 'worktree' && text.trim() === '') {
+        const tracked = await runCommand(deps.run, ['git', 'ls-files', '--error-unmatch', '--', q.path], root, 'diff-tracked-probe', deps.signal);
+        const isUntracked = !('run' in tracked) || tracked.run.exitCode !== 0;
+        if (isUntracked) {
+            const noIndex = await runCommand(deps.run, ['git', 'diff', unified, '--no-index', '--', '/dev/null', q.path], root, 'diff-untracked', deps.signal);
+            if ('run' in noIndex) {
+                truncated = truncated || noIndex.run.stdoutLossy;
+                text = noIndex.run.stdout;
+            }
+        }
+    }
+    return {
+        ok: true,
+        value: {
+            kind: 'diff', path: q.path, text,
+            newLines: await countNewSideLines(deps, root, q, text),
+            ...(truncated ? { truncated: true } : {}),
+        },
+    };
+}
+/**
+ * Lines in the diff's new-side version — the fact that decides whether hidden
+ * context can follow the last hunk. git caps trailing context at -U, so a full
+ * trailing run in `text` is ambiguous on its own: the hunk may be mid-file, or
+ * the file may end exactly there. The count resolves it, and it comes from the
+ * same source the diff compared against (see readNewSide), so the view and the
+ * file agree.
+ *
+ * 0 means "no new side, or the count is not trustworthy" (deleted file, missing
+ * blob, failed/truncated read, no hunk to follow, working file above
+ * DIFF_COUNT_READ_MAX): the view then hides the trailing expand control rather
+ * than offering one that could not reveal anything.
+ */
+async function countNewSideLines(deps, root, q, diffText) {
+    // Without a hunk no gap row can exist, so the count cannot matter — and a
+    // binary / empty diff then costs no read at all.
+    if (!diffText.includes('@@'))
+        return 0;
+    // The working file is read by us, uncapped by the runner: bound the read that
+    // only feeds this count (file-lines, the expansion path, stays uncapped).
+    const side = await readNewSide(deps, root, q, { worktreeMaxBytes: DIFF_COUNT_READ_MAX });
+    if (!side.ok || side.text === null)
+        return 0;
+    return countLines(side.text);
+}
+/** Number of lines in `content` under the same convention as splitLines (one
+ * trailing newline does not start a new line). Counting without splitting keeps
+ * the poll-path read from allocating one string per line just to read `.length`. */
+function countLines(content) {
+    if (content === '')
+        return 0;
+    let lines = 1;
+    for (let at = content.indexOf('\n'); at !== -1; at = content.indexOf('\n', at + 1))
+        lines++;
+    return content.endsWith('\n') ? lines - 1 : lines;
+}
+/** Split file content into lines, dropping one trailing newline element so the
+ * count matches the file's real line count (shared by the count and the slice). */
+function splitLines(content) {
+    const all = content.split('\n');
+    if (all[all.length - 1] === '')
+        all.pop();
+    return all;
+}
+/**
+ * A slice of a file's post-change content for on-demand context expansion. The
+ * source version mirrors the diff's new side: worktree reads the working file
+ * (a symlink as its target text, which is the blob git compares), staged reads
+ * the index blob, commit reads `<commit>:<path>`. The whole file is materialized
+ * then sliced in-process — expansion targets small ranges and git offers no
+ * cheap "print lines m..n of a blob" primitive.
+ */
+async function queryFileLines(deps, root, q) {
+    if (!isSafePath(q.path))
+        return { ok: false, error: { code: 'invalid-path', message: q.path } };
+    const start = Number.isFinite(q.start) ? Math.max(1, Math.floor(q.start)) : 1;
+    const end = Number.isFinite(q.end) ? Math.max(start, Math.floor(q.end)) : start;
+    const side = await readNewSide(deps, root, q);
+    if (!side.ok)
+        return { ok: false, error: { code: side.code, message: side.message } };
+    // A side that does not exist (deleted file, missing blob) has no lines: an
+    // empty EOF slice is the truthful answer and lets the caller drop its gap.
+    return sliceLines(q.path, side.text ?? '', start, end);
+}
+/** git says "this version has no such path" in exactly these shapes; every
+ * other non-zero exit (bad rev, corrupt object) is a real failure. */
+const ABSENT_SIDE_RE = /does not exist in|exists on disk, but not in the index|no such path/i;
+/**
+ * Read the version a diff's RIGHT side compares against — the single source of
+ * truth shared by gap expansion (`file-lines`) and the new-side line count, so
+ * a revealed slice and a reported count can never describe different files.
+ *
+ * `worktree` reads the working file itself (the index is the LEFT side of an
+ * unstaged diff — reading it would reveal stale lines), `staged` reads the
+ * index blob, `commit` the commit blob. `worktreeMaxBytes` bounds the read for
+ * the count-only caller; the expansion path leaves it unset.
+ */
+async function readNewSide(deps, root, q, opts) {
+    if (q.base === 'worktree')
+        return { ok: true, text: await readWorktreeSide(deps, root, q.path, opts?.worktreeMaxBytes) };
+    if (q.base === 'commit' && !isSafeRev(q.commit))
+        return { ok: false, code: 'invalid-name', message: `unsafe commit: ${q.commit}` };
+    const spec = q.base === 'commit' ? `${q.commit}:${q.path}` : `:${q.path}`;
+    const res = await runCommand(deps.run, ['git', 'show', '--end-of-options', spec], root, 'new-side', deps.signal);
+    if (!('run' in res))
+        return { ok: false, code: 'git-unavailable', message: 'git unavailable' };
+    if (res.run.cancelled)
+        return { ok: false, code: 'cancelled', message: 'cancelled' };
+    if (res.run.timedOut)
+        return { ok: false, code: 'timeout', message: 'timed out' };
+    if (res.run.exitCode !== 0) {
+        // "That version does not contain this path" is a missing side (a deleted
+        // file reads as an empty one); anything else must stay an error rather than
+        // masquerade as empty — a bad rev or a corrupt object would otherwise look
+        // exactly like a deleted file.
+        return ABSENT_SIDE_RE.test(res.run.stderr)
+            ? { ok: true, text: null }
+            : { ok: false, code: 'git-error', message: res.run.stderr.trim() || 'git show failed' };
+    }
+    // A lossy read means the runner dropped output at its collect/spill ceiling:
+    // what survived is the stream's *tail* (the head is what gets dropped), so a
+    // count or a slice from it would be a plausible lie. Refuse it instead (the
+    // count degrades to 0 = unknown).
+    if (res.run.stdoutLossy)
+        return { ok: false, code: 'git-error', message: 'git show output exceeded the output cap' };
+    return { ok: true, text: res.run.stdout };
+}
+/**
+ * Working file as the diff's new side: the LINK TEXT for a symlink (git stores
+ * that as the blob, so following the link would describe a different file), CRLF
+ * normalized like the blob git compares, else the file's own text. `maxBytes`
+ * bounds the read for the count-only caller; null means "no content known".
+ */
+async function readWorktreeSide(deps, root, path, maxBytes) {
+    const file = join(root, path);
+    const link = await deps.fs.symlinkTarget(file);
+    if (link !== null)
+        return link;
+    if (maxBytes !== undefined) {
+        const size = await deps.fs.stat(file).catch(() => null);
+        if (size === null || size.size > maxBytes)
+            return null;
+    }
+    const text = await readWorktreeText(deps, root, path);
+    // core.autocrlf rewrites the working file on checkout, so the bytes on disk
+    // can carry CRLF while the diff (and the blob it compares) is LF; revealing
+    // the raw bytes would show a \r the diff never had. Line count is unaffected.
+    return text === null ? null : text.replace(/\r\n/g, '\n');
+}
+/** Read a worktree file as text when it is inside the root (symlink-guarded). */
+async function readWorktreeText(deps, root, path) {
+    try {
+        const file = join(root, path);
+        const real = await deps.fs.realpath(file);
+        const rootReal = await deps.fs.realpath(root);
+        if (real !== rootReal && !real.startsWith(rootReal + sep))
+            return null;
+        const buf = await deps.fs.readFile(file);
+        return buf.toString('utf8');
+    }
+    catch {
+        return null;
+    }
+}
+/** Slice `content` to 1-based lines start..end, flagging when end hit EOF. */
+function sliceLines(path, content, start, end) {
+    const all = splitLines(content);
+    const from = Math.min(start, all.length + 1);
+    const to = Math.min(end, all.length);
+    const lines = from <= to ? all.slice(from - 1, to) : [];
+    const eof = to >= all.length;
+    return { ok: true, value: { kind: 'file-lines', path, start: from, lines, eof } };
+}
+/**
+ * Old/new image sides for a binary image, mirroring the text diff's sources:
+ * worktree rows compare index vs working file, staged rows HEAD vs index,
+ * commit rows parent vs commit — so each pane matches the code pane's meaning.
+ * Each side is capped at `config.maxBytes` (profile-configurable): as base64
+ * inside one JSON envelope, two capped sides bound the RPC payload.
+ */
+async function queryImageDiff(deps, config, root, q) {
+    if (!isSafePath(q.path))
+        return { ok: false, error: { code: 'invalid-path', message: q.path } };
+    if (q.base === 'commit' && !isSafeRev(q.commit))
+        return { ok: false, error: { code: 'invalid-name', message: `unsafe commit: ${q.commit}` } };
+    const mime = imageMimeFor(q.path);
+    if (mime === null)
+        return { ok: true, value: { kind: 'image-diff', path: q.path, mime } };
+    const oldSpec = q.base === 'staged' ? `HEAD:${q.path}` : q.base === 'commit' ? `${q.commit}^1:${q.path}` : `:${q.path}`;
+    const newSpec = q.base === 'staged' ? `:${q.path}` : q.base === 'commit' ? `${q.commit}:${q.path}` : null;
+    const [oldOid, newOid] = await Promise.all([
+        resolveOid(deps, root, oldSpec),
+        newSpec === null ? Promise.resolve(undefined) : resolveOid(deps, root, newSpec),
+    ]);
+    const cap = config.maxBytes;
+    const gitDir = oldOid !== undefined || newOid !== undefined ? await absoluteGitDir(deps, root) : '';
+    const [oldSide, newSide] = await Promise.all([
+        oldOid === undefined ? Promise.resolve(undefined) : blobSide(deps, gitDir, oldOid, cap),
+        newOid !== undefined
+            ? blobSide(deps, gitDir, newOid, cap)
+            : q.base === 'worktree' ? worktreeSide(deps, root, q.path, cap) : Promise.resolve(undefined),
+    ]);
+    const sides = [oldSide, newSide];
+    if (sides.some((s) => s !== undefined && 'tooLarge' in s)) {
+        return { ok: true, value: { kind: 'image-diff', path: q.path, mime, tooLarge: true } };
+    }
+    const old64 = sides[0] !== undefined && !('tooLarge' in sides[0]) ? sides[0].data : undefined;
+    const new64 = sides[1] !== undefined && !('tooLarge' in sides[1]) ? sides[1].data : undefined;
+    return {
+        ok: true,
+        value: {
+            kind: 'image-diff', path: q.path, mime,
+            ...(old64 !== undefined ? { old: `data:${mime};base64,${old64}` } : {}),
+            ...(new64 !== undefined ? { new: `data:${mime};base64,${new64}` } : {}),
+        },
+    };
+}
+/** Resolve `<rev>:<path>` to a full object id; absent spec → undefined. */
+async function resolveOid(deps, root, spec) {
+    const res = await runCommand(deps.run, ['git', 'rev-parse', '--verify', '--quiet', spec], root, 'image-oid', deps.signal);
+    if (!('run' in res) || res.run.exitCode !== 0)
+        return undefined;
+    const oid = res.run.stdout.trim();
+    return /^[0-9a-f]{40}$|^[0-9a-f]{64}$/.test(oid) ? oid : undefined;
+}
+async function absoluteGitDir(deps, root) {
+    const res = await runCommand(deps.run, ['git', 'rev-parse', '--absolute-git-dir'], root, 'git-dir', deps.signal);
+    if (!('run' in res) || res.run.exitCode !== 0)
+        throw new Error('git dir unavailable');
+    return res.run.stdout.trim();
+}
+/**
+ * Raw blob bytes: `unpack-file` writes the object to a temp file (stdout is a
+ * lossy utf8 decode and cannot carry binary), created in the git dir — which
+ * must be the cwd so the temp file never shows up as an untracked worktree
+ * entry. The printed name is charset-checked before it is joined and read.
+ */
+async function blobSide(deps, gitDir, oid, cap) {
+    const sizeRes = await runCommand(deps.run, ['git', 'cat-file', '-s', oid], gitDir, 'image-size', deps.signal);
+    if (!('run' in sizeRes) || sizeRes.run.exitCode !== 0)
+        return undefined;
+    const size = Number(sizeRes.run.stdout.trim());
+    if (!Number.isFinite(size))
+        return undefined;
+    if (size > cap)
+        return { tooLarge: true };
+    const nameRes = await runCommand(deps.run, ['git', 'unpack-file', oid], gitDir, 'image-unpack', deps.signal);
+    if (!('run' in nameRes) || nameRes.run.exitCode !== 0)
+        return undefined;
+    const name = nameRes.run.stdout.trim();
+    if (!/^[A-Za-z0-9._-]+$/.test(name))
+        return undefined;
+    const file = join(gitDir, name);
+    try {
+        const buf = await deps.fs.readFile(file);
+        if (buf.length > cap)
+            return { tooLarge: true };
+        return { data: buf.toString('base64') };
+    }
+    catch {
+        return undefined;
+    }
+    finally {
+        await deps.fs.remove(file).catch(() => { });
+    }
+}
+/** The working-tree file (absent when deleted). A symlink whose realpath
+ * escapes the repository root is refused, so an untrusted clone cannot point
+ * `evil.png → ~/.ssh/id_rsa` and have its bytes base64'd into the image pane. */
+async function worktreeSide(deps, root, path, cap) {
+    try {
+        const file = join(root, path);
+        const real = await deps.fs.realpath(file);
+        const rootReal = await deps.fs.realpath(root);
+        if (real !== rootReal && !real.startsWith(rootReal + sep))
+            return undefined;
+        const info = await deps.fs.stat(file);
+        if (info.size > cap)
+            return { tooLarge: true };
+        const buf = await deps.fs.readFile(file);
+        if (buf.length > cap)
+            return { tooLarge: true };
+        return { data: buf.toString('base64') };
+    }
+    catch {
+        return undefined;
+    }
+}
+// ── file browser ─────────────────────────────────────────────────────────
+/** Max entries returned for one directory listing (bounds RPC + render). */
+const DIR_ENTRY_CAP = 2000;
+/**
+ * List one working-tree directory, one level down. `.git` is skipped; the path
+ * is validated (`isSafePath`) and its realpath is confirmed inside the root so
+ * a symlinked subdirectory cannot escape. Entries are sorted dirs-first then by
+ * name and capped at DIR_ENTRY_CAP.
+ */
+async function queryDirList(deps, root, q, isGitRepo) {
+    const rel = q.path;
+    if ((rel !== '' && !isSafePath(rel)) || hasGitSegment(rel))
+        return { ok: false, error: { code: 'invalid-path', message: rel } };
+    const dir = rel === '' ? root : join(root, rel);
+    const inside = await isInsideRoot(deps, root, dir, true);
+    if (inside === 'missing')
+        return { ok: false, error: { code: 'file-not-found', message: rel } };
+    if (inside === 'outside')
+        return { ok: false, error: { code: 'invalid-path', message: rel } };
+    let raw;
+    try {
+        raw = await deps.fs.readdir(dir);
+    }
+    catch (error) {
+        return { ok: false, error: { code: 'git-error', message: error instanceof Error ? error.message : 'readdir failed' } };
+    }
+    const filtered = raw.filter((e) => e.name !== '.git');
+    filtered.sort((a, b) => (a.isDirectory !== b.isDirectory ? (a.isDirectory ? -1 : 1) : a.name.localeCompare(b.name)));
+    const truncated = filtered.length > DIR_ENTRY_CAP;
+    const slice = truncated ? filtered.slice(0, DIR_ENTRY_CAP) : filtered;
+    const ignored = isGitRepo ? await ignoredEntries(deps, root, rel, slice.map((e) => e.name)) : new Set();
+    const entries = await Promise.all(slice.map(async (e) => {
+        const ignoreFlag = ignored.has(e.name) ? { ignored: true } : {};
+        if (e.isDirectory)
+            return { name: e.name, dir: true, ...ignoreFlag };
+        let size;
+        try {
+            size = (await deps.fs.stat(join(dir, e.name))).size;
+        }
+        catch {
+            size = undefined;
+        }
+        return { name: e.name, dir: false, ...(size !== undefined ? { size } : {}), ...ignoreFlag };
+    }));
+    const path = rel === '' ? '' : rel.replace(/\/+$/, '');
+    return { ok: true, value: { kind: 'dir-list', path, entries, truncated } };
+}
+/** Check only the visible directory page; Git handles nested and negated rules. */
+async function ignoredEntries(deps, root, parent, names) {
+    const ignored = new Set();
+    const paths = names.map((name) => parent === '' ? name : `${parent}/${name}`);
+    // Bound each argv batch by both count and bytes (especially for deep paths).
+    for (let index = 0; index < paths.length;) {
+        const batch = [];
+        let bytes = 0;
+        while (index < paths.length && batch.length < 128) {
+            const candidate = paths[index];
+            const size = Buffer.byteLength(candidate) + 1;
+            if (batch.length > 0 && bytes + size > 32 * 1024)
+                break;
+            batch.push(candidate);
+            bytes += size;
+            index++;
+        }
+        const result = await runCommand(deps.run, ['git', 'check-ignore', '-z', '--stdin'], root, 'dir-ignore', deps.signal, `${batch.join('\0')}\0`);
+        if ('failure' in result || result.run.timedOut || result.run.cancelled || result.run.stdoutLossy || ![0, 1].includes(result.run.exitCode ?? -1))
+            continue;
+        const matches = new Set(result.run.stdout.split('\0'));
+        for (const path of batch)
+            if (matches.has(path))
+                ignored.add(parent === '' ? path : path.slice(parent.length + 1));
+    }
+    return ignored;
+}
+/**
+ * Read one working-tree file for preview. Images (by extension) return a base64
+ * data URL; otherwise a UTF-8/binary probe decides between a text body and a
+ * bare binary marker. Text reads floor at the copy envelope; an SVG — markup as
+ * well as picture — uses the same floor and above the image cap is served as
+ * source instead of a data URL. Over the byte cap → `tooLarge`. Path is
+ * validated and confirmed inside the root (symlink-guarded) before any read.
+ */
+async function queryFileContent(deps, config, root, q) {
+    if (!isSafePath(q.path) || hasGitSegment(q.path))
+        return { ok: false, error: { code: 'invalid-path', message: q.path } };
+    const file = join(root, q.path);
+    const inside = await isInsideRoot(deps, root, file, true);
+    // A gone file is a real state (the tree still lists it), not a bad path:
+    // report it separately so the preview can say the file no longer exists.
+    if (inside === 'missing')
+        return { ok: false, error: { code: 'file-not-found', message: q.path } };
+    if (inside === 'outside')
+        return { ok: false, error: { code: 'invalid-path', message: q.path } };
+    let info;
+    try {
+        info = await deps.fs.stat(file);
+    }
+    catch (error) {
+        return { ok: false, error: { code: isMissingPath(error) ? 'file-not-found' : 'git-error', message: error instanceof Error ? error.message : 'stat failed' } };
+    }
+    const mime = imageMimeFor(q.path);
+    // An SVG is markup, so it is copyable content like any document: it floors at
+    // the copy envelope too, and only the data URL is held to config.maxBytes.
+    // Every other image keeps config.maxBytes as its whole cap.
+    const isSvg = mime === SVG_MIME;
+    const cap = mime === null || isSvg ? Math.max(config.maxBytes, FILE_COPY_MAX_BYTES) : config.maxBytes;
+    // Same over-cap response whether the size trips at stat or after read (the
+    // post-read length guards a grow-during-read race). size/mtimeMs ride along
+    // on every variant (incl. tooLarge) — the properties dialog needs them and
+    // the stat has already run.
+    const statFields = { size: info.size, mtimeMs: Math.round(info.mtimeMs) };
+    const tooLarge = { ok: true, value: { kind: 'file-content', path: q.path, variant: mime !== null ? 'image' : 'text', tooLarge: true, ...statFields } };
+    if (info.size > cap)
+        return tooLarge;
+    let buf;
+    try {
+        buf = await deps.fs.readFile(file);
+    }
+    catch (error) {
+        return { ok: false, error: { code: isMissingPath(error) ? 'file-not-found' : 'git-error', message: error instanceof Error ? error.message : 'read failed' } };
+    }
+    if (buf.length > cap)
+        return tooLarge;
+    if (mime !== null) {
+        // An SVG is a picture and also markup, so this one read answers both faces
+        // of its preview; bytes that are not text leave it image-only.
+        const source = isSvg && !isBinaryBuffer(buf) ? buf.toString('utf8') : undefined;
+        // Past the image cap a picture is not worth base64-inlining into the
+        // response — but an SVG's markup is still readable and copyable, so it
+        // degrades to the source face instead of failing the preview outright.
+        if (isSvg && buf.length > config.maxBytes) {
+            if (source === undefined)
+                return tooLarge;
+            return { ok: true, value: {
+                    kind: 'file-content', path: q.path, variant: 'text',
+                    content: source, lines: countLines(source), absolutePath: file,
+                    ...statFields,
+                } };
+        }
+        return { ok: true, value: {
+                kind: 'file-content', path: q.path, variant: 'image',
+                dataUrl: `data:${mime};base64,${buf.toString('base64')}`,
+                ...(source === undefined ? {} : { content: source, lines: countLines(source) }),
+                ...statFields,
+            } };
+    }
+    if (isBinaryBuffer(buf))
+        return { ok: true, value: { kind: 'file-content', path: q.path, variant: 'binary', ...statFields } };
+    const content = buf.toString('utf8');
+    const lines = countLines(content);
+    // `absolutePath` feeds the client's Markdown image resolver: relative image
+    // destinations join beside the document, so the document's own absolute
+    // path is the one fact the browser cannot derive from the relative tree.
+    return { ok: true, value: { kind: 'file-content', path: q.path, variant: 'text', content, lines, absolutePath: file, ...statFields } };
+}
+/** Do not expose Git metadata even through an explicit RPC path. */
+function hasGitSegment(path) {
+    return path.split(/[\\/]/).includes('.git');
+}
+function isMissingPath(error) {
+    return error?.code === 'ENOENT';
+}
+/**
+ * Where `path` sits relative to `root` after symlinks are followed: the one
+ * containment check shared by every endpoint that touches a browsable file.
+ */
+export async function isInsideRoot(deps, root, path, hideGit = false) {
+    try {
+        const real = await deps.fs.realpath(path);
+        const rootReal = await deps.fs.realpath(root);
+        if (real !== rootReal && !real.startsWith(rootReal + sep))
+            return 'outside';
+        return !hideGit || !hasGitSegment(real.slice(rootReal.length + 1)) ? 'inside' : 'outside';
+    }
+    catch (error) {
+        return isMissingPath(error) ? 'missing' : 'outside';
+    }
+}
+/** Heuristic binary probe: a NUL byte in the first 8KB marks non-text. */
+function isBinaryBuffer(buf) {
+    const n = Math.min(buf.length, 8192);
+    for (let i = 0; i < n; i++)
+        if (buf[i] === 0)
+            return true;
+    return false;
+}
+async function queryShow(deps, root, ref) {
+    if (!isSafeRev(ref))
+        return { ok: false, error: { code: 'invalid-name', message: `unsafe ref: ${ref}` } };
+    // hash / short / subject / author / date / body — body last so a bounded
+    // split folds any stray 0x1f (crafted subject/metadata) back into the body,
+    // keeping the five leading fields aligned.
+    const metaFormat = '--format=%H%x1f%h%x1f%s%x1f%an%x1f%aI%x1f%b';
+    const [metaRes, statRes, numstatRes] = await Promise.all([
+        runCommand(deps.run, ['git', 'show', '-s', metaFormat, '--end-of-options', ref], root, 'show-meta', deps.signal),
+        runCommand(deps.run, ['git', 'show', FIRST_PARENT_DIFF, '--name-status', '-z', '--format=', '--end-of-options', ref], root, 'show-stat', deps.signal),
+        runCommand(deps.run, ['git', 'show', FIRST_PARENT_DIFF, '--numstat', '--format=', '--end-of-options', ref], root, 'show-numstat', deps.signal),
+    ]);
+    if (!('run' in metaRes))
+        return { ok: false, error: { code: 'git-unavailable' } };
+    if (metaRes.run.cancelled)
+        return { ok: false, error: { code: 'cancelled' } };
+    if (metaRes.run.timedOut)
+        return { ok: false, error: { code: 'timeout' } };
+    if (metaRes.run.exitCode !== 0) {
+        return { ok: false, error: { code: 'git-error', message: metaRes.run.stderr.trim() || 'unknown ref' } };
+    }
+    const parts = metaRes.run.stdout.split('\x1f');
+    const commit = commitFromFields(parts);
+    const body = commit === null ? '' : parts.slice(5).join('\x1f').trim();
+    const stats = 'run' in statRes && statRes.run.exitCode === 0
+        ? parseNameStatus(statRes.run.stdout)
+        : [];
+    // Line totals come from the same first-parent diff as the file list (the
+    // flag above pins `--numstat`, which already defaulted to first-parent for
+    // merges), so the summary can never pair one diff's file count with another
+    // diff's +/-. Binary rows ("-") are skipped by sumNumstat.
+    const { insertions, deletions } = stats.length > 0 && 'run' in numstatRes && numstatRes.run.exitCode === 0
+        ? sumNumstat(numstatRes.run.stdout)
+        : { insertions: 0, deletions: 0 };
+    return { ok: true, value: { kind: 'show', ref, commit, body, stats, insertions, deletions } };
+}
+async function queryBranches(deps, root) {
+    const fmt = '--format=%(refname:short)%00%(objectname:short)%00%(upstream:track)';
+    const [localRes, remoteRes, currentRes, defaultRes] = await Promise.all([
+        runCommand(deps.run, ['git', 'for-each-ref', '--sort=-committerdate', fmt, 'refs/heads'], root, 'branches-local', deps.signal),
+        runCommand(deps.run, ['git', 'for-each-ref', '--sort=-committerdate', fmt, 'refs/remotes'], root, 'branches-remote', deps.signal),
+        runCommand(deps.run, ['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'], root, 'branch-current', deps.signal),
+        runCommand(deps.run, ['git', 'symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD'], root, 'branch-default', deps.signal),
+    ]);
+    const local = 'run' in localRes && localRes.run.exitCode === 0 ? parseBranches(localRes.run.stdout) : [];
+    const remote = 'run' in remoteRes && remoteRes.run.exitCode === 0
+        ? parseBranches(remoteRes.run.stdout).filter((b) => !b.name.endsWith('/HEAD'))
+        : [];
+    const current = 'run' in currentRes && currentRes.run.exitCode === 0 ? currentRes.run.stdout.trim() || null : null;
+    let defaultBranch = null;
+    if ('run' in defaultRes && defaultRes.run.exitCode === 0) {
+        const raw = defaultRes.run.stdout.trim();
+        defaultBranch = raw.replace(/^origin\//, '') || null;
+    }
+    return { ok: true, value: { kind: 'branches', current, defaultBranch, local, remote } };
+}
+async function queryTags(deps, root) {
+    const res = await runCommand(deps.run, ['git', 'for-each-ref', '--sort=-creatordate', '--format=%(refname:short)%00%(objectname:short)', 'refs/tags'], root, 'tags', deps.signal);
+    const tags = 'run' in res && res.run.exitCode === 0 ? parseTags(res.run.stdout) : [];
+    return { ok: true, value: { kind: 'tags', tags } };
+}
+async function queryStashList(deps, root) {
+    // `git stash list` is `git log -g refs/stash`; a custom format with -z gives
+    // NUL-separated records of selector / reflog-subject / relative-time, which
+    // parseStashList turns into { index, message, branch, relTime }. No stash
+    // ref (never stashed) exits non-zero → an empty list, not an error.
+    const res = await runCommand(deps.run, ['git', 'stash', 'list', '-z', '--format=%gd%x1f%H%x1f%gs%x1f%cr'], root, 'stash-list', deps.signal);
+    const entries = 'run' in res && res.run.exitCode === 0 ? parseStashList(res.run.stdout) : [];
+    return { ok: true, value: { kind: 'stash-list', entries } };
+}
+async function queryAuthors(deps, root) {
+    // Same refset as the history graph so an author picked from this list can
+    // never point the graph at a chain it does not display (and vice versa).
+    const res = await runCommand(deps.run, ['git', 'log', ...VISIBLE_REFS, '--format=%an', '--max-count=2000'], root, 'authors', deps.signal);
+    const authors = 'run' in res && res.run.exitCode === 0
+        ? [...new Set(res.run.stdout.split('\n').map((s) => s.trim()).filter((s) => s !== ''))].sort((a, b) => a.localeCompare(b))
+        : [];
+    return { ok: true, value: { kind: 'authors', authors } };
+}
+async function queryLastCommitMessage(deps, root) {
+    const res = await runCommand(deps.run, ['git', 'log', '-1', '--format=%B'], root, 'last-message', deps.signal);
+    const message = 'run' in res && res.run.exitCode === 0 ? res.run.stdout.replace(/\n+$/, '') : '';
+    return { ok: true, value: { kind: 'last-commit-message', message } };
+}
+/**
+ * Preview the incoming fast-forward: commits + diffstat between HEAD and its
+ * upstream. All local (the objects are already fetched once `behind > 0`), so
+ * it never touches the network. A branch without an upstream reports
+ * `hasUpstream:false` with zeroed counts; the `@{upstream}` token is a fixed
+ * literal (never user input), kept an operand with `--end-of-options`.
+ */
+async function queryPullPreview(deps, root) {
+    const empty = { kind: 'pull-preview', hasUpstream: false, commits: 0, files: 0, insertions: 0, deletions: 0 };
+    const commitsRes = await runCommand(deps.run, ['git', 'rev-list', '--count', '--end-of-options', 'HEAD..@{upstream}'], root, 'pull-preview-count', deps.signal);
+    // A non-zero exit means no upstream (or unborn): report "no upstream".
+    if (!('run' in commitsRes) || commitsRes.run.exitCode !== 0)
+        return { ok: true, value: empty };
+    const commits = Number(commitsRes.run.stdout.trim()) || 0;
+    const diffRes = await runCommand(deps.run, ['git', 'diff', '--numstat', '--end-of-options', 'HEAD', '@{upstream}'], root, 'pull-preview-diff', deps.signal);
+    let files = 0;
+    let insertions = 0;
+    let deletions = 0;
+    if ('run' in diffRes && diffRes.run.exitCode === 0) {
+        files = diffRes.run.stdout.split('\n').filter((l) => l.trim() !== '').length;
+        const sum = sumNumstat(diffRes.run.stdout);
+        insertions = sum.insertions;
+        deletions = sum.deletions;
+    }
+    return { ok: true, value: { kind: 'pull-preview', hasUpstream: true, commits, files, insertions, deletions } };
+}
+async function queryPushPreview(deps, root) {
+    const empty = { kind: 'push-preview', hasUpstream: false, commits: 0, files: 0, insertions: 0, deletions: 0 };
+    // Outgoing range is the mirror of pull-preview: commits on HEAD not yet on the
+    // upstream. A non-zero exit means no upstream (or unborn) → "no upstream".
+    const commitsRes = await runCommand(deps.run, ['git', 'rev-list', '--count', '--end-of-options', '@{upstream}..HEAD'], root, 'push-preview-count', deps.signal);
+    if (!('run' in commitsRes) || commitsRes.run.exitCode !== 0)
+        return { ok: true, value: empty };
+    const commits = Number(commitsRes.run.stdout.trim()) || 0;
+    const diffRes = await runCommand(deps.run, ['git', 'diff', '--numstat', '--end-of-options', '@{upstream}', 'HEAD'], root, 'push-preview-diff', deps.signal);
+    let files = 0;
+    let insertions = 0;
+    let deletions = 0;
+    if ('run' in diffRes && diffRes.run.exitCode === 0) {
+        files = diffRes.run.stdout.split('\n').filter((l) => l.trim() !== '').length;
+        const sum = sumNumstat(diffRes.run.stdout);
+        insertions = sum.insertions;
+        deletions = sum.deletions;
+    }
+    return { ok: true, value: { kind: 'push-preview', hasUpstream: true, commits, files, insertions, deletions } };
+}
+async function queryWorktreeStats(deps, config, sessionId, repo) {
+    // The worktree stats now live on the snapshot (single source of git spawns);
+    // this endpoint just reads them so a bare stats request stays cheap.
+    const snapshot = await snapshotForSession(deps, config, sessionId, { repo });
+    if (!snapshot.ok)
+        return { ok: false, error: { code: 'git-error', message: 'snapshot failed' } };
+    return { ok: true, value: { kind: 'worktree-stats', stats: snapshot.value.stats } };
+}
+/**
+ * Aggregate ctx.llm providers / models / reasoning metadata for the config
+ * form. Each provider and model lookup is isolated into `failures` so one
+ * broken adapter never blanks the whole catalog; providers run in parallel
+ * because `listModels` / `resolveModelInfo` may be remote-backed, while the
+ * input order is kept for a stable listing.
+ *
+ * The host `LlmRuntime` implements catalog methods with `this.registration(...)`,
+ * so bind the service as receiver before detaching — an unbound call throws
+ * on every provider and blanks the catalog.
+ */
+async function queryModelCatalog(deps) {
+    const llm = deps.getLlm?.();
+    const empty = { kind: 'model-catalog', groups: [], failures: [] };
+    if (llm === undefined || typeof llm.listModels !== 'function') {
+        return { ok: true, value: empty };
+    }
+    const listModels = llm.listModels.bind(llm);
+    const resolveModelInfo = typeof llm.resolveModelInfo === 'function' ? llm.resolveModelInfo.bind(llm) : undefined;
+    const providers = llm.listProviders?.() ?? [];
+    const results = await Promise.all(providers.map(async (provider) => {
+        const name = provider.name ?? provider.id;
+        let listed;
+        try {
+            listed = await listModels(provider.id);
+        }
+        catch (error) {
+            return { id: provider.id, name, message: error instanceof Error ? error.message : String(error) };
+        }
+        const models = await Promise.all(listed.map(async (model) => {
+            const entry = { id: model.id, name: model.name ?? model.id };
+            if (resolveModelInfo === undefined)
+                return entry;
+            try {
+                const info = await resolveModelInfo(provider.id, model.id, deps.signal);
+                const reasoning = info.reasoning;
+                if (reasoning !== undefined && reasoning.efforts.length > 0) {
+                    return {
+                        ...entry,
+                        reasoning: {
+                            efforts: reasoning.efforts.map((effort) => ({ id: effort.id, name: effort.name })),
+                        },
+                    };
+                }
+            }
+            catch {
+                // Metadata is advisory; the model still appears without efforts.
+            }
+            return entry;
+        }));
+        // A provider that lists zero models is dropped entirely, not a failure.
+        if (models.length === 0)
+            return null;
+        return { id: provider.id, name, models };
+    }));
+    const groups = [];
+    const failures = [];
+    for (const one of results) {
+        if (one === null)
+            continue;
+        if ('models' in one)
+            groups.push(one);
+        else
+            failures.push(one);
+    }
+    return { ok: true, value: { kind: 'model-catalog', groups, failures } };
+}

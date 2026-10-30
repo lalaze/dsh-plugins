@@ -40,6 +40,8 @@ export async function installWorkspaces(ctx, store, machines) {
         stat: async (id, path, signal = unbounded(), expected) => await files.operate(id, { op: 'stat', path }, signal, expected),
         download: (id, path, revision, signal = unbounded(), expected) => files.download(id, path, revision, signal, expected),
         upload: async (id, path, revision, data, signal = unbounded(), expected) => await files.upload(id, path, revision, data.length, (async function* () { yield data; })(), signal, expected),
+        list: async (id, path, signal = unbounded(), expected) => await files.operate(id, { op: 'list', path }, signal, expected),
+        remove: async (id, path, revision, signal = unbounded(), expected) => await files.operate(id, { op: 'remove', path, revision }, signal, expected),
     });
     const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
     await tunnels.open();

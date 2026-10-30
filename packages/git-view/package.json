@@ -1,7 +1,7 @@
 {
   "name": "dsh-git-view",
-  "version": "0.1.2",
-  "description": "Git in DeepSeek Harness's right sidebar for local and remote workspaces: branches, commit graph, changes, VS Code's diff editor, merge-conflict resolution and change marks on files",
+  "version": "0.2.0",
+  "description": "IDE-style Git panel for DeepSeek Harness, ported from dsh-git-panel, for local and Remote Agents workspaces: branch tree and commit graph, changes with commit and amend, file browser, AI commit messages, Monaco diffs, merge-conflict resolution and change marks on files",
   "type": "module",
   "main": "lib/server/index.js",
   "types": "lib/server/index.d.ts",
@@ -14,12 +14,12 @@
     "./package.json": "./package.json"
   },
   "files": [
-    "lib",
-    "cordis.patch.yml",
+    "LICENSE",
     "README.md",
     "README.zh-CN.md",
-    "LICENSE",
-    "THIRD_PARTY_NOTICES.md"
+    "THIRD_PARTY_NOTICES.md",
+    "cordis.patch.yml",
+    "lib"
   ],
   "engines": {
     "node": ">=22.15.0",
@@ -46,16 +46,19 @@
     "client": {
       "platform": "web",
       "inject": [
+        "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-locale",
-        "@deepseek-ai/dsh-client-ui-sidebar-right",
-        "@deepseek-ai/dsh-client-ui-conversation"
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
       ]
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",
     "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2",
-    "react": "^18.3.1"
+    "react": "^18.3.1",
+    "@deepseek-ai/schemastery": ">=3.18.4"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -65,6 +68,9 @@
       "optional": true
     },
     "react": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
       "optional": true
     }
   }
