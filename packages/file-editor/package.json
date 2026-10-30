@@ -1,6 +1,6 @@
 {
   "name": "dsh-file-editor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Edit code and text files of local workspaces in DeepSeek Harness in VS Code's editor (Monaco), with Markdown and SVG previews",
   "type": "module",
   "main": "lib/server/index.js",

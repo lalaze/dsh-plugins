@@ -2,11 +2,11 @@
 
 [English](README.md) | **简体中文**
 
-`dsh-file-editor` 让你在 DeepSeek Harness 右侧栏中编辑本地工作区的代码和文本文件。从「工作区文件」、⌘P 或对话中的文件链接打开文件时，不再显示 DSH 的只读预览，而是用 VS Code 的编辑器 [Monaco](https://github.com/microsoft/monaco-editor) 打开：语法高亮、缩略图、查找与替换、多光标、代码折叠、基于单词的补全、命令面板（F1），以及显示光标位置、缩进、换行符和语言的状态栏。支持英文和简体中文，跟随 DSH 的语言设置，编辑器自带的菜单也一样。
+`dsh-file-editor` 让你在 DeepSeek Harness 右侧栏中编辑本地工作区的代码和文本文件。从「工作区文件」、⌘P 或对话中的文件链接打开文件时，不再显示 DSH 的只读预览，而是用 VS Code 的编辑器 [Monaco](https://github.com/microsoft/monaco-editor) 打开，铺满整个标签页，上方是显示路径和图标按钮的标题栏：语法高亮、缩略图、查找与替换、多光标、代码折叠、基于单词的补全、命令面板（F1），以及显示光标位置、缩进、换行符和语言的状态栏。支持英文和简体中文，跟随 DSH 的语言设置，编辑器自带的菜单也一样。
 
-- **保存：**点击「保存」或按 ⌘/Ctrl+S 写入文件；「还原」放弃修改。保存时会确认文件仍是打开时的版本：如果文件在磁盘上已被修改（例如被智能体编辑），保存会被拒绝，不会覆盖那次修改。
+- **保存：**点击标题栏的「保存」按钮或按 ⌘/Ctrl+S 写入文件，「还原」放弃修改；路径后的圆点表示有未保存的修改。保存时会确认文件仍是打开时的版本：如果文件在磁盘上已被修改（例如被智能体编辑），保存会被拒绝，不会覆盖那次修改。
 - **外部修改：**没有未保存修改时，文件在磁盘上变化后约两秒内自动重新加载。有未保存修改时，编辑器保留你的修改并提示文件已变化；点击「重新加载」查看新版本。
-- **预览：**Markdown 和 SVG 文件可在「编辑 / 预览」间切换。Markdown 支持 GitHub 表格和任务列表，其中的原始 HTML 按文本显示。图片、PDF、表格和其他文档仍由 DSH 自带的预览打开。
+- **预览：**Markdown 和 SVG 文件的标题栏有「预览」按钮，可在源码和渲染效果之间切换。Markdown 支持 GitHub 表格和任务列表，其中的原始 HTML 按文本显示。图片、PDF、表格和其他文档仍由 DSH 自带的预览打开。
 - **换行和编码：**CRLF 换行的文件保存后仍是 CRLF，UTF-8 BOM 会保留。非 UTF-8 文本或超过 4 MB 的文件不会以编辑方式打开。
 - **快捷键：**与 VS Code 相同。⌘/Ctrl+S 保存，F1 打开命令面板，⌘/Ctrl+F 查找，⌥/Alt+Z 切换自动换行，Ctrl+G 或点击状态栏中的光标位置可转到指定行。
 - **语言：**使用 Monaco 的语法高亮，包括 JavaScript、TypeScript 与 JSX、Python、JSON、Markdown、HTML、CSS、SCSS 与 Less、YAML、XML、Rust、Go、Java、C/C++、C#、SQL、Shell、Dockerfile、Ruby、PHP、Swift、Kotlin、Lua、R、PowerShell 和 INI 等；TOML 文件按 INI 高亮。JSON 还会检查错误，允许注释。`.txt`、`Makefile`、`.gitignore` 等其他文本文件不带高亮打开。不包含语言服务器提供的类型检查和补全：编辑器只看到单个文件，而不是整个项目。
@@ -26,7 +26,7 @@
 ```sh
 pnpm --filter dsh-file-editor check
 pnpm --filter dsh-file-editor pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.2.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.2.1.tgz"
 ```
 
 需要 Node.js ≥22.15.0，DSH ≥0.2.1-rc.2 且 <0.3.0。重启该 profile 并刷新浏览器。
