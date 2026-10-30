@@ -56,6 +56,8 @@ export class WorkspaceService {
     placement;
     localCwd;
     syncing = new Set();
+    /** Only this session's active request can cancel its pinned target, even after the session changes workspace. */
+    gitJobs = new Map();
     constructor(machines, placement, localCwd) {
         this.machines = machines;
         this.placement = placement;
@@ -83,6 +85,47 @@ export class WorkspaceService {
         revision(rev);
         const target = await this.target(sessionId, signal, expected);
         return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.upload(target.cwd, path, rev, size, input, signal));
+    }
+    /** Git commands in the conversation's verified remote directory, for other plugins; never offered to models. */
+    async git(sessionId, batch, signal, expected) {
+        const key = JSON.stringify([sessionId, batch.id]);
+        if (this.gitJobs.has(key))
+            throw new RemoteError('This Git request is already running', 409);
+        const job = { cancelled: false, started: false };
+        // Register before target/connection discovery so an early cancellation cannot be lost.
+        this.gitJobs.set(key, job);
+        const check = () => { signal.throwIfAborted(); if (job.cancelled)
+            throw new RemoteError('The Git operation was cancelled', 409); };
+        try {
+            const target = await this.target(sessionId, signal, expected);
+            job.target = target;
+            check();
+            return await this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); check(); }, files => {
+                check();
+                job.started = true;
+                return files.git(target.cwd, batch, signal);
+            });
+        }
+        finally {
+            if (this.gitJobs.get(key) === job)
+                this.gitJobs.delete(key);
+        }
+    }
+    async cancelGit(sessionId, id, signal, expected) {
+        const key = JSON.stringify([sessionId, id]), job = this.gitJobs.get(key);
+        if (!job)
+            return;
+        const target = job.target;
+        if (target && expected && (target.hostId !== expected.hostId || target.cwd !== expected.cwd))
+            throw new RemoteError('The workspace changed during verification. Select the model again.', 409);
+        job.cancelled = true;
+        if (!target || !job.started)
+            return;
+        // withWorkspace still verifies the SSH machine identity, but the conversation may now point elsewhere.
+        await this.machines.withWorkspace(target.hostId, async () => { signal.throwIfAborted(); }, async (files) => {
+            if (this.gitJobs.get(key) === job)
+                await files.cancelGit(target.cwd, id, signal);
+        });
     }
     async sync(sessionId, direction, dryRun, signal, expected, planId) {
         const target = await this.target(sessionId, signal, expected), local = await this.localCwd(sessionId);

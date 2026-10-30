@@ -31,6 +31,16 @@ export async function installWorkspaces(ctx, store, machines) {
         return cwd === await sessionCwd(id) ? value : { hostIds: [] };
     };
     const files = new WorkspaceService(machines, placement, sessionCwd);
+    const unbounded = () => new AbortController().signal;
+    ctx.provide('remoteAgentsWorkspaces', {
+        gitWorkspaceVersion: 1,
+        target: (id, signal = unbounded()) => files.target(id, signal),
+        git: (id, batch, signal = unbounded(), expected) => files.git(id, batch, signal, expected),
+        cancelGit: (id, job, signal = unbounded(), expected) => files.cancelGit(id, job, signal, expected),
+        stat: async (id, path, signal = unbounded(), expected) => await files.operate(id, { op: 'stat', path }, signal, expected),
+        download: (id, path, revision, signal = unbounded(), expected) => files.download(id, path, revision, signal, expected),
+        upload: async (id, path, revision, data, signal = unbounded(), expected) => await files.upload(id, path, revision, data.length, (async function* () { yield data; })(), signal, expected),
+    });
     const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
     await tunnels.open();
     const terminal = {};
