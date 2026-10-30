@@ -27,12 +27,12 @@
       },
       "versions": [
         {
-          "version": "0.2.63",
-          "publishTimestamp": 1793352939,
+          "version": "0.2.64",
+          "publishTimestamp": 1793383724,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "b1b83d7d820cdaa99d6c7bd155e5040cc5b958eb",
+            "commit": "521d588b1cd943aea61c7e4ff1d687b57693ac35",
             "path": "packages/remote-agents"
           },
           "engines": {
@@ -157,8 +157,8 @@
         "zh": "Git 视图"
       },
       "description": {
-        "en": "Git branches, commit graph, changes, Monaco diffs and conflict resolution for local and remote workspaces; remote support requires Remote Agents 0.2.62 or newer",
-        "zh": "本地/远程工作区的 Git 分支、提交图、改动、Monaco 差异与冲突处理；远程功能需搭配 Remote Agents 0.2.62 或更新版本"
+        "en": "IDE-style Git panel ported from dsh-git-panel (overview with branch tree and commit graph, changes with commit and amend, file browser, AI commit messages, input-bar marker) for local and remote workspaces, with Monaco diffs and conflict resolution; remote support requires Remote Agents 0.2.62 or newer",
+        "zh": "移植自 dsh-git-panel 的 IDE 风格 Git 面板（分支树与提交图总览、提交与 Amend、文件浏览、AI 生成提交信息、输入框标记），适用于本地与远程工作区，并提供 Monaco 差异与冲突处理；远程功能需搭配 Remote Agents 0.2.62 或更新版本"
       },
       "author": "lalaze",
       "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/git-view",
@@ -176,12 +176,12 @@
       },
       "versions": [
         {
-          "version": "0.1.2",
-          "publishTimestamp": 1793351823,
+          "version": "0.2.0",
+          "publishTimestamp": 1793383724,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "dc42eb14de8ec99edf565977aad30b05c0213557",
+            "commit": "521d588b1cd943aea61c7e4ff1d687b57693ac35",
             "path": "packages/git-view"
           },
           "engines": {
