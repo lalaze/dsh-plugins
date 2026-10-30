@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { acquireUsageStore } from './store.js';
 import { observe } from './observe.js';
-import { parseQuery, report, toCsv, validRecord, type UsageRecord } from './domain.js';
+import { parseQuery, report, toCsv, validRecord, type UsageRecord, type WorkspaceNames } from './domain.js';
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -30,6 +30,22 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
       if (!sessionId) return undefined;
       try { const cwd = (ctx.get('sessions') as { get?(id: string): { header?: { cwd?: unknown } } | undefined } | undefined)?.get?.(sessionId)?.header?.cwd; return typeof cwd === 'string' && cwd ? cwd : undefined; }
       catch { return undefined; }
+    };
+    /**
+     * DSH's workspaces as the sidebar lists them, read per report: a record belongs to the workspace holding its
+     * conversation, or else the one at the directory it recorded. Without DSH's registry, records keep their directory.
+     */
+    const workspaceNames = (): WorkspaceNames | undefined => {
+      type Workspace = { id: string; path: string; title: string; sessionIds: readonly string[] };
+      let list: Workspace[];
+      try { list = (ctx.get('workspaceRegistry') as { list?(): Workspace[] } | undefined)?.list?.() ?? []; } catch { return undefined; }
+      if (!list.length) return undefined;
+      const bySession = new Map<string, Workspace>(), byPath = new Map<string, Workspace>();
+      for (const workspace of list) { for (const id of workspace.sessionIds) bySession.set(id, workspace); byPath.set(workspace.path, workspace); }
+      return r => {
+        const workspace = (r.sessionId ? bySession.get(r.sessionId) : undefined) ?? (r.workspace ? byPath.get(r.workspace) : undefined);
+        return workspace && workspace.title ? { key: workspace.id, title: workspace.title } : undefined;
+      };
     };
     ctx.on('llm/stream', (options, next) => {
       // Remote CLI turns are recorded once from dsh-remote-agents' event, with their machine and remote directory.
@@ -55,7 +71,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
         const url = new URL(request.url);
         const format = url.searchParams.get('format');
         if (format && format !== 'csv') throw new Error("Unsupported export format");
-        const data = report(store.snapshot(), parseQuery(url), store.failedWrites);
+        const data = report(store.snapshot(), parseQuery(url), store.failedWrites, workspaceNames());
         const headers = { 'Cache-Control': 'no-store' };
         if (format === 'csv') return new Response(toCsv(data), { headers: { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="dsh-usage.csv"' } });
         return Response.json(data, { headers });

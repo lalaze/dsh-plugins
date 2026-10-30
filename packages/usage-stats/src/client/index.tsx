@@ -75,10 +75,13 @@ const BREAKDOWNS = [['provider', "By provider"], ['workspace', "By workspace"], 
 const BREAKDOWN_ROWS = 8;
 /** Long workspace paths keep their last two folders; the full path is in the tooltip. */
 const shortPath = (path: string) => { const parts = path.split(/[\\/]/).filter(Boolean); return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path; };
-/** A group's shown name and full tooltip; placeholder keys (empty or `?`) are translated. */
+/**
+ * A group's shown name and full tooltip; placeholder keys (empty or `?`) are translated. A DSH workspace shows its name
+ * as the sidebar does; a directory outside every workspace shows its last folders.
+ */
 const groupName = (g: { key: string; label: string }, by: Dimension) => {
-  const placeholder = g.key === '' || g.key === '?';
-  return { name: placeholder ? ui(g.label) : by === 'workspace' ? shortPath(g.label) : g.label, title: placeholder ? ui(g.label) : g.label };
+  const placeholder = g.key === '' || g.key === '?', named = by === 'workspace' && g.key.startsWith('workspace:');
+  return { name: placeholder ? ui(g.label) : by === 'workspace' && !named ? shortPath(g.label) : g.label, title: placeholder ? ui(g.label) : g.label };
 };
 /** The selected category's groups, largest first; a row expands into its request, token and status details. */
 function Breakdown({ data, by }: { data: UsageReport; by: Dimension }) {

@@ -156,6 +156,10 @@ test('真实 Cordis 与 LlmRuntime waterfall 经适配器派发后恰好采集�
     const label = (rows: { label: string }[]) => rows.map(row => row.label);
     assert.deepEqual(label(remote.breakdowns.provider), ['Codex', 'Claude Code']); assert.deepEqual(label(remote.breakdowns.host), ['Build box', 'Unknown host']);
     assert.deepEqual(label(remote.breakdowns.workspace), ['/srv/app', 'No workspace']); assert.deepEqual(label(remote.breakdowns.vendor), ['OpenAI', 'Anthropic']);
+    // With DSH's workspace registry, the delegated turn is named by the workspace holding its conversation.
+    ctx.provide('workspaceRegistry'); ctx.set('workspaceRegistry', { list: () => [{ id: 'w1', path: '/Users/me/app', title: 'app', sessionIds: ['remote-agent:t1'] }] });
+    const named = await (await fetcher!(new Request('http://example.test/api/usage-stats?source=remote-agents&groupBy=workspace'))).json();
+    assert.deepEqual(named.breakdowns.workspace.map((g: { key: string; label: string }) => [g.key, g.label]), [['workspace:w1', 'app'], ['', 'No workspace']]);
     const sources = await (await fetcher!(new Request('http://example.test/api/usage-stats?groupBy=source'))).json();
     assert.deepEqual(sources.groups.map((g: { key: string; label: string }) => [g.key, g.label]).sort(), [['dsh', 'DSH model calls'], ['remote-agents', 'Remote agents']]);
   } finally { await ctx.fiber.dispose(); await rm(root, { recursive: true, force: true }); }
@@ -217,6 +221,10 @@ test('分类：Provider 按 CLI 合并，模型厂商按模型名识别，DSH �
   assert.deepEqual(rows('model').map(r => r[1]), ['claude-opus-5', 'gpt-5.5 · priority', 'sonnet', 'deepseek-flash']);
   assert.deepEqual(rows('host'), [['Box A', 'Box A', 600], ['Box B', 'Box B', 250], ['?', 'Unknown host', 100], ['', 'This computer', 50]]);
   assert.deepEqual(rows('workspace').map(r => r[1]), ['/srv/a', '/srv/b', 'No workspace', '/home/me/app']);
+  // DSH's workspaces name their records: by the conversation, else by the directory; others keep their directory.
+  const named = report([...records.map((r, i) => ({ ...r, sessionId: `s${i}` })), record({ id: 'e', workspace: '/home/me/app', usage: usage(5) })], { groupBy: 'workspace' }, 0,
+    r => r.sessionId === 's0' || r.sessionId === 's2' ? { key: 'w1', title: 'dsh-plugins' } : r.workspace === '/home/me/app' ? { key: 'w2', title: 'app' } : undefined);
+  assert.deepEqual(named.breakdowns.workspace.map(g => [g.key, g.label, g.totals.totalTokens]), [['workspace:w1', 'dsh-plugins', 850], ['', 'No workspace', 100], ['workspace:w2', 'app', 55]]);
   assert.equal(report(records, { groupBy: 'model', model: 'gpt-5.5 · priority' }).totals.requests, 1, 'the model filter uses the shown name');
 });
 test('时区偏移按本地日期划分“今日”，非法偏移被拒绝', () => {

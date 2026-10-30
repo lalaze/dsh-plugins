@@ -84,10 +84,18 @@ export function vendorOf(r: Pick<UsageRecord, 'provider' | 'model'>): string {
   const model = modelOf(r), provider = r.provider.replace(/^remote-cli-/, '');
   return MODEL_VENDORS.find(([pattern]) => pattern.test(model))?.[1] ?? PROVIDER_VENDORS.find(([pattern]) => pattern.test(provider))?.[1] ?? 'Other';
 }
-/** Group key and label; placeholder labels (empty or `?` keys) are translated by the dashboard. */
-function dimension(r: UsageRecord, by: Dimension): [string, string] {
+/** The DSH workspace a record belongs to, as the sidebar names it; `key` is stable across renames. */
+export type WorkspaceNames = (r: UsageRecord) => { key: string; title: string } | undefined;
+/**
+ * Group key and label; placeholder labels (empty or `?` keys) are translated by the dashboard. A record is grouped under
+ * its DSH workspace when one is known, otherwise under the directory it recorded.
+ */
+function dimension(r: UsageRecord, by: Dimension, workspaces?: WorkspaceNames): [string, string] {
   if (by === 'provider') { const label = providerLabel(r.provider); return [label, label]; }
-  if (by === 'workspace') return r.workspace ? [r.workspace, r.workspace] : ['', "No workspace"];
+  if (by === 'workspace') {
+    const named = workspaces?.(r);
+    return named ? [`workspace:${named.key}`, named.title] : r.workspace ? [r.workspace, r.workspace] : ['', "No workspace"];
+  }
   if (by === 'model') { const model = modelOf(r); return [model, model]; }
   if (by === 'vendor') { const vendor = vendorOf(r); return [vendor, vendor]; }
   return r.host ? [r.host, r.host] : sourceOf(r.provider) === 'dsh' ? ['', "This computer"] : ['?', "Unknown host"];
@@ -139,7 +147,7 @@ export function parseQuery(url: URL): Query {
   if (tz !== null && tz !== '') { tzOffset = Number(tz); if (!Number.isInteger(tzOffset) || tzOffset < -840 || tzOffset > 840) throw new Error("Unsupported time zone offset"); }
   return { from, to, groupBy: groupBy as GroupBy, source, provider: filter('provider'), model: filter('model'), sessionId: filter('sessionId'), ...(tzOffset ? { tzOffset } : {}) };
 }
-export function report(records: readonly UsageRecord[], query: Query, failedWrites = 0): UsageReport {
+export function report(records: readonly UsageRecord[], query: Query, failedWrites = 0, workspaces?: WorkspaceNames): UsageReport {
   const totals = emptyTotals();
   const groups = new Map<string, UsageGroup>();
   const series = new Map<string, UsageGroup>(); const sources = new Map<string, UsageGroup>();
@@ -160,7 +168,7 @@ export function report(records: readonly UsageRecord[], query: Query, failedWrit
     }
     accumulate(series, day, day, r);
     accumulate(sources, sourceOf(r.provider), SOURCE_LABELS[sourceOf(r.provider)], r);
-    for (const by of DIMENSIONS) accumulate(breakdowns[by], ...dimension(r, by), r);
+    for (const by of DIMENSIONS) accumulate(breakdowns[by], ...dimension(r, by, workspaces), r);
   }
   const largest = (map: Map<string, UsageGroup>) => [...map.values()].sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || b.totals.requests - a.totals.requests || a.label.localeCompare(b.label));
   const by = query.groupBy;
