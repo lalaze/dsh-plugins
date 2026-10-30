@@ -62,7 +62,7 @@ Install an individual built archive into the desired DSH profile:
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.62.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.63.tgz"
 ```
 
 For Desktop, fully quit DSH and use the desktop application's bundled `dsh` command with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. For Web, restart the updated profile and refresh the browser. Plugins are not currently published to npm. The repository root is a private workspace; install individual plugin archives rather than the GitHub root.

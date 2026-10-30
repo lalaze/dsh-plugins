@@ -19,6 +19,14 @@ export function sessionFileAddress(sessionId: string, path: string): string {
   const encode = (segment: string) => encodeURIComponent(segment).replace(/%3A/gi, ':');
   return `dsh-resource://file/session/${encode(sessionId)}/${path.split('/').map(encode).join('/')}`;
 }
+/**
+ * Whether a session file address names a file in the remote workspace. DSH Desktop cites dropped files by their
+ * absolute path on the DSH machine; those stay with DSH's own viewer, which reads them where they are.
+ */
+export function inRemoteWorkspace(path: string, cwd: string): boolean {
+  if (/^[A-Za-z]:[\\/]|^\\\\/.test(path)) return false;
+  return !path.startsWith('/') || path === cwd || path.startsWith(`${cwd.replace(/\/+$/, '')}/`);
+}
 type TabDefinition = Record<string, unknown> & { id: string; kind: string; guide?: readonly Record<string, unknown>[] };
 type Entry = { cwd: string; target?: WorkspaceTarget; check: number };
 /** DSH's own Workspace files type: its kind, which ⌘P opens, and its guide entry's id. */
@@ -104,7 +112,10 @@ export function installWorkspaceSidebar(ctx: Client): void {
       try {
         update();
         offFile = tabs.register({ id: file, kind: file, patterns: ['dsh-resource://file/**'],
-          canOpen: (address: string) => { const parsed = workspaceFileAddress(address); return !!parsed && !!cache.get(parsed.sessionId)?.target; },
+          canOpen: (address: string) => {
+            const parsed = workspaceFileAddress(address), target = parsed && cache.get(parsed.sessionId)?.target;
+            return !!target && inRemoteWorkspace(parsed.path, target.cwd);
+          },
           title: (address: string) => workspaceFileAddress(address)?.path.split('/').pop() || ui('Remote file'),
         });
         scoped.slots.inject('sidebar.right.pane.tab', () => {

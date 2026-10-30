@@ -62,7 +62,7 @@ pnpm --filter dsh-remote-agents pack:plugin
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.62.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.63.tgz"
 ```
 
 桌面端请完全退出 DSH，使用桌面应用自带的 `dsh` 命令，将参数改为 `--profile desktop` 后安装并重新打开；npm 版 CLI 不能管理这个保留 profile。Web 端请重启更新的 profile 并刷新浏览器。插件目前未发布到 npm。仓库根目录是私有工作区，安装时应使用各插件的压缩包。

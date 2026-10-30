@@ -7,7 +7,7 @@ import {
 } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Cursor, type DshPermission, type TimelineEntry } from '../core/domain.js';
-import { restoreFiles, stageAttachments, type AttachmentAccess } from '../agents/attachments.js';
+import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
 import { ChatImageLinks, saveChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
 import { decidePermission } from '../agents/tools.js';
@@ -385,12 +385,18 @@ export class RemoteCliAdapter extends LlmAdapter {
         yield* endBlock(); rows.close(); yield { type: 'finish', reason: { kind: 'stop' } }; return;
       }
       const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
+      // DSH Desktop cites dropped non-image files by their path on this machine: send copies along with the attachments.
+      const stageInput = async () => {
+        const local = await stageLocalFiles(service.store.directory, taskId, messageId, localFileMentions(blockText(blocks), cwd), signal);
+        const attachments = [...await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal), ...local.map(f => f.attachment)];
+        return { attachments, text: localFilePrompt(prompt, taskId, messageId, local) };
+      };
       if (!task) {
         const composerMode = presetMode(provider.id, provider.modes, this.host.permission?.(sessionId));
-        const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
+        const { attachments, text } = await stageInput();
         // A newly selected route receives prior human/assistant context, never local DSH tool schemas or its system prompt.
         admitted = true;
-        const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt, ...(attachments.length ? { attachments } : {}),
+        const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt: text, ...(attachments.length ? { attachments } : {}),
           // Native chats follow the DSH composer's permission. Without a matching mode Claude and Codex follow the
           // remote CLI's own permission config; old cached Claude catalogs must not override it.
           ...(composerMode ? { modeId: composerMode } : provider.id === 'codex' ? { modeId: 'inherit' } : provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) },
@@ -413,12 +419,12 @@ export class RemoteCliAdapter extends LlmAdapter {
             }
             await delivered(previous.messageId, undefined, true);
           }
-          const attachments = await stageAttachments(service.store.directory, taskId, messageId, blocks, this.host.attachments, signal);
+          const { attachments, text } = await stageInput();
           await service.setModel(task.id, model.id, effort, options.model, serviceTier);
           // The composer's permission wins over a mode chosen in Open sessions; a custom DSH permission keeps the saved mode.
           const mode = presetMode(task.provider, task.modes ?? [], this.host.permission?.(sessionId));
           if (mode && mode !== service.store.task(t => t.id === task.id)?.modeId) await service.setMode(task.id, mode);
-          admitted = true; await service.send(task.id, { id: messageId, text: prompt, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
+          admitted = true; await service.send(task.id, { id: messageId, text, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
         } else admitted = true;
       }
       const receipt = await service.messageTimeline(taskId, messageId);

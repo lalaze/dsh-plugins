@@ -115,6 +115,26 @@ for (const provider of ['claude', 'codex', 'grok']) test(`${provider}: images an
   async function serviceDelete() { await adapter.projects.service.delete(task.id); await assert.rejects(access(attachmentDirectory(directory, task.id, task.id)), { code: 'ENOENT' }); }
 });
 
+test('DSH Desktop @path mentions of files on this machine are uploaded and point at their remote copies', async t => {
+  const { adapter, options, ssh, directory } = await setup(t);
+  const local = join(directory, 'Downloads output'); await mkdir(local);
+  const json = Buffer.from('{"vap":1}'), video = Buffer.concat([file, Buffer.alloc(200_000, 7)]);
+  await writeFile(join(local, 'vapc.json'), json); await writeFile(join(local, 'video.mp4'), video);
+  const text = `@"${join(local, 'vapc.json')}" @"${join(local, 'video.mp4')}", @${local}/ @/srv/project/src/app.ts @/nowhere/on/this/machine.txt 头图处接入 vap 动画`;
+  await collect(adapter.stream(options([{ type: 'text', text }])));
+  assert.deepEqual(ssh.uploads.map(u => u.data), [json, video]);
+  const sent: string = ssh.prompts[0].message.content[0].text;
+  assert.ok(!sent.includes(join(local, 'vapc.json')) && !sent.includes(join(local, 'video.mp4')));
+  for (const upload of ssh.uploads) {
+    const relative = upload.path.slice('/srv/canonical/'.length);
+    assert.ok(sent.includes(`@${relative} `) || sent.includes(`@${relative},`), sent); assert.ok(sent.includes(JSON.stringify(upload.path)));
+  }
+  assert.match(sent, /@\/srv\/project\/src\/app\.ts @\/nowhere\/on\/this\/machine\.txt 头图处接入/);
+  assert.ok(sent.includes(`@${local}/`));
+  const unreadable = join(local, 'locked.bin'); await writeFile(unreadable, file, { mode: 0 });
+  if (process.getuid?.() !== 0) await assert.rejects(collect(adapter.stream(options([{ type: 'text', text: `@"${unreadable}"` }], [user([{ type: 'text', text }])]))), /Cannot read .*locked\.bin/);
+});
+
 test('an interrupted upload is retryable without starting a CLI turn or losing attachment bytes', async t => {
   const { adapter, options, ssh, store } = await setup(t);
   const input = options([image]); ssh.failUpload = true;

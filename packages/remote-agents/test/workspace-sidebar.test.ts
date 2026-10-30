@@ -54,6 +54,10 @@ test('native sidebar claims only verified remote sessions, invalidates workspace
   installWorkspaceSidebar(ctx); await setImmediate(); await setImmediate();
   const claim = types.get('remote-agents/file')!.canOpen as (address: string) => boolean;
   assert.equal(claim('dsh-resource://file/session/remote/src/a.ts'), true);
+  assert.equal(claim('dsh-resource://file/session/remote/%2Fsrv%2Fapp%2Fsrc%2Fa.ts'), true);
+  assert.equal(claim('dsh-resource://file/session/remote//Users/me/Downloads/output/md5.txt'), false, 'a dropped file on the DSH machine stays with DSH');
+  assert.equal(claim('dsh-resource://file/session/remote/%2Fsrv%2Fapplication%2Fa.ts'), false);
+  assert.equal(claim('dsh-resource://file/session/remote/C:/Users/me/a.txt'), false);
   assert.equal(claim('dsh-resource://file/session/local/src/a.ts'), false);
   assert.equal(claim('dsh-resource://file/session/idle/src/a.ts'), false);
   assert.deepEqual(requested, ['remote'], 'warming does not probe local or inactive sessions');
