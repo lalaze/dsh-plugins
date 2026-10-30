@@ -20,7 +20,7 @@
 ```sh
 pnpm --filter dsh-workspace-tags check
 pnpm --filter dsh-workspace-tags pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.6.tgz"
 ```
 
 需要 DSH 0.2.1-rc.3 或之后的 0.2 版本。

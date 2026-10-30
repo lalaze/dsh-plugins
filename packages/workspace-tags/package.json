@@ -1,6 +1,6 @@
 {
   "name": "dsh-workspace-tags",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Colored workspace tags and tag or status grouping for the DeepSeek Harness sidebar",
   "type": "module",
   "main": "lib/server/index.js",
