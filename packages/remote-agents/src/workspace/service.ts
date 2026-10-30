@@ -4,7 +4,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { RemoteError, field, record } from '../core/domain.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { under, type WorkspacePlacement } from './access.js';
-import { FILE_LIMIT, TEXT_LIMIT, type FileOperation, type SyncResult, type WorkspaceManifest, type WorkspaceTarget } from './domain.js';
+import { FILE_LIMIT, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type SyncResult, type WorkspaceManifest, type WorkspaceTarget } from './domain.js';
 
 export type SessionPlacement = (id: string, signal: AbortSignal) => Promise<WorkspacePlacement>;
 export const hash = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');
@@ -45,6 +45,8 @@ export function revision(value: unknown): string | null {
 /** All entry points derive host and cwd from the DSH session; callers can only assert an expected target. */
 export class WorkspaceService {
   private readonly syncing = new Set<string>();
+  /** Only this session's active request can cancel its pinned target, even after the session changes workspace. */
+  private readonly gitJobs = new Map<string, { target?: WorkspaceTarget; cancelled: boolean; started: boolean }>();
   constructor(readonly machines: WorkspaceHosts, readonly placement: SessionPlacement, private readonly localCwd: (id: string) => Promise<string | undefined>) {}
   async target(sessionId: string, signal = new AbortController().signal, expected?: WorkspaceTarget): Promise<WorkspaceTarget> {
     const value = await this.placement(sessionId, signal);
@@ -64,6 +66,35 @@ export class WorkspaceService {
   async upload(sessionId: string, path: string, rev: string | null, size: number, input: AsyncIterable<Uint8Array>, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown> {
     revision(rev); const target = await this.target(sessionId, signal, expected);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.upload(target.cwd, path, rev, size, input, signal));
+  }
+  /** Git commands in the conversation's verified remote directory, for other plugins; never offered to models. */
+  async git(sessionId: string, batch: GitBatch, signal: AbortSignal, expected?: WorkspaceTarget): Promise<GitRun[]> {
+    const key = JSON.stringify([sessionId, batch.id]);
+    if (this.gitJobs.has(key)) throw new RemoteError('This Git request is already running', 409);
+    const job: { target?: WorkspaceTarget; cancelled: boolean; started: boolean } = { cancelled: false, started: false };
+    // Register before target/connection discovery so an early cancellation cannot be lost.
+    this.gitJobs.set(key, job);
+    const check = () => { signal.throwIfAborted(); if (job.cancelled) throw new RemoteError('The Git operation was cancelled', 409); };
+    try {
+      const target = await this.target(sessionId, signal, expected);
+      job.target = target; check();
+      return await this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); check(); }, files => {
+        check(); job.started = true;
+        return files.git(target.cwd, batch, signal);
+      });
+    } finally { if (this.gitJobs.get(key) === job) this.gitJobs.delete(key); }
+  }
+  async cancelGit(sessionId: string, id: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<void> {
+    const key = JSON.stringify([sessionId, id]), job = this.gitJobs.get(key);
+    if (!job) return;
+    const target = job.target;
+    if (target && expected && (target.hostId !== expected.hostId || target.cwd !== expected.cwd)) throw new RemoteError('The workspace changed during verification. Select the model again.', 409);
+    job.cancelled = true;
+    if (!target || !job.started) return;
+    // withWorkspace still verifies the SSH machine identity, but the conversation may now point elsewhere.
+    await this.machines.withWorkspace(target.hostId, async () => { signal.throwIfAborted(); }, async files => {
+      if (this.gitJobs.get(key) === job) await files.cancelGit(target.cwd, id, signal);
+    });
   }
   async sync(sessionId: string, direction: 'pull' | 'push', dryRun: boolean, signal: AbortSignal, expected?: WorkspaceTarget, planId?: string): Promise<SyncResult> {
     const target = await this.target(sessionId, signal, expected), local = await this.localCwd(sessionId);

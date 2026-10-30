@@ -3,6 +3,7 @@ import { test, type TestContext } from 'node:test';
 import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, symlink, rm, readdir, realpath, chmod, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { OpenSshTransport } from '../src/core/ssh.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';
@@ -98,6 +99,53 @@ test('a remote command that times out stops everything it started, and flooding 
   const flood = await files.operate(remote, { op: 'command', path: '.', command: 'yes' }) as { stdout: string; truncated: boolean; exitCode: number | null };
   assert.deepEqual([flood.truncated, flood.exitCode], [true, null]);
   assert.ok(flood.stdout.length <= 256 * 1024 && flood.stdout.startsWith('y\ny\n'));
+});
+test('remote Git passes each argument verbatim, runs in the workspace directory given and reports every command', async t => {
+  const { remote, files } = await directory(t);
+  await mkdir(join(remote, 'sub'));
+  await writeFile(join(remote, "it's $HOME.txt"), 'one\n');
+  const git = (argv: string[]) => ({ argv, timeoutMs: 20000 });
+  const message = 'Subject with "quotes", $HOME and `ticks`\n\nbody line';
+  const runs = await files.git(remote, { id: randomUUID(), maxBytes: 65536, stopOnError: true, commands: [
+    git(['init', '-q']), git(['add', '-A']), git(['-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-q', '-m', message]),
+    git(['log', '-1', '--pretty=format:%B']), git(['ls-files', '-z']),
+  ] });
+  assert.deepEqual(runs.map(r => [r.exitCode, r.skipped, r.timedOut, r.truncated]), Array(5).fill([0, false, false, false]));
+  assert.equal(runs[3].stdout.trim(), message);
+  assert.equal(runs[4].stdout, "it's $HOME.txt\0");
+  const [prefix] = await files.git(remote, { id: randomUUID(), path: 'sub', maxBytes: 1000, optionalLocks: false, commands: [git(['rev-parse', '--show-prefix'])] });
+  assert.equal(prefix.stdout, 'sub/\n');
+  const failed = await files.git(remote, { id: randomUUID(), maxBytes: 1000, stopOnError: true, commands: [git(['switch', 'missing']), git(['status'])] });
+  assert.notEqual(failed[0].exitCode, 0);
+  assert.match(failed[0].stderr, /missing/);
+  assert.deepEqual([failed[1].skipped, failed[1].exitCode], [true, null]);
+  const [cut] = await files.git(remote, { id: randomUUID(), maxBytes: 4, commands: [git(['log', '-1', '--pretty=format:%H'])] });
+  assert.deepEqual([cut.truncated, cut.exitCode], [true, null]);
+  assert.match(cut.stdout, /^[0-9a-f]{4}$/);
+  await assert.rejects(files.git(remote, { id: randomUUID(), path: '..', maxBytes: 10, commands: [git(['status'])] }), /outside the remote workspace/);
+  await assert.rejects(files.git(remote, { id: 'not-a-uuid', maxBytes: 10, commands: [git(['status'])] }), /Invalid Git request/);
+  await assert.rejects(files.git(remote, { id: randomUUID(), maxBytes: 10, commands: [git(['status', 'a\0b'])] }), /Invalid Git arguments/);
+  await assert.rejects(files.git(remote, { id: randomUUID(), maxBytes: 10, commands: [git(['commit', '-m', 'x'.repeat(70 * 1024)])] }), /too long/);
+});
+test('remote Git stops a command at its timeout, and a cancel stops the running command and skips the rest', async t => {
+  const { root, remote, files } = await directory(t);
+  const wait = { argv: ['-c', 'alias.wait=!sleep 30', 'wait'], timeoutMs: 60000 };
+  let started = Date.now();
+  const [timed] = await files.git(remote, { id: randomUUID(), maxBytes: 100, commands: [{ ...wait, timeoutMs: 1000 }] });
+  assert.deepEqual([timed.timedOut, timed.exitCode], [true, null]);
+  assert.ok(Date.now() - started < 4000, 'the command stops at its timeout');
+  const id = randomUUID(), jobs = join(root, '.dsh-remote-agents/git');
+  started = Date.now();
+  const running = files.git(remote, { id, maxBytes: 100, commands: [wait, { argv: ['--version'], timeoutMs: 20000 }] });
+  for (let i = 0; i < 200 && !(await stat(join(jobs, id)).then(() => true, () => false)); i++) await new Promise(resolve => setTimeout(resolve, 25));
+  await files.cancelGit(remote, id);
+  const [stopped, rest] = await running;
+  assert.deepEqual([stopped.exitCode, stopped.timedOut, rest.skipped], [null, false, true]);
+  assert.ok(Date.now() - started < 10000, 'the cancel stops the running command');
+  assert.deepEqual(await readdir(jobs), []);
+  // Cancelling a request that already finished changes nothing.
+  await files.cancelGit(remote, randomUUID());
+  await assert.rejects(files.cancelGit(remote, '../state'), /Invalid Git request/);
 });
 test('a name containing a newline is listed and readable, but scans skip it', async t => {
   const { remote, files } = await directory(t);

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -21,9 +21,12 @@ export class LocalTransport extends OpenSshTransport {
   readonly processes = new Map<ChildProcessWithoutNullStreams, string>();
   constructor(readonly home: string, private readonly env: Record<string, string> = {}) { super('ssh://builder@localhost'); }
   protected override spawnRemote(command: string): ChildProcessWithoutNullStreams {
+    // REMOTE_PATH preserves the initial Node's bin ahead of CLI discovery; keep it in the fixture.
+    // Explicit environment overrides still win for tests exercising a different login environment.
+    const env = { ...process.env, HOME: this.home, SHELL: '/bin/sh', PATH: `${join(this.home, '.local', 'bin')}:${process.env.PATH ?? ''}`, ...this.env };
     const child = this.offline
       ? spawn('/bin/sh', ['-c', 'echo "ssh: connect to host localhost port 22: Connection refused" >&2; exit 255'], { stdio: ['pipe', 'pipe', 'pipe'] })
-      : spawn('/bin/sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, HOME: this.home, SHELL: '/bin/sh', ...this.env } });
+      : spawn('/bin/sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'], env });
     this.processes.set(child, command); child.on('close', () => this.processes.delete(child));
     return child;
   }
@@ -45,9 +48,11 @@ export const waitFor = async <T>(read: () => T | Promise<T>, message: string, ti
 };
 export async function relayHarness(t: TestContext, env: Record<string, string> = {}, options: { longHome?: boolean } = {}) {
   // A long HOME puts the relay's Unix socket path beyond the ~104–108 byte platform limit.
-  const root = await mkdtemp(join(tmpdir(), 'dsh-relay-')), home = join(root, ...(options.longHome ? ['a-very-long-home-directory-name-'.repeat(4)] : []), 'home'), state = join(root, 'state');
+  // Match process.cwd() and remote canonical paths on platforms where tmpdir() is a symlink.
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-relay-'))), home = join(root, ...(options.longHome ? ['a-very-long-home-directory-name-'.repeat(4)] : []), 'home'), state = join(root, 'state');
   const bin = join(home, '.local', 'bin');
   await mkdir(bin, { recursive: true }); await mkdir(join(home, 'project'), { recursive: true });
+  await symlink(process.execPath, join(bin, 'node'));
   const source = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-cli.mjs');
   for (const name of ['codex', 'claude', 'dsh']) {
     await writeFile(join(bin, name), `#!${process.execPath}\n${(await readFile(source, 'utf8'))}`); await chmod(join(bin, name), 0o755);

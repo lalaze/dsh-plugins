@@ -10,6 +10,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.md) | Model icons and status badges on sidebar sessions, with the exact model in the hover card |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.md) | Collapsible provider groups in DSH's model picker, remembered in each browser |
 | `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.md) | Edit code and text files of local workspaces in VS Code's editor (Monaco), plus Markdown and SVG previews |
+| `dsh-git-view` | [packages/git-view](packages/git-view/README.md) | Git branches, commit graph, changes, Monaco diffs and conflict resolution for local and remote workspaces; remote support requires Remote Agents 0.2.62 or newer |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.md) | Colored workspace tags, with sidebar grouping by tag or by running status |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
@@ -21,7 +22,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 
 Plugin interfaces support English and Simplified Chinese. English is the source and fallback language. On hosts with the DSH locale service, plugins follow **Settings → General → Language** and update immediately, including open panels and known error messages. Older hosts without that service use English. API diagnostics and CSV column names use English; user content, model IDs and command syntax stay in their original language.
 
-The private `packages/i18n` helper is bundled into each client at build time, so plugin archives remain independently installable. The private `packages/file-view` code editor and file previews are shared the same way by `dsh-file-editor` and `dsh-remote-agents`.
+The private `packages/i18n` helper is bundled into each client at build time, so plugin archives remain independently installable. The private `packages/file-view` code editor, diff editor and file previews are shared the same way by `dsh-file-editor`, `dsh-remote-agents` and `dsh-git-view`; each plugin bundles the parts it uses.
 
 ## Setup
 
@@ -61,7 +62,7 @@ Install an individual built archive into the desired DSH profile:
 
 ```sh
 pnpm pack:plugins
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.61.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.62.tgz"
 ```
 
 For Desktop, fully quit DSH and use the desktop application's bundled `dsh` command with `--profile desktop`, then reopen the app; the npm CLI cannot manage this reserved profile. For Web, restart the updated profile and refresh the browser. Plugins are not currently published to npm. The repository root is a private workspace; install individual plugin archives rather than the GitHub root.
@@ -86,7 +87,8 @@ packages/
   session-models/       # Model icons and status badges on sidebar sessions
   model-groups/         # Collapsible provider groups in the model picker
   file-editor/          # Code editor for local workspace files
-  file-view/            # Private shared code editor and file previews
+  git-view/             # Git sidebar, diff editor and conflicts for local/remote workspaces
+  file-view/            # Private shared code/diff editors and file previews
   workspace-tags/       # Workspace tags and tag/status grouping in the sidebar
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds

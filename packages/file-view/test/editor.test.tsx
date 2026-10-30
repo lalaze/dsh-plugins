@@ -125,3 +125,27 @@ test('a bundle that fails to load can be retried', async () => {
   assert.equal(container.querySelector('[role=alert]'), null);
   assert.ok(container.querySelector('.fv-code[data-loaded]'));
 });
+
+test('the diff editor compares the original with editable text, counts changed lines and follows its options', async () => {
+  const { DiffEditor, diffEditorOf } = await import('../src/editor.js');
+  const changes: string[] = [], stats: { added: number; removed: number }[] = [];
+  let saved = 0;
+  const view = (modified: string, options: Partial<React.ComponentProps<typeof DiffEditor>> = {}) => <DiffEditor label="Working tree" src="/api/test/editor.js" path="a.ts"
+    original={'a\nb\nc\n'} modified={modified} onChange={value => changes.push(value)} onStats={value => stats.push(value)} onSave={() => saved++} {...options} />;
+  await mount(view('a\nB\nnew\nc\n'));
+  const diff = diffEditorOf(container.querySelector('.fv-diff')!) as unknown as typeof fake.diffs[number];
+  assert.equal(fake.diffs.length, 1);
+  assert.deepEqual(diff.getRawOptions(), { ...diff.getRawOptions(), originalEditable: false, renderSideBySide: true, wordWrap: 'off', modifiedAriaLabel: 'Working tree' });
+  assert.deepEqual(stats.at(-1), { added: 2, removed: 1 });
+  const modified = diff.getModel()!.modified;
+  assert.equal(modified.getLanguageId(), 'typescript');
+  await act(async () => modified.setValue('a\nb\nc\n'));
+  assert.deepEqual([changes, stats.at(-1)], [['a\nb\nc\n'], { added: 0, removed: 0 }]);
+  diff.getModifiedEditor().trigger('keyboard', 'dsh.save');
+  assert.equal(saved, 1);
+  await act(async () => root!.render(view('reloaded\n', { sideBySide: false, wrap: true, collapseUnchanged: false, fontSize: 15 })));
+  assert.equal(modified.getValue(), 'reloaded\n');
+  assert.equal(changes.length, 1, 'a value from outside is not reported as an edit');
+  assert.deepEqual([diff.getRawOptions().renderSideBySide, diff.getRawOptions().wordWrap, (diff.getRawOptions().hideUnchangedRegions as { enabled: boolean }).enabled, diff.getRawOptions().fontSize],
+    [false, 'on', false, 15]);
+});

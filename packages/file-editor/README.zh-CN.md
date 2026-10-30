@@ -21,12 +21,16 @@
 
 版本校验会拒绝校验时已存在的磁盘修改，但无法与其他进程的写入形成原子事务；其他程序恰好在校验后、替换前写入时，仍可能发生覆盖。请避免同时保存同一文件。
 
+## 0.2.2
+
+同步构建 Git 视图所共用的编辑器集成。独立文件编辑器仍保持原有编辑和预览行为；Git 差异与冲突操作由独立的 `dsh-git-view` 插件提供。
+
 ## 安装
 
 ```sh
 pnpm --filter dsh-file-editor check
 pnpm --filter dsh-file-editor pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.2.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.2.2.tgz"
 ```
 
 需要 Node.js ≥22.15.0，DSH ≥0.2.1-rc.2 且 <0.3.0。重启该 profile 并刷新浏览器。

@@ -1,5 +1,5 @@
 import { RemoteError, remotePath } from '../core/domain.js';
-import { FILE_LIMIT, TEXT_LIMIT, type FileOperation, type WorkspaceEntry, type WorkspaceFile, type WorkspaceManifest } from './domain.js';
+import { FILE_LIMIT, GIT_LIMITS, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceFile, type WorkspaceManifest } from './domain.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { REMOTE_DSH_RUNNER } from './runner.js';
@@ -20,6 +20,8 @@ function locate(cwd: string, value: string): Location {
   return { path, parent: parent === '.' ? '' : parent, base: posix.basename(path) };
 }
 const nulSplit = (text: string) => text.split('\0').filter(Boolean);
+/** A Git request's ID, which also names its job file on the SSH host. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export class WorkspaceFiles {
   constructor(private readonly transport: SshTransport) {}
@@ -140,5 +142,42 @@ node -e ${quote(REMOTE_DSH_RUNNER)} ${request}`;
     const at = locate(remotePath(cwd), path);
     const [written, bytes] = (await this.run('upload', cwd, at, { revision: revision ?? '', size: String(size) }, { input, maxBytes: 200, signal })).toString('utf8').trim().split(' ');
     return { path: at.path, revision: written, size: Number(bytes) };
+  }
+  /** Runs Git commands in one round trip. The SSH host passes the whole program as one argument, so arguments stay small. */
+  async git(cwd: string, batch: GitBatch, signal?: AbortSignal): Promise<GitRun[]> {
+    const { commands } = batch, values: Record<string, string> = {};
+    if (!UUID.test(batch.id)) throw new RemoteError('Invalid Git request');
+    if (!Array.isArray(commands) || !commands.length || commands.length > GIT_LIMITS.commands) throw new RemoteError('Invalid Git request');
+    if (!Number.isSafeInteger(batch.maxBytes) || batch.maxBytes < 1 || batch.maxBytes > GIT_LIMITS.output) throw new RemoteError('Invalid Git output limit');
+    let bytes = 0, time = 0;
+    commands.forEach(({ argv, timeoutMs }, i) => {
+      if (!Array.isArray(argv) || !argv.length || argv.length > GIT_LIMITS.arguments || argv.some(arg => typeof arg !== 'string' || arg.includes('\0'))) throw new RemoteError('Invalid Git arguments');
+      if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > GIT_LIMITS.timeoutMs) throw new RemoteError('Invalid Git timeout');
+      time += timeoutMs;
+      values[`argc_${i}`] = String(argv.length); values[`timeout_${i}`] = String(timeoutMs);
+      argv.forEach((arg, j) => { values[`arg_${i}_${j}`] = arg; bytes += Buffer.byteLength(arg); });
+    });
+    if (bytes > GIT_LIMITS.bytes) throw new RemoteError('Git arguments are too long', 413);
+    if (time > GIT_LIMITS.totalMs) throw new RemoteError('Invalid Git timeout');
+    const at = locate(remotePath(cwd), batch.path ?? '');
+    const data = await this.run('git', cwd, at, { ...values, id: batch.id, count: String(commands.length), limit: String(batch.maxBytes),
+      stop: batch.stopOnError ? '1' : '', optional_locks: batch.optionalLocks === false ? '0' : '1' }, { maxBytes: commands.length * (batch.maxBytes + 65_600), signal });
+    const runs: GitRun[] = [];
+    for (let offset = 0; runs.length < commands.length;) {
+      const newline = data.indexOf(10, offset);
+      if (newline < 0) throw new RemoteError('The SSH host returned an unexpected workspace response', 502);
+      const [code, timedOut, outBytes, errBytes] = data.subarray(offset, newline).toString('latin1').split(' ');
+      const out = data.subarray(newline + 1, newline + 1 + Number(outBytes)), end = newline + 1 + Number(outBytes) + Number(errBytes);
+      const truncated = out.length > batch.maxBytes;
+      runs.push({ exitCode: /^\d+$/.test(code) && timedOut !== '1' && !truncated ? Number(code) : null, timedOut: timedOut === '1', truncated, skipped: code === 'skip',
+        stdout: out.subarray(0, batch.maxBytes).toString('utf8'), stderr: data.subarray(newline + 1 + Number(outBytes), end).subarray(0, 65_536).toString('utf8') });
+      offset = end;
+    }
+    return runs;
+  }
+  /** Stops a running `git` request and the commands it has not started. */
+  async cancelGit(cwd: string, id: string, signal?: AbortSignal): Promise<void> {
+    if (!UUID.test(id)) throw new RemoteError('Invalid Git request');
+    await this.run('gitCancel', cwd, locate(remotePath(cwd), ''), { job_id: id }, { maxBytes: 0, signal });
   }
 }

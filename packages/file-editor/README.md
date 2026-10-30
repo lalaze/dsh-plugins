@@ -21,12 +21,16 @@ The editor validates paths and resolved symbolic links against the current conve
 
 Revision checks reject disk changes already present at the check, but are not an atomic transaction with writes by other processes. A write between the check and replacement can still be overwritten; avoid saving the same file simultaneously in other programs.
 
+## 0.2.2
+
+Rebuilt with the shared editor integration used by Git View. The standalone editor keeps its existing editing and preview behavior; Git diff and conflict controls belong to the separate `dsh-git-view` plugin.
+
 ## Install
 
 ```sh
 pnpm --filter dsh-file-editor check
 pnpm --filter dsh-file-editor pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.2.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-file-editor-0.2.2.tgz"
 ```
 
 Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Restart the profile and refresh the browser.

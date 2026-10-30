@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-git-view
+      name: dsh-git-view
+      config: {}

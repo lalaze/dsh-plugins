@@ -196,12 +196,13 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
             <Icon kind="search" /><input aria-label={ui('Search remote files')} placeholder={ui('Search remote files')} value={query} onChange={e => { setQuery(e.target.value); if (!e.target.value) setMatches(undefined); }} onKeyDown={e => { if (e.key === 'Escape' && query) { e.preventDefault(); e.stopPropagation(); clearSearch(); } }} />
             {query && <button type="button" className="ra-ws-icon" title={ui('Clear search')} aria-label={ui('Clear search')} onClick={clearSearch}><Icon kind="close" /></button>}
           </form>
-          <div className="ra-ws-entries">{matches ? (matches.length ? matches.map((match, index) => <button type="button" key={index} disabled={busy} aria-pressed={selected === match.path} onClick={() => pick(match.path)}>
+          {/* Rows name their workspace path, so other plugins can mark them, as dsh-git-view does with Git changes. */}
+          <div className="ra-ws-entries" data-workspace-session={matches ? undefined : sessionId}>{matches ? (matches.length ? matches.map((match, index) => <button type="button" key={index} disabled={busy} aria-pressed={selected === match.path} onClick={() => pick(match.path)}>
               <Icon kind="file" /><span className="ra-ws-entry-name">{match.path}<small>{match.line}: {match.text}</small></span></button>) : <p className="ra-ws-empty">{ui('No matches')}</p>)
-            : entries.length ? entries.map(entry => <button type="button" key={entry.path} data-kind={entry.kind} disabled={busy || !['directory', 'file'].includes(entry.kind)} aria-pressed={selected === entry.path} onClick={() => {
+            : entries.length ? entries.map(entry => <button type="button" key={entry.path} data-kind={entry.kind} data-workspace-path={entry.path} data-workspace-kind={entry.kind} disabled={busy || !['directory', 'file'].includes(entry.kind)} aria-pressed={selected === entry.path} onClick={() => {
               if (entry.kind === 'directory') goTo(entry.path);
               else pick(entry.path);
-            }}><Icon kind={entry.kind === 'directory' ? 'folder' : 'file'} /><span className="ra-ws-entry-name">{entry.name}</span>{entry.kind === 'file' ? <small>{size(entry.size)}</small> : entry.kind !== 'directory' && <small>{ui(entry.kind)}</small>}</button>)
+            }}><Icon kind={entry.kind === 'directory' ? 'folder' : 'file'} /><span className="ra-ws-entry-name" data-workspace-name="">{entry.name}</span>{entry.kind === 'file' ? <small>{size(entry.size)}</small> : entry.kind !== 'directory' && <small>{ui(entry.kind)}</small>}</button>)
             : <p className="ra-ws-empty">{ui('This folder is empty')}</p>}</div>
           <input hidden type="file" ref={input} onChange={upload} />
         </aside>}

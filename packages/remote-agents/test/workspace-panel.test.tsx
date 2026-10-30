@@ -48,6 +48,9 @@ test('in the sidebar, the files tool is a list and a chosen file opens in its ow
   const opened: string[] = [];
   await render(<WorkspacePanel sessionId="s1" tools={['files']} openFile={path => opened.push(path)} />);
   const entry = [...container.querySelectorAll<HTMLButtonElement>('.ra-ws-entries button')].find(b => b.textContent?.includes('main.ts'))!;
+  // Rows name their workspace path and kind for other plugins, such as dsh-git-view's change marks.
+  assert.equal(container.querySelector('.ra-ws-entries')!.getAttribute('data-workspace-session'), 's1');
+  assert.deepEqual([entry.dataset.workspacePath, entry.dataset.workspaceKind, entry.querySelector('[data-workspace-name]')?.textContent], ['main.ts', 'file', 'main.ts']);
   await act(async () => entry.click()); await settle();
   assert.deepEqual(opened, ['main.ts']);
   assert.equal(container.querySelector('.ra-ws-viewer'), null, 'no viewer opens under the list');

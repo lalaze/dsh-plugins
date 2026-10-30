@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { relayHarness, transcript, waitFor } from './relay-harness.js';
 import { RELAY_UNAVAILABLE } from '../src/core/domain.js';
-import { RelayClient } from '../src/agents/relay.js';
+import { REMOTE_HOME, remoteScript } from '../src/core/remote-host.js';
+import { RelayClient, RELAY_SCRIPT, RELAY_VERSION } from '../src/agents/relay.js';
 import type { SshTransport } from '../src/core/ssh.js';
 
 /** A relay client on a host that is known to support relays. */
@@ -47,13 +47,22 @@ for (const [provider, label] of PROTOCOLS) test(`${label}: a task keeps running 
   await waitFor(() => !h.alive(daemon), 'relay daemon exit');
 });
 
-test('without a usable Node.js the CLI is not started and the reason is reported', async t => {
-  const fake = await mkdtemp(join(tmpdir(), 'dsh-old-node-')); t.after(() => rm(fake, { recursive: true, force: true }));
-  await writeFile(join(fake, 'node'), '#!/bin/sh\nexit 1\n'); await chmod(join(fake, 'node'), 0o755);
-  const h = await relayHarness(t, { PATH: `${fake}:${process.env.PATH}` });
-  const agent = await h.first.service.create(h.request('claude', 'stream 1'));
+test('an old-node install probe prevents CLI startup and reports the reason', async t => {
+  const h = await relayHarness(t);
+  // A bad PATH Node no longer rules out usable system/NVM fallbacks. Simulate only the
+  // install probe's result here; real wrapper execution and fake CLI discovery remain intact.
+  const install = remoteScript('relay', RELAY_VERSION, RELAY_SCRIPT, { directories: [`${REMOTE_HOME}/relays-v1`] }).install;
+  const { transport, service } = h.first, exec = transport.exec.bind(transport);
+  let probes = 0;
+  t.mock.method(transport, 'exec', async (...args: Parameters<typeof transport.exec>) => {
+    if (args[0] === install) { probes++; return 'old-node'; }
+    return exec(...args);
+  });
+  const agent = await service.create(h.request('claude', 'stream 1'));
+  assert.equal(probes, 1, 'only the relay installation probe is simulated');
   assert.equal(agent.started, false); assert.equal(agent.error, RELAY_UNAVAILABLE['old-node']);
   assert.equal(existsSync(h.relays), false, 'no relay was installed');
+  assert.deepEqual(await h.lines('prompts.log'), [], 'no CLI turn was started');
 });
 
 test('repeated SSH interruptions reconnect from the saved byte offset without losing or repeating output', async t => {

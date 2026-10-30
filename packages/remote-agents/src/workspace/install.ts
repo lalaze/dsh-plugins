@@ -7,12 +7,30 @@ import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type Workspac
 import { editorHandler } from './editor-route.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { workspaceTransferHandler, type WorkspaceFeatures } from './http.js';
+import type { GitBatch, GitRun, WorkspaceTarget } from './domain.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
 
+/**
+ * What other DSH plugins on this host may do in a conversation's remote workspace, as the service `remoteAgentsWorkspaces`:
+ * always on its verified machine and in its verified directory, which every call checks again. dsh-git-view runs Git
+ * through it. Models use the `remote_workspace` tool instead, which offers no Git operation.
+ */
+export interface RemoteAgentsWorkspaces {
+  /** Version 1 binds Git, transfers and cancellation to verified workspace targets. */
+  readonly gitWorkspaceVersion: 1;
+  target(sessionId: string, signal?: AbortSignal): Promise<WorkspaceTarget>;
+  git(sessionId: string, batch: GitBatch, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<GitRun[]>;
+  cancelGit(sessionId: string, id: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<void>;
+  /** `path` is relative to the workspace, as in every call below; the revision is the file's SHA-256. */
+  stat(sessionId: string, path: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{ path: string; revision: string; size: number }>;
+  download(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<Buffer>;
+  /** Replaces the file read at `revision`, or creates it with null; a file changed since is refused. */
+  upload(sessionId: string, path: string, revision: string | null, data: Uint8Array, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{ path: string; revision: string; size: number }>;
+}
 export interface Workspaces {
   /** Which saved machines and remote directory a local workspace path stands for. */
   access: WorkspaceAccess;
@@ -44,6 +62,17 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     return cwd === await sessionCwd(id) ? value : { hostIds: [] };
   };
   const files = new WorkspaceService(machines, placement, sessionCwd);
+  const unbounded = () => new AbortController().signal;
+  ctx.provide('remoteAgentsWorkspaces', {
+    gitWorkspaceVersion: 1,
+    target: (id, signal = unbounded()) => files.target(id, signal),
+    git: (id, batch, signal = unbounded(), expected) => files.git(id, batch, signal, expected),
+    cancelGit: (id, job, signal = unbounded(), expected) => files.cancelGit(id, job, signal, expected),
+    stat: async (id, path, signal = unbounded(), expected) => await files.operate(id, { op: 'stat', path }, signal, expected) as { path: string; revision: string; size: number },
+    download: (id, path, revision, signal = unbounded(), expected) => files.download(id, path, revision, signal, expected),
+    upload: async (id, path, revision, data, signal = unbounded(), expected) =>
+      await files.upload(id, path, revision, data.length, (async function* () { yield data; })(), signal, expected) as { path: string; revision: string; size: number },
+  } satisfies RemoteAgentsWorkspaces);
   const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
   await tunnels.open();
   const terminal: { shell?: string } = {};

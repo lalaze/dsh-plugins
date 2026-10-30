@@ -65,11 +65,40 @@ class FakeEditor {
   dispose() { this.disposed = true; }
 }
 
-export type { FakeEditor, FakeModel };
-export interface FakeMonaco { theme?: string; editors: FakeEditor[]; models: FakeModel[] }
+/** A diff editor over two fake models; its line changes are the span between their common first and last lines. */
+class FakeDiffEditor {
+  disposed = false;
+  models?: { original: FakeModel; modified: FakeModel };
+  modifiedEditor?: FakeEditor;
+  private readonly updated = event();
+  constructor(private options: Record<string, unknown>) {}
+  setModel(models: { original: FakeModel; modified: FakeModel }) {
+    this.models = models;
+    this.modifiedEditor = new FakeEditor({ ...this.options, model: models.modified });
+    models.original.onDidChangeContent(() => this.updated.fire()); models.modified.onDidChangeContent(() => this.updated.fire());
+    queueMicrotask(() => this.updated.fire());
+  }
+  getModel() { return this.models ?? null; }
+  getModifiedEditor() { return this.modifiedEditor!; }
+  getRawOptions() { return this.options; }
+  updateOptions(options: Record<string, unknown>) { Object.assign(this.options, options); }
+  getLineChanges() {
+    const a = this.models!.original.getValue().split(/\r?\n/), b = this.models!.modified.getValue().split(/\r?\n/);
+    let start = 0, endA = a.length, endB = b.length;
+    while (start < endA && start < endB && a[start] === b[start]) start++;
+    while (endA > start && endB > start && a[endA - 1] === b[endB - 1]) { endA--; endB--; }
+    if (start === endA && start === endB) return [];
+    return [{ originalStartLineNumber: start + 1, originalEndLineNumber: endA > start ? endA : 0, modifiedStartLineNumber: start + 1, modifiedEndLineNumber: endB > start ? endB : 0 }];
+  }
+  onDidUpdateDiff(listener: Listener) { return this.updated.on(listener); }
+  dispose() { this.disposed = true; }
+}
+
+export type { FakeDiffEditor, FakeEditor, FakeModel };
+export interface FakeMonaco { theme?: string; editors: FakeEditor[]; diffs: FakeDiffEditor[]; models: FakeModel[] }
 /** Makes every `CodeEditor` on the page use a fresh fake, and returns it. */
 export function installFakeMonaco(): FakeMonaco {
-  const state: FakeMonaco = { editors: [], models: [] };
+  const state: FakeMonaco = { editors: [], diffs: [], models: [] };
   const monaco = {
     KeyMod: { CtrlCmd: 2048, Shift: 1024, Alt: 512 }, KeyCode: { KeyS: 49, KeyZ: 56 },
     languages: { getLanguages: () => LANGUAGES },
@@ -77,6 +106,7 @@ export function installFakeMonaco(): FakeMonaco {
       EndOfLineSequence: { LF: 0, CRLF: 1 },
       createModel: (value: string, language: string) => { const model = new FakeModel(value, language); state.models.push(model); return model; },
       create: (_host: HTMLElement, options: Record<string, unknown> & { model: FakeModel }) => { const editor = new FakeEditor(options); state.editors.push(editor); return editor; },
+      createDiffEditor: (_host: HTMLElement, options: Record<string, unknown>) => { const editor = new FakeDiffEditor(options); state.diffs.push(editor); return editor; },
       setTheme: (theme: string) => { state.theme = theme; },
       setModelLanguage: (model: FakeModel, language: string) => { if (model.languageId !== language) { model.languageId = language; model.language.fire(); } },
     },

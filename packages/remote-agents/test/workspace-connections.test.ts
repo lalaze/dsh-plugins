@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawn, execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile, chmod } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, chmod, realpath } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -35,30 +35,36 @@ test('tunnel startup, stop, saved definitions and host removal are independent o
 
 test('native terminal launcher resolves the workspace, refuses an invalid binding and opens the local shell elsewhere', async t => {
   if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }
-  const f = await fixture(t), modules = join(f.directory, 'modules'), bin = join(f.directory, 'bin'), capture = join(f.directory, 'ssh-args.json');
+  const f = await fixture(t);
+  // macOS process.cwd() canonicalizes /var to /private/var; keep containment inputs identical.
+  const directory = await realpath(f.directory), modules = join(directory, 'modules'), bin = join(directory, 'bin'), capture = join(directory, 'ssh-args.json');
+  const shell = join(bin, 'local-shell'), omc = join(directory, 'omc');
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
+  // Every launcher invocation has a finite fallback, never the developer's interactive shell.
+  await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
   for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
     await mkdir(dirname(join(modules, name)), { recursive: true });
     await writeFile(join(modules, `${name}.js`), (await transform(source, { loader: 'ts', format: 'esm', target: 'node22' })).code);
   }
   await writeFile(join(bin, 'ssh'), `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv.includes('-G'))process.stdout.write('hostname build-box\\nuser builder\\nport 22\\n');else fs.writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify(process.argv.slice(2)));\n`); await chmod(join(bin, 'ssh'), 0o700);
-  const anchor = await ensureAnchor(f.directory, { host: 'build-box', username: 'builder', port: 22 }, '/srv/app');
+  const anchor = await ensureAnchor(directory, { host: 'build-box', username: 'builder', port: 22 }, '/srv/app');
   const controller = { config: { shellCandidates: ['/bin/sh'] } };
-  const { shell: launcher, dispose: cleanup } = await installWorkspaceTerminal(controller, join(f.directory, 'terminal'), f.path, pathToFileURL(modules + '/')); t.after(cleanup);
+  const { shell: launcher, dispose: cleanup } = await installWorkspaceTerminal(controller, join(directory, 'terminal'), f.path, pathToFileURL(modules + '/')); t.after(cleanup);
   assert.ok(launcher); assert.equal(controller.config.shellCandidates[1], launcher);
-  const env = { ...process.env, DSH_HOME: f.directory, DSH_TERMINAL_CAPTURE: capture, PATH: `${bin}:${process.env.PATH}` };
-  await promisify(execFile)(launcher, [], { cwd: anchor, env });
+  const env = { ...process.env, HOME: directory, SHELL: shell, DSH_HOME: directory, DSH_OMC_STATE_DIR: omc, DSH_TERMINAL_CAPTURE: capture, PATH: `${bin}:${process.env.PATH}` };
+  const launch = (cwd: string) => promisify(execFile)(launcher, [], { cwd, env, timeout: 5000 });
+  await launch(anchor);
   const args: string[] = JSON.parse(await readFile(capture, 'utf8'));
   assert.ok(args.includes('-tt')); assert.ok(args.includes('builder@build-box')); assert.equal(args.at(-1), 'cd \'/srv/app\' && exec "${SHELL:-/bin/sh}" -l');
   await writeFile(join(anchor, '.dsh-remote-meta.json'), '{}');
-  await assert.rejects(promisify(execFile)(launcher, [], { cwd: anchor, env }), /valid remote workspace binding/);
-  const omc = join(f.directory, 'omc'), placeholder = join(omc, 'remote-workspaces', 'removed'); await mkdir(placeholder, { recursive: true });
-  await assert.rejects(promisify(execFile)(launcher, [], { cwd: placeholder, env: { ...env, DSH_OMC_STATE_DIR: omc } }), /verified remote workspace/);
+  await assert.rejects(launch(anchor), /valid remote workspace binding/);
+  const placeholder = join(omc, 'remote-workspaces', 'removed'); await mkdir(placeholder, { recursive: true });
+  await assert.rejects(launch(placeholder), /verified remote workspace/);
+  assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), args, 'invalid bindings and unverified OMC placeholders launch neither SSH nor the fallback shell');
   // The DSH-wide remembered shell also opens local conversations, which get the local shell instead of SSH.
-  const local = join(f.directory, 'project'), shell = join(bin, 'local-shell'); await mkdir(local);
-  await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
-  const { stderr } = await promisify(execFile)(launcher, [], { cwd: local, env: { ...env, SHELL: shell, DSH_OMC_STATE_DIR: omc } });
+  const local = join(directory, 'project'); await mkdir(local);
+  const { stderr } = await launch(local);
   assert.match(stderr, /Not a remote workspace/);
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
   cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);

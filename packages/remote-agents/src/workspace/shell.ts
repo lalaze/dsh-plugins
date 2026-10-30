@@ -1,5 +1,5 @@
 /**
- * POSIX shell program for remote workspace files and commands, run over the existing authenticated SSH transport.
+ * POSIX shell program for remote workspace files, commands and Git, run over the existing authenticated SSH transport.
  * It needs only `sh`, standard utilities and sha256sum, shasum or openssl, so hosts without Node.js work too.
  */
 export const WORKSPACE_SHELL = `
@@ -352,6 +352,89 @@ command)
   # "exit-code timed-out stdout-bytes stderr-bytes", then stdout and stderr.
   printf 'ok\\n%s %s %s %s\\n' "$dsh_code" "$dsh_timed_out" "$dsh_o" "$dsh_e"
   cat "$dsh_t/out" "$dsh_t/err" 2>/dev/null
+  ;;
+git)
+  # The Git commands of one request, in order: dsh_count commands, the i-th with dsh_argc_<i> arguments dsh_arg_<i>_<j>
+  # and a timeout of dsh_timeout_<i> milliseconds. Arguments go to Git as they are; no shell reads them. Each command
+  # runs in its own process group, which a gitCancel request for dsh_id stops. With dsh_stop=1, a failure skips the rest.
+  dsh_resolve "$dsh_path" "$dsh_parent" "$dsh_base"
+  [ -d "$dsh_file" ] || dsh_fail 400 'Not a directory'
+  cd -P "$dsh_file" 2>/dev/null || dsh_fail 403 'Not a readable directory'
+  command -v git >/dev/null 2>&1 || dsh_fail 501 'Git is not installed on the SSH host'
+  dsh_jobs=$HOME/.dsh-remote-agents/git
+  (umask 077; mkdir -p "$dsh_jobs") || dsh_fail 500 'Could not create the Git job directory'
+  dsh_temp
+  mkfifo "$dsh_t/stdout" "$dsh_t/stderr" || dsh_fail 500 'Could not create the command output pipes'
+  : > "$dsh_t/frames"
+  # Git never waits for a password, an editor or a pager, and reports in English so its messages can be recognized.
+  GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= GCM_INTERACTIVE=never GIT_EDITOR=: GIT_PAGER=cat PAGER=cat LC_ALL=C
+  export GIT_TERMINAL_PROMPT GIT_ASKPASS SSH_ASKPASS GCM_INTERACTIVE GIT_EDITOR GIT_PAGER PAGER LC_ALL
+  # Reads skip Git's optional index refresh, so they never hold the index lock another Git needs.
+  [ "$dsh_optional_locks" = 1 ] || { GIT_OPTIONAL_LOCKS=0; export GIT_OPTIONAL_LOCKS; }
+  dsh_run='dsh_c=$1; shift; "$@" </dev/null; printf %s "$?" > "$dsh_c"'
+  if sleep 0.001 2>/dev/null; then dsh_fraction=1; else dsh_fraction=; fi
+  dsh_i=0 dsh_failed=
+  while [ "$dsh_i" -lt "$dsh_count" ]; do
+    eval "dsh_argc=\\$dsh_argc_$dsh_i dsh_timeout=\\$dsh_timeout_$dsh_i"
+    : > "$dsh_t/out"; : > "$dsh_t/err"; rm -f "$dsh_t/code" "$dsh_t/timed-out"
+    if [ -n "$dsh_failed" ] || [ -e "$dsh_jobs/$dsh_id.cancel" ]; then dsh_code=skip
+    else
+      set -- git
+      dsh_j=0
+      while [ "$dsh_j" -lt "$dsh_argc" ]; do eval "set -- \\"\\$@\\" \\"\\$dsh_arg_\${dsh_i}_$dsh_j\\""; dsh_j=$((dsh_j + 1)); done
+      # As for commands, each stream is cut one byte past its limit.
+      head -c "$((dsh_limit + 1))" < "$dsh_t/stdout" > "$dsh_t/out" & dsh_readers=$!
+      head -c 65537 < "$dsh_t/stderr" > "$dsh_t/err" & dsh_readers="$dsh_readers $!"
+      dsh_group=
+      if command -v setsid >/dev/null 2>&1; then
+        setsid /bin/sh -c "$dsh_run" dsh-git "$dsh_t/code" "$@" </dev/null > "$dsh_t/stdout" 2> "$dsh_t/stderr" &
+        dsh_job=$! dsh_group=1
+      else
+        set -m 2>/dev/null
+        case $- in *m*) dsh_group=1 ;; esac
+        /bin/sh -c "$dsh_run" dsh-git "$dsh_t/code" "$@" </dev/null > "$dsh_t/stdout" 2> "$dsh_t/stderr" &
+        dsh_job=$!
+        set +m 2>/dev/null
+      fi
+      dsh_tmp=$dsh_jobs/$dsh_id
+      printf '%s\\n' "$dsh_job" > "$dsh_tmp"
+      if [ -n "$dsh_fraction" ]; then dsh_seconds=$(printf '%d.%03d' $((dsh_timeout / 1000)) $((dsh_timeout % 1000)))
+      else dsh_seconds=$(( (dsh_timeout + 999) / 1000 )); fi
+      dsh_after "$dsh_seconds" ': > "$dsh_t/timed-out"; dsh_kill'; dsh_watch=$!
+      wait "$dsh_job"
+      kill "$dsh_watch" 2>/dev/null
+      dsh_job=
+      rm -f "$dsh_tmp"; dsh_tmp=
+      dsh_after 2 'kill $dsh_readers'; dsh_grace=$!
+      wait $dsh_readers
+      kill "$dsh_grace" 2>/dev/null
+      dsh_code=-; [ ! -s "$dsh_t/code" ] || dsh_code=$(cat "$dsh_t/code")
+    fi
+    dsh_timed_out=0; [ ! -e "$dsh_t/timed-out" ] || dsh_timed_out=1
+    dsh_size_of "$dsh_t/out" || dsh_n=0; dsh_o=$dsh_n
+    dsh_size_of "$dsh_t/err" || dsh_n=0; dsh_e=$dsh_n
+    { printf '%s %s %s %s\\n' "$dsh_code" "$dsh_timed_out" "$dsh_o" "$dsh_e"; cat "$dsh_t/out" "$dsh_t/err"; } >> "$dsh_t/frames"
+    [ "$dsh_code" = 0 ] || [ "$dsh_stop" != 1 ] || dsh_failed=1
+    dsh_i=$((dsh_i + 1))
+  done
+  rm -f "$dsh_jobs/$dsh_id.cancel"
+  # Per command: "exit-code timed-out stdout-bytes stderr-bytes", then stdout and stderr. The exit code is "skip" for a
+  # command that did not run and "-" for one that was stopped.
+  printf 'ok\\n'
+  cat "$dsh_t/frames"
+  ;;
+gitCancel)
+  # Stops the Git command the git request dsh_job_id is running, and the commands it has not started yet.
+  case $dsh_job_id in ''|*[!0-9a-f-]*) dsh_fail 400 'Invalid Git request' ;; esac
+  dsh_jobs=$HOME/.dsh-remote-agents/git
+  if [ -d "$dsh_jobs" ]; then
+    : > "$dsh_jobs/$dsh_job_id.cancel"
+    # The marker of a request that had already finished is removed later.
+    find "$dsh_jobs" -name '*.cancel' -mmin +10 -exec rm -f {} + 2>/dev/null
+    dsh_p=$(cat "$dsh_jobs/$dsh_job_id" 2>/dev/null)
+    case $dsh_p in ''|*[!0-9]*) ;; *) kill -s TERM -- "-$dsh_p" 2>/dev/null || kill -s TERM $(dsh_tree "$dsh_p") 2>/dev/null ;; esac
+  fi
+  printf 'ok\\n'
   ;;
 *) dsh_fail 400 'Unknown workspace operation' ;;
 esac

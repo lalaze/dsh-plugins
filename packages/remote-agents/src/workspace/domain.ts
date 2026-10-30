@@ -19,6 +19,17 @@ export type FileOperation =
   | { op: 'manifest'; path: string }
   | { op: 'search'; path: string; query: string }
   | { op: 'command'; path: string; command: string; timeoutMs?: number };
+/** One Git invocation: its arguments without `git` itself, and how long it may run. */
+export interface GitCommand { argv: string[]; timeoutMs: number }
+/**
+ * Git commands run in order, in one SSH round trip, in the workspace directory `path`. `id`, a UUID, names the request
+ * for `cancelGit`. With `stopOnError` a failure skips the rest; reads pass `optionalLocks: false`. `maxBytes` limits each
+ * command's standard output.
+ */
+export interface GitBatch { id: string; path?: string; commands: GitCommand[]; maxBytes: number; stopOnError?: boolean; optionalLocks?: boolean }
+/** `exitCode` is null for a command that was stopped or skipped. */
+export interface GitRun { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean; truncated: boolean; skipped: boolean }
+export const GIT_LIMITS = { commands: 16, arguments: 64, bytes: 64 * 1024, output: 16 * 1024 * 1024, timeoutMs: 170_000, totalMs: 280_000 } as const;
 export interface SyncChange { path: string; action: 'copy' | 'delete'; source: string | null; destination: string | null }
 export interface SyncResult { direction: 'pull' | 'push'; dryRun: boolean; changes: SyncChange[]; conflicts: string[]; skipped: string[]; planId?: string }
 export interface TunnelConfig { id: string; hostId: string; direction: 'local' | 'reverse'; listenPort: number; targetPort: number; targetHost: string }

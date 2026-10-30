@@ -193,6 +193,134 @@ export function CodeEditor({ value, onChange, path, label, src, locale = 'en', r
   </div>;
 }
 
+export interface DiffEditorProps {
+  /** The version compared against, such as the file at HEAD; never editable. */
+  original: string;
+  /** The current text; as with `CodeEditor`, a different value from outside replaces the document. */
+  modified: string;
+  onChange?(value: string): void;
+  /** Picks the language; give the component a new `key` for another file. */
+  path: string;
+  /** The editable side's accessible name. */
+  label: string;
+  src: string;
+  locale?: EditorLocale;
+  /** Two columns, or one with removed lines above added ones. */
+  sideBySide?: boolean;
+  wrap?: boolean;
+  /** Folds unchanged lines, keeping three lines around each change; a fold expands when clicked. */
+  collapseUnchanged?: boolean;
+  /** Defaults to DSH's code font size. */
+  fontSize?: number;
+  readOnly?: boolean;
+  onSave?(): void;
+  /** Lines added and removed, each time the comparison is recomputed. */
+  onStats?(stats: { added: number; removed: number }): void;
+  className?: string;
+}
+const diffs = new WeakMap<Element, MonacoApi.editor.IStandaloneDiffEditor>();
+/** The diff editor showing in an element rendered by `DiffEditor`, for tests and integrations. */
+export const diffEditorOf = (element: Element): MonacoApi.editor.IStandaloneDiffEditor | undefined => diffs.get(element);
+const hidden = (enabled: boolean) => ({ enabled, contextLineCount: 3, minimumLineCount: 3, revealLineCount: 20 });
+
+/** VS Code's diff editor: `original` on the left or above, the editable `modified` text beside it. */
+export function DiffEditor({ original, modified, onChange, path, label, src, locale = 'en', sideBySide = true, wrap = false, collapseUnchanged = true,
+  fontSize, readOnly = false, onSave, onStats, className }: DiffEditorProps) {
+  const root = useRef<HTMLDivElement>(null), host = useRef<HTMLDivElement>(null);
+  const [editor, setEditor] = useState<MonacoApi.editor.IStandaloneDiffEditor>();
+  const [failed, setFailed] = useState(false), [attempt, setAttempt] = useState(0);
+  const latest = useRef({ original, modified, onChange, onSave, onStats, path, label, readOnly, sideBySide, wrap, collapseUnchanged, fontSize, locale });
+  latest.current = { original, modified, onChange, onSave, onStats, path, label, readOnly, sideBySide, wrap, collapseUnchanged, fontSize, locale };
+  /** As in `CodeEditor`: the modified text the model last reported or was given. */
+  const known = useRef(modified), external = useRef(false), monacoRef = useRef<Monaco>(), codeFont = useRef(13);
+
+  useEffect(() => {
+    let disposed = false, cleanup = () => {};
+    setFailed(false);
+    loadMonaco(src, locale).then(monaco => {
+      if (disposed) return;
+      monacoRef.current = monaco;
+      const props = latest.current, style = getComputedStyle(root.current!);
+      const fontFamily = style.getPropertyValue('--dsh-font-family-code').trim();
+      codeFont.current = parseFloat(style.getPropertyValue('--dsh-code-font-size')) || 13;
+      const language = languageFor(monaco, props.path);
+      const models = { original: monaco.editor.createModel(props.original, language), modified: monaco.editor.createModel(props.modified, language) };
+      models.modified.setEOL(eolOf(monaco, props.modified));
+      known.current = props.modified;
+      monaco.editor.setTheme(themeOf());
+      const created = monaco.editor.createDiffEditor(host.current!, {
+        automaticLayout: true, fixedOverflowWidgets: true, originalEditable: false, readOnly: props.readOnly, modifiedAriaLabel: props.label,
+        renderSideBySide: props.sideBySide, useInlineViewWhenSpaceIsLimited: false, ignoreTrimWhitespace: false, wordWrap: props.wrap ? 'on' : 'off',
+        hideUnchangedRegions: hidden(props.collapseUnchanged), fontSize: props.fontSize ?? codeFont.current, ...fontFamily ? { fontFamily } : {},
+      });
+      created.setModel(models);
+      created.getModifiedEditor().addAction({ id: 'dsh.save', label: say(props.locale, 'save'), keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS], run: () => { latest.current.onSave?.(); } });
+      const report = () => {
+        let added = 0, removed = 0;
+        // An end line of 0 means the change has no lines on that side.
+        for (const change of created.getLineChanges() ?? []) {
+          if (change.modifiedEndLineNumber > 0) added += change.modifiedEndLineNumber - change.modifiedStartLineNumber + 1;
+          if (change.originalEndLineNumber > 0) removed += change.originalEndLineNumber - change.originalStartLineNumber + 1;
+        }
+        latest.current.onStats?.({ added, removed });
+      };
+      const subscriptions = [
+        models.modified.onDidChangeContent(() => {
+          if (external.current) return;
+          known.current = models.modified.getValue();
+          latest.current.onChange?.(known.current);
+        }),
+        created.onDidUpdateDiff(report),
+      ];
+      const theme = followTheme(monaco), element = root.current!;
+      diffs.set(element, created);
+      setEditor(created);
+      cleanup = () => {
+        for (const subscription of subscriptions) subscription.dispose();
+        theme(); diffs.delete(element); created.dispose(); models.original.dispose(); models.modified.dispose();
+      };
+    }, () => { if (!disposed) setFailed(true); });
+    return () => { disposed = true; cleanup(); setEditor(undefined); };
+  }, [src, attempt]);
+  useEffect(() => {
+    const model = editor?.getModel()?.original;
+    if (model && model.getValue() !== original) model.setValue(original);
+  }, [editor, original]);
+  useEffect(() => {
+    const model = editor?.getModel()?.modified, monaco = monacoRef.current;
+    if (!model || !monaco || modified === known.current) return;
+    known.current = modified;
+    external.current = true;
+    try {
+      if (model.getEOL() !== (lineSeparatorOf(modified) ?? '\n')) { model.setValue(modified); model.setEOL(eolOf(monaco, modified)); }
+      else {
+        const target = editor!.getModifiedEditor();
+        model.pushStackElement();
+        model.pushEditOperations(target.getSelections(), [{ range: model.getFullModelRange(), text: modified }], () => null);
+        model.pushStackElement();
+      }
+    } finally { external.current = false; }
+  }, [editor, modified]);
+  useEffect(() => {
+    const models = editor?.getModel(), monaco = monacoRef.current;
+    if (!models || !monaco) return;
+    const language = languageFor(monaco, path);
+    monaco.editor.setModelLanguage(models.original, language); monaco.editor.setModelLanguage(models.modified, language);
+  }, [editor, path]);
+  useEffect(() => {
+    editor?.updateOptions({ readOnly, renderSideBySide: sideBySide, wordWrap: wrap ? 'on' : 'off', hideUnchangedRegions: hidden(collapseUnchanged), fontSize: fontSize ?? codeFont.current });
+    editor?.getModifiedEditor().updateOptions({ ariaLabel: label });
+  }, [editor, readOnly, label, sideBySide, wrap, collapseUnchanged, fontSize]);
+
+  const t = (key: string) => say(locale, key);
+  return <div className={['fv-code', 'fv-diff', className].filter(Boolean).join(' ')} ref={root} data-loaded={editor ? '' : undefined}><style>{fileViewStyles}</style>
+    <div className="fv-code-host monaco-component" ref={host} />
+    {!editor && (failed
+      ? <p className="fv-code-note" role="alert">{t('failed')} <button type="button" onClick={() => setAttempt(attempt + 1)}>{t('retry')}</button></p>
+      : <p className="fv-code-note" role="status">{t('loading')}</p>)}
+  </div>;
+}
+
 const eolOf = (monaco: Monaco, text: string) => lineSeparatorOf(text) ? monaco.editor.EndOfLineSequence.CRLF : monaco.editor.EndOfLineSequence.LF;
 function reveal(editor: MonacoApi.editor.IStandaloneCodeEditor, line: number) {
   const target = Math.min(line, editor.getModel()?.getLineCount() ?? line);
