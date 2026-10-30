@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-view",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Git in DeepSeek Harness's right sidebar for local and remote workspaces: branches, commit graph, changes, VS Code's diff editor, merge-conflict resolution and change marks on files",
   "type": "module",
   "main": "lib/server/index.js",
