@@ -1,7 +1,7 @@
 {
   "name": "dsh-file-editor",
-  "version": "0.1.1",
-  "description": "Edit code and text files of local workspaces in DeepSeek Harness, with highlighting and Markdown and SVG previews",
+  "version": "0.2.0",
+  "description": "Edit code and text files of local workspaces in DeepSeek Harness in VS Code's editor (Monaco), with Markdown and SVG previews",
   "type": "module",
   "main": "lib/server/index.js",
   "types": "lib/server/index.d.ts",
@@ -22,7 +22,7 @@
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "build": "node -e \"fs.rmSync('lib', { recursive: true, force: true })\" && tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs",
+    "build": "node -e \"fs.rmSync('lib', { recursive: true, force: true })\" && tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs && node ../../scripts/build-editor.mjs lib/editor.js",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts test/*.test.tsx",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",
@@ -37,7 +37,7 @@
     "dsh-plugin",
     "deepseek-harness",
     "editor",
-    "codemirror",
+    "monaco",
     "files"
   ],
   "license": "MIT",

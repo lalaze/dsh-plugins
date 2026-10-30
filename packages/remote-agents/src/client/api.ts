@@ -1,3 +1,5 @@
+/** The code editor bundle the plugin serves; see workspace/editor-route.ts. */
+export const EDITOR_SRC = '/api/remote-agents/editor.js';
 export class ApiError extends Error {
   constructor(message: string, readonly status: number) { super(message); }
 }

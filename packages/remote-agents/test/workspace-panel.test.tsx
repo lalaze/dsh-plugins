@@ -3,6 +3,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
+import { installFakeMonaco } from '@dsh-plugins/file-view/testing';
 import { sessionFileAddress, workspaceFileAddress } from '../src/client/workspace/sidebar.js';
 
 test('file tab addresses are built as DSH builds them and read back unchanged', () => {
@@ -13,11 +14,10 @@ test('file tab addresses are built as DSH builds them and read back unchanged', 
 });
 
 let root: Root | undefined, container: HTMLElement, requests: Record<string, unknown>[];
-const globals = ['window', 'document', 'navigator', 'MutationObserver', 'requestAnimationFrame', 'cancelAnimationFrame', 'getComputedStyle', 'Node', 'Element', 'HTMLElement', 'HTMLInputElement', 'Text', 'Range', 'Selection', 'KeyboardEvent', 'Event', 'DOMRect', 'Window', 'fetch'] as const;
+const globals = ['window', 'document', 'navigator', 'MutationObserver', 'getComputedStyle', 'Node', 'Element', 'HTMLElement', 'HTMLInputElement', 'Event', 'fetch'] as const;
 beforeEach(() => {
   const { window } = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true });
-  window.Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
-  window.Range.prototype.getBoundingClientRect = () => new window.DOMRect();
+  installFakeMonaco();
   requests = [];
   // The remote agents API, as far as the files tool uses it.
   const fetch = async (_url: string, init: { body: string }) => {
@@ -58,8 +58,8 @@ test('a file tab shows only that file, at the line it was opened at, without the
   const [{ WorkspacePanel }, { editorOf }] = await Promise.all([import('../src/client/workspace/panel.js'), import('@dsh-plugins/file-view')]);
   await render(<WorkspacePanel sessionId="s1" tools={['files']} initialPath="main.ts" fileOnly line={3} />);
   assert.equal(container.querySelector('.ra-ws-browser'), null);
-  const view = editorOf(container.querySelector('.cm-editor')!)!;
-  assert.equal(view.state.sliceDoc(), 'one\ntwo\nthree\n');
-  assert.equal(view.state.doc.lineAt(view.state.selection.main.head).number, 3);
+  const editor = editorOf(container.querySelector('.fv-code')!)!;
+  assert.equal(editor.getModel()!.getValue(), 'one\ntwo\nthree\n');
+  assert.equal(editor.getPosition()!.lineNumber, 3);
   assert.equal(container.querySelector('[aria-label="Close file"]'), null, 'the tab has its own close button');
 });

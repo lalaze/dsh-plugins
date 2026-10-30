@@ -4,6 +4,8 @@ export type FileRead = FileState & ({ kind: 'text'; content: string; revision: s
 export type Saved = FileState & { revision: string };
 
 const HEADER = { 'X-DSH-File-Editor': '1' };
+/** The code editor bundle the plugin serves; see editor-route.ts. */
+export const EDITOR_SRC = '/api/file-editor/editor.js';
 export async function fileRequest<T>(action: 'read' | 'stat' | 'write', data: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   const response = await fetch('/api/file-editor', { method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
     headers: { ...HEADER, 'content-type': 'application/json' }, body: JSON.stringify({ action, ...data }) });

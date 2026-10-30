@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { build } from 'esbuild';
@@ -21,6 +21,7 @@ import { WorkspaceFiles } from '../src/workspace/files.ts';
 import { WorkspaceService } from '../src/workspace/service.ts';
 import { WorkspaceTunnels } from '../src/workspace/tunnels.ts';
 import { workspaceTransferHandler } from '../src/workspace/http.ts';
+import { editorHandler } from '../src/workspace/editor-route.ts';
 
 const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-preview-'));
 const workspaceRoot = join(directory, 'remote-project'), mirrorRoot = join(directory, 'local-mirror');
@@ -89,6 +90,9 @@ const handler = createHandler(service, undefined, placement, {
   create: async (...args) => { if (createDelay) await new Promise(resolve => setTimeout(resolve, createDelay)); return workspaces.create(...args); },
 }, { files: workspaceService, tunnels }, sharing);
 const transfer = workspaceTransferHandler(workspaceService);
+// The code editor bundle file views load, built as the package build writes it.
+execFileSync(process.execPath, [fileURLToPath(new URL('../../../scripts/build-editor.mjs', import.meta.url)), join(directory, 'editor.js')], { stdio: 'ignore' });
+const editorBundle = editorHandler(pathToFileURL(join(directory, 'editor.js')));
 const adapter = new RemoteCliAdapter(new ChatProjects(service), { agent: () => undefined, step: () => undefined });
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = await build({ absWorkingDir: root, entryPoints: ['test/ui/app.fixture.tsx'], bundle: true, write: false, outfile: 'preview.js', loader: { '.woff2': 'dataurl', '.woff': 'dataurl', '.ttf': 'dataurl' }, platform: 'browser', format: 'esm', target: 'es2022' });
@@ -172,6 +176,10 @@ const server = createServer(async (request, response) => {
     }
     if (request.url.startsWith('/api/remote-agents/files?') || request.url.startsWith('/api/remote-agents/download?')) {
       const result = await transfer(new Request(`http://preview.test${request.url}`, { method: request.method, headers: request.headers, ...(request.method === 'POST' ? { body } : {}) }));
+      response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(Buffer.from(await result.arrayBuffer())); return;
+    }
+    if (request.url === '/api/remote-agents/editor.js') {
+      const result = await editorBundle(new Request(`http://preview.test${request.url}`, { headers: request.headers }));
       response.writeHead(result.status, Object.fromEntries(result.headers)); response.end(Buffer.from(await result.arrayBuffer())); return;
     }
     if (request.url === '/api/remote-agents') {

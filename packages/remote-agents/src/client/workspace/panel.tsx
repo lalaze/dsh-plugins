@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CodeEditor, ImagePreview, MarkdownPreview, imageType, isMarkdown } from '@dsh-plugins/file-view';
-import { api, requestId } from '../api.js';
-import { ui, localizeError, useLocale } from '../i18n.js';
+import { api, EDITOR_SRC, requestId } from '../api.js';
+import { i18n, ui, localizeError, useLocale } from '../i18n.js';
 import { workspaceStyles } from './styles.js';
 import { type SyncResult, type Tunnel, type WorkspaceEntry, type WorkspaceFile, type WorkspaceTarget } from '../../workspace/domain.js';
 
@@ -206,7 +206,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
               : <p className="ra-ws-note" role="status">{ui('Loading image…')}</p>)}
             {file && mode === 'preview' && (svg ? <div className="ra-ws-preview"><ImagePreview src={svg} name={file.path.split('/').pop() ?? ''} labels={{ fit: ui('Fit to pane'), actual: ui('Actual size') }} /></div>
               : <MarkdownPreview className="ra-ws-preview" source={draft} />)}
-            {file && mode === 'edit' && <CodeEditor key={file.path} className="ra-workspace-editor" label={ui('Remote file contents')} path={file.path} value={draft} onChange={setDraft} onSave={save} readOnly={busy} line={file.path === initialPath ? line : undefined} />}
+            {file && mode === 'edit' && <CodeEditor key={file.path} className="ra-workspace-editor" label={ui('Remote file contents')} src={EDITOR_SRC} locale={i18n.activeLocale()} path={file.path} value={draft} onChange={setDraft} onSave={save} readOnly={busy} line={file.path === initialPath ? line : undefined} />}
             {info && <div className="ra-ws-viewer-actions">
               {file && <><button className="ra-ws-button ra-primary" title="⌘/Ctrl + S" disabled={busy || !dirty} onClick={save}>{ui('Save to remote')}</button>
                 <button className="ra-ws-button" disabled={busy || !dirty} onClick={() => { setDraft(file.content); setError(''); }}>{ui('Discard changes')}</button></>}

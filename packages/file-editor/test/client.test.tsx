@@ -3,6 +3,7 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
+import { installFakeMonaco } from '@dsh-plugins/file-view/testing';
 import { claims, fileAddress } from '../src/client/address.js';
 
 test('file addresses carry the session, a relative or absolute path and an optional line', () => {
@@ -25,13 +26,12 @@ test('text and code files of known local conversations are claimed; images, remo
 
 // The editor tab, mounted with a simulated file route.
 let root: Root | undefined, container: HTMLElement;
-const globals = ['window', 'document', 'navigator', 'MutationObserver', 'requestAnimationFrame', 'cancelAnimationFrame', 'getComputedStyle', 'Node', 'Element', 'HTMLElement', 'Text', 'Range', 'Selection', 'KeyboardEvent', 'Event', 'DOMRect', 'Window', 'fetch'] as const;
+const globals = ['window', 'document', 'navigator', 'MutationObserver', 'getComputedStyle', 'Node', 'Element', 'HTMLElement', 'Event', 'fetch'] as const;
 let disk: { content: string; mtimeMs: number }, requests: Record<string, unknown>[];
 const sha = async (text: string) => (await import('node:crypto')).createHash('sha256').update(text).digest('hex');
 beforeEach(() => {
   const { window } = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true });
-  window.Range.prototype.getClientRects = () => ({ length: 0, item: () => null, [Symbol.iterator]: [][Symbol.iterator] }) as unknown as DOMRectList;
-  window.Range.prototype.getBoundingClientRect = () => new window.DOMRect();
+  installFakeMonaco();
   disk = { content: '# Title\n', mtimeMs: 1 }; requests = [];
   const fetch = async (_url: string, init: { body: string }) => {
     const body = JSON.parse(init.body); requests.push(body);
@@ -52,20 +52,26 @@ afterEach(async () => {
   for (const name of globals) delete (globalThis as Record<string, unknown>)[name];
 });
 const settle = () => act(async () => { for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve)); });
+/** The editor's text, and edits made as typing would. */
+async function editor() {
+  const { editorOf } = await import('@dsh-plugins/file-view');
+  const model = () => editorOf(container.querySelector('.fv-code')!)!.getModel()!;
+  return { text: () => model().getValue(), edit: (change: (text: string) => string) => act(async () => model().setValue(change(model().getValue()))) };
+}
 async function open() {
-  const [{ createRoot }, { FileTab }, { editorOf }] = await Promise.all([import('react-dom/client'), import('../src/client/file-tab.js'), import('@dsh-plugins/file-view')]);
+  const [{ createRoot }, { FileTab }] = await Promise.all([import('react-dom/client'), import('../src/client/file-tab.js')]);
   root = createRoot(container);
   await act(async () => root!.render(<FileTab sessionId="s1" path="README.md" />));
   await settle();
-  return () => editorOf(container.querySelector('.cm-editor')!)!;
+  return editor();
 }
 const button = (label: string) => [...container.querySelectorAll('button')].find(b => b.textContent === label)!;
 
 test('a file loads, edits are saved with their revision, and a stale save reports the change on disk', async () => {
   const view = await open();
-  assert.equal(view().state.sliceDoc(), '# Title\n');
+  assert.equal(view.text(), '# Title\n');
   assert.ok(button('Save').disabled);
-  await act(async () => view().dispatch({ changes: { from: view().state.doc.length, insert: 'more\n' } }));
+  await view.edit(text => `${text}more\n`);
   assert.ok(container.querySelector('.fe-dirty'));
   await act(async () => button('Save').click()); await settle();
   assert.equal(disk.content, '# Title\nmore\n');
@@ -73,7 +79,7 @@ test('a file loads, edits are saved with their revision, and a stale save report
   assert.equal(container.querySelector('.fe-dirty'), null);
   // Someone else saves; this tab's next save is refused instead of overwriting it.
   disk = { content: 'theirs\n', mtimeMs: 99 };
-  await act(async () => view().dispatch({ changes: { from: 0, insert: 'mine ' } }));
+  await view.edit(text => `mine ${text}`);
   await act(async () => button('Save').click()); await settle();
   assert.equal(disk.content, 'theirs\n');
   assert.match(container.querySelector('[data-tone=warn]')!.textContent!, /changed on disk/);
@@ -85,11 +91,11 @@ test('changes made elsewhere reload a clean file by themselves and are only repo
   const view = await open();
   disk = { content: '# Agent edit\n', mtimeMs: 2 };
   await act(async () => mock.timers.tick(2000)); await settle();
-  assert.equal(view().state.sliceDoc(), '# Agent edit\n');
-  await act(async () => view().dispatch({ changes: { from: 0, insert: 'draft ' } }));
+  assert.equal(view.text(), '# Agent edit\n');
+  await view.edit(text => `draft ${text}`);
   disk = { content: '# Second edit\n', mtimeMs: 3 };
   await act(async () => mock.timers.tick(2000)); await settle();
-  assert.equal(view().state.sliceDoc(), 'draft # Agent edit\n', 'unsaved edits are kept');
+  assert.equal(view.text(), 'draft # Agent edit\n', 'unsaved edits are kept');
   assert.ok(container.querySelector('[data-tone=warn]'));
   assert.equal(button('Reload').disabled, false, 'reloading is offered');
 });
@@ -110,9 +116,9 @@ for (const action of ['stat', 'read'] as const) {
     disk = { content: '# Agent edit\n', mtimeMs: 2 };
     await act(async () => mock.timers.tick(2000)); await settle();
     assert.ok(intercepted, 'the background request is in flight');
-    await act(async () => view().dispatch({ changes: { from: 0, insert: 'my draft ' } }));
+    await view.edit(text => `my draft ${text}`);
     await act(async () => release()); await settle();
-    assert.equal(view().state.sliceDoc(), 'my draft # Title\n');
+    assert.equal(view.text(), 'my draft # Title\n');
     assert.ok(container.querySelector('.fe-dirty'));
     assert.ok(container.querySelector('[data-tone=warn]'), 'the disk change is reported without replacing the draft');
     if (action === 'stat') assert.equal(requests.filter(r => r.action === 'read').length, 1, 'no refresh read starts over a new draft');
@@ -124,7 +130,7 @@ test('the file loads under React StrictMode effect replay', async () => {
   root = createRoot(container);
   await act(async () => root!.render(<React.StrictMode><FileTab sessionId="s1" path="README.md" /></React.StrictMode>));
   await settle();
-  assert.ok(container.querySelector('.cm-editor'), 'a replayed mount still accepts the loaded file');
+  assert.ok(container.querySelector('.fv-code[data-loaded]'), 'a replayed mount still accepts the loaded file');
 });
 
 test('Markdown can be previewed, rendered without raw HTML', async () => {
@@ -169,6 +175,5 @@ test('a conversation link’s line, passed as a navigation parameter, is where t
   root = createRoot(container);
   const tab = { navigation: { address: 'dsh-resource://file/session/s1/README.md', params: { line: 2 } } };
   await act(async () => root!.render(<Tab sessionId="s1" useTabInfo={() => ({ tab })} />)); await settle();
-  const view = editorOf(container.querySelector('.cm-editor')!)!;
-  assert.equal(view.state.doc.lineAt(view.state.selection.main.head).number, 2);
+  assert.equal(editorOf(container.querySelector('.fv-code')!)!.getPosition()!.lineNumber, 2);
 });

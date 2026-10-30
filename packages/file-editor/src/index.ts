@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-client-connection';
+import { editorHandler } from './editor-route.js';
 import { LocalFiles } from './files.js';
 import { createHandler } from './http.js';
 
@@ -21,4 +22,6 @@ export function apply(ctx: Context): void {
   const files = new LocalFiles(id => sessionCwd(ctx, id));
   const log = (message: string) => (ctx.get('logger') as { warn?(text: string): void } | undefined)?.warn?.(message);
   ctx.connection.fetch.register({ path: '/api/file-editor', methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(files, log) });
+  // The client's EDITOR_SRC; the build writes the bundle next to lib/server.
+  ctx.connection.fetch.register({ path: '/api/file-editor/editor.js', methods: ['GET'], requestBody: 'buffered', fetch: editorHandler(new URL('../editor.js', import.meta.url)) });
 }

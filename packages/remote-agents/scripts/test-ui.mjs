@@ -28,18 +28,21 @@ const image = name => { if (screenshots) browser('screenshot', ...(name.startsWi
 const workspaceChecks = () => {
   evaluate('window.fixture.setLocale("en")');
   const entries = '.ra-ws-entries', viewing = '.ra-ws-viewer-head .ra-mono', editor = '[aria-label="Remote file contents"]';
-  // The CodeMirror editor's text, line by line; undefined while no editor is shown.
-  const editorText = `(document.querySelector('${editor}') ? [...document.querySelectorAll('${editor} .cm-line')].map(line => line.textContent).join("\\n") : undefined)`;
+  // The open Monaco editor, through the bundle the panel loaded; undefined while no editor is shown.
+  const shown = `globalThis[Symbol.for("dsh-plugins.editor")]?.monaco?.editor.getEditors().find(e => e.getContainerDomNode().isConnected)`;
+  const editorText = `${shown}?.getValue()`;
+  // Replaces the text as typing would, with the focus in the editor so its shortcuts apply.
+  const fill = text => evaluate(`(() => { const e = ${shown}; e.focus(); e.getModel().setValue(${JSON.stringify(text)}); })()`);
   browser('click', '[data-open-workspace]'); wait(`document.querySelector("${entries}")?.textContent.includes("hello.txt")`);
   expect('document.querySelector(".ra-ws-target")?.title === "build-box:/srv/main-chat"');
   expect('[...document.querySelectorAll(".ra-ws-tabs button")].map(b => b.textContent).join() === "Files,Sync,Tunnels,Remote DSH"');
   browser('click', `${entries} button:has-text("hello.txt")`);
   wait(`${editorText}?.includes("Hello from")`);
   // ⌘/Ctrl+S saves from the editor.
-  browser('fill', editor, 'edited from the workspace UI'); wait('document.querySelector(".ra-ws-dirty")');
+  fill('edited from the workspace UI'); wait('document.querySelector(".ra-ws-dirty")');
   browser('press', 'Control+s'); wait('!document.querySelector(".ra-ws-dirty") && !document.querySelector(".ra-ws-busy") && document.querySelector(".ra-ws-viewer-actions .ra-primary")?.disabled');
   fixture({ workspaceContent: 'external change' });
-  browser('fill', editor, 'stale edit'); browser('click', 'button:text-is("Save to remote")');
+  fill('stale edit'); browser('click', 'button:text-is("Save to remote")');
   wait('document.querySelector(".ra-workspace-panel [role=alert]")?.textContent.includes("file changed")');
   browser('click', 'button:text-is("Reload file")'); wait(`${editorText} === "external change"`);
   // A new file opens right away; a folder does not.
@@ -51,7 +54,7 @@ const workspaceChecks = () => {
   browser('fill', '[aria-label="Rename destination"]', 'renamed.txt'); browser('click', '.ra-ws-rename button'); wait(`document.querySelector("${viewing}")?.textContent === "renamed.txt"`);
   // Unsaved edits block opening another file, not browsing folders; closing asks to save or discard first.
   create('Folder', 'docs'); wait(`document.querySelector("${entries}")?.textContent.includes("docs")`);
-  browser('fill', editor, 'unsaved'); browser('click', `${entries} button:text-is("docs")`);
+  fill('unsaved'); browser('click', `${entries} button:text-is("docs")`);
   wait(`[...document.querySelectorAll(".ra-ws-crumbs button")].some(b => b.textContent === "docs") && ${editorText} === "unsaved"`);
   browser('click', '.ra-ws-crumbs button'); wait(`document.querySelector("${entries}")?.textContent.includes("hello.txt")`);
   browser('click', `${entries} button:has-text("hello.txt")`); wait('document.querySelector(".ra-workspace-panel [role=alert]")?.textContent.includes("Save or discard")');

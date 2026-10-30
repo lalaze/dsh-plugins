@@ -1,27 +1,20 @@
-// Token colors follow DSH's theme: it marks the body `data-ds-dark-theme` in dark mode. Hosts without that
+// Colors follow DSH's theme: it marks the body `data-ds-dark-theme` in dark mode. Hosts without that
 // marker follow the system scheme.
-const LIGHT = `--fv-keyword:#cf222e;--fv-string:#0a3069;--fv-number:#0550ae;--fv-comment:#6e7781;--fv-type:#953800;--fv-definition:#8250df;
---fv-property:#0550ae;--fv-meta:#6e7781;--fv-link:#0969da;--fv-inserted:#116329;--fv-deleted:#82071e;--fv-heading:#0550ae`;
-const DARK = `--fv-keyword:#ff7b72;--fv-string:#a5d6ff;--fv-number:#79c0ff;--fv-comment:#8b949e;--fv-type:#ffa657;--fv-definition:#d2a8ff;
---fv-property:#79c0ff;--fv-meta:#8b949e;--fv-link:#58a6ff;--fv-inserted:#7ee787;--fv-deleted:#ffa198;--fv-heading:#79c0ff`;
+const LIGHT = '--fv-link:#0969da;--fv-status-bg:#f8f8f8;--fv-status-fg:#3b3b3b;--fv-status-border:#e5e5e5';
+const DARK = '--fv-link:#58a6ff;--fv-status-bg:#181818;--fv-status-fg:#cccccc;--fv-status-border:#2b2b2b';
 export const fileViewStyles = `
 .fv-code,.fv-markdown{${LIGHT}}
 body[data-ds-dark-theme] .fv-code,body[data-ds-dark-theme] .fv-markdown{${DARK}}
 @media(prefers-color-scheme:dark){body:not([data-ds-theme-source]) .fv-code,body:not([data-ds-theme-source]) .fv-markdown{${DARK}}}
-.fv-code{min-height:0;overflow:hidden}
-.fv-code .tok-keyword,.fv-code .tok-operator.tok-keyword{color:var(--fv-keyword)}
-.fv-code .tok-string,.fv-code .tok-string2{color:var(--fv-string)}
-.fv-code .tok-number,.fv-code .tok-bool,.fv-code .tok-atom,.fv-code .tok-literal{color:var(--fv-number)}
-.fv-code .tok-comment{color:var(--fv-comment);font-style:italic}
-.fv-code .tok-typeName,.fv-code .tok-className,.fv-code .tok-namespace{color:var(--fv-type)}
-.fv-code .tok-definition,.fv-code .tok-macroName{color:var(--fv-definition)}
-.fv-code .tok-propertyName,.fv-code .tok-labelName{color:var(--fv-property)}
-.fv-code .tok-meta{color:var(--fv-meta)}
-.fv-code .tok-link,.fv-code .tok-url{color:var(--fv-link);text-decoration:underline}
-.fv-code .tok-heading{color:var(--fv-heading);font-weight:600}
-.fv-code .tok-strong{font-weight:600}.fv-code .tok-emphasis{font-style:italic}.fv-code .tok-strikethrough{text-decoration:line-through}
-.fv-code .tok-inserted{color:var(--fv-inserted)}.fv-code .tok-deleted{color:var(--fv-deleted)}
-.fv-code .tok-invalid{color:var(--fv-deleted)}
+.fv-code{position:relative;display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+.fv-code-host{flex:1;min-height:0;min-width:0}
+.fv-code-note{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:8px;margin:0;font-size:12px;opacity:.7}
+.fv-code-note button{font:inherit;color:inherit;background:transparent;border:1px solid color-mix(in srgb,currentColor 25%,transparent);border-radius:4px;padding:2px 8px;cursor:pointer}
+.fv-status{flex:none;display:flex;justify-content:flex-end;align-items:center;gap:2px;height:22px;padding:0 6px;overflow:hidden;white-space:nowrap;
+font:12px/22px system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--fv-status-bg);color:var(--fv-status-fg);border-top:1px solid var(--fv-status-border)}
+/* Specific enough to win over a host's own button styles. */
+.fv-code .fv-status>*{flex:none;height:22px;margin:0;padding:0 6px;font:inherit;color:inherit;background:none;border:none;border-radius:0;box-shadow:none}
+.fv-code .fv-status>button{cursor:pointer;border-radius:3px}.fv-code .fv-status>button:hover:enabled{background:color-mix(in srgb,currentColor 12%,transparent)}
 .fv-image{display:flex;flex-direction:column;min-height:0;height:100%}
 .fv-image-stage{flex:1;min-height:0;overflow:auto;display:grid;place-items:center;padding:12px;border-radius:6px;cursor:zoom-in;
 background:repeating-conic-gradient(color-mix(in srgb,currentColor 7%,transparent) 0 25%,transparent 0 50%) 0 0/16px 16px}

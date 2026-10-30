@@ -12,7 +12,7 @@ interface Route { path: string; methods: string[]; requestBody: 'buffered' | 'st
 const bridged = (route: Route, method: string, query = '', headers: Record<string, string> = {}) => new Request(`http://dsh.internal${route.path}${query}`,
   route.requestBody === 'streaming' ? { method, headers, body: Readable.toWeb(Readable.from([])) as ReadableStream, duplex: 'half' } as RequestInit : { method, headers });
 
-test('every route survives DSH’s request bridge: file downloads have a buffered GET route, uploads a streaming POST one', async t => {
+test('every route survives DSH’s request bridge: file downloads and the editor bundle have buffered GET routes, uploads a streaming POST one', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-routes-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const plugin = await import('../src/index.js');
@@ -22,6 +22,7 @@ test('every route survives DSH’s request bridge: file downloads have a buffere
   t.after(async () => { await mounted.dispose(); await dispose(); });
   assert.deepEqual(routes.map(r => `${r.methods.join('/')} ${r.path} ${r.requestBody}`).sort(), [
     'GET /api/remote-agents/download buffered',
+    'GET /api/remote-agents/editor.js buffered',
     'GET/POST /api/remote-agents buffered',
     'POST /api/remote-agents/files streaming',
   ]);

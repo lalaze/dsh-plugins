@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from '@dsh-plugins/i18n/react';
 import { CodeEditor, ImagePreview, MarkdownPreview, imageType, isMarkdown } from '@dsh-plugins/file-view';
-import { fileRequest, type FileRead, type FileState, type Saved } from './api.js';
+import { EDITOR_SRC, fileRequest, type FileRead, type FileState, type Saved } from './api.js';
 import { i18n, localizeError, ui } from './i18n.js';
 import { styles } from './styles.js';
 
@@ -92,7 +92,7 @@ export function FileTab({ sessionId, path, line }: { sessionId: string; path: st
         : file.kind === 'binary' ? <p className="fe-note">{ui('This file is not UTF-8 text, so it cannot be edited here.')}</p>
         : file.kind === 'large' ? <p className="fe-note">{ui('This file is larger than the 4 MB editor limit.')}</p>
         : mode === 'preview' && previewable ? (svg ? <ImagePreview src={svg} name={name} labels={{ fit: ui('Fit to pane'), actual: ui('Actual size') }} /> : <MarkdownPreview source={draft} />)
-        : <CodeEditor className="fe-editor" label={ui('File contents')} path={path} value={draft} onChange={setDraft} onSave={save} readOnly={busy} line={line} />}
+        : <CodeEditor className="fe-editor" label={ui('File contents')} src={EDITOR_SRC} locale={i18n.activeLocale()} path={path} value={draft} onChange={setDraft} onSave={save} readOnly={busy} line={line} />}
     </div>
   </section>;
 }
