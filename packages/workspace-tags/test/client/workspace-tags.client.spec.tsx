@@ -108,7 +108,7 @@ describe('sections', () => {
     expect(rowActivity([node('l')])).toBeUndefined()
   })
 
-  it('puts a Workspace with any running Session only in Running, ahead of every other state', () => {
+  it('puts a Workspace with any running Session only in Running with all its Sessions, ahead of every other state', () => {
     const sessions: Record<string, SessionNode[]> = {
       alpha: [node('a1', { running: true }), waiting('a2'), node('a3')],
       beta: [node('b1', { completed: true }), node('b2', { running: true }), node('b3', { runningSubagentCount: 2 })],
@@ -122,7 +122,7 @@ describe('sections', () => {
       section.kind, section.groups.map(g => [g.key, g.expanded, g.sessions.map(n => n.id)]), section.count,
     ])).toEqual([
       ['waiting', [['gamma', true, ['c1']]], 1],
-      ['running', [['alpha', true, ['a1']], ['beta', true, ['b2', 'b3']], ['delta', true, ['d3']]], 4],
+      ['running', [['alpha', true, ['a1', 'a2', 'a3']], ['beta', true, ['b1', 'b2', 'b3']], ['delta', true, ['d1', 'd2', 'd3']]], 4],
       // Idle follows the sidebar's fold, holds Workspaces without Sessions, and counts Workspaces.
       ['idle', [['epsilon', false, []]], 1],
     ])
@@ -289,7 +289,7 @@ describe('WorkspaceBrowser with tags', () => {
     expect(sectionNames()).toEqual([['Idle', ['alpha', 'delta']]])
   })
 
-  it('keeps a Workspace with a running Session out of the other Status sections', async () => {
+  it('shows all Sessions of a running Workspace without duplicating it in other Status sections', async () => {
     const { runtime, store } = await mount({
       useSessions: hook(sessionState([summary('a1', { running: true }), summary('a2'), summary('a3'), summary('b1'),
         summary('x1', { origin: 'subagent', running: true })])),
@@ -300,7 +300,7 @@ describe('WorkspaceBrowser with tags', () => {
     expect(store.getSnapshot().groupExpansion).toEqual({})
     // Alpha's waiting and idle Sessions do not give it Waiting or Idle entries while a1 runs.
     expect(sectionSessions()).toEqual([
-      ['Running', [['alpha', ['a1']]]],
+      ['Running', [['alpha', ['a1', 'a2', 'a3']]]],
       ['Idle', []],
     ])
     expect(within(sectionHeader('Idle')).getByText('1')).toBeTruthy()
@@ -308,7 +308,7 @@ describe('WorkspaceBrowser with tags', () => {
     // Folding alpha inside Running does not change the sidebar's own Workspace fold.
     fireEvent.click(workspaceRow('alpha')[0]!)
     expect(sectionSessions()[0]).toEqual(['Running', [['alpha', []]]])
-    expect(within(workspaceRow('alpha')[0]!).getByRole('img', { name: 'Running' })).toBeTruthy()
+    expect(within(workspaceRow('alpha')[0]!).getByRole('img', { name: '1 waiting for you' })).toBeTruthy()
     expect(store.getSnapshot().groupExpansion).toEqual({})
     // Only beta, which has no running Session, remains in Idle.
     fireEvent.click(sectionHeader('Idle'))

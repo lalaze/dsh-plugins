@@ -21,13 +21,13 @@ export interface BrowserSection {
   kind: SectionKind
   tag?: WorkspaceTag
   /**
-   * Tag sections hold whole Workspaces. Status sections hold each Workspace
+   * Tag sections hold whole Workspaces. Waiting and Completed hold each Workspace
    * with only its Sessions in that state. Any running Session puts the whole
-   * Workspace in Running alone; otherwise a Workspace can qualify for several
+   * Workspace, including all its Sessions, in Running alone; otherwise a Workspace can qualify for several
    * sections. Idle follows the Workspace's own fold.
    */
   groups: readonly GroupNode[]
-  /** Workspaces in Tag and Idle sections, Sessions in the others. */
+  /** Workspaces in Tag and Idle sections, running Sessions in Running, matching Sessions in the others. */
   count: number
 }
 
@@ -120,7 +120,7 @@ export function tagSections(groups: readonly GroupNode[], state: TagState): Brow
 /**
  * Waiting for the user, then finished and unread, then running, then Idle.
  * Any running Session (including a subagent) puts its Workspace only in Running,
- * with just its running Sessions. Otherwise each state lists every Workspace
+ * with all its Sessions. Otherwise each state lists every Workspace
  * with Sessions in that state and only those Sessions. Idle also holds
  * Workspaces without Sessions, where a new one starts.
  * @param groups - the rendered groups, whose Sessions follow their fold state.
@@ -133,7 +133,7 @@ export function statusSections(groups: readonly GroupNode[], sessionsOf: (group:
     const all = sessionsOf(group)
     const running = all.filter(node => node.running || node.runningSubagentCount > 0)
     if (running.length > 0) {
-      active.get('running')!.push({ ...group, expanded: true, sessions: running })
+      active.get('running')!.push({ ...group, expanded: true, sessions: all })
       continue
     }
     const byKind = new Map<ActiveStatus, SessionNode[]>()
@@ -152,7 +152,9 @@ export function statusSections(groups: readonly GroupNode[], sessionsOf: (group:
   const sections: BrowserSection[] = [...active]
     .filter(([, members]) => members.length > 0)
     .map(([kind, members]) => ({
-      key: `status:${kind}`, kind, groups: members, count: members.reduce((n, member) => n + member.sessions.length, 0),
+      key: `status:${kind}`, kind, groups: members, count: members.reduce((n, member) => n + (kind === 'running'
+        ? member.sessions.filter(node => node.running || node.runningSubagentCount > 0).length
+        : member.sessions.length), 0),
     }))
   if (idle.length > 0) sections.push({ key: 'status:idle', kind: 'idle', groups: idle, count: idle.length })
   return sections
