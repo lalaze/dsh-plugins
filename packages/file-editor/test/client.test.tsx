@@ -65,7 +65,8 @@ async function open() {
   await settle();
   return editor();
 }
-const button = (label: string) => [...container.querySelectorAll('button')].find(b => b.textContent === label)!;
+/** A button by its text or, for the title bar's icon buttons, by its accessible name. */
+const button = (label: string) => [...container.querySelectorAll('button')].find(b => b.textContent === label || b.getAttribute('aria-label') === label)!;
 
 test('a file loads, edits are saved with their revision, and a stale save reports the change on disk', async () => {
   const view = await open();

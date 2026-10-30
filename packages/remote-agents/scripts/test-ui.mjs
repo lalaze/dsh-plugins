@@ -40,9 +40,9 @@ const workspaceChecks = () => {
   wait(`${editorText}?.includes("Hello from")`);
   // ⌘/Ctrl+S saves from the editor.
   fill('edited from the workspace UI'); wait('document.querySelector(".ra-ws-dirty")');
-  browser('press', 'Control+s'); wait('!document.querySelector(".ra-ws-dirty") && !document.querySelector(".ra-ws-busy") && document.querySelector(".ra-ws-viewer-actions .ra-primary")?.disabled');
+  browser('press', 'Control+s'); wait('!document.querySelector(".ra-ws-dirty") && !document.querySelector(".ra-ws-busy") && [...document.querySelectorAll(".ra-ws-tools button")].find(b => b.ariaLabel === "Save to remote")?.disabled');
   fixture({ workspaceContent: 'external change' });
-  fill('stale edit'); browser('click', 'button:text-is("Save to remote")');
+  fill('stale edit'); browser('click', '[aria-label="Save to remote"]');
   wait('document.querySelector(".ra-workspace-panel [role=alert]")?.textContent.includes("file changed")');
   browser('click', 'button:text-is("Reload file")'); wait(`${editorText} === "external change"`);
   // A new file opens right away; a folder does not.
@@ -51,7 +51,8 @@ const workspaceChecks = () => {
     browser('fill', '[aria-label="New item name"]', name); browser('click', 'button:text-is("Create")');
   };
   create('File', 'created.txt'); wait(`document.querySelector("${viewing}")?.textContent === "created.txt" && ${editorText} === ""`);
-  browser('fill', '[aria-label="Rename destination"]', 'renamed.txt'); browser('click', '.ra-ws-rename button'); wait(`document.querySelector("${viewing}")?.textContent === "renamed.txt"`);
+  // Renaming edits the path in the title bar.
+  browser('click', '.ra-ws-tools [aria-label="Rename"]'); browser('fill', '[aria-label="Rename destination"]', 'renamed.txt'); browser('click', '.ra-ws-rename button[type=submit]'); wait(`document.querySelector("${viewing}")?.textContent === "renamed.txt"`);
   // Unsaved edits block opening another file, not browsing folders; closing asks to save or discard first.
   create('Folder', 'docs'); wait(`document.querySelector("${entries}")?.textContent.includes("docs")`);
   fill('unsaved'); browser('click', `${entries} button:text-is("docs")`);
@@ -60,9 +61,9 @@ const workspaceChecks = () => {
   browser('click', `${entries} button:has-text("hello.txt")`); wait('document.querySelector(".ra-workspace-panel [role=alert]")?.textContent.includes("Save or discard")');
   expect(`document.querySelector("${viewing}")?.textContent === "renamed.txt"`);
   browser('click', '[aria-label="Close file"]'); expect(`document.querySelector("${viewing}")?.textContent === "renamed.txt"`);
-  browser('click', 'button:text-is("Discard changes")'); browser('click', '[aria-label="Close file"]'); wait(`document.querySelector(".ra-ws-placeholder") && !document.querySelector('${editor}')`);
+  browser('click', '[aria-label="Discard changes"]'); browser('click', '[aria-label="Close file"]'); wait(`document.querySelector(".ra-ws-placeholder") && !document.querySelector('${editor}')`);
   browser('click', `${entries} button:has-text("renamed.txt")`); wait(`document.querySelector("${viewing}")?.textContent === "renamed.txt"`);
-  browser('click', 'button:text-is("Delete file")'); browser('click', 'button:text-is("Delete")'); wait(`!document.querySelector("${entries}")?.textContent.includes("renamed.txt")`);
+  browser('click', '[aria-label="Delete file"]'); browser('click', 'button:text-is("Delete")'); wait(`!document.querySelector("${entries}")?.textContent.includes("renamed.txt")`);
   evaluate('(()=>{const input=document.querySelector(".ra-ws-files input[type=file]"), files=new DataTransfer();files.items.add(new File([new Uint8Array([0,1,255])],"upload.bin"));input.files=files.files;input.dispatchEvent(new Event("change",{bubbles:true}));})()');
   wait(`document.querySelector("${entries}")?.textContent.includes("upload.bin")`);
   // An uploaded image is shown instead of the binary-file note.
@@ -71,13 +72,13 @@ const workspaceChecks = () => {
   browser('click', `${entries} button:has-text("pixel.png")`);
   wait('document.querySelector(".ra-ws-preview .fv-image img")?.naturalWidth === 1 && !document.querySelector(".ra-ws-viewer .ra-ws-note")');
   wait('document.querySelector(".fv-image-meta")?.textContent.startsWith("1 × 1")');
-  browser('click', 'button:text-is("Delete file")'); browser('click', 'button:text-is("Delete")'); wait(`!document.querySelector("${entries}")?.textContent.includes("pixel.png")`);
+  browser('click', '[aria-label="Delete file"]'); browser('click', 'button:text-is("Delete")'); wait(`!document.querySelector("${entries}")?.textContent.includes("pixel.png")`);
   // A binary file cannot be edited here, but it can still be renamed and deleted.
   browser('click', `${entries} button:has-text("upload.bin")`);
   wait(`document.querySelector(".ra-ws-viewer .ra-ws-note")?.textContent.includes("binary") && !document.querySelector('${editor}')`);
-  browser('fill', '[aria-label="Rename destination"]', 'moved.bin'); browser('click', '.ra-ws-rename button');
+  browser('click', '.ra-ws-tools [aria-label="Rename"]'); browser('fill', '[aria-label="Rename destination"]', 'moved.bin'); browser('click', '.ra-ws-rename button[type=submit]');
   wait(`document.querySelector("${viewing}")?.textContent === "moved.bin" && document.querySelector("${entries}")?.textContent.includes("moved.bin")`);
-  browser('click', 'button:text-is("Delete file")'); browser('click', 'button:text-is("Delete")'); wait(`!document.querySelector("${entries}")?.textContent.includes("moved.bin")`);
+  browser('click', '[aria-label="Delete file"]'); browser('click', 'button:text-is("Delete")'); wait(`!document.querySelector("${entries}")?.textContent.includes("moved.bin")`);
   // Search runs on Enter; the clear button and Escape end it without closing the window.
   const search = () => { browser('fill', '[aria-label="Search remote files"]', 'external'); browser('press', 'Enter'); wait(`document.querySelector("${entries} small")?.textContent === "1: external change"`); };
   const searchCleared = `document.querySelector('[aria-label="Search remote files"]').value === "" && document.querySelector("${entries}")?.textContent.includes("docs")`;

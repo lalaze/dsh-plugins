@@ -402,8 +402,6 @@ export const zh: Record<string, string> = {
   "Choose a file": "选择文件",
   "Remote file contents": "远程文件内容",
   "Save to remote": "保存到远程",
-  "File view": "文件视图",
-  "Edit": "编辑",
   "Preview": "预览",
   "Fit to pane": "适应窗格",
   "Actual size": "实际大小",

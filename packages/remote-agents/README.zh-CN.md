@@ -154,7 +154,7 @@ DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要�
 
 ```sh
 pnpm --filter dsh-remote-agents pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.60.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-remote-agents-0.2.61.tgz"
 ```
 
 重启该 profile 并刷新浏览器。桌面版请完全退出应用，并使用应用自带的 `dsh` 配合 `--profile desktop`。

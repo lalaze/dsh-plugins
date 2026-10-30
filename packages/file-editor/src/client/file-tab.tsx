@@ -5,10 +5,23 @@ import { EDITOR_SRC, fileRequest, type FileRead, type FileState, type Saved } fr
 import { i18n, localizeError, ui } from './i18n.js';
 import { styles } from './styles.js';
 
+const PATHS = {
+  file: 'M4 2h5l3 3v9H4zM9 2v3h3', preview: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8zM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  save: 'M3 2.5h8l2.5 2.5v8.5h-10.5zM5.5 2.5V6h5V2.5M5.5 13.5V9.5h5v4', revert: 'M3.5 6.5h6.5a3.5 3.5 0 0 1 0 7H6.5M6 4 3.5 6.5 6 9',
+  reload: 'M13 3v3.5H9.5M3 13V9.5h3.5M4.2 6A4.5 4.5 0 0 1 12.6 5.7M11.8 10A4.5 4.5 0 0 1 3.4 10.3',
+} as const;
+const Icon = ({ kind }: { kind: keyof typeof PATHS }) => <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[kind]} /></svg>;
+/** An icon button of the title bar, named by its tooltip. */
+const Tool = ({ label, icon, ...props }: { label: string; icon: keyof typeof PATHS } & React.ButtonHTMLAttributes<HTMLButtonElement>) =>
+  <button type="button" className="fe-tool" title={label} aria-label={label} {...props}><Icon kind={icon} /></button>;
+
 /** How often an open file is checked for changes made elsewhere, such as by an agent. */
 const POLL_MS = 2000;
 
-/** One local file: highlighted editing, Markdown and SVG previews, and saves that never overwrite changes made elsewhere. */
+/**
+ * One local file, edge to edge as an editor in VS Code: a title bar with the path and icon actions, then the editor or a
+ * Markdown or SVG preview. Saves never overwrite changes made elsewhere.
+ */
 export function FileTab({ sessionId, path, line }: { sessionId: string; path: string; line?: number }) {
   useLocale(i18n);
   const [file, setFile] = useState<FileRead>(), [draft, setDraft] = useState(''), [error, setError] = useState('');
@@ -74,16 +87,16 @@ export function FileTab({ sessionId, path, line }: { sessionId: string; path: st
 
   return <section className="fe-tab" aria-label={name}><style>{styles}</style>
     <header className="fe-head">
-      <span className="fe-path" title={path}>{path}</span>
-      {dirty && <span className="fe-dirty">{ui('Unsaved')}</span>}
-      {previewable && <span className="fe-segment" role="radiogroup" aria-label={ui('File view')}>
-        {(['edit', 'preview'] as const).map(key => <button type="button" role="radio" key={key} aria-checked={mode === key} onClick={() => setMode(key)}>{ui(key === 'edit' ? 'Edit' : 'Preview')}</button>)}
-      </span>}
-      {text && <>
-        <button type="button" className="fe-button fe-primary" title="⌘/Ctrl + S" disabled={busy || !dirty} onClick={save}>{ui('Save')}</button>
-        <button type="button" className="fe-button" disabled={busy || !dirty} onClick={() => { setDraft(text.content); setError(''); }}>{ui('Revert')}</button>
-      </>}
-      <button type="button" className="fe-button" disabled={busy || (dirty && !stale)} onClick={() => void run(() => load())}>{ui('Reload')}</button>
+      <Icon kind="file" /><span className="fe-path" title={path}>{path}</span>
+      {dirty && <span className="fe-dirty" role="img" title={ui('Unsaved')} aria-label={ui('Unsaved')} />}
+      <span className="fe-tools">
+        {previewable && <Tool label={ui('Preview')} icon="preview" aria-pressed={mode === 'preview'} onClick={() => setMode(mode === 'preview' ? 'edit' : 'preview')} />}
+        {text && <>
+          <Tool label={ui('Save')} icon="save" title={`${ui('Save')} (⌘/Ctrl+S)`} disabled={busy || !dirty} onClick={save} />
+          <Tool label={ui('Revert')} icon="revert" disabled={busy || !dirty} onClick={() => { setDraft(text.content); setError(''); }} />
+        </>}
+        <Tool label={ui('Reload')} icon="reload" disabled={busy || (dirty && !stale)} onClick={() => void run(() => load())} />
+      </span>
     </header>
     {stale && <div className="fe-banner" data-tone="warn" role="status"><span>{ui('The file changed on disk.')} {dirty && ui('Reload to see the new version; your unsaved changes will be lost.')}</span></div>}
     {error && <div className="fe-banner" data-tone="error" role="alert">{error}</div>}

@@ -20,6 +20,9 @@ const PATHS = {
   download: 'M8 2.5V10M5 7l3 3 3-3M3 10v3h10v-3', refresh: 'M13 3v3.5H9.5M3 13V9.5h3.5M4.2 6A4.5 4.5 0 0 1 12.6 5.7M11.8 10A4.5 4.5 0 0 1 3.4 10.3',
   search: 'M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM14 14l-3.5-3.5', trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5', play: 'M5 3.5v9l7-4.5z',
   stop: 'M4.5 4.5h7v7h-7z', close: 'M4.5 4.5l7 7M11.5 4.5l-7 7', external: 'M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5',
+  save: 'M3 2.5h8l2.5 2.5v8.5h-10.5zM5.5 2.5V6h5V2.5M5.5 13.5V9.5h5v4', discard: 'M3.5 6.5h6.5a3.5 3.5 0 0 1 0 7H6.5M6 4 3.5 6.5 6 9',
+  rename: 'M10.5 2.5l3 3-8 8h-3v-3zM9 4l3 3', preview: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8zM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  check: 'M3 8.5l3 3 7-7',
 } as const;
 function Icon({ kind }: { kind: keyof typeof PATHS }) {
   return <svg className="ra-ws-glyph" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={PATHS[kind]} /></svg>;
@@ -42,6 +45,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
   // Markdown and SVG files can also be shown rendered; binary images are only shown.
   const [mode, setMode] = useState<'edit' | 'preview'>('edit'), [picture, setPicture] = useState<string>(), [removed, setRemoved] = useState(false);
   const [name, setName] = useState(''), [kind, setKind] = useState<'file' | 'directory'>('file'), [deleting, setDeleting] = useState(false), [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [query, setQuery] = useState(''), [matches, setMatches] = useState<{ path: string; line: number; text: string }[]>();
   const [direction, setDirection] = useState<'pull' | 'push'>('pull'), [sync, setSync] = useState<SyncResult>();
   const [tunnels, setTunnels] = useState<Tunnel[]>([]), [listenPort, setListenPort] = useState('38080'), [targetPort, setTargetPort] = useState('3000'), [tunnelDirection, setTunnelDirection] = useState<'local' | 'reverse'>('local');
@@ -74,7 +78,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
     return () => c.abort();
   }, [target, path, call]);
   const open = useCallback(async (filePath: string) => {
-    setSelected(filePath); setFile(undefined); setInfo(undefined); setReadOnly(''); setDraft(''); setDeleting(false); setMode('edit');
+    setSelected(filePath); setFile(undefined); setInfo(undefined); setReadOnly(''); setDraft(''); setDeleting(false); setRenaming(false); setMode('edit');
     try {
       const value = await operate<WorkspaceFile>({ op: 'read', path: filePath });
       if (alive.current) { setFile(value); setInfo(value); setDraft(value.content); }
@@ -143,6 +147,12 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
   const clearSearch = () => { setQuery(''); setMatches(undefined); };
   const close = () => { if (canNavigate()) { setSelected(undefined); setFile(undefined); setInfo(undefined); setReadOnly(''); setDraft(''); setDeleting(false); setError(''); } };
   const save = () => { if (file && dirty) void run(async () => { const saved = await operate<{ path: string; revision: string; size: number }>({ op: 'write', path: file.path, content: draft, revision: file.revision }); setFile({ ...file, ...saved, content: draft }); setInfo(saved); await reload(); }); };
+  const rename = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const destination = (new FormData(event.currentTarget).get('destination') as string).trim();
+    if (!info || !destination || destination === info.path) { setRenaming(false); return; }
+    void run(async () => { await operate({ op: 'move', path: info.path, destination, revision: info.revision }); await reload(); await open(destination); });
+  };
   const create = (event: React.FormEvent) => { event.preventDefault(); void run(async () => {
     if (!name || /[\\/]/.test(name) || name === '.' || name === '..') throw new Error(ui('Enter a file or folder name.'));
     const destination = path ? `${path}/${name}` : name;
@@ -159,15 +169,15 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
   const segmented = <T extends string,>(label: string, value: T, set: (value: T) => void, options: readonly (readonly [T, string])[]) =>
     <div className="ra-ws-segment" role="radiogroup" aria-label={label}>{options.map(([key, text]) => <button type="button" role="radio" key={key} aria-checked={value === key} disabled={busy} onClick={() => set(key)}>{text}</button>)}</div>;
 
-  return <section className="dsh-ra ra-workspace-panel" aria-label={ui('Remote workspace')}><style>{workspaceStyles}</style>
-    <header className="ra-ws-head">
+  return <section className="dsh-ra ra-workspace-panel" aria-label={ui('Remote workspace')} data-file-only={fileOnly ? '' : undefined}><style>{workspaceStyles}</style>
+    {!fileOnly && <header className="ra-ws-head">
       {target ? <span className="ra-ws-target" title={`${target.label}:${target.cwd}`}><Icon kind="server" /><b>{target.label}</b><span className="ra-mono">{`\u200e${target.cwd}\u200e`}</span></span> : <span />}
       {busy && <span className="ra-ws-busy" role="status"><span className="ra-ws-spinner" aria-hidden="true" />{ui('Working…')}</span>}
-    </header>
+    </header>}
     {!sessionId ? <p className="ra-ws-note">{ui('Select a verified remote workspace first.')}</p> : !target ? <p className="ra-ws-note" role="status">{error || ui('Loading workspace…')}</p> : <>
       {tools.length > 1 && <nav className="ra-ws-tabs" aria-label={ui('Workspace tools')}>{tools.map(key => <button type="button" key={key} aria-pressed={tab === key} onClick={() => setTab(key)}>{ui(TOOLS[key])}</button>)}</nav>}
       {error && <div className="ra-banner" data-tone="error" role="alert"><span>{error}</span>{selected && tab === 'files' && <button disabled={busy} onClick={() => void run(() => open(selected))}>{ui('Reload file')}</button>}</div>}
-      {tab === 'files' && <div className="ra-ws-files" data-layout={openFile ? 'list' : fileOnly ? 'file' : undefined} data-open={selected && !openFile ? '' : undefined}>
+      {tab === 'files' && <div className="ra-ws-files" data-layout={openFile ? 'list' : fileOnly ? 'file' : undefined} data-open={selected && !openFile && !fileOnly ? '' : undefined}>
         {!fileOnly && <aside className="ra-ws-browser">
           <div className="ra-ws-toolbar">
             <button type="button" className="ra-ws-icon" title={ui('Up')} aria-label={ui('Up')} disabled={busy || !path} onClick={() => goTo(folders.slice(0, -1).join('/'))}><Icon kind="up" /></button>
@@ -197,23 +207,32 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
         </aside>}
         {!openFile && <main className="ra-ws-viewer">
           {selected ? <>
-            <div className="ra-ws-viewer-head"><Icon kind="file" /><span className="ra-mono" title={selected}>{selected}</span>{dirty && <span className="ra-ws-dirty">{ui('Unsaved')}</span>}
-              <button type="button" className="ra-ws-icon" title={ui('Download')} aria-label={ui('Download')} disabled={busy} onClick={() => void run(download)}><Icon kind="download" /></button>
-              {!fileOnly && <button type="button" className="ra-ws-icon" title={ui('Close file')} aria-label={ui('Close file')} disabled={busy} onClick={close}><Icon kind="close" /></button>}</div>
-            {previewable && segmented(ui('File view'), mode, setMode, [['edit', ui('Edit')], ['preview', ui('Preview')]] as const)}
+            <div className="ra-ws-viewer-head">
+              {fileOnly ? <><Icon kind="server" /><span className="ra-ws-host" title={`${target.label}:${target.cwd}`}>{target.label}</span><span className="ra-ws-sep" aria-hidden="true">›</span></> : <Icon kind="file" />}
+              {renaming && info ? <form className="ra-ws-rename" onSubmit={rename}>
+                <input className="ra-ws-input" name="destination" aria-label={ui('Rename destination')} defaultValue={info.path} autoFocus
+                  onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setRenaming(false); } }} />
+                <button type="submit" className="ra-ws-icon" title={ui('Rename')} aria-label={ui('Rename')} disabled={busy}><Icon kind="check" /></button>
+                <button type="button" className="ra-ws-icon" title={ui('Cancel')} aria-label={ui('Cancel')} onClick={() => setRenaming(false)}><Icon kind="close" /></button>
+              </form> : <span className="ra-mono" title={selected}>{selected}</span>}
+              {dirty && <span className="ra-ws-dirty" role="img" title={ui('Unsaved')} aria-label={ui('Unsaved')} />}
+              {fileOnly && busy && <span className="ra-ws-spinner" role="status" title={ui('Working…')} aria-label={ui('Working…')} />}
+              <span className="ra-ws-tools">
+                {previewable && <button type="button" className="ra-ws-icon" title={ui('Preview')} aria-label={ui('Preview')} aria-pressed={mode === 'preview'} disabled={busy} onClick={() => setMode(mode === 'preview' ? 'edit' : 'preview')}><Icon kind="preview" /></button>}
+                {file && <button type="button" className="ra-ws-icon" title={`${ui('Save to remote')} (⌘/Ctrl+S)`} aria-label={ui('Save to remote')} disabled={busy || !dirty} onClick={save}><Icon kind="save" /></button>}
+                {file && <button type="button" className="ra-ws-icon" title={ui('Discard changes')} aria-label={ui('Discard changes')} disabled={busy || !dirty} onClick={() => { setDraft(file.content); setError(''); }}><Icon kind="discard" /></button>}
+                {info && <button type="button" className="ra-ws-icon" title={ui('Rename')} aria-label={ui('Rename')} aria-expanded={renaming} disabled={busy || dirty} onClick={() => setRenaming(!renaming)}><Icon kind="rename" /></button>}
+                <button type="button" className="ra-ws-icon" title={ui('Download')} aria-label={ui('Download')} disabled={busy} onClick={() => void run(download)}><Icon kind="download" /></button>
+                {info && <button type="button" className="ra-ws-icon ra-ws-danger" title={ui('Delete file')} aria-label={ui('Delete file')} disabled={busy} onClick={() => setDeleting(true)}><Icon kind="trash" /></button>}
+                {!fileOnly && <button type="button" className="ra-ws-icon" title={ui('Close file')} aria-label={ui('Close file')} disabled={busy} onClick={close}><Icon kind="close" /></button>}
+              </span>
+            </div>
             {readOnly && !binaryImage && <p className="ra-ws-note">{readOnly}</p>}
             {binaryImage && (picture ? <div className="ra-ws-preview"><ImagePreview src={picture} name={binaryImage.path.split('/').pop() ?? ''} bytes={binaryImage.size} labels={{ fit: ui('Fit to pane'), actual: ui('Actual size') }} /></div>
               : <p className="ra-ws-note" role="status">{ui('Loading image…')}</p>)}
             {file && mode === 'preview' && (svg ? <div className="ra-ws-preview"><ImagePreview src={svg} name={file.path.split('/').pop() ?? ''} labels={{ fit: ui('Fit to pane'), actual: ui('Actual size') }} /></div>
               : <MarkdownPreview className="ra-ws-preview" source={draft} />)}
             {file && mode === 'edit' && <CodeEditor key={file.path} className="ra-workspace-editor" label={ui('Remote file contents')} src={EDITOR_SRC} locale={i18n.activeLocale()} path={file.path} value={draft} onChange={setDraft} onSave={save} readOnly={busy} line={file.path === initialPath ? line : undefined} />}
-            {info && <div className="ra-ws-viewer-actions">
-              {file && <><button className="ra-ws-button ra-primary" title="⌘/Ctrl + S" disabled={busy || !dirty} onClick={save}>{ui('Save to remote')}</button>
-                <button className="ra-ws-button" disabled={busy || !dirty} onClick={() => { setDraft(file.content); setError(''); }}>{ui('Discard changes')}</button></>}
-              <form className="ra-ws-rename" onSubmit={event => { event.preventDefault(); const form = event.currentTarget, destination = new FormData(form).get('destination') as string; if (destination.trim()) void run(async () => { await operate({ op: 'move', path: info.path, destination, revision: info.revision }); await reload(); await open(destination); }); }}>
-                <input className="ra-ws-input" name="destination" aria-label={ui('Rename destination')} placeholder={info.path} /><button className="ra-ws-button" disabled={busy || dirty}>{ui('Rename')}</button></form>
-              <button className="ra-ws-button ra-ws-danger" disabled={busy} onClick={() => setDeleting(true)}><Icon kind="trash" />{ui('Delete file')}</button>
-            </div>}
             {deleting && info && <div className="ra-banner" data-tone="error"><span>{ui('Delete this remote file?')}</span><span className="ra-ws-row"><button disabled={busy} onClick={() => void run(async () => { await operate({ op: 'remove', path: info.path, revision: info.revision }); setFile(undefined); setInfo(undefined); setReadOnly(''); setSelected(undefined); setDeleting(false); setRemoved(true); await reload(); })}>{ui('Delete')}</button><button onClick={() => setDeleting(false)}>{ui('Cancel')}</button></span></div>}
           </> : fileOnly ? <div className="ra-ws-placeholder"><Icon kind="file" /><p>{ui(removed ? 'File deleted' : 'Loading file…')}</p></div>
             : <div className="ra-ws-placeholder"><Icon kind="file" /><p>{ui('Choose a file')}</p><small>{ui('Files are read directly from the remote machine. Saving checks for concurrent edits.')}</small></div>}

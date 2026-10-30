@@ -43,7 +43,6 @@ export const workspaceStyles = `
 .ra-workspace-panel .ra-ws-icon{display:inline-grid;place-items:center;flex:none;width:28px;height:28px;padding:0;border:0;border-radius:7px;background:transparent;color:var(--ws-muted)}
 .ra-workspace-panel .ra-ws-icon:hover:enabled,.ra-workspace-panel a.ra-ws-icon:hover{background:var(--ws-hover);color:var(--dsw-alias-label-primary,inherit)}
 .ra-workspace-panel .ra-ws-danger:hover:enabled{color:var(--ra-bad)}
-.ra-workspace-panel .ra-ws-button.ra-ws-danger{margin-left:auto;border-color:transparent;color:var(--ws-muted)}
 .ra-workspace-panel .ra-ws-segment{display:flex;gap:2px;padding:2px;border-radius:9px;background:var(--ws-field);border:1px solid var(--ws-line)}
 .ra-workspace-panel .ra-ws-segment button{flex:1 1 0;min-width:0;height:28px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:var(--ws-muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ra-workspace-panel .ra-ws-segment button[aria-checked=true]{background:var(--dsw-alias-bg-layer-3,color-mix(in srgb,currentColor 12%,transparent));color:var(--dsw-alias-label-primary,inherit);box-shadow:0 1px 2px #0003;font-weight:500}
@@ -90,14 +89,25 @@ export const workspaceStyles = `
 .ra-workspace-panel .ra-ws-entry-name small{overflow:hidden;text-overflow:ellipsis;color:var(--ws-faint);font-size:11px}
 .ra-workspace-panel .ra-ws-entries button>small{flex:none;font-size:11px;color:var(--ws-faint);font-variant-numeric:tabular-nums}
 .ra-workspace-panel .ra-ws-viewer{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0}
-.ra-workspace-panel .ra-ws-viewer-head{display:flex;align-items:center;gap:7px;min-height:28px;color:var(--ws-muted)}
-.ra-workspace-panel .ra-ws-viewer-head .ra-mono{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary,inherit)}
-.ra-workspace-panel .ra-ws-dirty{flex:none;padding:1px 7px;border-radius:5px;font-size:11px;background:color-mix(in srgb,var(--ra-warn) 16%,transparent);color:var(--ra-warn)}
+.ra-workspace-panel .ra-ws-viewer-head{display:flex;align-items:center;gap:6px;min-height:28px;color:var(--ws-muted)}
+.ra-workspace-panel .ra-ws-viewer-head .ra-mono{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary,inherit)}
+.ra-workspace-panel .ra-ws-host{flex:0 1 auto;min-width:24px;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ra-workspace-panel .ra-ws-sep{flex:none;color:var(--ws-faint)}
+.ra-workspace-panel .ra-ws-tools{display:flex;align-items:center;gap:1px;flex:none;margin-left:auto}
+.ra-workspace-panel .ra-ws-tools .ra-ws-icon[aria-pressed=true]{background:var(--ws-hover);color:var(--dsw-alias-label-primary,inherit)}
+.ra-workspace-panel .ra-ws-dirty{flex:none;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-primary,currentColor)}
 .ra-workspace-panel .ra-workspace-editor{flex:1;min-height:320px;width:100%;border:1px solid var(--ws-line);border-radius:10px;background:var(--ws-field);color:inherit;tab-size:2}
 .ra-workspace-panel .ra-workspace-editor:focus-within{border-color:var(--dsw-alias-state-business-primary,var(--ra-accent))}
 .ra-workspace-panel .ra-ws-preview{flex:1;min-height:320px;padding:8px;border:1px solid var(--ws-line);border-radius:10px;overflow:auto}
-.ra-workspace-panel .ra-ws-viewer-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.ra-workspace-panel .ra-ws-rename{display:flex;gap:6px;flex:1 1 220px;min-width:0}
+.ra-workspace-panel .ra-ws-rename{display:flex;align-items:center;gap:2px;flex:1 1 auto;min-width:0}
+.ra-workspace-panel .ra-ws-rename .ra-ws-input{height:26px;padding:0 8px;font-family:var(--dsh-font-family-code,ui-monospace,SFMono-Regular,Menlo,monospace);font-size:12.5px}
+/* A file tab is the file alone, edge to edge, as an editor in VS Code: one title bar, then the editor or preview. */
+.dsh-ra.ra-workspace-panel[data-file-only]{gap:0;padding:0}
+.ra-workspace-panel[data-file-only] .ra-ws-viewer{gap:0}
+.ra-workspace-panel[data-file-only] .ra-ws-viewer-head{min-height:35px;padding:0 6px 0 12px;border-bottom:1px solid var(--ws-line)}
+.ra-workspace-panel[data-file-only] :is(.ra-workspace-editor,.ra-ws-preview,.ra-ws-placeholder){min-height:0;border:0;border-radius:0}
+.ra-workspace-panel[data-file-only] .ra-ws-preview{padding:12px 16px}
+.ra-workspace-panel[data-file-only] :is(.ra-banner,.ra-ws-note){margin:8px 12px}
 .ra-workspace-panel .ra-ws-placeholder{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;flex:1;min-height:220px;padding:24px;border:1px dashed var(--ws-line);border-radius:12px;text-align:center;color:var(--ws-faint)}
 .ra-workspace-panel .ra-ws-placeholder .ra-ws-glyph{width:24px;height:24px}
 .ra-workspace-panel .ra-ws-placeholder p{margin:0;color:var(--ws-muted)}

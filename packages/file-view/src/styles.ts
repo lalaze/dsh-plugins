@@ -31,4 +31,7 @@ background:repeating-conic-gradient(color-mix(in srgb,currentColor 7%,transparen
 .fv-markdown blockquote{margin:0;padding-left:12px;border-left:3px solid color-mix(in srgb,currentColor 20%,transparent);opacity:.85}
 .fv-markdown table{border-collapse:collapse}.fv-markdown th,.fv-markdown td{border:1px solid color-mix(in srgb,currentColor 18%,transparent);padding:4px 8px}
 .fv-markdown img{max-width:100%}
+/* Task lists as on GitHub, whatever the host does to inputs. */
+.fv-markdown .contains-task-list{padding-left:1.4em}.fv-markdown .task-list-item{list-style:none}
+.fv-markdown input[type=checkbox]{width:auto;height:auto;margin:0 .45em 0 -1.4em;padding:0;border:revert;border-radius:revert;background:revert;vertical-align:-1px}
 `;
