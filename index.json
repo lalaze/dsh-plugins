@@ -27,12 +27,12 @@
       },
       "versions": [
         {
-          "version": "0.2.61",
-          "publishTimestamp": 1793331404,
+          "version": "0.2.62",
+          "publishTimestamp": 1793347922,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "bba85add163ab1411fd4432d8795379cdfeff48f",
+            "commit": "1f0d37ea737f4c7ea9674800ae95896853fa1e34",
             "path": "packages/remote-agents"
           },
           "engines": {
@@ -136,13 +136,53 @@
       },
       "versions": [
         {
-          "version": "0.2.1",
-          "publishTimestamp": 1793331404,
+          "version": "0.2.2",
+          "publishTimestamp": 1793347922,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "bba85add163ab1411fd4432d8795379cdfeff48f",
+            "commit": "1f0d37ea737f4c7ea9674800ae95896853fa1e34",
             "path": "packages/file-editor"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-git-view",
+      "title": {
+        "en": "Git View",
+        "zh": "Git 视图"
+      },
+      "description": {
+        "en": "Git branches, commit graph, changes, Monaco diffs and conflict resolution for local and remote workspaces; remote support requires Remote Agents 0.2.62 or newer",
+        "zh": "本地/远程工作区的 Git 分支、提交图、改动、Monaco 差异与冲突处理；远程功能需搭配 Remote Agents 0.2.62 或更新版本"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/git-view",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/git-view"
+      },
+      "metadata": {
+        "keywords": [
+          "git",
+          "source-control",
+          "diff",
+          "remote"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793347922,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "1f0d37ea737f4c7ea9674800ae95896853fa1e34",
+            "path": "packages/git-view"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.2 <0.3.0"
@@ -175,12 +215,12 @@
       },
       "versions": [
         {
-          "version": "0.1.6",
-          "publishTimestamp": 1793331880,
+          "version": "0.1.7",
+          "publishTimestamp": 1793347922,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "2fa36cb8cecfa892049ff001470737d2b7b6e2e2",
+            "commit": "1f0d37ea737f4c7ea9674800ae95896853fa1e34",
             "path": "packages/workspace-tags"
           },
           "engines": {
