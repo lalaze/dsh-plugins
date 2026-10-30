@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { permissionOf } from '../core/dsh-host.js';
 import { dshHome, under, WorkspaceAccess } from './access.js';
+import { editorHandler } from './editor-route.js';
 import { workspaceTransferHandler } from './http.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceService } from './service.js';
@@ -38,6 +39,8 @@ export async function installWorkspaces(ctx, store, machines) {
     const transfer = workspaceTransferHandler(files);
     ctx.connection.fetch.register({ path: '/api/remote-agents/files', methods: ['POST'], requestBody: 'streaming', fetch: transfer });
     ctx.connection.fetch.register({ path: '/api/remote-agents/download', methods: ['GET'], requestBody: 'buffered', fetch: transfer });
+    // The client's EDITOR_SRC; the build writes the bundle next to lib/server.
+    ctx.connection.fetch.register({ path: '/api/remote-agents/editor.js', methods: ['GET'], requestBody: 'buffered', fetch: editorHandler(new URL('../../editor.js', import.meta.url)) });
     ctx.inject(['terminalController'], scoped => {
         let disposed = false, cleanup;
         void installWorkspaceTerminal(scoped.get('terminalController'), join(store.directory, 'terminal'), join(store.directory, 'state.json'))

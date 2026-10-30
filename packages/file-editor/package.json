@@ -1,7 +1,7 @@
 {
   "name": "dsh-file-editor",
-  "version": "0.1.1",
-  "description": "Edit code and text files of local workspaces in DeepSeek Harness, with highlighting and Markdown and SVG previews",
+  "version": "0.2.0",
+  "description": "Edit code and text files of local workspaces in DeepSeek Harness in VS Code's editor (Monaco), with Markdown and SVG previews",
   "type": "module",
   "main": "lib/server/index.js",
   "types": "lib/server/index.d.ts",
@@ -29,7 +29,7 @@
     "dsh-plugin",
     "deepseek-harness",
     "editor",
-    "codemirror",
+    "monaco",
     "files"
   ],
   "license": "MIT",

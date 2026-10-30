@@ -4,43 +4,16 @@ The browser artifact bundles this workspace's private `@dsh-plugins/i18n` and `@
 
 The interaction model follows [Paseo](https://github.com/getpaseo/paseo); no Paseo source, SDK or runtime dependency is included.
 
+`lib/editor.js`, the code editor the browser loads when a file opens, is built from [Monaco Editor](https://github.com/microsoft/monaco-editor) (`monaco-editor` 0.57.0, MIT License, Copyright (c) 2016 - present Microsoft Corporation). Its license and the notices of the components it includes, among them marked (MIT) and DOMPurify (Apache License 2.0), are in `lib/editor-notices.txt`.
+
 The browser bundle includes the packages below, each under the license of its section; their copyright notices are listed with them. Regenerate this file with `node ../../scripts/third-party-notices.mjs`.
 
 ## MIT License
 
-- `@codemirror/autocomplete` 6.20.4: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/commands` 6.11.1: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/lang-css` 6.3.1: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/lang-html` 6.4.12: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/lang-javascript` 6.2.5: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/lang-json` 6.0.2: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/lang-markdown` 6.5.2: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/lang-python` 6.2.1: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/lang-xml` 6.1.0: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/lang-yaml` 6.1.3: Copyright (C) 2024 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/language` 6.13.1: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/legacy-modes` 6.5.5: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/search` 6.7.2: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/state` 6.7.6: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/streamparser` 6.0.0: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@codemirror/view` 6.43.15: Copyright (C) 2018-2021 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/common` 1.5.4: Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/css` 1.3.9: Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/highlight` 1.2.5: Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/html` 1.3.13: Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/javascript` 1.5.6: Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/json` 1.0.3: Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin>, Arun Srinivasan <rulfzid@gmail.com>, and others
-- `@lezer/lr` 1.4.11: Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/markdown` 1.8.1: Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/python` 1.1.19: Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/xml` 1.0.6: Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
-- `@lezer/yaml` 1.0.4: Copyright (C) 2024 by Marijn Haverbeke <marijnh@gmail.com> and others
-- `@marijn/find-cluster-break` 1.0.4: Copyright (C) 2024 by Marijn Haverbeke <marijn@haverbeke.berlin>
 - `@phosphor-icons/react` 2.1.10: Copyright (c) 2020 Phosphor Icons
 - `bail` 2.0.2: Copyright (c) 2015 Titus Wormer <tituswormer@gmail.com>
 - `ccount` 2.0.1: Copyright (c) 2015 Titus Wormer <tituswormer@gmail.com>
 - `comma-separated-tokens` 2.0.3: Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>
-- `crelt` 1.0.7: Copyright (C) 2020 by Marijn Haverbeke <marijn@haverbeke.berlin>
 - `decode-named-character-reference` 1.3.0: Copyright (c) Titus Wormer <tituswormer@gmail.com>
 - `devlop` 1.1.0: Copyright (c) 2023 Titus Wormer <tituswormer@gmail.com>
 - `escape-string-regexp` 5.0.0: Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)
@@ -98,7 +71,6 @@ The browser bundle includes the packages below, each under the license of its se
 - `remark-parse` 11.0.0: Copyright (c) 2014 Titus Wormer <tituswormer@gmail.com>
 - `remark-rehype` 11.1.2: Copyright (c) Titus Wormer <tituswormer@gmail.com>
 - `space-separated-tokens` 2.0.2: Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>
-- `style-mod` 4.1.4: Copyright (C) 2018 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
 - `style-to-js` 1.1.21: Copyright (c) 2020 Menglin "Mark" Xu <mark@remarkablemark.org>
 - `style-to-object` 1.0.14: Copyright (c) 2017 Menglin "Mark" Xu <mark@remarkablemark.org>
 - `trim-lines` 3.0.1: Copyright (c) 2015 Titus Wormer <mailto:tituswormer@gmail.com>
@@ -111,7 +83,6 @@ The browser bundle includes the packages below, each under the license of its se
 - `unist-util-visit-parents` 6.0.2: Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>
 - `vfile` 6.0.3: Copyright (c) 2015 Titus Wormer <tituswormer@gmail.com>
 - `vfile-message` 4.0.3: Copyright (c) Titus Wormer <tituswormer@gmail.com>
-- `w3c-keyname` 2.2.8: Copyright (C) 2016 by Marijn Haverbeke <marijn@haverbeke.berlin> and others
 - `zwitch` 2.0.4: Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
