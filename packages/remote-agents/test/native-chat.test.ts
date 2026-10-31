@@ -6,7 +6,7 @@ import LlmRuntime, { createUserMessage, createAssistantMessage, createSystemMess
 import { Session, SessionId } from '@deepseek-ai/dsh-session';
 import { assertReleasedV4Relationships } from '@deepseek-ai/dsh-session-format-v3-to-v4';
 import { ChatProjects } from '../src/chat/projects.js';
-import { CHAT_PROVIDER, CHAT_PROVIDERS, chatProviderId, chatModelId, RemoteCliAdapter, type ChatHost } from '../src/chat/native-chat.js';
+import { CHAT_PROVIDER, CHAT_PROVIDERS, SYNC_SOURCE, chatProviderId, chatModelId, RemoteCliAdapter, type ChatHost } from '../src/chat/native-chat.js';
 import { Store } from '../src/core/store.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { TaskHistory } from '../src/agents/history.js';
@@ -516,23 +516,127 @@ test('text-only input, auxiliary calls and unavailable routes never start an uni
   assert.equal(remote.creates, 0);
 });
 
-test('each remote model defaults to the reasoning effort its last conversation turn used', async t => {
-  const { adapter, options, remote, projects, project, store, path } = await setup(t);
-  remote.catalog[0].models[0].thinkingOptions!.push({ id: 'low', label: 'Low' }); remote.catalog[0].models[0].defaultThinkingOptionId = 'high';
+test('an explicit effort selection updates the default and survives restart without sending a turn', async t => {
+  const { adapter, options, remote, projects, project, service, store, path } = await setup(t);
+  remote.catalog[0].models[0].thinkingOptions!.push({ id: 'low', label: 'Low' }); remote.catalog[0].models[0].defaultThinkingOptionId = 'low';
   await projects.refresh(project.id);
-  let refreshes = 0; adapter.onModelInfoChange(() => refreshes++);
+  let refreshes = 0; const off = adapter.onModelInfoChange(() => refreshes++);
   const route = options().model, effortOf = async () => (await adapter.resolveModel(CODEX_PROVIDER, route)).reasoning?.defaultEffort;
-  assert.equal(await effortOf(), 'high', 'the CLI default before any turn');
-  await collect(adapter.stream(options('Quick question', { reasoningEffort: ReasoningEffortId('low') }))); await pause(20);
-  assert.equal(await effortOf(), 'low'); assert.equal(refreshes, 1, 'DSH is told to reload the catalog');
-  await collect(adapter.stream(options('Another', { reasoningEffort: ReasoningEffortId('low') }))); await pause(20);
-  assert.equal(refreshes, 1, 'an unchanged effort does not reload the catalog');
-  await collect(adapter.stream(options('Summarize', { purpose: 'compaction', reasoningEffort: ReasoningEffortId('high') }))); await pause(20);
-  assert.equal(await effortOf(), 'low', 'compaction does not change the remembered effort');
-  const reopened = new Store(path); await reopened.open(); assert.equal(reopened.chatEffort(route), 'low', 'it survives a restart');
-  remote.catalog[0].models[0].thinkingOptions = [{ id: 'high', label: 'High' }]; await projects.refresh(project.id);
-  assert.equal(await effortOf(), 'high', 'an effort the model no longer offers falls back to its default');
+  const handler = createHandler(service, projects);
+  const select = (reasoningEffort: string) => handler(new Request('http://dsh.test/api/remote-agents', { method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-DSH-Remote-Agents': '1' }, body: JSON.stringify({ action: 'setChatEffort', provider: CODEX_PROVIDER, model: route, reasoningEffort }) }));
+  assert.equal(await effortOf(), 'low', 'the CLI default before any explicit selection');
+  const discoveries = remote.discoveries;
+  const selected = await select('high'); assert.equal(selected.status, 200); assert.deepEqual(await selected.json(), { ok: true });
+  assert.equal(await effortOf(), 'high'); assert.equal(refreshes, 1, 'DSH is told to reload the catalog');
+  assert.equal((await select('high')).status, 200); assert.equal(refreshes, 1, 'an unchanged selection does not reload the catalog');
+  assert.equal(remote.creates, 0); assert.equal(remote.sends, 0); assert.equal(remote.discoveries, discoveries, 'selection never probes SSH');
+  const reopened = new Store(path); await reopened.open(); assert.equal(reopened.chatEffort(route), 'high');
+  const restarted = new RemoteAgentsService(reopened, remote.backend); t.after(() => restarted.close());
+  const next = new RemoteCliAdapter(new ChatProjects(restarted), { agent: () => undefined, step: () => undefined }); t.after(() => next.close());
+  assert.equal((await next.resolveModel(CODEX_PROVIDER, route)).reasoning?.defaultEffort, 'high', 'the picker default survives restart');
+  remote.catalog[0].models[0].thinkingOptions = [{ id: 'low', label: 'Low' }]; await projects.refresh(project.id);
+  assert.equal(await effortOf(), 'low', 'a removed effort falls back to the CLI default');
+  off(); await projects.setEffort(CODEX_PROVIDER, route, 'low'); assert.equal(refreshes, 1, 'the model-info subscription disposes');
   assert.equal(store.chatEffort('constructor'), undefined);
+});
+
+test('turns without an effort use the advertised remembered default, but explicit Low stays Low', async t => {
+  const { adapter, options, remote, projects, project, store } = await setup(t);
+  remote.catalog[0].models[0].thinkingOptions!.push({ id: 'low', label: 'Low' }); remote.catalog[0].models[0].defaultThinkingOptionId = 'low';
+  await projects.refresh(project.id);
+  const route = options().model; await projects.setEffort(CODEX_PROVIDER, route, 'high');
+  assert.equal((await adapter.resolveModel(CODEX_PROVIDER, route)).reasoning?.defaultEffort, 'high');
+  await collect(adapter.stream(options('Use the advertised default')));
+  assert.equal(remote.created?.thinkingOptionId, 'high', 'omitting effort must not silently run the CLI default Low');
+  await collect(adapter.stream(options('An old chat explicitly requests Low', { reasoningEffort: ReasoningEffortId('low') })));
+  assert.equal(store.snapshot().tasks[0].thinkingOptionId, 'low'); assert.equal(store.chatEffort(route), 'high');
+  await collect(adapter.stream(options('Use the default again')));
+  assert.equal(store.snapshot().tasks[0].thinkingOptionId, 'high');
+  remote.catalog[0].models[0].thinkingOptions = [{ id: 'low', label: 'Low' }]; await projects.refresh(project.id);
+  await collect(adapter.stream(options('The remembered effort is no longer supported')));
+  assert.equal(store.snapshot().tasks[0].thinkingOptionId, 'low'); assert.equal(store.chatEffort(route), 'high', 'fallback is not an explicit selection');
+});
+
+test('old Low streams, receipt replay, sync and compaction cannot overwrite an explicit High selection', async t => {
+  const { adapter, options, remote, projects, project, store } = await setup(t);
+  remote.catalog[0].models[0].thinkingOptions!.push({ id: 'low', label: 'Low' }); remote.catalog[0].models[0].defaultThinkingOptionId = 'low';
+  await projects.refresh(project.id);
+  const first = options('Old Low turn', { reasoningEffort: ReasoningEffortId('low') }), route = first.model;
+  await collect(adapter.stream(first));
+  assert.equal(store.chatEffort(route), undefined, 'even a successful turn must not implicitly remember its effort');
+  await projects.setEffort(CODEX_PROVIDER, route, 'high');
+  let refreshes = 0; adapter.onModelInfoChange(() => refreshes++);
+  await collect(adapter.stream(first)); assert.equal(store.chatEffort(route), 'high', 'old receipts do not change the selection');
+  const follow = options('Old session continues with Low', { reasoningEffort: ReasoningEffortId('low') });
+  await collect(adapter.stream(follow)); assert.equal(store.chatEffort(route), 'high', 'old conversation configuration does not change the selection');
+  const task = store.snapshot().tasks[0], delivered = task.chat!.delivered!;
+  await store.update(state => { state.tasks[0].chat!.delivered = { messageId: delivered.messageId, cursor: null }; });
+  let notice: ReturnType<typeof createUserMessage> | undefined;
+  assert.equal(adapter.sync({ session: { id: follow.sessionId!, requestHeader: () => ({ config: { provider: CODEX_PROVIDER, model: route } }) as ReturnType<Session['requestHeader']> },
+    send: message => { notice = message; } }), true);
+  assert.equal(notice?.source?.kind, SYNC_SOURCE);
+  const creates = remote.creates, sends = remote.sends;
+  await collect(adapter.stream({ ...follow, messages: [...follow.messages, notice!] }));
+  assert.equal(store.chatEffort(route), 'high', 'a sync wake does not remember the old header effort');
+  assert.equal(remote.creates, creates); assert.equal(remote.sends, sends, 'sync only follows output');
+  await collect(adapter.stream(options('Summarize', { purpose: 'compaction', reasoningEffort: ReasoningEffortId('low') })));
+  assert.equal(store.chatEffort(route), 'high', 'compaction never changes the selection');
+  assert.equal(refreshes, 0, 'execution never reloads the effort catalog');
+});
+
+test('a rejected workspace admission cannot remember a stale conversation effort', async t => {
+  const { adapter, options, remote, projects, project, store } = await setup(t, { workspace: async () => ({ hostIds: [], cwd: '/srv/project' }) });
+  remote.catalog[0].models[0].thinkingOptions!.push({ id: 'low', label: 'Low' }); await projects.refresh(project.id);
+  const route = options().model; await projects.setEffort(CODEX_PROVIDER, route, 'high');
+  await assert.rejects(collect(adapter.stream(options('Not admitted', { reasoningEffort: ReasoningEffortId('low') }))), /does not belong/);
+  await store.flush(); assert.equal(store.chatEffort(route), 'high'); assert.equal(remote.creates, 0);
+});
+
+test('explicit effort selection validates the provider, full route, legacy tier and supported effort', async t => {
+  const { service, projects, project, options, remote, store, hostId } = await setup(t);
+  remote.catalog[0].models[0].serviceTiers = [{ id: 'priority', label: 'Fast' }];
+  remote.catalog[0].models.push({ id: 'plain/model', label: 'No thinking options' }); await projects.refresh(project.id);
+  const route = options().model, handler = createHandler(service, projects);
+  const post = (input: Record<string, unknown>) => handler(new Request('http://dsh.test/api/remote-agents', { method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-DSH-Remote-Agents': '1' }, body: JSON.stringify({ action: 'setChatEffort', provider: CODEX_PROVIDER, model: route, reasoningEffort: 'high', ...input }) }));
+  let refreshes = 0; projects.onEffortChange(() => refreshes++);
+  const discoveries = remote.discoveries;
+  for (const input of [
+    { provider: 'codex' }, { provider: 'remote-cli-claude' }, { provider: 'remote-cli-codex-extra' },
+    { model: `${project.id}/codex` }, { model: `${project.id}/codex/%ZZ` }, { model: `${route}/priority/extra` },
+    { model: `${route}/unavailable` }, { model: `${route}/` }, { model: `${route}/%ZZ` },
+    { model: `removed/codex/remote-model` }, { model: `${project.id}/claude/remote-model` },
+    { model: chatModelId(project.id, 'codex', 'plain/model') }, { reasoningEffort: 'unsupported' },
+    { reasoningEffort: '' }, { reasoningEffort: 1 }, { provider: null }, { model: null },
+  ]) {
+    const response = await post(input); assert.equal(response.status, 400, JSON.stringify(input));
+    assert.equal(store.chatEffort(route), undefined); assert.equal(refreshes, 0);
+  }
+  assert.equal(remote.discoveries, discoveries); assert.equal(remote.creates, 0);
+  assert.equal((await post({ provider: CHAT_PROVIDER })).status, 200, 'the saved aggregate provider remains valid');
+  const tierRoute = `${route}/priority`;
+  assert.equal((await post({ model: tierRoute })).status, 200); assert.equal(store.chatEffort(tierRoute), 'high');
+  const [legacy] = await projects.add({ hostId, cwd: '/srv/legacy', label: 'Legacy project' });
+  const legacyRoute = chatModelId(legacy.id, 'codex', 'remote-model', 'priority');
+  await projects.setEffort(CODEX_PROVIDER, legacyRoute, 'high'); assert.equal(store.chatEffort(legacyRoute), 'high', 'available legacy project and tier routes remain valid');
+  await store.update(state => { state.hosts[0].catalog!.providers[0].status = 'unavailable'; });
+  assert.equal((await post({})).status, 400, 'an unavailable provider cannot accept a selection');
+});
+
+test('effort selections compare inside the write queue and preserve High-Low-High order', async t => {
+  const { projects, project, options, remote, store } = await setup(t);
+  remote.catalog[0].models[0].thinkingOptions!.push({ id: 'low', label: 'Low' }); await projects.refresh(project.id);
+  const route = options().model;
+  await projects.setEffort(CODEX_PROVIDER, route, 'high');
+  const changes: (string | undefined)[] = []; projects.onEffortChange(() => changes.push(store.chatEffort(route)));
+  await Promise.all(['high', 'low', 'high'].map(effort => projects.setEffort(CODEX_PROVIDER, route, effort)));
+  assert.equal(store.chatEffort(route), 'high'); assert.deepEqual(changes, ['low', 'high']);
+  const writes = await Promise.allSettled([
+    projects.setEffort(CODEX_PROVIDER, route, 'low'), projects.setEffort(CODEX_PROVIDER, route, 'invalid'), projects.setEffort(CODEX_PROVIDER, route, 'high'),
+  ]);
+  assert.deepEqual(writes.map(write => write.status), ['fulfilled', 'rejected', 'fulfilled']);
+  assert.equal(store.chatEffort(route), 'high', 'a rejected selection cannot poison the queue or overwrite the last valid choice');
 });
 
 test('compaction uses a disposable CLI session and preserves the live conversation binding', async t => {

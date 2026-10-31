@@ -7,7 +7,7 @@ import { identifier, record, remotePath, field, taskInput, providerSelection, Re
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup { hostId: string; relayId: string }
 /**
- * `chatEfforts` maps a native chat model route to the reasoning effort its last conversation turn used;
+ * `chatEfforts` maps a native chat model route to the reasoning effort of its last explicit picker selection;
  * `chatFast` lists the DSH conversations whose Codex turns run at the Fast speed.
  */
 /**
@@ -99,9 +99,9 @@ export class Store {
   chatProjects(): ChatProject[] { return structuredClone(this.state.mainChatProjects ?? []); }
   /** A copy of the sharing settings; read for every shared tool listing and call. */
   sharing(): SharingSettings { return structuredClone(this.state.sharing ?? {}); }
-  /** The reasoning effort a native chat model route last used, if any. */
   /** Whether a DSH conversation's Codex turns use the Fast speed. */
   chatFast(sessionId: string): boolean { return this.state.chatFast?.includes(sessionId) ?? false; }
+  /** The reasoning effort last explicitly selected for a native chat model route, if any. */
   chatEffort(route: string): string | undefined { return Object.hasOwn(this.state.chatEfforts ?? {}, route) ? this.state.chatEfforts![route] : undefined; }
   /** This DSH's identity for shared hosts, created on first use. */
   async instance(): Promise<Instance> {

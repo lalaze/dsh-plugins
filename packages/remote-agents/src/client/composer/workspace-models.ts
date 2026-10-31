@@ -19,9 +19,12 @@ const remote = (provider: string) => provider === 'remote-cli' || provider.start
 const unavailable = () => ui('This remote model does not belong to the current workspace machine. Select a matching workspace and model.');
 
 /** One session's filtered view, shared by the native picker and /model. Never changes the host catalog. */
-export function workspaceDirectory<D extends Directory>(source: D, options: { key(): string; check(signal: AbortSignal): Promise<Admission> }) {
+export function workspaceDirectory<D extends Directory>(source: D, options: {
+  key(): string; check(signal: AbortSignal): Promise<Admission>;
+  remember?(selection: Selection & { reasoningEffort: string }): Promise<unknown>;
+}) {
   let disposed = false, key = options.key(), admission: Admission | undefined, request: AbortController | undefined;
-  let pending: Promise<Admission | undefined> | undefined;
+  let pending: Promise<Admission | undefined> | undefined, preferenceError: string | undefined;
   let previous: { source: Snapshot; admission?: Admission; key: string; pending: boolean; value: Snapshot } | undefined;
   const listeners = new Set<() => void>();
   const publish = () => { for (const listener of listeners) listener(); };
@@ -39,6 +42,7 @@ export function workspaceDirectory<D extends Directory>(source: D, options: { ke
     });
     const blocked = snapshot.current && remote(snapshot.current.provider) && !groups.some(group => group.id === snapshot.current!.provider && group.models.some(model => model.id === snapshot.current!.model));
     const value: Snapshot = { ...snapshot, groups,
+      ...(preferenceError ? { error: preferenceError } : {}),
       ...(snapshot.failures ? { failures: snapshot.failures.filter(failure => !remote(failure.id) || !!accepted?.hostIds.length) } : {}),
       ...(blocked ? { current: null, retainedEffort: undefined, routable: false, error: checking ? null : unavailable() } : {}),
       ...(checking && !accepted ? { status: 'loading' } : {}),
@@ -46,14 +50,14 @@ export function workspaceDirectory<D extends Directory>(source: D, options: { ke
     previous = { source: snapshot, admission: accepted, key: currentKey, pending: checking, value }; return value;
   };
   const invalidate = () => {
-    request?.abort(); request = undefined; pending = undefined; admission = undefined; previous = undefined; publish();
+    request?.abort(); request = undefined; pending = undefined; admission = undefined; previous = undefined; preferenceError = undefined; publish();
   };
   const refresh = (): Promise<Admission | undefined> => {
     if (disposed) return Promise.resolve(undefined);
     const nextKey = options.key();
     if (pending && key === nextKey) return pending;
     request?.abort();
-    if (key !== nextKey) admission = undefined;
+    if (key !== nextKey) { admission = undefined; preferenceError = undefined; }
     key = nextKey;
     const controller = new AbortController(); request = controller;
     pending = (async () => {
@@ -73,13 +77,26 @@ export function workspaceDirectory<D extends Directory>(source: D, options: { ke
     return getSnapshot();
   };
   const select = async (selection: Selection) => {
+    if (preferenceError) { preferenceError = undefined; previous = undefined; publish(); }
     if (remote(selection.provider)) {
       const accepted = await refresh();
       if (disposed || !accepted || accepted !== currentAdmission() || !allowed(selection, accepted)) {
         return { ok: false, error: { code: 'remote/workspace-mismatch', message: unavailable() } };
       }
     }
-    return source.select(selection);
+    const selectedKey = options.key(), result = await source.select(selection);
+    // Persist explicit successful choices immediately, even when no message is sent. Merely loading
+    // a saved conversation (or a failed/no-longer-admitted selection) must never rewrite the default.
+    if (result && typeof result === 'object' && 'ok' in result && result.ok === true
+      && !disposed && selectedKey === options.key() && remote(selection.provider) && selection.reasoningEffort !== undefined && options.remember) {
+      try { await options.remember({ ...selection, reasoningEffort: selection.reasoningEffort }); }
+      catch {
+        const message = ui('Failed to save the thinking level. Select it again to retry.');
+        if (!disposed && selectedKey === options.key()) { preferenceError = message; previous = undefined; publish(); }
+        return { ok: false, error: { code: 'remote/preference-save-failed', message } };
+      }
+    }
+    return result;
   };
   const store = { ...source.store, getSnapshot, subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; } };
   const view = new Proxy(source, { get(target, property) {
@@ -116,6 +133,7 @@ export function installWorkspaceModels(ctx: WorkspaceClient): void {
           return JSON.stringify([cwd, workspace?.workspaceId, workspace?.path]);
         },
         check: signal => api<Admission>('workspaceModels', { sessionId: id }, signal),
+        remember: selection => api('setChatEffort', { ...selection }),
       });
       views.set(id, { source, wrapper }); void wrapper.refresh(); return wrapper.view;
     };

@@ -5,6 +5,7 @@ import type { RemoteAgentsService } from '../agents/service.js';
 /** Saved, explicitly discovered catalogs let the native model picker work without opening SSH. */
 export class ChatProjects {
   private listeners = new Set<() => void>();
+  private effortListeners = new Set<() => void>();
   constructor(readonly service: RemoteAgentsService) {}
   list(): ChatProject[] { return this.service.store.chatProjects(); }
   /** The picker advertises one catalog per host; old project routes remain resolvable for saved chats. */
@@ -15,6 +16,31 @@ export class ChatProjects {
     return () => { this.listeners.delete(listener); off(); };
   }
   private changed(): void { for (const listener of this.listeners) listener(); }
+  /** Only explicit effort selections change a model's advertised default. */
+  onEffortChange(listener: () => void): () => void {
+    this.effortListeners.add(listener); return () => { this.effortListeners.delete(listener); };
+  }
+  /** Validate and remember a successful picker selection without SSH or starting a CLI. */
+  async setEffort(provider: string, route: string, effort: string): Promise<void> {
+    let changed = false;
+    await this.service.store.update(state => {
+      const [projectId, nativeProvider, nativeModel, nativeTier, ...extra] = route.split('/');
+      let cli: string, model: string, tier: string | undefined;
+      try {
+        cli = decodeURIComponent(nativeProvider ?? ''); model = decodeURIComponent(nativeModel ?? '');
+        tier = nativeTier === undefined ? undefined : decodeURIComponent(nativeTier);
+      } catch { throw new RemoteError('Invalid remote CLI model'); }
+      const project = this.routes().find(p => p.id === projectId);
+      const selected = project?.providers.find(p => p.id === cli && p.status === 'ready')?.models.find(m => m.id === model);
+      if (!selected || !cli || !model || extra.length || (tier !== undefined && (!tier || !selected.serviceTiers?.some(t => t.id === tier)))
+        || (provider !== 'remote-cli' && provider !== `remote-cli-${cli}`)) throw new RemoteError('This remote model is unavailable');
+      if (!selected.thinkingOptions?.some(option => option.id === effort)) throw new RemoteError('This remote model does not support that thinking level.');
+      // Compare inside the write queue: High → Low → High must not skip the final selection against stale state.
+      if (Object.hasOwn(state.chatEfforts ?? {}, route) && state.chatEfforts![route] === effort) return;
+      state.chatEfforts = { ...state.chatEfforts, [route]: effort }; changed = true;
+    });
+    if (changed) for (const listener of this.effortListeners) listener();
+  }
   /** The Fast tier a native chat model route offers; a route saved with a tier names the same model. */
   fastTier(route: string): Choice | undefined {
     const [projectId, cli, model] = route.split('/').map(part => { try { return decodeURIComponent(part); } catch { return ''; } });

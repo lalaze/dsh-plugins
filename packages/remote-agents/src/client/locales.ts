@@ -1,4 +1,5 @@
 export const zh: Record<string, string> = {
+  "Failed to save the thinking level. Select it again to retry.": "思考强度保存失败，请重新选择以重试。",
   "Fast is on: faster replies that use more of your plan. Applies from the next message.": "Fast 已开启：回复更快，额度消耗更多。从下一条消息开始生效。",
   "Fast is off. Turn it on for faster replies that use more of your plan.": "Fast 已关闭。开启后回复更快，额度消耗更多。",
   "Could not change Fast": "无法切换 Fast",

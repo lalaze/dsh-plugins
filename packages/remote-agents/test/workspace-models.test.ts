@@ -60,3 +60,63 @@ test('selection rechecks admission, preserves ordinary selections and fails clos
   assert.equal(wrapped.view.store.getSnapshot(), directory.store.getSnapshot(), 'disabling the plugin restores the native catalog view');
   assert.equal((await wrapped.view.select(selection) as { ok: boolean }).ok, false);
 });
+
+test('successful explicit thinking choices are remembered immediately without a conversation turn', async () => {
+  const { directory, snapshot, selected } = fixture(), remembered: unknown[] = [];
+  const wrapped = workspaceDirectory(directory, { key: () => 'one', check: async () => ({ hostIds: ['machine-one'] }),
+    remember: async choice => { remembered.push(choice); } });
+  await wrapped.view.load();
+  wrapped.view.store.getSnapshot(); await wrapped.refresh();
+  assert.deepEqual(remembered, [], 'loading or restoring a current selection is not a user choice');
+  const high = { ...selection, reasoningEffort: 'high' };
+  assert.deepEqual(await wrapped.view.select(high), { ok: true });
+  assert.deepEqual(remembered, [high]); assert.deepEqual(selected, [high]);
+  assert.equal(snapshot.current, selection, 'the host remains the owner of the current selection');
+  await wrapped.view.select(selection);
+  await wrapped.view.select({ provider: 'deepseek', model: 'deepseek-chat', reasoningEffort: 'high' });
+  assert.deepEqual(remembered, [high], 'ordinary models and omitted efforts do not set remote defaults');
+  wrapped.dispose();
+});
+
+test('failed selections and rejected workspace admissions never change the remembered effort', async () => {
+  const { directory } = fixture(), remembered: unknown[] = [];
+  const failure = { ok: false, error: { code: 'selection-failed', message: 'Not saved' } };
+  directory.select = async () => failure;
+  let allowed = true;
+  const wrapped = workspaceDirectory(directory, { key: () => 'one', check: async () => ({ hostIds: allowed ? ['machine-one'] : [] }),
+    remember: async choice => { remembered.push(choice); } });
+  const high = { ...selection, reasoningEffort: 'high' };
+  assert.equal(await wrapped.view.select(high), failure);
+  allowed = false;
+  assert.equal((await wrapped.view.select(high) as { ok: boolean }).ok, false);
+  assert.deepEqual(remembered, []);
+  wrapped.dispose();
+});
+
+test('a preference save failure is visible and retrying the same choice saves it', async () => {
+  const { directory } = fixture(); let offline = true, saves = 0, updates = 0;
+  const wrapped = workspaceDirectory(directory, { key: () => 'one', check: async () => ({ hostIds: ['machine-one'] }),
+    remember: async () => { if (offline) throw new Error('offline'); saves++; } });
+  const off = wrapped.view.store.subscribe(() => updates++), high = { ...selection, reasoningEffort: 'high' };
+  assert.equal((await wrapped.view.select(high) as { ok: boolean }).ok, false);
+  assert.match(wrapped.view.store.getSnapshot().error!, /Failed to save the thinking level/);
+  assert.equal(wrapped.view.store.getSnapshot(), wrapped.view.store.getSnapshot());
+  offline = false;
+  assert.deepEqual(await wrapped.view.select(high), { ok: true });
+  assert.equal(saves, 1); assert.equal(wrapped.view.store.getSnapshot().error, undefined);
+  assert.ok(updates > 0); off(); wrapped.dispose();
+});
+
+for (const change of ['workspace', 'dispose'] as const) test(`a ${change} change during the host selection does not save a stale preference`, async () => {
+  const { directory } = fixture(), remembered: unknown[] = [];
+  let key = 'one', started!: () => void, complete!: (result: unknown) => void;
+  const selecting = new Promise<void>(resolve => { started = resolve; });
+  directory.select = async () => { started(); return new Promise(resolve => { complete = resolve; }); };
+  const wrapped = workspaceDirectory(directory, { key: () => key, check: async () => ({ hostIds: ['machine-one'] }),
+    remember: async choice => { remembered.push(choice); } });
+  const pending = wrapped.view.select({ ...selection, reasoningEffort: 'high' });
+  await selecting;
+  if (change === 'workspace') { key = 'two'; wrapped.changed(); } else wrapped.dispose();
+  complete({ ok: true }); await pending;
+  assert.deepEqual(remembered, []); wrapped.dispose();
+});

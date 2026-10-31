@@ -6,7 +6,7 @@ import {
   type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk,
 } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
-import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Cursor, type DshPermission, type TimelineEntry } from '../core/domain.js';
+import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Cursor, type DshPermission, type Model, type TimelineEntry } from '../core/domain.js';
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
 import { ChatImageLinks, saveChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
@@ -139,7 +139,6 @@ export class RemoteCliAdapter extends LlmAdapter {
   private controllers = new Set<AbortController>();
   private released = false;
   private auxiliaryDirectories = new Map<string, string>();
-  private modelInfoListeners = new Set<() => void>();
   private woken = new Set<string>();
   constructor(readonly projects: ChatProjects, private readonly host: ChatHost, private readonly pollMs = 150) { super(); }
   override providerInfo(provider: string) {
@@ -174,23 +173,20 @@ export class RemoteCliAdapter extends LlmAdapter {
   override async resolveModel(provider: string, model: string, signal?: AbortSignal): Promise<LlmResolvedModelInfo> {
     signal?.throwIfAborted(); const route = this.route(provider, model);
     const advertised = (await this.listModels(provider)).find(m => m.id === model);
-    // DSH picks a model's default effort whenever it is chosen in the menu, so the default is the effort this
-    // model last ran with, while the model still offers it; otherwise the CLI's own default.
-    const remembered = this.projects.service.store.chatEffort(model);
-    const defaultEffort = remembered && route.model.thinkingOptions?.some(o => o.id === remembered) ? remembered : route.model.defaultThinkingOptionId;
+    // DSH picks a model's default effort whenever it is chosen in the menu: use the last explicit
+    // selection while the model still offers it; otherwise use the CLI's own default.
+    const defaultEffort = this.defaultEffort(model, route.model);
     return { provider, id: model, name: advertised?.name ?? route.model.label, inputModalities: inputModalitiesOf(route.provider.id, route.model),
       ...(route.model.thinkingOptions?.length ? { reasoning: { efforts: route.model.thinkingOptions.map(o => ({ id: ReasoningEffortId(o.id), name: o.label })),
         ...(defaultEffort ? { defaultEffort: ReasoningEffortId(defaultEffort) } : {}) } } : {}) };
   }
-  /** Called when an advertised default effort changes, for the plugin to refresh DSH's model catalog. */
-  onModelInfoChange(listener: () => void): () => void { this.modelInfoListeners.add(listener); return () => { this.modelInfoListeners.delete(listener); }; }
-  /** Remember the effort a conversation turn uses with a model; compaction's disposable sessions do not count. */
-  private async rememberEffort(route: string, effort: string): Promise<void> {
-    const store = this.projects.service.store;
-    if (store.chatEffort(route) === effort) return;
-    await store.update(state => { state.chatEfforts = { ...state.chatEfforts, [route]: effort }; });
-    for (const listener of this.modelInfoListeners) listener();
+  /** Picker metadata and turns without an explicit effort must agree on the effective default. */
+  private defaultEffort(route: string, model: Model): string | undefined {
+    const remembered = this.projects.service.store.chatEffort(route);
+    return remembered && model.thinkingOptions?.some(option => option.id === remembered) ? remembered : model.defaultThinkingOptionId;
   }
+  /** Called when an advertised default effort changes, for the plugin to refresh DSH's model catalog. */
+  onModelInfoChange(listener: () => void): () => void { return this.projects.onEffortChange(listener); }
   /**
    * Plugin unload or DSH shutdown: end local streams but leave remote turns running. A persistent
    * CLI keeps working; the conversation shows its remaining output with the next response.
@@ -254,9 +250,8 @@ export class RemoteCliAdapter extends LlmAdapter {
     if (content.some(b => b.type === 'image' && !b.offloaded) && !inputModalitiesOf(provider.id, model).includes('image')) throw new LlmError('This remote CLI does not support image input', 'UNSUPPORTED_INPUT');
     const currentPrompt = blockText(content).trim() || (content.some(b => b.type === 'image' || b.type === 'file') ? 'Inspect the attached images and files.' : '');
     if (!currentPrompt) throw new LlmError('Enter a message for the remote CLI.', 'INVALID_REQUEST');
-    const effort = options.reasoningEffort ?? model.defaultThinkingOptionId;
+    const effort = options.reasoningEffort ?? this.defaultEffort(options.model, model);
     if (effort && !model.thinkingOptions?.some(o => o.id === effort)) throw new LlmError('This remote model does not support that thinking level.', 'INVALID_REQUEST');
-    if (options.reasoningEffort && !this.auxiliaryDirectories.has(sessionId)) void this.rememberEffort(options.model, options.reasoningEffort).catch(() => {});
     let task = service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route === options.model)
       ?? service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route.startsWith(`${project.id}/${encodeURIComponent(provider.id)}/`));
     // Recheck even saved routes: a previous model choice cannot authorize another workspace's machine.
