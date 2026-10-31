@@ -53,7 +53,9 @@ export class ChatProjects {
   }
   /** Turn Fast on or off for a conversation's next turns; a turn already running keeps its speed. */
   async setFast(sessionId: string, enabled: boolean): Promise<{ enabled: boolean }> {
-    if (this.service.store.chatFast(sessionId) !== enabled) await this.service.store.update(state => {
+    await this.service.store.update(state => {
+      // Compare after earlier writes: a queued enable must not make a later disable look redundant.
+      if ((state.chatFast?.includes(sessionId) ?? false) === enabled) return;
       const rest = (state.chatFast ?? []).filter(id => id !== sessionId);
       if (enabled) rest.push(sessionId);
       if (rest.length) state.chatFast = rest; else delete state.chatFast;

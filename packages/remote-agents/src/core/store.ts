@@ -123,7 +123,11 @@ export class Store {
       // Never replace state another DSH instance wrote, for example after a plugin reload, with a stale snapshot.
       const current = await readFile(this.path, 'utf8').catch(e => { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw e; });
       if (current !== this.saved) throw new RemoteError('Remote agent state was changed by another DSH instance. Reload the plugin.', 409);
-      const text = `${JSON.stringify(next, null, 2)}\n`, temporary = `${this.path}.${randomUUID()}.tmp`;
+      const text = `${JSON.stringify(next, null, 2)}\n`;
+      // Compare persisted content, not just the in-memory state: open() may have migrated old fields.
+      // Keep the stale-writer check above, but do not rewrite or publish an unchanged registry.
+      if (text === this.saved) return;
+      const temporary = `${this.path}.${randomUUID()}.tmp`;
       try {
         await writeFile(temporary, text, { mode: 0o600, flag: 'wx' });
         await rename(temporary, this.path);
