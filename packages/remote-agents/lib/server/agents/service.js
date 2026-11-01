@@ -10,6 +10,7 @@ export class RemoteAgentsService {
     locks = new Map();
     restoring = new Map();
     catalogListeners = new Set();
+    delegationRecovery = new Map();
     closed = false;
     factory;
     /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
@@ -84,6 +85,28 @@ export class RemoteAgentsService {
             if (!this.closed)
                 this.connection(hostId).backend.startSharing?.();
         return Promise.allSettled(tasks.map(task => this.restore(task))).then(() => { });
+    }
+    /** Observe only this conversation's delegated CLIs, including saved/archived history.
+     * Recovery attaches existing relays only; it never starts a new CLI or sends a prompt.
+     * Do not use snapshot/resume here: opening one conversation must not connect unrelated hosts.
+     */
+    async delegations(sessionId) {
+        const tasks = this.store.tasks(t => t.origin === 'dsh' && t.owner?.sessionId === sessionId && !t.chat);
+        return Promise.all(tasks.map(async (task) => this.observeDelegation(task, await this.live(task))));
+    }
+    observeDelegation(task, live) {
+        const summary = this.summarize(task, live);
+        if (!task.relay || !task.native || task.archived || summary.attached || this.closed)
+            return summary;
+        const recovery = this.delegationRecovery.get(task.id), now = Date.now();
+        // Polls must not repeatedly acquire a shared lease or retry an offline/quota failure.
+        // The backend owns reconnecting once attached. A changed relay gets a fresh attempt.
+        if (!recovery || recovery.relayId !== task.relay.id || recovery.retryAt <= now) {
+            this.delegationRecovery.set(task.id, { relayId: task.relay.id, retryAt: now + 30_000 });
+            void this.restore(task);
+        }
+        return { ...summary, status: task.error ? 'error' : 'starting', reconnecting: true,
+            ...(task.error ? { error: this.safeError(task.error) } : {}) };
     }
     onCatalogChange(listener) { this.catalogListeners.add(listener); return () => this.catalogListeners.delete(listener); }
     catalogChanged() { for (const listener of this.catalogListeners)
@@ -250,6 +273,7 @@ export class RemoteAgentsService {
         return {
             id: task.id, hostId: task.hostId, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model,
             ...(task.chat ? { chatSessionId: task.chat.sessionId } : {}),
+            ...(task.owner ? { ownerSessionId: task.owner.sessionId } : {}),
             ...(task.modeId ? { modeId: task.modeId } : {}), ...(task.thinkingOptionId ? { thinkingOptionId: task.thinkingOptionId } : {}),
             ...(task.serviceTier ? { serviceTier: task.serviceTier } : {}),
             modes: permissionModes(task.provider, task.modes ?? []), title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
@@ -505,13 +529,14 @@ export class RemoteAgentsService {
     async detail(id, cursor, direction) {
         const task = this.task(id);
         // Viewing a panel agent opts into its relay recovery; offline history remains immediately readable.
-        if (task.relay)
+        const delegated = task.origin === 'dsh' && !!task.owner && !task.chat;
+        if (!delegated && task.relay && !task.archived)
             void this.restore(task);
         const live = await this.live(task);
         if (live)
             this.assertAgent(task, live);
         const timeline = task.agentId ? await this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
-        return { agent: this.summarize(task, live), permissions: live?.pendingPermissions ?? [], timeline };
+        return { agent: delegated ? this.observeDelegation(task, live) : this.summarize(task, live), permissions: live?.pendingPermissions ?? [], timeline };
     }
     async reply(id) {
         const task = this.task(id);
@@ -725,6 +750,7 @@ export class RemoteAgentsService {
         // Let in-flight mutations persist their final receipt before a plugin reload opens state.
         await Promise.allSettled([...this.locks.values()]);
         this.connections.clear();
+        this.delegationRecovery.clear();
         await this.store.flush();
     }
 }

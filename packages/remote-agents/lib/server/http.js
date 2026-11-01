@@ -84,6 +84,10 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'setChatSpeed':
                     result = await projects.setFast(field(input.sessionId, 'session ID', 256), input.fast === true);
                     break;
+                case 'setChatEffort':
+                    await projects.setEffort(field(input.provider, 'provider', 200), field(input.model, 'model', 1000), field(input.reasoningEffort, 'reasoning effort', 200));
+                    result = { ok: true };
+                    break;
                 case 'addChatProject':
                     result = await projects.add(input.project);
                     break;
@@ -159,6 +163,9 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                         ...(input.title === undefined ? {} : { title: field(input.title, 'title', 100) }) });
                     break;
                 }
+                case 'delegations':
+                    result = await service.delegations(field(input.sessionId, 'session ID', 256));
+                    break;
                 case 'agent': {
                     if (input.direction !== undefined && input.direction !== 'before' && input.direction !== 'after')
                         throw new RemoteError('Invalid timeline direction');

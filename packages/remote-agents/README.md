@@ -106,6 +106,7 @@ Ask DSH something like *"have Codex on build-box fix the failing tests in /srv/a
 - While a tool waits, the remote agent's approval requests and questions appear as **native DSH prompts** in the conversation. A one-time DSH approval never selects a session-wide CLI permission. If you dismiss a prompt, the request stays pending and the tool reports it; `remote_agent_wait` can show the prompt again.
 - Starting an agent in a mode that doesn't ask before acting (full access, bypass permissions) requires your explicit approval.
 - Stopping the DSH response stops waiting but does **not** stop the remote agents, matching Paseo's independent agents. Stop them with `remote_agent_stop`.
+- Remote CLIs a conversation started appear in that conversation's native **sub-agents** list at the top, merged with its own sub-agents. Clicking one opens a read-only, live view of the remote conversation; continue, stop or answer approvals with the tools above or in the sessions panel. Only tasks started directly by that conversation are listed, and viewing one never sends a prompt or starts a CLI. This needs a DSH whose slot registry exposes `entries` and `subscribe`; otherwise the list is unchanged.
 - The tools load when DSH provides agent tools and approvals. Native model routes and settings work without the delegation tool registry.
 
 ## Sharing DSH MCP servers and skills

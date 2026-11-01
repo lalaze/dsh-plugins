@@ -91,6 +91,8 @@ export declare class SshBackend implements Backend {
     private identity?;
     private catalogs;
     private sessions;
+    /** Admitted starts/restores, including work not yet registered in sessions. */
+    private readonly reservations;
     private histories;
     private starting;
     private accounts;
@@ -141,6 +143,8 @@ export declare class SshBackend implements Backend {
      */
     restore(task: Task): Promise<Agent | null>;
     private reconnect;
+    /** Synchronous admission: no async launch/restore can pass the same last free slot. */
+    private reserve;
     private lease;
     create(task: Task, signal?: AbortSignal): Promise<Agent>;
     recover(task: Task, signal?: AbortSignal): Promise<Agent>;

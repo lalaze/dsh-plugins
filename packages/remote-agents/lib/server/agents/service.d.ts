@@ -37,6 +37,7 @@ export declare class RemoteAgentsService {
     private readonly locks;
     private readonly restoring;
     private readonly catalogListeners;
+    private readonly delegationRecovery;
     private closed;
     private readonly factory;
     /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
@@ -58,6 +59,12 @@ export declare class RemoteAgentsService {
     resume(hostId?: string): Promise<void>;
     /** Reattach only the remote tasks behind one open DSH conversation; unrelated hosts stay offline. */
     resumeConversation(sessionId: string): Promise<void>;
+    /** Observe only this conversation's delegated CLIs, including saved/archived history.
+     * Recovery attaches existing relays only; it never starts a new CLI or sends a prompt.
+     * Do not use snapshot/resume here: opening one conversation must not connect unrelated hosts.
+     */
+    delegations(sessionId: string): Promise<AgentSummary[]>;
+    private observeDelegation;
     onCatalogChange(listener: () => void): () => void;
     private catalogChanged;
     /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */

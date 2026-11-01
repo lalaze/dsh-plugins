@@ -5,7 +5,7 @@ export interface RelayCleanup {
     relayId: string;
 }
 /**
- * `chatEfforts` maps a native chat model route to the reasoning effort its last conversation turn used;
+ * `chatEfforts` maps a native chat model route to the reasoning effort of its last explicit picker selection;
  * `chatFast` lists the DSH conversations whose Codex turns run at the Fast speed.
  */
 /**
@@ -64,9 +64,9 @@ export declare class Store {
     chatProjects(): ChatProject[];
     /** A copy of the sharing settings; read for every shared tool listing and call. */
     sharing(): SharingSettings;
-    /** The reasoning effort a native chat model route last used, if any. */
     /** Whether a DSH conversation's Codex turns use the Fast speed. */
     chatFast(sessionId: string): boolean;
+    /** The reasoning effort last explicitly selected for a native chat model route, if any. */
     chatEffort(route: string): string | undefined;
     /** This DSH's identity for shared hosts, created on first use. */
     instance(): Promise<Instance>;

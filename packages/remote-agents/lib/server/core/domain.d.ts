@@ -316,6 +316,8 @@ export interface AgentSummary {
     id: string;
     /** Open bound conversations in the native DSH UI; never submit a second conversation here. */
     chatSessionId?: string;
+    /** Local DSH conversation that delegated this CLI task; not a main-chat binding. */
+    ownerSessionId?: string;
     hostId: string;
     cwd: string;
     provider: string;

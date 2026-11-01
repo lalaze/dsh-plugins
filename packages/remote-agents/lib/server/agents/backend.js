@@ -52,6 +52,8 @@ export class SshBackend {
     identity;
     catalogs = new Map();
     sessions = new Map();
+    /** Admitted starts/restores, including work not yet registered in sessions. */
+    reservations = new Set();
     histories = new Map();
     starting = new Map();
     accounts = new Map();
@@ -347,6 +349,8 @@ done`}`, 15_000, { login: false });
      * reconnecting, and the turn, tools and pending permissions are rebuilt from the saved history.
      */
     restore(task) {
+        if (this.closed)
+            return Promise.reject(new Error('SSH agent backend has stopped'));
         const pending = this.restoring.get(task.id);
         if (pending)
             return pending;
@@ -374,20 +378,51 @@ done`}`, 15_000, { login: false });
         }
         if (!task.relay || !task.native)
             return null;
-        const history = await this.history(task.id);
-        const at = (await history.checkpoint(task.relay.id))?.at ?? 0;
-        this.assertOpen();
+        const release = this.reserve(task.id);
         let session;
-        const link = this.link(task.relay.id, at, state => { if (session)
-            session.agent.reconnecting = !state.connected; }, task.id);
-        session = this.session({ ...task, executionCwd: task.executionCwd ?? task.cwd }, new JsonlPeer(link), history, link);
-        await session.restore();
-        session.agent.reconnecting = true;
-        this.sessions.set(task.id, session);
-        link.open();
-        // Its MCP proxies reach DSH again once the reverse forward is back.
-        this.sharing()?.attached(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, task);
-        return structuredClone(session.agent);
+        try {
+            const history = await this.history(task.id);
+            const at = (await history.checkpoint(task.relay.id))?.at ?? 0;
+            this.assertOpen();
+            const link = this.link(task.relay.id, at, state => { if (session)
+                session.agent.reconnecting = !state.connected; }, task.id);
+            session = this.session({ ...task, executionCwd: task.executionCwd ?? task.cwd }, new JsonlPeer(link), history, link);
+            await session.restore();
+            // close() may have released all registered sessions while history was still loading.
+            this.assertOpen();
+            session.agent.reconnecting = true;
+            this.sessions.set(task.id, session);
+            link.open();
+            // Its MCP proxies reach DSH again once the reverse forward is back.
+            this.sharing()?.attached(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, task);
+            return structuredClone(session.agent);
+        }
+        catch (error) {
+            // Release the local attachment only: a persistent CLI must survive shutdown or a failed restore.
+            session?.release();
+            if (session && this.sessions.get(task.id) === session)
+                this.sessions.delete(task.id);
+            throw error;
+        }
+        finally {
+            release();
+        }
+    }
+    /** Synchronous admission: no async launch/restore can pass the same last free slot. */
+    reserve(id) {
+        this.assertOpen();
+        if (this.reservations.has(id))
+            throw new Error('This CLI session is already being attached');
+        const occupied = () => this.reservations.size + [...this.sessions].filter(([id, session]) => session.alive && !this.reservations.has(id)).length;
+        while (occupied() >= SESSION_LIMIT) {
+            const idle = [...this.sessions].find(([id, session]) => !this.reservations.has(id) && !this.starting.has(id) && !this.restoring.has(id) && !this.leases.has(id) && session.evictable);
+            if (!idle)
+                throw new Error(`This SSH host already has ${SESSION_LIMIT} working CLI sessions. Wait for one to finish, or archive an idle agent.`);
+            idle[1].close();
+            this.sessions.delete(idle[0]);
+        }
+        this.reservations.add(id);
+        return () => { this.reservations.delete(id); };
     }
     lease(id) {
         this.leases.set(id, (this.leases.get(id) ?? 0) + 1);
@@ -469,59 +504,60 @@ done`}`, 15_000, { login: false });
         const attachments = !resume ? await transferAttachments(this.transport, this.store.directory, task.id, task.id, profile.cwd, task.attachments ?? [], signal) : [];
         signal?.throwIfAborted();
         this.assertOpen();
-        if ([...this.sessions.values()].filter(s => s.alive).length >= SESSION_LIMIT) {
-            const idle = [...this.sessions].find(([id, session]) => !this.starting.has(id) && !this.leases.has(id) && session.evictable);
-            if (!idle)
-                throw new Error(`This SSH host already has ${SESSION_LIMIT} working CLI sessions. Wait for one to finish, or archive an idle agent.`);
-            idle[1].close();
-            this.sessions.delete(idle[0]);
-        }
-        // DSH's shared MCP servers and skills are launch options only; the saved argv stays the CLI's own.
-        // Sharing never blocks a launch: the CLI starts without what could not be prepared.
-        const shared = await this.sharing()?.prepare(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, saved, profile.protocol, signal)
-            .catch(error => { signal?.throwIfAborted(); console.warn(`[remote-agents] Sharing with ${this.host.label} failed: ${String(error)}`); return undefined; });
-        signal?.throwIfAborted();
-        this.assertOpen();
-        const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : sharedArguments(profile.protocol, argv, shared);
-        let link;
-        if (relay) {
-            // Record the relay before it exists, so an interrupted start is cleaned up rather than leaked.
-            const relayId = randomUUID(), previous = this.store.task(t => t.id === task.id)?.relay;
-            await this.store.update(state => {
-                const saved = state.tasks.find(t => t.id === task.id);
-                if (!saved)
-                    throw new RemoteError('Remote agent was deleted', 409);
-                saved.relay = { id: relayId };
+        const release = this.reserve(task.id);
+        try {
+            // DSH's shared MCP servers and skills are launch options only; the saved argv stays the CLI's own.
+            // Sharing never blocks a launch: the CLI starts without what could not be prepared.
+            const shared = await this.sharing()?.prepare(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, saved, profile.protocol, signal)
+                .catch(error => { signal?.throwIfAborted(); console.warn(`[remote-agents] Sharing with ${this.host.label} failed: ${String(error)}`); return undefined; });
+            signal?.throwIfAborted();
+            this.assertOpen();
+            const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : sharedArguments(profile.protocol, argv, shared);
+            let link;
+            if (relay) {
+                // Record the relay before it exists, so an interrupted start is cleaned up rather than leaked.
+                const relayId = randomUUID(), previous = this.store.task(t => t.id === task.id)?.relay;
+                await this.store.update(state => {
+                    const saved = state.tasks.find(t => t.id === task.id);
+                    if (!saved)
+                        throw new RemoteError('Remote agent was deleted', 409);
+                    saved.relay = { id: relayId };
+                    if (previous)
+                        state.relayCleanups = [...(state.relayCleanups ?? []), { hostId: this.host.id, relayId: previous.id }];
+                });
                 if (previous)
-                    state.relayCleanups = [...(state.relayCleanups ?? []), { hostId: this.host.id, relayId: previous.id }];
-            });
-            if (previous)
-                void this.cleanup();
-            // Another DSH taking the session over must find this relay rather than resume the CLI a second time.
-            await this.shared?.flush(task.id);
+                    void this.cleanup();
+                // Another DSH taking the session over must find this relay rather than resume the CLI a second time.
+                await this.shared?.flush(task.id);
+                this.assertOpen();
+                try {
+                    await relay.launch(relayId, profile.cwd, launch);
+                }
+                catch (error) {
+                    await this.relayEnded(task.id, relayId).catch(() => { });
+                    throw error;
+                }
+                link = this.link(relayId, 0, state => { if (this.sessions.get(task.id)?.relay === link)
+                    this.sessions.get(task.id).agent.reconnecting = !state.connected; }, task.id);
+            }
+            this.assertOpen();
+            const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch)), history, link);
+            this.sessions.set(task.id, session);
+            link?.open();
             try {
-                await relay.launch(relayId, profile.cwd, launch);
+                await session.initialize(profile.protocol, argv, resume, acpServers(shared));
+                this.assertOpen();
+                if (!resume)
+                    await session.send(attachmentPrompt(task.prompt, attachments), task.id, attachments);
+                return structuredClone(session.agent);
             }
             catch (error) {
-                await this.relayEnded(task.id, relayId).catch(() => { });
+                session.close();
                 throw error;
             }
-            link = this.link(relayId, 0, state => { if (this.sessions.get(task.id)?.relay === link)
-                this.sessions.get(task.id).agent.reconnecting = !state.connected; }, task.id);
         }
-        const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch)), history, link);
-        this.sessions.set(task.id, session);
-        link?.open();
-        try {
-            await session.initialize(profile.protocol, argv, resume, acpServers(shared));
-            this.assertOpen();
-            if (!resume)
-                await session.send(attachmentPrompt(task.prompt, attachments), task.id, attachments);
-            return structuredClone(session.agent);
-        }
-        catch (error) {
-            session.close();
-            throw error;
+        finally {
+            release();
         }
     }
     async agent(id) {
@@ -716,7 +752,8 @@ done`}`, 15_000, { login: false });
             probe.close();
         for (const session of this.sessions.values())
             session.release();
-        await Promise.allSettled([...this.starting.values(), ...this.ending.values()]);
+        // Restores never wait for starts, so a start awaiting restore cannot form a shutdown cycle.
+        await Promise.allSettled([...this.starting.values(), ...this.restoring.values(), ...this.ending.values()]);
         this.probes.clear();
         this.sessions.clear();
         for (const history of this.histories.values())

@@ -4,6 +4,7 @@ import type { RemoteAgentsService } from '../agents/service.js';
 export declare class ChatProjects {
     readonly service: RemoteAgentsService;
     private listeners;
+    private effortListeners;
     constructor(service: RemoteAgentsService);
     list(): ChatProject[];
     /** The picker advertises one catalog per host; old project routes remain resolvable for saved chats. */
@@ -11,6 +12,10 @@ export declare class ChatProjects {
     routes(): ChatProject[];
     onChange(listener: () => void): () => void;
     private changed;
+    /** Only explicit effort selections change a model's advertised default. */
+    onEffortChange(listener: () => void): () => void;
+    /** Validate and remember a successful picker selection without SSH or starting a CLI. */
+    setEffort(provider: string, route: string, effort: string): Promise<void>;
     /** The Fast tier a native chat model route offers; a route saved with a tier names the same model. */
     fastTier(route: string): Choice | undefined;
     /** Whether a conversation's model offers Fast, and whether the conversation has it on. */

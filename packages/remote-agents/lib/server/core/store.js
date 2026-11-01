@@ -123,9 +123,9 @@ export class Store {
     chatProjects() { return structuredClone(this.state.mainChatProjects ?? []); }
     /** A copy of the sharing settings; read for every shared tool listing and call. */
     sharing() { return structuredClone(this.state.sharing ?? {}); }
-    /** The reasoning effort a native chat model route last used, if any. */
     /** Whether a DSH conversation's Codex turns use the Fast speed. */
     chatFast(sessionId) { return this.state.chatFast?.includes(sessionId) ?? false; }
+    /** The reasoning effort last explicitly selected for a native chat model route, if any. */
     chatEffort(route) { return Object.hasOwn(this.state.chatEfforts ?? {}, route) ? this.state.chatEfforts[route] : undefined; }
     /** This DSH's identity for shared hosts, created on first use. */
     async instance() {
@@ -152,7 +152,12 @@ export class Store {
                 return undefined; throw e; });
             if (current !== this.saved)
                 throw new RemoteError('Remote agent state was changed by another DSH instance. Reload the plugin.', 409);
-            const text = `${JSON.stringify(next, null, 2)}\n`, temporary = `${this.path}.${randomUUID()}.tmp`;
+            const text = `${JSON.stringify(next, null, 2)}\n`;
+            // Compare persisted content, not just the in-memory state: open() may have migrated old fields.
+            // Keep the stale-writer check above, but do not rewrite or publish an unchanged registry.
+            if (text === this.saved)
+                return;
+            const temporary = `${this.path}.${randomUUID()}.tmp`;
             try {
                 await writeFile(temporary, text, { mode: 0o600, flag: 'wx' });
                 await rename(temporary, this.path);
