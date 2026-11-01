@@ -12,6 +12,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.md) | Edit code and text files of local workspaces in VS Code's editor (Monaco), plus Markdown and SVG previews |
 | `dsh-git-view` | [packages/git-view](packages/git-view/README.md) | IDE-style Git panel ported from dsh-git-panel (overview with branch tree and commit graph, changes with commit and amend, file browser, AI commit messages, input-bar marker) for local and remote workspaces, with Monaco diffs and conflict resolution; remote support requires Remote Agents 0.2.62 or newer |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.md) | Colored workspace tags, with sidebar grouping by tag or by running status |
+| `dsh-device-sync` | [packages/device-sync](packages/device-sync/README.md) | Pair two DSH machines over Tailscale: share workspace groups and conversation history, and steer each other's sessions, each run only on the machine that owns it |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | Chrome-style Elements, Console and Network debugger in a separate Chrome/Edge window |
@@ -90,6 +91,7 @@ packages/
   git-view/             # Git sidebar, diff editor and conflicts for local/remote workspaces
   file-view/            # Private shared code/diff editors and file previews
   workspace-tags/       # Workspace tags and tag/status grouping in the sidebar
+  device-sync/          # Pairing, shared groups and history, and remote steering between two machines
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds
   browser-devtools/     # Separate-window debugger for Sidebar Browser tabs

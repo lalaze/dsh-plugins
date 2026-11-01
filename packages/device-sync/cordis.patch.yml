@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-device-sync
+      name: dsh-device-sync
+      config: {}
