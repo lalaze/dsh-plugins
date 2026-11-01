@@ -1,6 +1,6 @@
 {
   "name": "dsh-device-sync",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pair two DSH machines over Tailscale: share workspace groups and conversation history, and steer each other's sessions",
   "type": "module",
   "main": "lib/server/index.js",

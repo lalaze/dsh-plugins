@@ -26,7 +26,15 @@ With permission (see below), the host API accepts these requests for the other m
 
 Each request carries an ID, so a retry after a lost connection never runs it twice. When the other machine is offline, a request is held and sent only after you confirm it again; it is never run on this machine instead.
 
-This version has no window of its own for reading and steering the other machine’s sessions. Open the other machine’s DSH Web over Tailscale to watch and steer them; a phone works the same way. While it is offline, its synced history stays on this machine.
+Open **Settings → Device sync → Synced sessions** and select a title to read its mirrored timeline, including attachments and live drafts. Sessions are grouped by machine and workspace; hidden and subagent sessions are excluded until their filters are enabled. Hide/restore affects only this machine. Archived and deleted sessions remain readable.
+
+While the viewer is open and the peer is online with history sharing allowed, an interrupted live stream reconnects after 3 seconds. Only one stream is active per viewer. Closing/switching the viewer, going offline, revoking history access or deleting the remote session cancels its live stream and retry delay and clears the draft. Permanent HTTP denials such as 403/404 stop retries until the viewer is reopened or eligibility changes. History polling errors and live-stream errors are displayed independently; a successful history fetch does not hide a failed live connection.
+
+**Remote workspaces** lets you assign shared groups and associate remote workspaces with local ones, without mapping or opening the remote path locally. **Pending requests** lets you explicitly send or discard held requests and shows delivery failures. A delivered request and a still-held request have different status messages.
+
+The viewer supports text messages (queue by default, or steer), stopping an online task, and answering online approvals/questions when the owning machine grants command access. Non-answerable approvals must be answered on the owning machine. Requests cannot be sent to paused/unpaired machines or archived/deleted sessions from this client. Offline prompts are held; no request is automatically released. Uncertain browser responses retain the original request ID for retry, first checking the outbox, so a lost response cannot create a fresh execution.
+
+The viewer is embedded in settings (also accessible through the existing header badge). New-session/continuation controls and image uploads are not included; the host APIs remain available. Existing mirrored image/file attachments can be viewed. No real two-host or authenticated DSH GUI acceptance is claimed by the automated tests.
 
 ## Requirements
 
@@ -46,6 +54,8 @@ Each machine decides what it allows the other:
 
 - **Share history**: its workspaces, groups and conversations. On by default.
 - **Allow remote control**: messages, stopping tasks and confirmations in its sessions. Off by default.
+
+Once paired, the conversation header shows the other machine’s name and whether it is online, with a warning dot when syncing fails; select it to open these settings in a window.
 
 Change either at any time under the paired machine’s card, which also shows whether it is online, when it last synced, how many sessions and requests are waiting, the last failure, and **Sync now**, **Pause sync** and **Unpair…**. After unpairing, the other machine can no longer sync or send requests; you can also delete the history copied from it.
 
@@ -78,8 +88,12 @@ Build and install on both machines:
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.1.tgz"
 ```
+
+## 0.1.1 release notes
+
+- The conversation header shows the paired machine and whether it is online, or that syncing failed; select it to open Device sync settings in a window.
 
 ## 0.1.0 release notes
 
