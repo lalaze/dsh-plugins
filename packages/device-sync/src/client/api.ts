@@ -1,21 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import { ATTACHMENT_ROUTE, LIVE_ROUTE, LOCAL_ROUTE, type LiveFrame, type LocalAction, type LocalStatus } from '../shared/protocol.js'
 import { localizeError } from './i18n.js'
+import { readLiveFrames } from './live.js'
 
-export async function act<T = unknown>(action: LocalAction): Promise<T> {
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) { super(message); this.name = 'ApiError' }
+}
+
+export async function act<T = unknown>(action: LocalAction, signal?: AbortSignal): Promise<T> {
   const response = await fetch(LOCAL_ROUTE, {
-    method: 'POST', credentials: 'same-origin', cache: 'no-store',
+    method: 'POST', credentials: 'same-origin', cache: 'no-store', signal,
     headers: { 'Content-Type': 'application/json', 'X-DSH-Device-Sync': '1' }, body: JSON.stringify(action),
   })
   const body = await response.json().catch(() => ({})) as { error?: string }
-  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`)
+  if (!response.ok) throw new ApiError(body.error ?? `HTTP ${response.status}`, response.status)
   return body as T
 }
 
 export async function loadStatus(signal?: AbortSignal): Promise<LocalStatus> {
   const response = await fetch(LOCAL_ROUTE, { credentials: 'same-origin', cache: 'no-store', signal })
   const body = await response.json().catch(() => ({})) as LocalStatus & { error?: string }
-  if (!response.ok) throw new Error(body.error ?? `HTTP ${response.status}`)
+  if (!response.ok) throw new ApiError(body.error ?? `HTTP ${response.status}`, response.status)
   return body
 }
 
@@ -47,21 +52,9 @@ export async function followLive(deviceId: string, sessionId: string, signal: Ab
   const response = await fetch(`${LIVE_ROUTE}?${new URLSearchParams({ device: deviceId, session: sessionId })}`, { credentials: 'same-origin', cache: 'no-store', signal })
   if (!response.ok || !response.body) {
     const body = await response.json().catch(() => ({})) as { error?: string }
-    throw new Error(body.error ?? `HTTP ${response.status}`)
+    throw new ApiError(body.error ?? `HTTP ${response.status}`, response.status)
   }
-  const reader = response.body.getReader(), decoder = new TextDecoder()
-  let buffer = ''
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buffer += decoder.decode(value, { stream: true })
-    let newline: number
-    while ((newline = buffer.indexOf('\n')) >= 0) {
-      const line = buffer.slice(0, newline).trim()
-      buffer = buffer.slice(newline + 1)
-      if (line) onFrame(JSON.parse(line) as LiveFrame)
-    }
-  }
+  await readLiveFrames(response.body, signal, onFrame)
 }
 
 /** A request ID the executing machine uses to run a request only once. */

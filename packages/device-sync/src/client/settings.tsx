@@ -1,18 +1,22 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import type { Grants, LocalStatus, PairingStatus, PeerStatus } from '../shared/protocol.js'
 import { act, useStatus } from './api.js'
 import { ago, localizeError, ui, useLocale } from './i18n.js'
 import { styles } from './styles.js'
+import { RemoteSettings } from './remote.js'
 
 const CONNECTION: Record<PeerStatus['connection'], string> = { online: 'Online', offline: 'Offline', paused: 'Paused', unpaired: 'Unpaired' }
 
 /** Run an action, showing its failure inline; `done` refreshes the status. */
 function useRunner(done: () => Promise<void>) {
   const [busy, setBusy] = useState<string>()
+  const lock = useRef(false)
   const [error, setError] = useState<string>()
   const run = async (key: string, task: () => Promise<unknown>) => {
+    if (lock.current) return
+    lock.current = true
     setBusy(key); setError(undefined)
-    try { await task(); await done() } catch (failure) { setError(localizeError(failure)) } finally { setBusy(undefined) }
+    try { await task(); await done() } catch (failure) { setError(localizeError(failure)) } finally { lock.current = false; setBusy(undefined) }
   }
   return { busy, error, run }
 }
@@ -137,7 +141,7 @@ export function SyncSettings() {
           </div>
         </div>
         <div className="dsy-row">
-          <div><div>{ui('Remote sessions')}</div><p className="dsy-hint">{ui('To watch and steer a paired machine’s sessions, open its own DSH Web over Tailscale. Its synced history stays readable here while it is offline.')}</p></div>
+          <div><div>{ui('Remote sessions')}</div><p className="dsy-hint">{ui('Open a synced session below to read its history and send authorized requests to its owning machine.')}</p></div>
         </div>
       </section>
 
@@ -158,6 +162,7 @@ export function SyncSettings() {
         {status.peers.map(peer => <Peer key={peer.deviceId} peer={peer} run={run} busy={busy} />)}
       </section>}
 
+      <RemoteSettings status={status} refresh={refresh} />
       <Conflicts status={status} run={run} busy={busy} />
 
       <section className="dsy-section">
