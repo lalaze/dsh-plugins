@@ -90,6 +90,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
             ...(input.title === undefined ? {} : { title: field(input.title, 'title', 100) }) });
           break;
         }
+        case 'delegations': result = await service.delegations(field(input.sessionId, 'session ID', 256)); break;
         case 'agent': {
           if (input.direction !== undefined && input.direction !== 'before' && input.direction !== 'after') throw new RemoteError('Invalid timeline direction');
           result = await service.detail(agentId(), cursorInput(input.cursor), input.direction); break;

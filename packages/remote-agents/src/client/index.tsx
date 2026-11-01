@@ -9,6 +9,8 @@ import { HostManager } from './settings/hosts.js';
 import { SharingSettings } from './settings/sharing.js';
 import { styles } from './styles.js';
 import { Sessions } from './sessions/sessions.js';
+import { installDelegatedCatalog } from './sessions/delegated.js';
+import type { CatalogSlots } from './sessions/delegated-model.js';
 import { ModelLabel } from './composer/model-label.js';
 import { installCustomModelLabels } from './composer/custom-model-label.js';
 import { installWorkspaceModels, type WorkspaceClient } from './composer/workspace-models.js';
@@ -24,7 +26,7 @@ import { installWorkspaceImport, type WorkspaceList } from './workspace/import.j
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
   inject?(services: string[], factory: (scoped: Client) => void): unknown;
-  slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC<any>): unknown };
+  slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC<any>): unknown } & Partial<Pick<CatalogSlots<React.ComponentType<any>>, 'entries' | 'subscribe'>>;
 }
 function Settings({ openSessions, openWorkspace }: { openSessions: () => void; openWorkspace: () => void }) {
   useLocale();
@@ -63,6 +65,8 @@ export const name = 'dsh-remote-agents-client';
 export const inject = ['slots', 'locale'];
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
+  // Decorate the existing native menu only on hosts exposing the supported slot ledger.
+  if (ctx.slots.entries && ctx.slots.subscribe) ctx.effect(() => installDelegatedCatalog(ctx.slots as CatalogSlots<React.ComponentType<any>>));
   const Surface = () => {
     useLocale(); const [visible, setVisible] = useState(false), [workspace, setWorkspace] = useState(false);
     const openChat = (id: string) => {
