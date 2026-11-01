@@ -215,13 +215,49 @@
       },
       "versions": [
         {
-          "version": "0.1.9",
-          "publishTimestamp": 1793354533,
+          "version": "0.1.10",
+          "publishTimestamp": 1793512221,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "7ccf1afcb21d07d95b1d7eb15af81a9fd6eec8bd",
+            "commit": "9434d601101697df1a135d5fada072a8c934f21d",
             "path": "packages/workspace-tags"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.3 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-device-sync",
+      "title": "DSH Device Sync",
+      "description": {
+        "en": "Pair two DSH machines over Tailscale: share workspace groups and conversation history, and steer each other's sessions, each run only on the machine that owns it",
+        "zh": "通过 Tailscale 配对两台 DSH 机器：共享工作区分组和对话记录，互相指挥会话，每个会话只在所属机器上执行"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/device-sync",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/device-sync"
+      },
+      "metadata": {
+        "keywords": [
+          "sync",
+          "tailscale",
+          "remote"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793512221,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "9434d601101697df1a135d5fada072a8c934f21d",
+            "path": "packages/device-sync"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.3 <0.3.0"
