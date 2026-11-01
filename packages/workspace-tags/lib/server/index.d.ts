@@ -7,6 +7,24 @@
 import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
 import { TagStore } from './server/store.js';
+import { type TagState } from './shared/tags.js';
+/**
+ * What other host plugins may do with the tags, as the service `workspaceTags`. dsh-device-sync uses it to share
+ * tags between paired machines.
+ */
+export interface WorkspaceTagsService {
+    readonly version: 1;
+    snapshot(): TagState;
+    /** Save a merged state; invalid entries are dropped. Open sidebars pick it up on their next refresh. */
+    replace(state: TagState): Promise<TagState>;
+    /** Called after each saved change, including those made through {@link replace}. */
+    subscribe(listener: (state: TagState) => void): () => void;
+}
+declare module '@deepseek-ai/cordis' {
+    interface Context {
+        workspaceTags: WorkspaceTagsService;
+    }
+}
 export declare const name = "dsh-workspace-tags";
 export declare const inject: string[];
 export declare const Config: Schema<Schemastery.ObjectS<NoInfer<{

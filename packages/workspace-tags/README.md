@@ -13,17 +13,22 @@ Under the sidebar header, **All** and one chip per tag pick which workspaces the
 
 A folded workspace row shows what its sessions would: a badge counting those that need you, or a spinner when one is only running. Right-click a workspace, or choose **Tags…** in its **⋯** menu, to tick its tags, create a tag (name and color) that is added to that workspace, or open **Manage tags…** to rename, recolor or delete tags. A workspace’s tags show as small dots at the end of its row in every grouping mode. Sections fold, and the Group by choice, folded sections and the chosen tag chip are remembered per browser. Inside a section, workspaces keep the sidebar’s order; drag workspaces into order under Workspace grouping, since a workspace can appear in several sections.
 
-Tags are stored on the DSH host in `~/.dsh/storages/dsh-workspace-tags/tags.json` (under `DSH_HOME` when set), so the desktop app and remote web clients of the same host share them; open clients pick up changes from others within 30 seconds or when their window regains focus. Deleting a workspace in the sidebar removes its tags.
+Tags are stored on the DSH host in `~/.dsh/storages/dsh-workspace-tags/tags.json` (under `DSH_HOME` when set), so the desktop app and remote web clients of the same host share them; open clients pick up changes from others within 3 seconds while visible, or when their window regains focus. Other host plugins can read and replace the tags through the `workspaceTags` service; [Device Sync](../device-sync/README.md) uses it to share tags with a paired machine. Deleting a workspace in the sidebar removes its tags.
 
 Build and install:
 
 ```sh
 pnpm --filter dsh-workspace-tags check
 pnpm --filter dsh-workspace-tags pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.9.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.10.tgz"
 ```
 
 Requires DSH 0.2.1-rc.3 or a later 0.2 release.
+
+## 0.1.10 release notes
+
+- Open sidebars pick up tag changes from other clients within 3 seconds instead of 30; a refresh that finds nothing new returns an empty response.
+- Other host plugins can read, replace and watch the tags through the new `workspaceTags` service.
 
 ## 0.1.9 release notes
 

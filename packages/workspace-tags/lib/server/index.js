@@ -11,6 +11,12 @@ export async function apply(ctx, config = {}) {
     const store = new TagStore(join(config.stateDir ?? defaultStateDir(), 'tags.json'));
     await store.load();
     const headers = { 'Cache-Control': 'no-store' };
+    ctx.provide('workspaceTags', {
+        version: 1,
+        snapshot: () => store.snapshot(),
+        replace: async (state) => (await store.replace(state)).state,
+        subscribe: listener => store.subscribe(listener),
+    });
     // The host connection supplies authentication and origin checks.
     ctx.effect(() => ctx.connection.fetch.register({
         path: TAGS_ROUTE,
@@ -20,8 +26,13 @@ export async function apply(ctx, config = {}) {
     }));
 }
 export async function handleTagRequest(store, request, headers = {}) {
-    if (request.method === 'GET')
-        return Response.json({ state: store.snapshot() }, { headers });
+    if (request.method === 'GET') {
+        // A client that already holds this revision gets an empty answer, which keeps frequent refreshes cheap.
+        const revision = store.revision();
+        if (new URL(request.url).searchParams.get('revision') === revision)
+            return new Response(null, { status: 204, headers });
+        return Response.json({ state: store.snapshot(), revision }, { headers });
+    }
     let operation;
     try {
         operation = await request.json();
@@ -31,7 +42,7 @@ export async function handleTagRequest(store, request, headers = {}) {
     }
     try {
         const { state, tag } = await store.apply(operation);
-        return Response.json({ state, ...(tag ? { tag } : {}) }, { headers });
+        return Response.json({ state, revision: store.revision(), ...(tag ? { tag } : {}) }, { headers });
     }
     catch (error) {
         if (error instanceof TagError)
