@@ -112,3 +112,37 @@ test('the route reads state, applies operations and reports rejections', async t
   const read = await handleTagRequest(store, new Request('http://host/api/workspace-tags'))
   assert.deepEqual((await read.json() as { state: TagState }).state, store.snapshot())
 })
+
+test('a refresh with the current revision is answered without a body', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'workspace-tags-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const store = new TagStore(join(dir, 'tags.json'))
+  await store.load()
+  const get = (revision?: string) => handleTagRequest(store, new Request(`http://host/api/workspace-tags${revision ? `?revision=${revision}` : ''}`))
+  const first = await (await get()).json() as { revision: string }
+  assert.equal((await get(first.revision)).status, 204)
+  await store.apply({ op: 'create', name: 'Ops', color: 'teal' })
+  const changed = await get(first.revision)
+  assert.equal(changed.status, 200)
+  assert.notEqual((await changed.json() as { revision: string }).revision, first.revision)
+})
+
+test('a merged state replaces the tags, is normalized and reaches listeners', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'workspace-tags-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const store = new TagStore(join(dir, 'tags.json'))
+  await store.load()
+  const seen: TagState[] = []
+  const unsubscribe = store.subscribe(state => seen.push(state))
+  const state = await store.replace({
+    tags: [{ id: 'a', name: 'Work', color: 'blue' }, { id: 'b', name: 'work', color: 'red' }],
+    assignments: { ws: ['a', 'b'] },
+  })
+  assert.deepEqual(state.state, { tags: [{ id: 'a', name: 'Work', color: 'blue' }], assignments: { ws: ['a'] } })
+  assert.deepEqual(seen, [state.state])
+  unsubscribe()
+  await store.apply({ op: 'delete', id: 'a' })
+  assert.equal(seen.length, 1)
+  const reopened = new TagStore(join(dir, 'tags.json')); await reopened.load()
+  assert.deepEqual(reopened.snapshot(), emptyTagState())
+})

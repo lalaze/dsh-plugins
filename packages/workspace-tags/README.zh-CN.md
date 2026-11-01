@@ -13,17 +13,22 @@
 
 折叠的工作区行会显示其会话的状态：需要你查看的会话数徽标，或仅在运行时显示加载图标。右键点击工作区，或在其 **⋯** 菜单中选择**标签…**，即可勾选标签、新建标签（名称和颜色）并添加到该工作区，或打开**管理标签…**重命名、修改颜色或删除标签。在任何分组方式下，工作区的标签都以小圆点显示在行尾。分区可以折叠；分组方式、折叠状态和选中的标签按钮按浏览器分别保存。分区内的工作区保持侧栏原有顺序；由于同一工作区可能出现在多个分区，请在“按工作区”分组下拖动调整顺序。
 
-标签保存在 DSH 主机的 `~/.dsh/storages/dsh-workspace-tags/tags.json`（设置了 `DSH_HOME` 时位于其下），同一主机的桌面应用和远程 Web 客户端共用；其他客户端的修改会在 30 秒内或窗口重新获得焦点时同步。在侧栏中删除工作区会一并移除它的标签。
+标签保存在 DSH 主机的 `~/.dsh/storages/dsh-workspace-tags/tags.json`（设置了 `DSH_HOME` 时位于其下），同一主机的桌面应用和远程 Web 客户端共用；窗口可见时，其他客户端的修改会在 3 秒内同步，窗口重新获得焦点时也会同步。其他主机插件可以通过 `workspaceTags` 服务读取和替换标签；[Device Sync](../device-sync/README.zh-CN.md) 借此与已配对的机器共享标签。在侧栏中删除工作区会一并移除它的标签。
 
 构建并安装：
 
 ```sh
 pnpm --filter dsh-workspace-tags check
 pnpm --filter dsh-workspace-tags pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.9.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.10.tgz"
 ```
 
 需要 DSH 0.2.1-rc.3 或之后的 0.2 版本。
+
+## 0.1.10 更新说明
+
+- 已打开的侧栏会在 3 秒内（原为 30 秒）获取其他客户端对标签的修改；没有变化时刷新只返回空响应。
+- 新增 `workspaceTags` 服务，其他主机插件可以读取、替换和监听标签。
 
 ## 0.1.9 更新说明
 

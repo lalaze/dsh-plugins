@@ -9,8 +9,11 @@ import { emptyTagState, parseTagState, TAGS_ROUTE, type TagOperation, type Works
 import type { SectionMode, TagDialogRequest, TagMenuRequest, TagRuntime, TagSnapshot, TagViewState } from './contract.ts'
 import { sectionFoldedByDefault } from './sections.ts'
 
-/** Other clients of the same host (desktop and remote web) can change tags. */
-const REFRESH_MS = 30_000
+/**
+ * Other clients of the same host (desktop and remote web) and paired machines (through dsh-device-sync) can change
+ * tags. A refresh that finds the same revision costs an empty response.
+ */
+const REFRESH_MS = 3_000
 const VIEW_KEY = 'dsh-workspace-tags.view.v1'
 
 const isMode = (value: unknown): value is SectionMode => value === 'tag' || value === 'status'
@@ -38,13 +41,18 @@ export function createTagRuntime(options: TagRuntimeOptions = {}): TagRuntime & 
 
   // A refresh started before a write must not replace the write's newer state.
   let generation = 0
+  let revision: string | undefined
   const refresh = async (): Promise<void> => {
     const current = ++generation
     try {
-      const response = await request(TAGS_ROUTE, { credentials: 'same-origin', cache: 'no-store' })
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const body = await response.json() as { state?: unknown }
-      if (current === generation) tags.set({ phase: 'ready', state: parseTagState(body.state) })
+      const url = revision === undefined ? TAGS_ROUTE : `${TAGS_ROUTE}?${new URLSearchParams({ revision })}`
+      const response = await request(url, { credentials: 'same-origin', cache: 'no-store' })
+      if (response.status === 204 && tags.getSnapshot().phase === 'ready') return
+      if (!response.ok || response.status === 204) throw new Error(`HTTP ${response.status}`)
+      const body = await response.json() as { state?: unknown; revision?: unknown }
+      if (current !== generation) return
+      revision = typeof body.revision === 'string' ? body.revision : undefined
+      tags.set({ phase: 'ready', state: parseTagState(body.state) })
     } catch (error) {
       if (current !== generation) return
       if (tags.getSnapshot().phase === 'loading') tags.set({ ...tags.getSnapshot(), phase: 'error' })
@@ -59,9 +67,10 @@ export function createTagRuntime(options: TagRuntimeOptions = {}): TagRuntime & 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(operation),
     })
-    const body = await response.json().catch(() => ({})) as { state?: unknown; tag?: WorkspaceTag; error?: unknown }
+    const body = await response.json().catch(() => ({})) as { state?: unknown; tag?: WorkspaceTag; error?: unknown; revision?: unknown }
     if (!response.ok) throw new Error(typeof body.error === 'string' ? body.error : 'Could not save tags')
     generation++
+    revision = typeof body.revision === 'string' ? body.revision : undefined
     tags.set({ phase: 'ready', state: parseTagState(body.state) })
     return body.tag
   }
