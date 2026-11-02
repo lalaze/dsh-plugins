@@ -88,7 +88,7 @@ DSH 若补充两处小接口，实现会更简单：导入只读会话，让副�
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.2.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.3.tgz"
 ```
 
 ## 0.1.2 更新说明
