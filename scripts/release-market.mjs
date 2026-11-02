@@ -30,6 +30,20 @@ const heading = async path => existsSync(path) ? /^# (.+)$/m.exec(await readFile
 const tableRows = text => [...text.matchAll(/^\| `([^`]+)` \| [^|]+ \| (.+?) \|$/gm)].map(([, name, description]) => [name, description]);
 const localized = (en, zh) => zh && zh !== en ? { en, zh } : en;
 
+/** Order of dotted versions; a prerelease (`1.2.0-rc.1`) sorts before its release. */
+function compareVersions(a, b) {
+  const parse = version => { const [core, pre] = version.split(/-(.*)/s); return { parts: core.split('.').map(Number), pre }; };
+  const x = parse(a), y = parse(b);
+  for (let i = 0; i < Math.max(x.parts.length, y.parts.length); i++) {
+    const difference = (x.parts[i] ?? 0) - (y.parts[i] ?? 0);
+    if (difference) return Math.sign(difference);
+  }
+  if (x.pre === y.pre) return 0;
+  if (x.pre === undefined) return 1;
+  if (y.pre === undefined) return -1;
+  return x.pre.localeCompare(y.pre, undefined, { numeric: true });
+}
+
 async function digest(dir) {
   if (!existsSync(dir)) return '';
   const hash = createHash('sha256');
@@ -113,7 +127,7 @@ try {
   const index = existsSync(indexPath) ? await readJson(indexPath) : { format: 1, plugins: [] };
   const listed = new Map(index.plugins.map(plugin => [plugin.name, plugin]));
 
-  const releases = [], unchanged = [], stale = [];
+  const releases = [], unchanged = [], stale = [], older = [];
   for (const plugin of plugins) {
     const tarball = tarballs.find(file => file.startsWith(`${plugin.name.replace(/^@/, '').replace('/', '-')}-`) && file.endsWith('.tgz'));
     if (!tarball) throw new Error(`pnpm pack produced no archive for ${plugin.name}.`);
@@ -127,6 +141,9 @@ try {
     Object.assign(plugin, { version: manifest.version, engines: manifest.engines?.dsh ? { dsh: manifest.engines.dsh } : {}, icon: await inlineIcon(extracted, manifest) });
 
     const target = join(worktree, 'packages', plugin.dir);
+    // A newer version released from another branch stays listed; publishing this one would downgrade the market.
+    const newest = listed.get(plugin.name)?.versions[0]?.version;
+    if (newest && compareVersions(plugin.version, newest) < 0) { older.push({ plugin, newest }); continue; }
     if (listed.get(plugin.name)?.versions.some(version => version.version === plugin.version)) {
       if (await digest(extracted) === await digest(target)) unchanged.push(plugin); else stale.push(plugin);
       continue;
@@ -137,6 +154,7 @@ try {
   }
 
   for (const plugin of stale) console.warn(`${plugin.name} changed since ${plugin.version} was released; bump its version to publish the change.`);
+  for (const { plugin, newest } of older) console.warn(`${plugin.name} ${plugin.version} is older than the listed ${newest}, released from another branch; skipped.`);
   if (!releases.length) console.log('Nothing new to release: every plugin version is already in the market index.');
   else if (dryRun) {
     console.log(`Would release to ${BRANCH}:`);
