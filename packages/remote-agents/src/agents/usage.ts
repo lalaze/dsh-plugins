@@ -122,9 +122,17 @@ export function codexAccountUsage(account: any, limits: any, checkedAt = new Dat
   };
 }
 const CLAUDE_WINDOWS: [string, string][] = [['five_hour', 'Session'], ['seven_day', 'Weekly'], ['seven_day_opus', 'Weekly · Opus'], ['seven_day_sonnet', 'Weekly · Sonnet']];
+/**
+ * The CLI keeps the plan it saw at sign-in, so an upgraded account still reports Pro until it signs in again.
+ * Pro pays for Fable with usage credits; only Max gives it a weekly window of its own, so that window decides first.
+ */
+function claudePlan(plan: unknown, limits: any): unknown {
+  return list(limits?.model_scoped).some(window => /^fable\b/i.test(String(window?.display_name ?? ''))) ? 'Max' : plan;
+}
 /** Claude `initialize` account details and the `get_usage` control response behind `/usage`. */
 export function claudeAccountUsage(account: any, usage: any, checkedAt = new Date().toISOString()): AccountUsage {
-  const limits = usage?.rate_limits, plan = typeof usage?.subscription_type === 'string' ? capitalize(usage.subscription_type) : account?.subscriptionType;
+  const limits = usage?.rate_limits;
+  const plan = claudePlan(typeof usage?.subscription_type === 'string' ? capitalize(usage.subscription_type) : account?.subscriptionType, limits);
   const windows: QuotaWindow[] = [
     ...CLAUDE_WINDOWS.map(([id, label]) => ({ id, label, window: limits?.[id] })),
     ...list(limits?.model_scoped).map((window, index) => ({ id: `model_scoped:${index}`, label: `Weekly · ${window?.display_name ?? 'Model'}`, window })),
