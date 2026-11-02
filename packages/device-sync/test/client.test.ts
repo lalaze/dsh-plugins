@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { canCommand, canInteract, isDefiniteRejection, matchSessions, mergeEvents, visibleSessions } from '../src/client/view-model.js'
+import { canCommand, canInteract, groupReach, isDefiniteRejection, matchSessions, mergeEvents, visibleSessions } from '../src/client/view-model.js'
 import type { MirrorSessionView, PeerStatus, SyncedEvent } from '../src/shared/protocol.js'
 
 const peer = (connection: PeerStatus['connection'], command = true) => ({ connection, grantsFromPeer: { command, history: true } } as PeerStatus)
@@ -14,6 +14,15 @@ test('commands require an active pairing and remote command grant, not local gra
   assert.equal(canCommand(peer('offline')), true) // prompt may be explicitly held, not executed
   assert.equal(canInteract(peer('offline')), false) // stale approvals/answers/cancel are not offered offline
   assert.equal(canInteract(peer('online')), true)
+})
+test('group changes are blocked where they can never arrive, and only delayed while paused or offline', () => {
+  const at = (connection: PeerStatus['connection'], history = true) => ({ connection, grantsToPeer: { history, command: false } } as PeerStatus)
+  assert.equal(groupReach(undefined), 'blocked-unpaired')
+  assert.equal(groupReach(at('unpaired')), 'blocked-unpaired')
+  for (const connection of ['online', 'offline', 'paused'] as const) assert.equal(groupReach(at(connection, false)), 'blocked-sharing')
+  assert.equal(groupReach(at('paused')), 'paused')
+  assert.equal(groupReach(at('offline')), 'offline')
+  assert.equal(groupReach(at('online')), 'ok')
 })
 test('hidden and subagent sessions are opt-in; archive/deletion remain visible history', () => {
   const sessions = [session(), session({ hidden: true }), session({ origin: 'subagent' }), session({ archived: true }), session({ removed: true })]

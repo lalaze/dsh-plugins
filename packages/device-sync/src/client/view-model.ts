@@ -9,6 +9,15 @@ export const tagColor = (id: string) => TAG_COLORS[id] ?? TAG_COLORS.gray
 
 export const canCommand = (peer?: PeerStatus) => !!peer?.grantsFromPeer.command && peer.connection !== 'unpaired' && peer.connection !== 'paused'
 export const canInteract = (peer?: PeerStatus) => canCommand(peer) && peer?.connection === 'online'
+/**
+ * Whether group changes to a paired machine's workspaces reach it: it pulls them from here, so an unpaired machine
+ * or one this machine does not share with never gets them; a paused or offline one gets them later.
+ */
+export function groupReach(peer?: PeerStatus): 'blocked-unpaired' | 'blocked-sharing' | 'paused' | 'offline' | 'ok' {
+  if (!peer || peer.connection === 'unpaired') return 'blocked-unpaired'
+  if (!peer.grantsToPeer.history) return 'blocked-sharing'
+  return peer.connection === 'paused' ? 'paused' : peer.connection === 'offline' ? 'offline' : 'ok'
+}
 export function visibleSessions(sessions: MirrorSessionView[], hidden: boolean, children: boolean) {
   return sessions.filter(s => (hidden || !s.hidden) && (children || s.origin !== 'subagent'))
 }

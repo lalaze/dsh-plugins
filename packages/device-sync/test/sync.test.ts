@@ -206,6 +206,25 @@ test('groups edited on either machine reach the other, with a backup before the 
   assert.equal((await readdir(join(a.dir, 'backups'))).length, 1)
 })
 
+test('a group set here on the other machine\'s workspace reaches its sidebar, only while this machine shares with it', async t => {
+  const a = await node(t, 'Laptop'), b = await node(t, 'Mac mini')
+  b.host.addWorkspace('wb', 'zebox')
+  a.tags.edit(s => { s.tags.push({ id: 't-work', name: 'Work', color: 'blue' }) })
+  await pair(a, b)
+  const macId = b.sync.identity.deviceId, ref = `${macId}:wb`
+  await waitFor(async () => b.tags.state.tags.length === 1 && (await a.sync.status()).workspaces.some(w => w.deviceId === macId && w.items.length), 8_000, 'tag and workspace synced')
+  await a.sync.action({ action: 'assign', workspaceRef: ref, tagId: 't-work', assigned: true })
+  await waitFor(() => (b.tags.state.assignments.wb ?? []).includes('t-work'), 5_000, 'the assignment in the Mac mini sidebar')
+  await assert.rejects(a.sync.action({ action: 'assign', workspaceRef: `${macId}:missing`, tagId: 't-work', assigned: true }), /Unknown workspace/)
+  // Without sharing, the Mac mini cannot pull the change, so it is refused instead of silently kept here.
+  await a.sync.action({ action: 'setGrants', deviceId: macId, grants: { history: false, command: false } })
+  await assert.rejects(a.sync.action({ action: 'assign', workspaceRef: ref, tagId: 't-work', assigned: false }), /does not share with Mac mini/)
+  assert.deepEqual((await a.sync.status()).groups.assignments[ref], ['t-work'])
+  // Nor after unpairing, while the copied history stays.
+  await a.sync.action({ action: 'unpair', deviceId: macId, forgetHistory: false })
+  await assert.rejects(a.sync.action({ action: 'assign', workspaceRef: ref, tagId: 't-work', assigned: false }), /only be changed on paired machines/)
+})
+
 test('confirmations waiting on the executing machine can be answered from the other one', async t => {
   const a = await node(t, 'Laptop'), b = await node(t, 'Mac mini')
   b.host.addSession('s1', undefined, 'Task')

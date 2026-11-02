@@ -293,6 +293,21 @@ export class DeviceSync {
     this.save()
   }
 
+  /**
+   * Only this machine's workspaces, or those of a paired machine this one shares with, take groups: that machine
+   * pulls the change from here, so without sharing it never arrives. Paused or offline machines get it later.
+   */
+  private assignable({ deviceId, workspaceId }: { deviceId: string; workspaceId: string }): void {
+    if (deviceId === this.identity.deviceId) {
+      if (!this.executor.workspaceEntries().some(w => w.workspaceId === workspaceId)) throw new HttpError('Unknown workspace', 404)
+      return
+    }
+    const peer = this.state.peers[deviceId]
+    if (!this.active(peer)) throw new HttpError('Groups can only be changed on paired machines.', 409)
+    if (!peer.grantsToPeer.history) throw new HttpError(`This machine does not share with ${peer.name}, so group changes cannot reach it.`, 409)
+    if (!this.mirrors.get(deviceId)?.workspaces().some(w => w.workspaceId === workspaceId)) throw new HttpError('Unknown workspace', 404)
+  }
+
   /** A local group edit that is not in dsh-workspace-tags (another machine's workspace, or a link). */
   private async groupsChanged(): Promise<void> {
     this.executor.bump(); this.groupsRev = this.executor.revision()
@@ -691,8 +706,9 @@ export class DeviceSync {
         return { events: await mirror.read(sessionId, { after: typeof input.after === 'number' ? input.after : undefined, last: typeof input.limit === 'number' ? Math.min(input.limit, 5_000) : undefined }) }
       }
       case 'assign': {
-        const ref = text(input.workspaceRef, 'workspace', 300)
-        if (!parseWorkspaceRef(ref)) throw new HttpError('Invalid workspace')
+        const ref = text(input.workspaceRef, 'workspace', 300), target = parseWorkspaceRef(ref)
+        if (!target) throw new HttpError('Invalid workspace')
+        this.assignable(target)
         if (!this.groups.tags().some(tag => tag.id === input.tagId)) throw new HttpError('This group no longer exists', 404)
         if (this.groups.set(`assign|${input.tagId}|${ref}`, input.assigned === true)) await this.groupsChanged()
         return { ok: true }

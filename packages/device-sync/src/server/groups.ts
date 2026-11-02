@@ -221,7 +221,8 @@ export class Groups {
   view(tagsPlugin: boolean): GroupsView {
     const names = this.names()
     const tagNames = new Map(this.tags().map(tag => [tag.id, tag.name]))
-    const conflicts = Object.values(this.data.conflicts).map(({ stamps: _stamps, ...conflict }) => ({
+    // Workspace links have no settings left to resolve them in; the later write stands.
+    const conflicts = Object.values(this.data.conflicts).filter(conflict => !conflict.key.startsWith('link|')).map(({ stamps: _stamps, ...conflict }) => ({
       ...conflict, label: conflictLabel(conflict.key, tagNames), keptFrom: names[conflict.keptFrom] ?? conflict.keptFrom, otherFrom: names[conflict.otherFrom] ?? conflict.otherFrom,
     }))
     return { tags: this.tags(), assignments: this.assignments(), links: this.links(), conflicts, tagsPlugin }

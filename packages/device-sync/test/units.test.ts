@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
 import { openApprovals, openQuestions, shareEvent } from '../src/server/events.js'
-import { Groups, emptyGroups } from '../src/server/groups.js'
+import { Groups, emptyGroups, linkKey } from '../src/server/groups.js'
 import { bridgeApprovalEvent } from '../src/server/host.js'
 import { deviceIdOf, loadIdentity, pairingCode, requestCanonical, sha256 } from '../src/server/identity.js'
 import { Blobs, Mirror } from '../src/server/mirror.js'
@@ -87,6 +87,16 @@ test('groups merge field by field, and concurrent edits keep both values', () =>
   mini.merge('laptop', laptop.registers())
   assert.equal(mini.tags()[0].name, 'Laptop name')
   assert.equal(mini.view(true).conflicts.length, 0)
+})
+
+test('conflicting workspace links are settled by the later write and not shown', () => {
+  const laptop = new Groups(emptyGroups(), 'laptop'), mini = new Groups(emptyGroups(), 'mini')
+  laptop.set(linkKey('laptop:w1', 'mini:w2'), true)
+  mini.set(linkKey('laptop:w1', 'mini:w2'), false)
+  mini.merge('laptop', laptop.registers()); laptop.merge('mini', mini.registers())
+  assert.deepEqual(laptop.links(), mini.links())
+  assert.equal(mini.view(true).conflicts.length, 0)
+  assert.equal(laptop.view(true).conflicts.length, 0)
 })
 
 test('tags created separately with the same name are both kept under distinct names', () => {
