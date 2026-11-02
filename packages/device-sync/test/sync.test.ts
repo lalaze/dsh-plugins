@@ -3,7 +3,7 @@ import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import test from 'node:test'
 import type { LiveFrame, MirrorSessionView } from '../src/shared/protocol.js'
-import { node, pair, waitFor, type Node } from './fakes.js'
+import { node, pair, remoteWorkspace, waitFor, type Node } from './fakes.js'
 
 const mirrored = async (n: Node, sessionId: string): Promise<MirrorSessionView | undefined> => (await n.sync.status()).sessions.find(s => s.sessionId === sessionId)
 const texts = async (n: Node, deviceId: string, sessionId: string) => {
@@ -283,4 +283,59 @@ test('images arrive with their session and are stored once by content', async t 
   assert.equal((await readdir(join(a.dir, 'blobs'))).length, 1)
   // An attachment the session never showed is not served.
   await assert.rejects(a.sync.attachment(macId, 's1', 'img-3'), /Unknown attachment/)
+})
+
+test('a conversation in an SSH workspace carries on here, in this machine\'s workspace for the same directory', async t => {
+  const a = await node(t, 'Laptop'), b = await node(t, 'Mac mini')
+  const api = { host: 'Dev.example.com', username: 'me', port: 22, remotePath: '/srv/api' }
+  a.host.addWorkspace('wa', 'api', await remoteWorkspace(a, 'Dev.example.com-me-22/api', { ...api, alias: 'dev', createdAt: '2026-10-01T00:00:00.000Z' }))
+  a.host.addWorkspace('wn', 'notes', '/work/notes')
+  a.host.addSession('s1', 'wa', 'Fix login')
+  a.host.append('s1', 'user/message', { role: 'user', content: [{ type: 'text', text: 'Fix the login redirect' }] })
+  a.host.append('s1', 'assistant/message', { message: { role: 'assistant', content: [{ type: 'reasoning', text: 'PRIVATE THOUGHT' }, { type: 'text', text: 'The redirect drops the query string.' },
+    { type: 'tool-call', id: 'c1', name: 'remote_workspace', arguments: '{"command":"cat config.ts"}' }] } })
+  a.host.append('s1', 'tool/result', { message: { toolCallId: 'c1', content: [{ type: 'text', text: 'TOOL OUTPUT' }] } })
+  a.host.append('s1', 'assistant/message', { message: { role: 'assistant', content: [{ type: 'tool-call', id: 'c2', name: 'remote_workspace', arguments: '{}' }] } })
+  a.host.addSession('s2', 'wn', 'Notes')
+  // The Mac mini's folder for the same directory, written differently; another directory on that machine; a local folder.
+  b.host.addWorkspace('wl', 'api (local)', '/work/api')
+  b.host.addWorkspace('wo', 'web', await remoteWorkspace(b, 'dev.example.com-me-22/web', { ...api, remotePath: '/srv/web' }))
+  b.host.addWorkspace('wb', 'api', await remoteWorkspace(b, 'dev.example.com-me-22/api', { host: 'dev.example.com.', username: 'me', remotePath: '/srv/./api/' }))
+  await pair(a, b)
+  const laptopId = a.sync.identity.deviceId
+  const laptopWorkspaces = async () => (await b.sync.status()).workspaces.find(w => w.deviceId === laptopId)?.items ?? []
+  await waitFor(async () => (await laptopWorkspaces()).some(w => w.remote), 8_000, 'the SSH binding')
+  assert.deepEqual((await laptopWorkspaces()).find(w => w.workspaceId === 'wa')?.remote, { ...api, alias: 'dev' })
+  assert.equal((await laptopWorkspaces()).find(w => w.workspaceId === 'wn')?.remote, undefined, 'a local folder has no binding')
+  const own = (await b.sync.status()).workspaces.find(w => w.deviceId === b.sync.identity.deviceId)!.items
+  assert.deepEqual(own.find(w => w.workspaceId === 'wb')?.remote, { host: 'dev.example.com.', username: 'me', port: 22, remotePath: '/srv/api' })
+  await waitFor(async () => (await texts(b, laptopId, 's1')).length === 5, 8_000, 'the history')
+
+  const request = (extra: Record<string, unknown>) => b.sync.action({ action: 'continueHere', requestId: 'req-continue-1', deviceId: laptopId, sessionId: 's1', workspaceId: 'wb', ...extra } as never)
+  await assert.rejects(request({ workspaceId: 'wo' }), /not the same SSH directory/)
+  await assert.rejects(request({ workspaceId: 'wl' }), /not the same SSH directory/)
+  await assert.rejects(request({ workspaceId: 'missing' }), /Unknown workspace/)
+  await assert.rejects(request({ sessionId: 's2' }), /not in an SSH workspace/)
+  await assert.rejects(request({ sessionId: 'missing' }), /Unknown session/)
+  assert.equal(b.host.prompts.length, 0, 'nothing started for refused requests')
+
+  // The laptop is switched off; the Mac mini carries on alone, and a retry starts nothing more.
+  await a.sync.close()
+  const results = await Promise.all([1, 2].map(() => request({ note: 'Now add a test for it' }))) as { sessionId: string }[]
+  const again = await request({ note: 'Now add a test for it' }) as { sessionId: string }
+  const created = results[0].sessionId
+  assert.ok(created)
+  assert.deepEqual([results[1].sessionId, again.sessionId], [created, created])
+  assert.equal(b.host.prompts.length, 1)
+  assert.ok(b.host.workspaceState.items.find(w => w.workspaceId === 'wb')!.sessionIds.includes(created), 'in the matching workspace')
+  const prompt = b.host.prompts[0].text
+  assert.match(prompt, /“Fix login” from another machine, Laptop/)
+  assert.match(prompt, /ssh:\/\/me@Dev\.example\.com\/srv\/api/)
+  assert.match(prompt, /\[User\]\nFix the login redirect/)
+  assert.match(prompt, /\[Assistant\]\nThe redirect drops the query string\.\n\(Tools used: remote_workspace ×2\)/)
+  for (const left of ['PRIVATE THOUGHT', 'TOOL OUTPUT', 'cat config.ts']) assert.ok(!prompt.includes(left), `${left} is left out`)
+  assert.match(prompt, /Now add a test for it$/)
+  await waitFor(() => b.sync.executor.entry(created)?.continuedFrom?.sessionId === 's1', 8_000, 'the link to the original')
+  assert.deepEqual(b.sync.executor.entry(created)?.continuedFrom, { deviceId: laptopId, sessionId: 's1' })
+  assert.equal(a.host.prompts.length, 0, 'the original conversation is not changed')
 })

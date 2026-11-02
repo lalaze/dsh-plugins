@@ -3,7 +3,7 @@ import { workspaceRef, type LocalStatus } from '../shared/protocol.js'
 import { act } from './api.js'
 import { ago, localizeError, ui } from './i18n.js'
 import { SessionViewer } from './sessions.js'
-import { canCommand, groupReach, matchSessions, tagColor, visibleSessions } from './view-model.js'
+import { canCommand, continuation, groupReach, matchSessions, tagColor, visibleSessions } from './view-model.js'
 import { deliveryMessage, SessionFacts, type Delivery } from './session-common.js'
 
 /** Sessions listed per workspace before "Show more". */
@@ -101,7 +101,7 @@ export function RemoteSettings({ status, refresh }: { status: LocalStatus; refre
       })}
     </section>
     {selected && <section className="dsy-card" aria-label={ui('Remote sessions')}><div className="dsy-actions"><button type="button" className="dsy-btn" onClick={() => setSelected(undefined)}>{ui('Close')}</button></div>
-      {session ? <SessionViewer key={`${session.deviceId}:${session.sessionId}`} session={session} peer={status.peers.find(p => p.deviceId === session.deviceId)} outbox={status.outbox} refresh={refresh} /> : <p className="dsy-hint">{ui('This synced session is no longer available.')}</p>}
+      {session ? <SessionViewer key={`${session.deviceId}:${session.sessionId}`} session={session} peer={status.peers.find(p => p.deviceId === session.deviceId)} outbox={status.outbox} continuation={continuation(status, session)} refresh={refresh} /> : <p className="dsy-hint">{ui('This synced session is no longer available.')}</p>}
     </section>}
   </>
 }

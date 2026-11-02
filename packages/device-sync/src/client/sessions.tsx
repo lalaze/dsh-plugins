@@ -1,14 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react'
-import type { Command, MirrorSessionView, PeerStatus, PendingInteraction, QuestionAnswer, SyncedEvent, OutboxItem } from '../shared/protocol.js'
+import { remoteLabel, type Command, type CommandResult, type MirrorSessionView, type PeerStatus, type PendingInteraction, type QuestionAnswer, type SyncedEvent, type OutboxItem } from '../shared/protocol.js'
 import { act, ApiError, followLive, loadStatus, requestId } from './api.js'
 import { localizeError, ui } from './i18n.js'
+import { openLocalSession } from './navigation.js'
 import { Timeline } from './timeline.js'
 import { reconnectLive } from './live.js'
-import { canCommand, canInteract, isDefiniteRejection, mergeEvents } from './view-model.js'
+import { canCommand, canInteract, continuation as continuationOf, isDefiniteRejection, mergeEvents } from './view-model.js'
 import { deliveryMessage, SessionFacts, type Delivery } from './session-common.js'
 
 /** Keyed by device/session by the caller: old fetches cannot populate another conversation. */
-export function SessionViewer({ session, peer, outbox, refresh }: { session: MirrorSessionView; peer?: PeerStatus; outbox: OutboxItem[]; refresh(): Promise<void> }) {
+export function SessionViewer({ session, peer, outbox, continuation, refresh }: { session: MirrorSessionView; peer?: PeerStatus; outbox: OutboxItem[]; continuation?: Continuation; refresh(): Promise<void> }) {
   const [events, setEvents] = useState<SyncedEvent[]>([])
   const [draft, setDraft] = useState<{ text: string; reasoning: string }>()
   const [loadError, setLoadError] = useState(''), [loading, setLoading] = useState(true)
@@ -98,7 +99,44 @@ export function SessionViewer({ session, peer, outbox, refresh }: { session: Mir
         <button type="submit" className="dsy-btn" data-kind="primary" disabled={busy || !allowed || !!retry || !text.trim()}>{ui(busy ? 'Sending…' : peer?.connection === 'offline' ? 'Hold request' : 'Send')}</button>
         <button type="button" className="dsy-btn" disabled={busy || !allowed || !canInteract(peer) || !!retry || session.state === 'idle'} onClick={() => void send({ kind: 'cancel', requestId: requestId(), sessionId: session.sessionId })}>{ui('Stop task')}</button></div>
     </form>
+    {continuation && <ContinueHere session={session} continuation={continuation} />}
   </div>
+}
+
+type Continuation = NonNullable<ReturnType<typeof continuationOf>>
+/** Carry an SSH workspace's conversation on in this machine's workspace for the same directory. */
+function ContinueHere({ session, continuation }: { session: MirrorSessionView; continuation: Continuation }) {
+  const [note, setNote] = useState(''), [busy, setBusy] = useState(false), lock = useRef(false), alive = useRef(true)
+  const [error, setError] = useState(''), [notice, setNotice] = useState('')
+  // The request whose outcome is unknown; trying again reuses it, so at most one conversation is started.
+  const pending = useRef<string>(), [uncertain, setUncertain] = useState(false)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  const { local, remote } = continuation
+  if (!local) return <section className="dsy-continue"><h4>{ui('Continue on this machine')}</h4>
+    <p className="dsy-hint">{ui('This machine has no workspace for {0} yet. Add this SSH machine under Settings → Remote agents; it then brings in the remote workspaces shared on that machine.', { 0: remoteLabel(remote) })}</p></section>
+  const start = async () => {
+    if (lock.current) return
+    lock.current = true; setBusy(true); setError(''); setNotice('')
+    const id = pending.current ??= requestId()
+    try {
+      const result = await act<CommandResult>({ action: 'continueHere', requestId: id, deviceId: session.deviceId, sessionId: session.sessionId, workspaceId: local.workspaceId, ...(note.trim() ? { note } : {}) })
+      pending.current = undefined
+      const opened = !!result.sessionId && openLocalSession(result.sessionId)
+      if (alive.current) { setUncertain(false); setNote(''); setNotice(ui(opened ? 'Started in {0} on this machine.' : 'Started in {0} on this machine. Open it from the sidebar.', { 0: local.title })) }
+    } catch (e) {
+      const definite = isDefiniteRejection(e instanceof ApiError ? e.status : undefined)
+      if (definite) pending.current = undefined
+      if (alive.current) { setError(localizeError(e)); setUncertain(!definite) }
+    } finally { lock.current = false; if (alive.current) setBusy(false) }
+  }
+  return <section className="dsy-continue" aria-label={ui('Continue on this machine')}><h4>{ui('Continue on this machine')}</h4>
+    <p className="dsy-hint">{ui('Starts a new conversation in {0} on this machine, with this conversation’s history. The original conversation is not changed.', { 0: local.title })}</p>
+    {session.storedSeq < session.lastSeq && <p className="dsy-warn">{ui('Part of this conversation has not been copied here yet; only what is shown above is included.')}</p>}
+    <textarea aria-label={ui('What next (optional)')} placeholder={ui('What should happen next? (optional)')} value={note} disabled={busy || uncertain} onChange={e => setNote(e.target.value)} />
+    {error && <p className="dsy-error" role="alert">{error}</p>}{notice && <p className="dsy-hint" role="status">{notice}</p>}
+    {uncertain && <p className="dsy-hint">{ui('No confirmation arrived. Trying again sends the same request, so at most one conversation is started.')}</p>}
+    <div className="dsy-actions" style={{ justifyContent: 'flex-start' }}><button type="button" className="dsy-btn" data-kind="primary" disabled={busy} onClick={() => void start()}>{ui(busy ? 'Starting…' : uncertain ? 'Try again' : 'Continue here')}</button></div>
+  </section>
 }
 
 type AnswerCommand = { kind: 'approval'; approvalId: string; outcome: 'allowed-once' | 'rejected' } | { kind: 'answer'; callId: string; answers: QuestionAnswer[] }

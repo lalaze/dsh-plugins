@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { TestContext } from 'node:test'
@@ -135,22 +135,30 @@ export class FakeTags implements WorkspaceTagsService {
   private fire() { for (const listener of this.listeners) listener(this.snapshot()) }
 }
 
-export interface Node { sync: DeviceSync; host: FakeHost; tags: FakeTags; dir: string; port: number; endpoint: string }
+export interface Node { sync: DeviceSync; host: FakeHost; tags: FakeTags; dir: string; home: string; port: number; endpoint: string }
 
 let nextPort = 47700 + Math.floor(Math.random() * 1000)
 
 export async function node(t: TestContext, name: string, options: { dir?: string; port?: number } = {}): Promise<Node> {
   const dir = options.dir ?? await mkdtemp(join(tmpdir(), `device-sync-${name}-`))
   const host = new FakeHost(), tags = new FakeTags()
-  const port = options.port ?? nextPort++
-  const sync = await DeviceSync.open({ stateDir: dir, host, tags: () => tags, listen: { host: '127.0.0.1', port }, intervalMs: 150 })
+  const port = options.port ?? nextPort++, home = join(dir, 'dsh-home')
+  const sync = await DeviceSync.open({ stateDir: dir, host, tags: () => tags, listen: { host: '127.0.0.1', port }, intervalMs: 150, dshHome: home })
   // After hooks run in the order they were added: close before the directory goes.
   t.after(() => sync.close())
   if (!options.dir) t.after(() => rm(dir, { recursive: true, force: true, maxRetries: 5 }))
   await sync.action({ action: 'rename', name })
   await sync.start()
   await waitFor(async () => Boolean((await sync.status()).listener.address))
-  return { sync, host, tags, dir, port, endpoint: `127.0.0.1:${port}` }
+  return { sync, host, tags, dir, home, port, endpoint: `127.0.0.1:${port}` }
+}
+
+/** The placeholder folder remote-agents creates for a remote workspace, at `remote-workspaces/<folder>`. */
+export async function remoteWorkspace(n: Node, folder: string, meta: Record<string, unknown>): Promise<string> {
+  const path = join(n.home, 'remote-workspaces', ...folder.split('/'))
+  await mkdir(path, { recursive: true })
+  await writeFile(join(path, '.dsh-remote-meta.json'), JSON.stringify(meta))
+  return path
 }
 
 /** Pair two nodes, confirming on both, and wait until each lists the other as paired. */

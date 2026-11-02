@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { canCommand, canInteract, groupReach, isDefiniteRejection, matchSessions, mergeEvents, visibleSessions } from '../src/client/view-model.js'
-import type { MirrorSessionView, PeerStatus, SyncedEvent } from '../src/shared/protocol.js'
+import { canCommand, canInteract, continuation, groupReach, isDefiniteRejection, matchSessions, mergeEvents, visibleSessions } from '../src/client/view-model.js'
+import { matchingWorkspace, normalizeRemotePath, remoteLabel, sameRemote, type LocalStatus, type MirrorSessionView, type PeerStatus, type RemoteBinding, type SyncedEvent, type WorkspaceEntry } from '../src/shared/protocol.js'
 
 const peer = (connection: PeerStatus['connection'], command = true) => ({ connection, grantsFromPeer: { command, history: true } } as PeerStatus)
 const session = (extra: Partial<MirrorSessionView> = {}) => ({ deviceId: 'a', sessionId: 's', updatedAt: 0, lastSeq: 0, storedSeq: 0, archived: false, state: 'idle', pending: [], ...extra } as MirrorSessionView)
@@ -55,4 +55,36 @@ test('overlapping history fetches deduplicate and preserve sequence gaps', () =>
 test('definite HTTP rejections unlock editing, ambiguous outcomes keep the original request ID', () => {
   for (const status of [400, 401, 403, 404, 409, 413, 422, 429]) assert.equal(isDefiniteRejection(status), true)
   for (const status of [undefined, 408, 500, 502, 503, 504]) assert.equal(isDefiniteRejection(status), false)
+})
+
+test('SSH workspaces are the same project only with the same host, user, port and normalized directory', () => {
+  const api: RemoteBinding = { host: 'Dev.Example.com', username: 'me', port: 22, remotePath: '/srv/api' }
+  assert.equal(normalizeRemotePath('/srv/./web/../api//'), '/srv/api')
+  for (const same of [api, { ...api, host: 'dev.example.com.' }, { ...api, remotePath: '/srv/./web/../api/' }, { ...api, alias: 'other-alias' }]) assert.equal(sameRemote(api, same), true, JSON.stringify(same))
+  assert.equal(sameRemote({ ...api, host: '[fd7a::1]' }, { ...api, host: 'FD7A::1' }), true)
+  for (const other of [{ ...api, host: 'dev2.example.com' }, { ...api, username: 'Me' }, { ...api, port: 2222 }, { ...api, remotePath: '/srv/api/sub' }, { ...api, remotePath: '/srv' }]) assert.equal(sameRemote(api, other), false, JSON.stringify(other))
+  // Bindings from the paired machine may be missing or malformed; those match nothing.
+  for (const bad of [undefined, { ...api, port: '22' }, { ...api, username: '' }, { ...api, remotePath: 'srv/api' }, { host: 'x' }] as RemoteBinding[]) {
+    assert.equal(sameRemote(api, bad), false); assert.equal(sameRemote(bad, bad), false)
+  }
+  assert.equal(remoteLabel(api), 'ssh://me@Dev.Example.com/srv/api')
+  assert.equal(remoteLabel({ ...api, host: 'fd7a::1', port: 2222 }), 'ssh://me@[fd7a::1]:2222/srv/api')
+  const workspace = (workspaceId: string, remote?: RemoteBinding) => ({ workspaceId, title: workspaceId, path: `/p/${workspaceId}`, sessionIds: [], order: 0, ...(remote ? { remote } : {}) } as WorkspaceEntry)
+  const local = [workspace('plain'), workspace('web', { ...api, remotePath: '/srv/web' }), workspace('api', { ...api, host: 'dev.example.com' }), workspace('api-2', api)]
+  assert.equal(matchingWorkspace(api, local)?.workspaceId, 'api')
+  assert.equal(matchingWorkspace({ ...api, port: 2200 }, local), undefined)
+  assert.equal(matchingWorkspace(undefined, local), undefined)
+})
+
+test('continuing here is offered for SSH workspaces only, with this machine\'s matching workspace when there is one', () => {
+  const api: RemoteBinding = { host: 'dev', username: 'me', port: 22, remotePath: '/srv/api' }
+  const status = (localRemote?: RemoteBinding) => ({ device: { deviceId: 'here', name: 'Mac mini' }, workspaces: [
+    { deviceId: 'here', items: [{ workspaceId: 'mine', title: 'api', path: '/h/api', sessionIds: [], order: 0, ...(localRemote ? { remote: localRemote } : {}) }] },
+    { deviceId: 'a', items: [{ workspaceId: 'ssh', title: 'api', path: '/l/api', sessionIds: [], order: 0, remote: api }, { workspaceId: 'plain', title: 'notes', path: '/l/notes', sessionIds: [], order: 1 }] },
+  ] } as unknown as LocalStatus)
+  assert.equal(continuation(status(api), session({ workspaceId: 'plain' })), undefined)
+  assert.equal(continuation(status(api), session()), undefined, 'a session outside any workspace')
+  assert.equal(continuation(status(api), session({ workspaceId: 'ssh' }))?.local?.workspaceId, 'mine')
+  assert.deepEqual(continuation(status({ ...api, remotePath: '/srv/web' }), session({ workspaceId: 'ssh' })), { remote: api })
+  assert.deepEqual(continuation(status(), session({ workspaceId: 'ssh' })), { remote: api })
 })

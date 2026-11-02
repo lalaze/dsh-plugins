@@ -1,4 +1,4 @@
-import type { MirrorSessionView, PeerStatus, SyncedEvent } from '../shared/protocol.js'
+import { isRemoteBinding, matchingWorkspace, type LocalStatus, type MirrorSessionView, type PeerStatus, type RemoteBinding, type SyncedEvent, type WorkspaceEntry } from '../shared/protocol.js'
 
 /** dsh-workspace-tags' palette ids; several (amber, emerald, sky, rose) are not CSS color names. */
 const TAG_COLORS: Record<string, string> = {
@@ -34,4 +34,15 @@ export function mergeEvents(old: SyncedEvent[], next: SyncedEvent[]): SyncedEven
 /** A definite client rejection did not execute; a timeout may still be ambiguous. */
 export function isDefiniteRejection(status: number | undefined): boolean {
   return status !== undefined && status >= 400 && status < 500 && status !== 408
+}
+
+/**
+ * Whether a synced session can be carried on here. Undefined unless its workspace is an SSH directory; otherwise
+ * that directory, and this machine's workspace for the same directory when there is one.
+ */
+export function continuation(status: LocalStatus, session: MirrorSessionView): { remote: RemoteBinding; local?: WorkspaceEntry } | undefined {
+  const remote = status.workspaces.find(w => w.deviceId === session.deviceId)?.items.find(w => w.workspaceId === session.workspaceId)?.remote
+  if (!isRemoteBinding(remote)) return undefined
+  const local = matchingWorkspace(remote, status.workspaces.find(w => w.deviceId === status.device.deviceId)?.items ?? [])
+  return { remote, ...(local ? { local } : {}) }
 }

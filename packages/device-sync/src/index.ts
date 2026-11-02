@@ -16,7 +16,8 @@ import { DeviceSync, HttpError, type WorkspaceTagsService } from './server/servi
 export const name = 'dsh-device-sync'
 export const inject = ['connection']
 
-const defaultStateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', name)
+const dshHome = () => process.env.DSH_HOME?.trim() || join(homedir(), '.dsh')
+const defaultStateDir = () => join(dshHome(), 'storages', name)
 
 export interface Config {
   stateDir?: string
@@ -46,6 +47,7 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
     stateDir: config.stateDir ?? defaultStateDir(),
     host: dshHost(ctx),
     tags: () => ctx.get('workspaceTags') as WorkspaceTagsService | undefined,
+    dshHome: dshHome(),
     listen: { port: config.port ?? DEFAULT_PORT, host: config.listenHost || undefined, advertise: config.advertise || undefined, anyNetwork: config.anyNetwork === true },
     log,
   })

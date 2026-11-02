@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import type { LocalStatus } from '../shared/protocol.js'
 import { useStatus } from './api.js'
 import { ui, useLocale } from './i18n.js'
+import { onSessionOpened } from './navigation.js'
 import { SyncSettings } from './settings.js'
 import { styles } from './styles.js'
 
@@ -30,7 +31,9 @@ function SettingsDialog({ onClose }: { onClose(): void }) {
     close.current?.focus()
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.stopPropagation(); onCloseRef.current() } }
     document.addEventListener('keydown', key, true)
-    return () => { document.removeEventListener('keydown', key, true); if (opener?.isConnected) opener.focus() }
+    // A conversation opened from here, such as one continued on this machine, shows behind the dialog.
+    const stopOpened = onSessionOpened(() => onCloseRef.current())
+    return () => { document.removeEventListener('keydown', key, true); stopOpened(); if (opener?.isConnected) opener.focus() }
   }, [])
   return createPortal(<div className="dsy dsy-overlay"><style>{styles}</style>
     <div className="dsy-mask" onPointerDown={onClose} />

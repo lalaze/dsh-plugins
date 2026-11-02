@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm, appendFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, appendFile, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { Context } from '@deepseek-ai/cordis'
+import { readRemoteBinding } from '../src/server/bindings.js'
 import { openApprovals, openQuestions, shareEvent } from '../src/server/events.js'
+import { MAX_TEXT } from '../src/server/executor.js'
 import { Groups, emptyGroups, linkKey } from '../src/server/groups.js'
+import { handoffPrompt } from '../src/server/handoff.js'
 import { bridgeApprovalEvent } from '../src/server/host.js'
 import { deviceIdOf, loadIdentity, pairingCode, requestCanonical, sha256 } from '../src/server/identity.js'
 import { Blobs, Mirror } from '../src/server/mirror.js'
@@ -179,4 +182,39 @@ test('an approval answered locally needs nothing from the other machine, and no 
   bridgeApprovalEvent(plain, () => undefined)
   const plainWaterfall = plain.waterfall as unknown as (...args: unknown[]) => Promise<string>
   assert.equal(await plainWaterfall.call(plain, {}, 'approval/request', { agent: { id: 's' }, toolName: 'bash' }, () => Promise.resolve('unavailable')), 'unavailable')
+})
+
+test('a long history is cut to fit one message, keeping the most recent part and the next step', () => {
+  const events = Array.from({ length: 120 }, (_, i) => ({ seq: i, time: 0, type: i % 2 ? 'assistant/message' : 'user/message',
+    data: i % 2 ? { message: { content: [{ type: 'text', text: `answer ${i} ${'b'.repeat(9_000)}` }] } } : { content: [{ type: 'text', text: `question ${i} ${'a'.repeat(3_000)}` }] } }))
+  const note = 'n'.repeat(20_000)
+  const prompt = handoffPrompt(events, { title: 'Long', machine: 'Laptop', workspace: 'ssh://me@dev/srv' }, MAX_TEXT - 1)
+  const noted = handoffPrompt(events, { title: 'Long', machine: 'Laptop', workspace: 'ssh://me@dev/srv', note }, MAX_TEXT - 1)
+  for (const text of [prompt, noted]) {
+    assert.ok(text.length < MAX_TEXT, `${text.length} characters`)
+    assert.match(text, /answer 119 b+\n… \[\d+ characters left out\] …\nb+\n<\/previous-conversation>/, 'the latest answer, its middle left out')
+    assert.match(text, /\[\d+ earlier messages left out\]/)
+    assert.ok(!text.includes('question 0 '))
+  }
+  assert.ok(noted.endsWith(note))
+  assert.ok(noted.length > prompt.length - 1_000, 'a long note still leaves room for history')
+})
+
+test('remote workspace bindings are read from remote-agents\' placeholder folders only', async t => {
+  const home = await tempDir(t), root = join(home, 'remote-workspaces')
+  const anchor = join(root, 'dev-me-22', 'api'), outside = join(home, 'elsewhere')
+  await mkdir(join(anchor, 'pkg'), { recursive: true }); await mkdir(outside, { recursive: true })
+  await writeFile(join(anchor, '.dsh-remote-meta.json'), JSON.stringify({ host: 'dev', username: 'me', remotePath: '/srv/api', alias: 'work' }))
+  assert.deepEqual(await readRemoteBinding(home, anchor), { host: 'dev', username: 'me', port: 22, remotePath: '/srv/api', alias: 'work' })
+  assert.equal((await readRemoteBinding(home, join(anchor, 'pkg')))?.remotePath, '/srv/api/pkg', 'a folder inside the workspace')
+  assert.equal(await readRemoteBinding(home, join(root, 'dev-me-22')), undefined)
+  assert.equal(await readRemoteBinding(home, outside), undefined)
+  // Metadata reached through a link out of the folder does not count, nor does a malformed one.
+  await writeFile(join(outside, 'meta.json'), JSON.stringify({ host: 'evil', username: 'me', remotePath: '/' }))
+  await mkdir(join(root, 'dev-me-22', 'linked'))
+  await symlink(join(outside, 'meta.json'), join(root, 'dev-me-22', 'linked', '.dsh-remote-meta.json'))
+  assert.equal(await readRemoteBinding(home, join(root, 'dev-me-22', 'linked')), undefined)
+  await mkdir(join(root, 'dev-me-22', 'bad'))
+  await writeFile(join(root, 'dev-me-22', 'bad', '.dsh-remote-meta.json'), JSON.stringify({ host: 'dev', username: 'me', port: 0, remotePath: '/srv' }))
+  assert.equal(await readRemoteBinding(home, join(root, 'dev-me-22', 'bad')), undefined)
 })

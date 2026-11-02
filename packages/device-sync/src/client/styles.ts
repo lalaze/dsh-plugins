@@ -98,6 +98,9 @@ export const styles = `
 .dsy-composer{border-top:.5px solid var(--dsy-line);padding:10px 18px 14px;display:grid;gap:8px}
 .dsy-composer textarea{width:100%;min-height:64px;max-height:220px;resize:vertical;padding:8px 10px;border:.5px solid var(--dsy-line-strong);border-radius:var(--dsy-r-md);background:transparent}
 .dsy-composer-bar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.dsy-continue{border-top:.5px solid var(--dsy-line);padding:10px 18px 14px;display:grid;gap:8px}
+.dsy-continue h4{font-size:13px;font-weight:500}
+.dsy-continue textarea{width:100%;min-height:52px;max-height:180px;resize:vertical;padding:8px 10px;border:.5px solid var(--dsy-line-strong);border-radius:var(--dsy-r-md);background:transparent}
 .dsy-banner{margin:10px 18px 0;padding:8px 12px;border-radius:var(--dsy-r-sm);background:var(--dsy-track);font-size:12px}
 .dsy-banner[data-kind=warn]{color:var(--dsy-warn)}
 .dsy-empty{margin:auto;color:var(--dsy-muted);text-align:center;padding:24px}

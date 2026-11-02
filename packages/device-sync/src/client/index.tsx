@@ -2,6 +2,7 @@ import type { LocaleContext } from '@dsh-plugins/i18n'
 import type React from 'react'
 import { SyncBadge } from './badge.js'
 import { installLocale, ui } from './i18n.js'
+import { setNavigation } from './navigation.js'
 import { SyncSettings } from './settings.js'
 
 interface Client extends LocaleContext {
@@ -14,6 +15,8 @@ export const name = 'dsh-device-sync-client'
 export const inject = ['slots', 'locale']
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx))
+  // Read when used: DSH provides its navigation after plugins load.
+  ctx.effect(() => setNavigation(() => (ctx.get as ((name: string) => unknown) | undefined)?.('uiWorkspace') as { openSession?(sessionId: string): void } | undefined))
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'device-sync', order: 75, label: () => ui('Device sync') }, SyncSettings))
   // Sync status among the conversation header utilities, before the host's buttons (order 0).
   ctx.slots.inject('conversation.session.header.utilities', () => {

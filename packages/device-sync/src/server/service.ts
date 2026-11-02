@@ -12,12 +12,13 @@ import { networkInterfaces } from 'node:os'
 import { join } from 'node:path'
 import {
   DEFAULT_GRANTS, PROTOCOL_VERSION, type Command, type CommandResult, type Grants, type LiveFrame, type LocalAction, type LocalStatus,
-  type OutboxItem, type PairingStatus, type PeerStatus, type SessionEntry, type SyncedEvent, type WorkspaceEntry, parseWorkspaceRef,
+  type OutboxItem, type PairingStatus, type PeerStatus, type SessionEntry, type SyncedEvent, type WorkspaceEntry, parseWorkspaceRef, remoteLabel, sameRemote,
 } from '../shared/protocol.js'
 import { attachmentRefs } from './events.js'
-import { CommandError, emptyExecutorData, Executor, type ExecutorData } from './executor.js'
+import { CommandError, emptyExecutorData, Executor, MAX_TEXT, type ExecutorData } from './executor.js'
 import { readJson, Serial, writeJsonAtomic } from './files.js'
 import { emptyGroups, Groups, linkKey, type GroupsData, type Registers, type TagState } from './groups.js'
+import { handoffPrompt, MAX_NOTE } from './handoff.js'
 import type { HostApi } from './host.js'
 import { defaultDeviceName, deviceIdOf, loadIdentity, nonce, pairingCode, sha256, type Identity } from './identity.js'
 import { Blobs, Mirror, type AttachmentMeta } from './mirror.js'
@@ -90,6 +91,8 @@ export interface ServiceOptions {
   intervalMs?: number
   /** Images up to this size are fetched with their session; larger attachments when first opened. */
   autoDownloadBytes?: number
+  /** DSH's home directory, where remote workspaces record which SSH directory they stand for. */
+  dshHome?: string
   log?(message: string): void
 }
 
@@ -156,7 +159,7 @@ export class DeviceSync {
       host: options.host, data: state.executor,
       save: () => this.save(), changed: () => this.notifyPeers(),
       approvalPeers: () => Object.values(this.state.peers).some(peer => this.active(peer) && !peer.paused && peer.grantsToPeer.command && this.links.get(peer.deviceId)?.online),
-      log: options.log,
+      dshHome: options.dshHome, log: options.log,
     })
   }
 
@@ -626,6 +629,27 @@ export class DeviceSync {
 
   private outboxView({ command: _command, ...item }: OutboxRecord): OutboxItem { return item }
 
+  /**
+   * Start a session here that carries on a synced one, in this machine's workspace for the same SSH directory. It
+   * runs only here, so the other machine, which may well be off, is neither asked nor changed.
+   */
+  private async continueHere(input: Extract<LocalAction, { action: 'continueHere' }>): Promise<CommandResult> {
+    const deviceId = text(input.deviceId, 'device'), sessionId = text(input.sessionId, 'session'), workspaceId = text(input.workspaceId, 'workspace', 300)
+    const mirror = this.mirrors.get(deviceId), session = mirror?.session(sessionId)
+    if (!mirror || !session) throw new HttpError('Unknown session', 404)
+    const source = mirror.workspaces().find(w => w.workspaceId === session.workspaceId)?.remote
+    if (!source) throw new HttpError('This conversation is not in an SSH workspace.', 409)
+    const local = this.executor.workspaceEntries().find(w => w.workspaceId === workspaceId)
+    if (!local) throw new HttpError('Unknown workspace', 404)
+    if (!sameRemote(local.remote, source)) throw new HttpError('This workspace is not the same SSH directory as the conversation.', 409)
+    const note = typeof input.note === 'string' ? input.note : ''
+    if (note.length > MAX_NOTE) throw new HttpError('The message is too long')
+    const history = handoffPrompt(await mirror.read(sessionId), {
+      title: session.title ?? session.localTitle, machine: this.state.peers[deviceId]?.name ?? deviceId, workspace: remoteLabel(source), note,
+    }, MAX_TEXT - 1)
+    return this.executor.command({ kind: 'create', requestId: input.requestId, workspaceId, content: [{ type: 'text', text: history }], continuedFrom: { deviceId, sessionId } })
+  }
+
   // ---------------------------------------------------------------- browser API
 
   async status(): Promise<LocalStatus> {
@@ -720,6 +744,7 @@ export class DeviceSync {
         return { ok: true }
       }
       case 'resolveConflict': if (this.groups.resolve(text(input.key, 'conflict', 500), input.useOther === true)) await this.groupsChanged(); return { ok: true }
+      case 'continueHere': return this.continueHere(input)
       default: throw new HttpError('Unknown action')
     }
   }

@@ -1,8 +1,12 @@
 import React from '../../packages/device-sync/node_modules/react/index.js'
 import { createRoot } from '../../packages/device-sync/node_modules/react-dom/client.js'
 import { SyncSettings } from '../../packages/device-sync/src/client/settings'
+import { setNavigation } from '../../packages/device-sync/src/client/navigation'
 const status:any = {device:{deviceId:'local',name:'Laptop'},listener:{address:'100.1.1.1:47630'},peers:[{deviceId:'remote',name:'Mac mini',endpoint:'100.1.1.2',connection:'online',pairedAt:Date.now(),grantsFromPeer:{history:true,command:true},grantsToPeer:{history:true,command:false},pending:0}],pairings:[],workspaces:[{deviceId:'local',items:[{workspaceId:'local-ws',title:'Local project',path:'/local',order:0,sessionIds:[]}]},{deviceId:'remote',items:[{workspaceId:'remote-ws',title:'Remote project',path:'/remote/project',order:0,sessionIds:['s1','s2']}]}],sessions:[{deviceId:'remote',sessionId:'s1',workspaceId:'remote-ws',title:'First task',updatedAt:Date.now(),lastSeq:1,storedSeq:1,archived:false,state:'waiting',pending:[{kind:'approval',id:'approval1',toolName:'test command',reason:'Run tests',askedAt:Date.now(),answerable:true}]},{deviceId:'remote',sessionId:'s2',workspaceId:'remote-ws',title:'Second task',updatedAt:Date.now(),lastSeq:1,storedSeq:1,archived:false,state:'idle',pending:[]},...[3,4,5,6,7,8].map(n=>({deviceId:'remote',sessionId:'s'+n,workspaceId:'remote-ws',title:'Old task '+n,updatedAt:Date.now()-n*86400000,lastSeq:1,storedSeq:1,archived:false,state:'idle',pending:[]}))],groups:{tags:[{id:'work',name:'Work tag',color:'blue',order:0}],assignments:{},links:[],conflicts:[],tagsPlugin:true},outbox:[],backups:[]}
 const calls:any[]=[]
+const opened:string[]=[]
+setNavigation(()=>({openSession:(id:string)=>{opened.push(id)}}))
+let continueFailures=1
 let rejectPrompt=false
 const streams: {session:string; signal:AbortSignal; close():void; active():boolean}[]=[]
 let reconnects=0
@@ -25,6 +29,10 @@ window.fetch=async (url:any,opts:any={}) => {
  if(a.action==='events') return Response.json({events:[{seq:1,type:'user/message',time:Date.now(),data:{content:[{type:'text',text:a.sessionId==='s1'?'HISTORY ONE':'HISTORY TWO'}]}}]})
  if(a.action==='assign') status.groups.assignments[a.workspaceRef]=a.assigned?[a.tagId]:[]
  if(a.action==='link') status.groups.links=a.linked?[[a.localRef,a.remoteRef]]:[]
+ if(a.action==='continueHere') {
+  if(continueFailures-->0) return Response.json({error:'The request failed on this machine'},{status:502})
+  return Response.json({ok:true,sessionId:'local-new'})
+ }
  if(a.action==='hideSession') status.sessions.find((s:any)=>s.sessionId===a.sessionId).hidden=a.hidden
  if(a.action==='command') {
   if(rejectPrompt && a.command.kind==='prompt') return Response.json({error:'The message is too long'},{status:400})
@@ -98,6 +106,28 @@ async function test(){try{
  const grant=streams.at(-1)!;status.peers[0].grantsFromPeer.history=false;await wait(2200)
  assert(grant.signal.aborted,'revoked history grant aborts live stream')
  const revoked=reconnects;await wait(3100);assert(reconnects===revoked,'revoked grant prevents reconnect')
+ assert(!document.body.textContent?.includes('Continue on this machine'),'no continuation for a session outside an SSH workspace')
+ const api={host:'dev.example.com',username:'me',port:22,remotePath:'/srv/api'}
+ status.peers[0].grantsFromPeer.history=true
+ status.workspaces[1].items.push({workspaceId:'ssh-ws',title:'SSH project',path:'/remote/ssh',order:1,sessionIds:['s9'],remote:api})
+ status.sessions.push({deviceId:'remote',sessionId:'s9',workspaceId:'ssh-ws',title:'SSH task',updatedAt:Date.now(),lastSeq:3,storedSeq:1,archived:false,state:'idle',pending:[]})
+ await wait(2200)
+ button('SSH task').click();await wait()
+ assert(document.body.textContent?.includes('This machine has no workspace for ssh://me@dev.example.com/srv/api yet. Add this SSH machine under Settings → Remote agents')&&!has('Continue here'),'without a matching workspace the viewer says how to add one')
+ status.workspaces[0].items.push({workspaceId:'local-ssh',title:'api on Mac mini',path:'/home/.dsh/remote-workspaces/dev/api',order:1,sessionIds:[],remote:{...api,host:'Dev.Example.com',remotePath:'/srv/api/'}})
+ await wait(2200)
+ assert(document.body.textContent?.includes('Starts a new conversation in api on Mac mini on this machine, with this conversation’s history. The original conversation is not changed.'),'a matching workspace is named before starting')
+ assert(document.querySelector('.dsy-continue .dsy-warn')?.textContent?.includes('has not been copied here yet'),'a mirror behind its machine says so')
+ const note=document.querySelector('.dsy-continue textarea') as HTMLTextAreaElement
+ Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(note,'Add a test');note.dispatchEvent(new Event('input',{bubbles:true}));await wait()
+ button('Continue here').click();button('Continue here').click();await wait()
+ const firstTry=calls.filter(a=>a.action==='continueHere')
+ assert(firstTry.length===1&&firstTry[0].workspaceId==='local-ssh'&&firstTry[0].sessionId==='s9'&&firstTry[0].deviceId==='remote'&&firstTry[0].note==='Add a test','double click sends one continuation with the note')
+ assert(has('Try again')&&(document.querySelector('.dsy-continue textarea') as HTMLTextAreaElement).disabled&&opened.length===0,'an uncertain failure locks the note and offers the same request again')
+ button('Try again').click();await wait()
+ const tries=calls.filter(a=>a.action==='continueHere')
+ assert(tries.length===2&&tries[1].requestId===tries[0].requestId,'trying again reuses the request ID')
+ assert(opened.length===1&&opened[0]==='local-new','the new local conversation is opened')
  document.getElementById('result')!.textContent=JSON.stringify({ok:true,results})
  }catch(e){document.getElementById('result')!.textContent=JSON.stringify({ok:false,results,error:String(e)})}}
 void test()
