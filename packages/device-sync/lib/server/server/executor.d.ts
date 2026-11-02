@@ -25,6 +25,7 @@ export interface ExecutorData {
     }>;
 }
 export declare const emptyExecutorData: () => ExecutorData;
+export declare const MAX_TEXT = 200000;
 export interface ExecutorOptions {
     host: HostApi;
     data: ExecutorData;
@@ -33,6 +34,8 @@ export interface ExecutorOptions {
     changed(): void;
     /** Whether any paired machine could answer an approval now. */
     approvalPeers(): boolean;
+    /** DSH's home directory, whose `remote-workspaces` folder holds remote workspaces' SSH bindings. */
+    dshHome?: string;
     log?(message: string): void;
 }
 export declare class Executor {
@@ -41,6 +44,10 @@ export declare class Executor {
     private readonly entries;
     private workspaceState;
     private workspaceRev;
+    /** SSH bindings read for workspace paths; `null` for a path that is not a remote workspace. */
+    private bindings;
+    private readingBindings?;
+    private bindingsAgain;
     private rev;
     /** Identifies this process's change counter; a peer holding another epoch's cursor gets everything again. */
     readonly epoch: string;
@@ -81,6 +88,11 @@ export declare class Executor {
     bump(): number;
     revision(): number;
     workspaceEntries(): WorkspaceEntry[];
+    /**
+     * Read the SSH binding of every workspace again; peers fetch the workspaces once more when one changed. Reading
+     * each time the workspaces change also picks up a placeholder folder created just after its workspace.
+     */
+    private readBindings;
     entry(sessionId: string): SessionEntry | undefined;
     /**
      * Shared events after `after`, in order. `through` is the last event examined, shared or not: a mirror holding

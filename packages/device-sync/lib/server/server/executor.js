@@ -3,6 +3,7 @@
  * they may send. Only this half ever reaches DSH's session API; nothing here writes a session log directly.
  */
 import { randomUUID } from 'node:crypto';
+import { readRemoteBinding } from './bindings.js';
 import { attachmentRefs, chunkText, openApprovals, openQuestions, shareEvent, titleOf } from './events.js';
 import { AsyncQueue, sleep } from './queue.js';
 export class CommandError extends Error {
@@ -15,7 +16,7 @@ export class CommandError extends Error {
 }
 export const emptyExecutorData = () => ({ sessions: {}, handled: {}, continued: {} });
 const HANDLED_TTL = 7 * 24 * 3600_000;
-const MAX_TEXT = 200_000;
+export const MAX_TEXT = 200_000;
 const MAX_IMAGE_BASE64 = 14_000_000;
 const MAX_EVENTS_BYTES = 4_000_000;
 /** How often a running session is read again while nothing else announces its progress. */
@@ -26,6 +27,10 @@ export class Executor {
     entries = new Map();
     workspaceState = { items: [], archivedSessionIds: [] };
     workspaceRev = 0;
+    /** SSH bindings read for workspace paths; `null` for a path that is not a remote workspace. */
+    bindings = new Map();
+    readingBindings;
+    bindingsAgain = false;
     rev = 0;
     /** Identifies this process's change counter; a peer holding another epoch's cursor gets everything again. */
     epoch = randomUUID().slice(0, 8);
@@ -55,6 +60,7 @@ export class Executor {
                 this.workspaceRev = ++this.rev;
                 this.schedule();
                 this.options.changed();
+                void this.readBindings();
             }
         });
         void this.loop('questions', async () => {
@@ -251,7 +257,44 @@ export class Executor {
     bump() { return ++this.rev; }
     revision() { return this.rev; }
     workspaceEntries() {
-        return this.workspaceState.items.map((item, order) => ({ workspaceId: item.workspaceId, title: item.title, path: item.path, sessionIds: [...item.sessionIds], order }));
+        return this.workspaceState.items.map((item, order) => {
+            const remote = this.bindings.get(item.path);
+            return { workspaceId: item.workspaceId, title: item.title, path: item.path, sessionIds: [...item.sessionIds], order, ...(remote ? { remote } : {}) };
+        });
+    }
+    /**
+     * Read the SSH binding of every workspace again; peers fetch the workspaces once more when one changed. Reading
+     * each time the workspaces change also picks up a placeholder folder created just after its workspace.
+     */
+    async readBindings() {
+        const home = this.options.dshHome;
+        if (!home)
+            return;
+        if (this.readingBindings) {
+            this.bindingsAgain = true;
+            return this.readingBindings;
+        }
+        this.readingBindings = (async () => {
+            try {
+                do {
+                    this.bindingsAgain = false;
+                    const paths = [...new Set(this.workspaceState.items.map(item => item.path))];
+                    const next = new Map(await Promise.all(paths.map(async (path) => [path, await readRemoteBinding(home, path) ?? null])));
+                    if (this.controller.signal.aborted)
+                        return;
+                    const changed = paths.some(path => JSON.stringify(next.get(path)) !== JSON.stringify(this.bindings.get(path) ?? null));
+                    this.bindings = next;
+                    if (changed) {
+                        this.workspaceRev = ++this.rev;
+                        this.options.changed();
+                    }
+                } while (this.bindingsAgain);
+            }
+            finally {
+                this.readingBindings = undefined;
+            }
+        })();
+        return this.readingBindings;
     }
     entry(sessionId) {
         const entry = this.entries.get(sessionId);

@@ -28,6 +28,8 @@ export interface ServiceOptions {
     intervalMs?: number;
     /** Images up to this size are fetched with their session; larger attachments when first opened. */
     autoDownloadBytes?: number;
+    /** DSH's home directory, where remote workspaces record which SSH directory they stand for. */
+    dshHome?: string;
     log?(message: string): void;
 }
 export declare class HttpError extends Error {
@@ -119,6 +121,11 @@ export declare class DeviceSync {
     private command;
     private deliver;
     private outboxView;
+    /**
+     * Start a session here that carries on a synced one, in this machine's workspace for the same SSH directory. It
+     * runs only here, so the other machine, which may well be off, is neither asked nor changed.
+     */
+    private continueHere;
     status(): Promise<LocalStatus>;
     action(input: LocalAction): Promise<unknown>;
     private requirePeer;

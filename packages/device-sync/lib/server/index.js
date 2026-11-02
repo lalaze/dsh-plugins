@@ -7,7 +7,8 @@ import { dshHost } from './server/host.js';
 import { DeviceSync, HttpError } from './server/service.js';
 export const name = 'dsh-device-sync';
 export const inject = ['connection'];
-const defaultStateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', name);
+const dshHome = () => process.env.DSH_HOME?.trim() || join(homedir(), '.dsh');
+const defaultStateDir = () => join(dshHome(), 'storages', name);
 export const Config = Schema.object({
     stateDir: Schema.string().default(defaultStateDir()),
     port: Schema.natural().max(65535).default(DEFAULT_PORT).description('Port paired machines connect to, on this machine\'s Tailscale address.'),
@@ -28,6 +29,7 @@ export async function apply(ctx, config = {}) {
         stateDir: config.stateDir ?? defaultStateDir(),
         host: dshHost(ctx),
         tags: () => ctx.get('workspaceTags'),
+        dshHome: dshHome(),
         listen: { port: config.port ?? DEFAULT_PORT, host: config.listenHost || undefined, advertise: config.advertise || undefined, anyNetwork: config.anyNetwork === true },
         log,
     });

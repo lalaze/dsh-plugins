@@ -9,7 +9,7 @@ Supports English and Simplified Chinese, following DSH’s language setting with
 ## What is shared
 
 - **Groups**: the tags of [Workspace Tags](../workspace-tags/README.md) (name and color), and which workspaces have them, on both machines. Edits are merged field by field and reach the other machine within a few seconds. When both machines changed the same field before syncing, the later value is used on both and the other one is kept as a conflict under **Settings → Device sync** until you pick one. Tags created separately under the same name are both kept, the later one renamed “Name (2)”.
-- **Workspaces**: each machine’s workspaces, with their stable ID, title, path and order. A path is shown for information only and is never used on the other machine; directories with the same name are not treated as the same project.
+- **Workspaces**: each machine’s workspaces, with their stable ID, title, path and order. A path is shown for information only and is never used on the other machine; directories with the same name are not treated as the same project. For a remote workspace of [Remote Agents](../remote-agents/README.md) (or dsh-remote), the SSH directory it stands for is shared too: host, user, port and remote path, read from `.dsh-remote-meta.json` in its folder under `$DSH_HOME/remote-workspaces/`.
 - **Conversations**: titles, workspace, archive state, user messages, assistant replies, tool calls and results, fork links, approvals asked and decided. System prompts, request headers and the model’s token stream stay on their machine. Images are stored once by content; small images arrive with their session, larger attachments when first opened.
 
 Copies live in this plugin’s storage, not in DSH’s session store, so nothing synced can start an agent. A session removed on its machine stays readable here.
@@ -34,7 +34,21 @@ While the viewer is open and the peer is online with history sharing allowed, an
 
 The viewer supports text messages (queue by default, or steer), stopping an online task, and answering online approvals/questions when the owning machine grants command access. Non-answerable approvals must be answered on the owning machine. Requests cannot be sent to paused/unpaired machines or archived/deleted sessions from this client. Offline prompts are held; no request is automatically released. Uncertain browser responses retain the original request ID for retry, first checking the outbox, so a lost response cannot create a fresh execution.
 
-The viewer is embedded in settings (also accessible through the existing header badge). New-session/continuation controls and image uploads are not included; the host APIs remain available. Existing mirrored image/file attachments can be viewed. No real two-host or authenticated DSH GUI acceptance is claimed by the automated tests.
+The viewer is embedded in settings (also accessible through the existing header badge). Image uploads are not included. Starting a session on the other machine has no control in the viewer; the host API remains available. Existing mirrored image/file attachments can be viewed. No real two-host or authenticated DSH GUI acceptance is claimed by the automated tests.
+
+## Continuing an SSH workspace’s conversation on this machine
+
+A conversation in a remote workspace, driven by a DSH model such as DeepSeek through `remote_workspace`, lives in the DSH of the machine that started it. When that machine is off, the other one can carry it on: the project is on the SSH machine, not on either DSH machine.
+
+Two workspaces are the same project when they are the same SSH directory: the same host, user, port and remote path (host names compare without case or a trailing dot; paths after resolving `.` and `..`). Folder names and titles do not count.
+
+The viewer of a synced conversation in such a workspace offers **Continue on this machine**:
+
+- When this machine has a workspace for the same directory, it names it and takes an optional note on what should happen next. **Continue here** starts a new conversation in that workspace here, and opens it. Its first message holds the synced history: user messages and assistant replies, the most recent part when it is long, with tool calls reduced to their names and tool results left out; then the note. The original conversation is not changed, and the other machine is not asked. The new conversation records which one it continues. A retry after a lost response reuses the request ID, so it starts at most one conversation.
+- When it has none, the viewer says so. Add the SSH machine under **Settings → Remote agents**; Remote Agents then brings in the remote workspaces shared on that machine.
+- Conversations outside SSH workspaces do not offer it. Conversations of Remote Agents’ CLI models (Claude, Codex) carry on through Remote Agents’ shared sessions instead.
+
+Both machines need this version: an older one does not share the SSH directory of its workspaces.
 
 ## Requirements
 
@@ -88,8 +102,12 @@ Build and install on both machines:
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.4.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.5.tgz"
 ```
+
+## 0.1.5 release notes
+
+- Continue on this machine: a synced conversation in an SSH remote workspace can be carried on in this machine’s workspace for the same SSH directory (same host, user, port and path). A new conversation starts here with the synced history and an optional note on what to do next, and opens; the original is not changed and the other machine may be off. Without a matching workspace, the viewer says to add the SSH machine under Settings → Remote agents. Workspaces now share their SSH directory, so both machines need this version.
 
 ## 0.1.4 release notes
 

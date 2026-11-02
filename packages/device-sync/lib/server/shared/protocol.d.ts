@@ -56,6 +56,18 @@ export interface QuestionAnswer {
     selected: string[];
     custom?: string;
 }
+/**
+ * The SSH directory a remote workspace stands for, as remote-agents (and dsh-remote) records it beside the
+ * workspace's local placeholder folder. Two machines whose workspaces have the same binding work on the same project.
+ */
+export interface RemoteBinding {
+    host: string;
+    username: string;
+    port: number;
+    remotePath: string;
+    /** The ~/.ssh/config Host the machine was saved as; informative only. */
+    alias?: string;
+}
 /** One workspace as its own machine describes it. Paths are informative only; they are never used on another machine. */
 export interface WorkspaceEntry {
     workspaceId: string;
@@ -64,7 +76,22 @@ export interface WorkspaceEntry {
     sessionIds: string[];
     /** Position in that machine's sidebar. */
     order: number;
+    /** Set when the workspace is a directory on an SSH machine. */
+    remote?: RemoteBinding;
 }
+/** POSIX normalization as remote-agents applies it: `.` and `..` segments resolve lexically, trailing slashes go. */
+export declare function normalizeRemotePath(path: string): string;
+/** Whether a binding, possibly from the paired machine, has every field it needs. */
+export declare const isRemoteBinding: (value: RemoteBinding | undefined) => value is RemoteBinding;
+/**
+ * Whether two remote workspaces are the same project: the same host, user, port and directory. Bindings arrive from
+ * the paired machine, so anything malformed matches nothing.
+ */
+export declare function sameRemote(a: RemoteBinding | undefined, b: RemoteBinding | undefined): boolean;
+/** A binding as one line, such as `ssh://me@mac-mini:2222/home/me/project`. */
+export declare const remoteLabel: (remote: RemoteBinding) => string;
+/** The first of `local` that is the same SSH directory as `remote`. */
+export declare const matchingWorkspace: (remote: RemoteBinding | undefined, local: readonly WorkspaceEntry[]) => WorkspaceEntry | undefined;
 /** One session as its executing machine describes it, without its content. */
 export interface SessionEntry {
     sessionId: string;
@@ -344,6 +371,18 @@ export type LocalAction = {
     action: 'resolveConflict';
     key: string;
     useOther: boolean;
+}
+/**
+ * Start a session in this machine's `workspaceId`, the same SSH directory as a synced session's workspace, with
+ * that session's history as context. The synced session is not changed. `requestId` makes a retry harmless.
+ */
+ | {
+    action: 'continueHere';
+    requestId: string;
+    deviceId: string;
+    sessionId: string;
+    workspaceId: string;
+    note?: string;
 };
 /** Workspace reference unique across machines. */
 export declare const workspaceRef: (deviceId: string, workspaceId: string) => string;
