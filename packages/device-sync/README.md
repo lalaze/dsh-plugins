@@ -26,11 +26,11 @@ With permission (see below), the host API accepts these requests for the other m
 
 Each request carries an ID, so a retry after a lost connection never runs it twice. When the other machine is offline, a request is held and sent only after you confirm it again; it is never run on this machine instead.
 
-Open **Settings → Device sync → Synced sessions** and select a title to read its mirrored timeline, including attachments and live drafts. Sessions are grouped by machine and workspace; hidden and subagent sessions are excluded until their filters are enabled. Hide/restore affects only this machine. Archived and deleted sessions remain readable.
+Open **Settings → Device sync → Synced sessions** and select a title to read its mirrored timeline, including attachments and live drafts. Sessions are grouped by machine and workspace. Each machine’s card starts folded and shows its session count; each workspace lists its five most recent sessions until you choose **Show more**. Search matches titles, session IDs, workspace names and folders, and unfolds every match. Hidden and subagent sessions are excluded until their filters are enabled. Hide/restore affects only this machine. Archived and deleted sessions remain readable.
 
 While the viewer is open and the peer is online with history sharing allowed, an interrupted live stream reconnects after 3 seconds. Only one stream is active per viewer. Closing/switching the viewer, going offline, revoking history access or deleting the remote session cancels its live stream and retry delay and clears the draft. Permanent HTTP denials such as 403/404 stop retries until the viewer is reopened or eligibility changes. History polling errors and live-stream errors are displayed independently; a successful history fetch does not hide a failed live connection.
 
-**Remote workspaces** lets you assign shared groups and associate remote workspaces with local ones, without mapping or opening the remote path locally. **Pending requests** lets you explicitly send or discard held requests and shows delivery failures. A delivered request and a still-held request have different status messages.
+**Remote workspaces** lists each paired machine’s workspaces in a folded card. Select a group chip to add a workspace to that group or take it out; the change shows in that machine’s sidebar. Remote paths are never mapped or opened here. **Pending requests** lets you explicitly send or discard held requests and shows delivery failures. A delivered request and a still-held request have different status messages.
 
 The viewer supports text messages (queue by default, or steer), stopping an online task, and answering online approvals/questions when the owning machine grants command access. Non-answerable approvals must be answered on the owning machine. Requests cannot be sent to paused/unpaired machines or archived/deleted sessions from this client. Offline prompts are held; no request is automatically released. Uncertain browser responses retain the original request ID for retry, first checking the outbox, so a lost response cannot create a fresh execution.
 
@@ -88,8 +88,13 @@ Build and install on both machines:
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.2.tgz"
 ```
+
+## 0.1.2 release notes
+
+- Synced sessions can be searched; machine cards fold, and each workspace shows its five most recent sessions until expanded.
+- Remote workspaces fold per machine, one row per workspace, with group chips to toggle; linking remote and local workspaces is no longer offered, as nothing used it yet.
 
 ## 0.1.1 release notes
 
