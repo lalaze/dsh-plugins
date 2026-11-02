@@ -102,8 +102,12 @@ DSH 若补充两处小接口，实现会更简单：导入只读会话，让副�
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.4.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.5.tgz"
 ```
+
+## 0.1.5 更新说明
+
+- 在本机接续：SSH 远程工作区中的已同步对话，可以在本机同一 SSH 目录（主机、用户、端口和路径都相同）的工作区里接续。会在本机新建对话并打开，带上已同步的历史和可选的“接下来要做什么”；原对话不会改动，另一台机器关机也可以用。本机没有对应工作区时，提示先在“设置 → 远程智能体”添加这台 SSH 机器。工作区现在会同步其 SSH 目录，两台机器都需要更新到此版本。
 
 ## 0.1.4 更新说明
 

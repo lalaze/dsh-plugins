@@ -102,8 +102,12 @@ Build and install on both machines:
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.4.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.5.tgz"
 ```
+
+## 0.1.5 release notes
+
+- Continue on this machine: a synced conversation in an SSH remote workspace can be carried on in this machine’s workspace for the same SSH directory (same host, user, port and path). A new conversation starts here with the synced history and an optional note on what to do next, and opens; the original is not changed and the other machine may be off. Without a matching workspace, the viewer says to add the SSH machine under Settings → Remote agents. Workspaces now share their SSH directory, so both machines need this version.
 
 ## 0.1.4 release notes
 
