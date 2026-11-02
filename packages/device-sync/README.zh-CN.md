@@ -88,8 +88,12 @@ DSH 若补充两处小接口，实现会更简单：导入只读会话，让副�
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.3.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.4.tgz"
 ```
+
+## 0.1.4 更新说明
+
+- 远端工作区：分组修改无法到达对方时（本机未与其共享，或已解除配对），分组标签不可点并说明原因；对方暂停同步或离线时提示修改将延后生效。插件同样拒绝此类修改，并不再显示已移除的“关联工作区”的冲突。
 
 ## 0.1.3 更新说明
 
