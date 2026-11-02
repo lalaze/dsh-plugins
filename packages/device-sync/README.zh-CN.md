@@ -88,13 +88,16 @@ DSH 若补充两处小接口，实现会更简单：导入只读会话，让副�
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.2.tgz"
 ```
 
-## 0.1.1 更新说明
+## 0.1.2 更新说明
 
 - 已同步会话支持搜索；机器卡片可收起，每个工作区先显示最近 5 个会话，其余可展开查看。
 - 远端工作区按机器折叠，每个工作区一行，用分组标签切换归属；不再提供“关联本机工作区”，此前该关联尚无任何功能使用。
+
+## 0.1.1 更新说明
+
 - 对话顶栏显示已配对的机器及其在线状态，同步失败时给出提示；点击可在弹窗中打开设备同步设置。
 
 ## 0.1.0 更新说明

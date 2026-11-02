@@ -88,13 +88,16 @@ Build and install on both machines:
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.2.tgz"
 ```
 
-## 0.1.1 release notes
+## 0.1.2 release notes
 
 - Synced sessions can be searched; machine cards fold, and each workspace shows its five most recent sessions until expanded.
 - Remote workspaces fold per machine, one row per workspace, with group chips to toggle; linking remote and local workspaces is no longer offered, as nothing used it yet.
+
+## 0.1.1 release notes
+
 - The conversation header shows the paired machine and whether it is online, or that syncing failed; select it to open Device sync settings in a window.
 
 ## 0.1.0 release notes
