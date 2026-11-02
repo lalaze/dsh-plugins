@@ -22,7 +22,6 @@ export function RemoteSettings({ status, refresh }: { status: LocalStatus; refre
     try { await task(); await refresh() } catch (e) { setError(localizeError(e)) } finally { locked.current = false; setBusy(false) }
   }
   const peerName = (id: string) => status.peers.find(p => p.deviceId === id)?.name ?? id
-  const local = status.workspaces.find(w => w.deviceId === status.device.deviceId)?.items ?? []
   const session = status.sessions.find(s => s.deviceId === selected?.deviceId && s.sessionId === selected?.sessionId)
   const workspaceTitle = (deviceId: string, workspaceId?: string) => status.workspaces.find(w => w.deviceId === deviceId)?.items.find(w => w.workspaceId === workspaceId)?.title
   const searching = query.trim() !== ''
@@ -33,23 +32,27 @@ export function RemoteSettings({ status, refresh }: { status: LocalStatus; refre
     {notice && <p className="dsy-hint" role="status">{notice}</p>}
     <section className="dsy-section"><h3>{ui('Remote workspaces')}</h3>
       {!status.groups.tagsPlugin && <p className="dsy-hint">{ui('Install Workspace Tags 0.1.10 or later to see shared groups in the sidebar.')}</p>}
-      {!status.groups.tags.length && <p className="dsy-hint">{ui('Create groups in Workspace Tags in the sidebar.')}</p>}
       {!status.workspaces.some(w => w.deviceId !== status.device.deviceId && w.items.length) && <p className="dsy-hint">{ui('No remote workspaces yet.')}</p>}
-      {status.workspaces.filter(w => w.deviceId !== status.device.deviceId).map(device => <div key={device.deviceId} className="dsy-section"><h4>{peerName(device.deviceId)}</h4>
-        {[...device.items].sort((a, b) => a.order - b.order).map(w => {
-          const ref = workspaceRef(device.deviceId, w.workspaceId)
-          return <div className="dsy-card" key={ref}><h4>{w.title}</h4><p className="dsy-hint dsy-mono">{w.path}</p><p className="dsy-hint">{ui('Path used only on the other machine.')}</p>
-            {status.groups.tags.map(t => <label className="dsy-check" key={t.id}><input type="checkbox" disabled={busy} checked={(status.groups.assignments[ref] ?? []).includes(t.id)} onChange={e => { const assigned = e.target.checked; void run(() => act({ action: 'assign', workspaceRef: ref, tagId: t.id, assigned })) }} /><span className="dsy-tagdot" style={{ background: tagColor(t.color) }} />{t.name}</label>)}
-            <h4>{ui('Linked workspaces')}</h4>
-            {!local.length && <p className="dsy-hint">{ui('No local workspaces.')}</p>}
-            {local.map(l => {
-              const localRef = workspaceRef(status.device.deviceId, l.workspaceId)
-              const linked = status.groups.links.some(pair => pair.includes(ref) && pair.includes(localRef))
-              return <label className="dsy-check" key={localRef}><input type="checkbox" checked={linked} disabled={busy} onChange={e => { const linked = e.target.checked; void run(() => act({ action: 'link', localRef, remoteRef: ref, linked })) }} />{l.title}</label>
+      {status.workspaces.filter(w => w.deviceId !== status.device.deviceId && w.items.length).map(device => {
+        const name = peerName(device.deviceId), key = `workspaces/${device.deviceId}`
+        return <div className="dsy-card" key={device.deviceId}>
+          <h4><button type="button" className="dsy-fold" aria-expanded={!!expanded[key]} onClick={() => setExpanded(old => ({ ...old, [key]: !old[key] }))}><span className="dsy-chevron" aria-hidden="true">›</span><span className="dsy-ws-title">{name}</span><span className="dsy-count">{ui('{0} workspaces', { 0: device.items.length })}</span></button></h4>
+          {expanded[key] && <>
+            <p className="dsy-hint">{status.groups.tags.length ? ui('Select a group to add a workspace to it or take it out. Groups show in {0}’s sidebar; paths are only used on {0}.', { 0: name }) : ui('Create groups in Workspace Tags in the sidebar.')}</p>
+            {[...device.items].sort((a, b) => a.order - b.order).map(w => {
+              const ref = workspaceRef(device.deviceId, w.workspaceId), assigned = status.groups.assignments[ref] ?? []
+              return <div className="dsy-wrow" key={ref}>
+                <div className="dsy-wrow-main"><span className="dsy-ws-title" title={w.title}>{w.title}</span><span className="dsy-wrow-path dsy-mono" title={w.path}>{w.path}</span></div>
+                {status.groups.tags.length > 0 && <div className="dsy-chips" role="group" aria-label={ui('Groups of {0}', { 0: w.title })}>{status.groups.tags.map(t => {
+                  const on = assigned.includes(t.id)
+                  return <button type="button" key={t.id} className="dsy-chip" aria-pressed={on} disabled={busy} style={{ '--dsy-tag': tagColor(t.color) } as React.CSSProperties}
+                    title={ui(on ? 'Remove from {0}' : 'Add to {0}', { 0: t.name })} onClick={() => void run(() => act({ action: 'assign', workspaceRef: ref, tagId: t.id, assigned: !on }))}><span className="dsy-chip-dot" aria-hidden="true" />{t.name}</button>
+                })}</div>}
+              </div>
             })}
-          </div>
-        })}
-      </div>)}
+          </>}
+        </div>
+      })}
     </section>
     {status.outbox.length > 0 && <section className="dsy-section"><h3>{ui('Pending requests')}</h3><p className="dsy-hint">{ui('Held requests are never sent automatically. Review before sending.')}</p>
       {status.outbox.map(item => <div className="dsy-card" key={item.requestId}><div>{peerName(item.deviceId)} · {item.summary}</div><p className="dsy-hint">{ago(item.createdAt)} · {ui(item.state === 'sending' ? 'Sending…' : item.state === 'held' ? 'Held' : 'Failed')}</p>
