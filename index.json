@@ -251,12 +251,12 @@
       },
       "versions": [
         {
-          "version": "0.1.1",
-          "publishTimestamp": 1793515453,
+          "version": "0.1.2",
+          "publishTimestamp": 1793585441,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "ab8cfed50b6beaec0923591d43a81c4b484753a9",
+            "commit": "202f4714595b898a9f3c4bdce0c7d4e0f98be87b",
             "path": "packages/device-sync"
           },
           "engines": {
