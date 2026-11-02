@@ -145,10 +145,11 @@ export function apply(ctx: Context, tagging?: TagRuntime): void {
 
   // Stable per-surface occupancy sources (the renderer's hook cache keys by
   // source identity): true while the surface's directory-flow hole is filled.
-  const flowSource = (hole: 'sidebar.workspaces.directoryFlow' | 'conversation.hero.workspace.directoryFlow'): HostObservable<boolean> => ({
+  const flowSource = (hole: 'sidebar.workspaces.directoryFlow' | 'conversation.hero.workspace.directoryFlow' | 'sidebar.workspaces.deviceFilter'): HostObservable<boolean> => ({
     getSnapshot: () => ctx.slots.entries(hole).length > 0,
     subscribe: listener => ctx.slots.subscribe(hole, listener),
   })
+  const deviceFilterAvailability = flowSource('sidebar.workspaces.deviceFilter')
   const browserFlowSource = flowSource('sidebar.workspaces.directoryFlow')
   const hostInfo: HostObservable<RemoteHostFacts> = {
     getSnapshot: () => ctx.remote.$host,
@@ -284,6 +285,7 @@ export function apply(ctx: Context, tagging?: TagRuntime): void {
     unarchiveSession: async (sessionId) => { await uiWorkspace.unarchiveSession(sessionId) },
     createWorkspace: input => workspaces.create(input),
     tagging,
+    deviceFilterAvailability,
     requestSearch: shortcutControls.search,
     requestAddWorkspace: shortcutControls.add,
     closeAddWorkspace: shortcutControls.closeAdd,
@@ -301,6 +303,10 @@ export function apply(ctx: Context, tagging?: TagRuntime): void {
       name: 'sidebar.workspaces',
       children: {
         'sidebar.workspaces.directoryFlow': { kind: 'single', scope: 'root' },
+        'sidebar.workspaces.presentation': { kind: 'single', scope: 'root' },
+        'sidebar.workspaces.viewOptions': { kind: 'list', scope: 'root' },
+        'sidebar.workspaces.deviceFilter': { kind: 'single', scope: 'root' },
+        'sidebar.workspaces.remote': { kind: 'list', scope: 'root' },
         // Every row entry reads the menu's open state through a hook bound
         // from the row's render occurrence (the owner passes the state pair
         // as hookContext).

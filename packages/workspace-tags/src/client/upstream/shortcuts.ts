@@ -63,7 +63,9 @@ export function installWorkspaceShortcuts(
   reportForkFailure: (reason: 'unavailable' | 'failed') => void,
 ): void {
   const t = ctx.locale.bind('workspace')
-  const current = () => Object.values(ctx.sessions.list.getSnapshot().byId)
+  const remotePanel = () => String(ctx.layout.panelInfo.getSnapshot().activePanelId ?? '') === 'device-sync.remote-conversation'
+  // A global panel owns the centre, even if a local session is briefly retained during teardown.
+  const current = () => ctx.layout.panelInfo.getSnapshot().activePanelId !== null ? undefined : Object.values(ctx.sessions.list.getSnapshot().byId)
     .find(row => (row.retainedBy.mainView ?? 0) > 0)
   const addReason = () => ctx.slots.entries('sidebar.workspaces.directoryFlow').length === 0
     ? t('shortcut.noPicker')
@@ -79,12 +81,12 @@ export function installWorkspaceShortcuts(
     }), `ui-workspace: ${id}`)
   }
   register('session.new', () => t('session.new'), ['new session', 'new chat'], 'KeyN', ['primary'], ['primary', 'alt'],
-    () => ({ status: 'handled', run: () => { navigation.startSession() } }))
+    () => remotePanel() ? { status: 'blocked', reason: t('shortcut.noSession') } : ({ status: 'handled', run: () => { navigation.startSession() } }))
   register('session.search', () => t('search.sessions.aria'), ['search sessions'], 'KeyK', ['primary'], ['primary', 'alt'],
     () => ({ status: 'handled', run: controls.search }))
   register('workspace.add', () => t('workspace.add'), ['add workspace', 'open folder'], 'KeyO', ['primary'], ['primary', 'alt'],
     () => {
-      const reason = addReason()
+      const reason = remotePanel() ? t('shortcut.noSession') : addReason()
       return reason === null ? { status: 'handled', run: controls.add } : { status: 'blocked', reason }
     })
   register('session.rename', () => t('rename.session.title'), ['rename session'], 'KeyG', ['primary', 'alt'], ['primary', 'alt'], (context) => {

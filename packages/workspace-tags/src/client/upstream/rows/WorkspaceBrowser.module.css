@@ -623,3 +623,13 @@
     transition: none;
   }
 }
+
+/* One presentation list area for owner-qualified native and mirror records. */
+.presentationListArea { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+
+/* Component MenuItemButton exposes current semantics but no trailing marker.
+   Match the native data-row check (14px, primary label); reserve its width off. */
+.menuOptionContent { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; }
+.menuOptionLabel { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.menuOptionCheck { flex: none; display: inline-flex; width: 14px; height: 14px; color: var(--dsw-alias-label-primary); }
+.menuOptionCheck svg { width: 14px; height: 14px; }

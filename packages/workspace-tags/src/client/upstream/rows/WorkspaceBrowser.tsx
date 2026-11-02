@@ -14,14 +14,14 @@
  * are slot entries with their own behavior, so this component threads no
  * action callbacks and hosts no action surface.
  */
-import { type CSSProperties, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import clsx from 'clsx'
 import {
   Button, HoverCardGroup, IconArchiveCheckOutlineRegular, IconArchiveOffOutlineRegular, IconArchiveOutlineRegular,
   IconChevronsUpDownOutlineRegular, IconClockOutlineRegular, IconCloseFillRegular, IconGaugeOutlineRegular,
   IconFlatListOutlineRegular, IconFolderCloseRegular, IconProjectAddOutlineRegular,
   IconQueueOutlineRegular, IconSearchOutlineRegular, IconSlidersTwoOutlineRegular,
-  IconWorkspaceTreeOutlineRegular, Menu, Modal, Tooltip,
+  IconWorkspaceTreeOutlineRegular, IconCheckOutlineRegular, Menu, MenuItemButton, Modal, Tooltip,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type {
   SessionListState, SessionSearchResultItem,
@@ -30,7 +30,7 @@ import type { WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
-import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import type { WorkspaceBrowserProps, WorkspaceViewOptionsOwnerProps } from '../contract/slots.ts'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
@@ -41,6 +41,8 @@ import { AnimatedRows } from './AnimatedRows.tsx'
 import { FLAT_SESSION_ORDER_KEY, type SessionGroupBy } from '../stores.ts'
 import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
+import { collectPresentation, projectPresentation, flattenPresentation, presentationActivity, type MirrorContribution } from '../presentation.ts'
+import { usePresentationGroups, MirrorSessionRow, PresentedRow, type PresentationContext } from './PresentationRows.tsx'
 import type { TagState, WorkspaceTag } from '../../../shared/tags.ts'
 import type { SectionMode, TagRuntime } from '../../tags/contract.ts'
 import {
@@ -48,13 +50,14 @@ import {
 } from '../../tags/parts.tsx'
 import {
   activityBySpace, browserSections, inSpace, isActiveStatus, liveFilter, rowActivity, sectionFolded, sessionActivity,
-  tagsByName, type RowActivity,
+  tagsByName, UNTAGGED_FILTER, type RowActivity,
 } from '../../tags/sections.ts'
 
 /**
  * Column slide length (--ds-transition-duration-slow): rail-search focus waits it out —
  * focus() forces a synchronous layout and would jank the slide.
  */
+const NO_DEVICE_FILTER = { getSnapshot: () => false, subscribe: (_listener: () => void) => () => {} }
 const EXPAND_SLIDE_MS = 300
 /** Pause between the latest keystroke and a Host content-search request. */
 const SEARCH_DEBOUNCE_MS = 250
@@ -148,7 +151,8 @@ function useNativeDragAcceptance(active: boolean): void {
 }
 
 /** Grouping, ordering, and archived-filter menu; own open state so it resets with the wide chrome. */
-function ViewOptionsMenu({ groupBy, sectionMode, orderBy, archivedFilter, onGroupPick, onSectionPick, onOrderPick, onArchivedFilterPick, t }: {
+function ViewOptionsMenu({ renderRemoteOptions, groupBy, sectionMode, orderBy, archivedFilter, onGroupPick, onSectionPick, onOrderPick, onArchivedFilterPick, t }: {
+  renderRemoteOptions?: (owner: WorkspaceViewOptionsOwnerProps) => ReactNode
   groupBy: SessionGroupBy
   // workspace-tags: Tag/Status modes layered over `groupBy` (absent without a tag runtime).
   sectionMode: SectionMode | null
@@ -219,7 +223,9 @@ function ViewOptionsMenu({ groupBy, sectionMode, orderBy, archivedFilter, onGrou
           </button>
         </Tooltip>
       )}
-    />
+    >
+      {renderRemoteOptions?.({ renderOption: option => <MenuItemButton key={option.id} current={option.checked} onSelect={option.onToggle}><span className={css.menuOptionContent}><span className={css.menuOptionLabel}>{option.label}</span><span className={css.menuOptionCheck} data-menu-option-check={option.checked} aria-hidden="true">{option.checked && <IconCheckOutlineRegular />}</span></span></MenuItemButton> })}
+    </Menu>
   )
 }
 
@@ -280,6 +286,8 @@ type SessionTreeProps = Pick<
   | 'sidebar.session.row.leading'
   | 'sidebar.session.row.hover'
 > & {
+  presentation: PresentationContext
+  onWorkspaceReorder(): void
   shortcuts: readonly import('@deepseek-ai/dsh-client-shortcuts/client').ShortcutCatalogEntry[]
   /** Always-mounted Session list snapshot. */
   list: SessionListState
@@ -337,7 +345,7 @@ function EmptySessions({ rowState, onLeaveArchivedOnly, filter, t }: Pick<Sessio
     return (
       <div className={css.emptyState} data-row-key="empty">
         <TagIcon size={24} />
-        <div>{tagT('tags.filter.empty', { name: filter.tag.name })}</div>
+        <div>{filter.tag.id === UNTAGGED_FILTER ? tagT('tags.filter.untaggedEmpty') : tagT('tags.filter.empty', { name: filter.tag.name })}</div>
         <button type="button" className={css.emptyAction} onClick={filter.clear}>{tagT('tags.filter.showAll')}</button>
       </div>
     )
@@ -365,7 +373,7 @@ function SessionTree({
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
   setSessionOrder, home, t,
-  revealSessionId, onSessionRevealed, shortcuts, tagging,
+  revealSessionId, onSessionRevealed, shortcuts, tagging, presentation, onWorkspaceReorder,
 }: SessionTreeProps) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const statuses = useSessionStatus(s => s)
@@ -506,6 +514,7 @@ function SessionTree({
       ? siblings.length
       : siblings.findIndex(workspace => workspace.workspaceId === anchor)
     if (sourceIndex !== -1 && (anchorIndex === sourceIndex || anchorIndex === sourceIndex + 1)) return
+    onWorkspaceReorder()
     insertWorkspaceBefore(activeDrag.workspaceId, anchor).catch((reason: unknown) => {
       console.warn('workspace reorder rejected:', reason)
     })
@@ -577,6 +586,7 @@ function SessionTree({
     group: GroupNode,
     depth: number,
     section?: { activity: RowActivity | undefined; toggle?: () => void; limit?: boolean },
+    externalChildren?: ReactNode,
   ): ReactNode => {
     const workspaceId = group.workspaceId
     const children = childrenByParent.get(group.key) ?? []
@@ -595,7 +605,7 @@ function SessionTree({
     const visible = limited ? watermarkRows(group.sessions, watermark) : collapsed
     const sessionsExpanded = visible.hiddenCount === 0
     rowKeys.push(`workspace:${group.key}`)
-    const childRows = group.expanded ? children.map(child => renderGroup(child, depth + 1)) : []
+    const childRows = externalChildren === undefined ? (group.expanded ? children.map(child => renderGroup(child, depth + 1)) : []) : externalChildren
     const sessions = visible.rows
     for (const node of sessions) rowKeys.push(`session:${node.id}`)
     if (collapsed.hiddenCount > 0) rowKeys.push(`overflow:${group.key}`)
@@ -671,7 +681,7 @@ function SessionTree({
         <ProjectRowItem
           newShortcut={shortcuts.find(row => row.id === 'session.new')}
           group={group}
-          containsCurrentDescendant={currentAncestors.has(group.key)}
+          containsCurrentDescendant={!panelActive && currentAncestors.has(group.key)}
           home={home}
           t={t}
           onToggle={section?.toggle ?? (() => {
@@ -710,7 +720,7 @@ function SessionTree({
               },
             }}
         />
-        {childRows.length > 0 && (
+        {(Array.isArray(childRows) ? childRows.length > 0 : childRows !== null) && (
           <div role="group">
             {childRows}
           </div>
@@ -790,32 +800,19 @@ function SessionTree({
     )
   }
 
-  const groupRows = sections === undefined
-    ? rootGroups.map(group => renderGroup(group, 0))
-    : sections.map((section) => {
-      const collapsed = sectionFolded(tagging?.collapsed ?? {}, section.key)
-      return (
-        <SectionBlock
-          key={section.key}
-          section={section}
-          collapsed={collapsed}
-          onToggle={() => { tagging?.runtime.setSectionCollapsed(section.key, !collapsed) }}
-          t={tagT}
-        >
-          {collapsed ? null : section.groups.map((group) => {
-            if (section.kind === 'idle') return renderGroup(group, 0, { activity: undefined })
-            if (!isActiveStatus(section.kind)) return renderGroup(group, 0)
-            const foldKey = `${section.key}/${group.key}`
-            const folded = sectionFolds.has(foldKey)
-            return renderGroup(folded ? { ...group, expanded: false, sessions: [] } : group, 0, {
-              activity: rowActivity(group.sessions),
-              toggle: () => { toggleSectionFold(foldKey) },
-              limit: section.kind === 'running',
-            })
-          })}
-        </SectionBlock>
-      )
-    })
+  const groupRows = usePresentationGroups({
+    context: presentation, mode: tagging?.mode ?? null, nested: nestWorkspaces,
+    nativeExpanded: group => groups.find(native => native.key === group.key)?.expanded ?? false,
+    collapsed: tagging?.collapsed ?? {}, setCollapsed: (key, value) => tagging?.runtime.setSectionCollapsed(key, value),
+    label: key => asTagTranslate(t)(key),
+    rejectDrag: drop => {
+      if (drop) { sessionDropCommitted.current = true; workspaceDropCommitted.current = true; setDrag(null); setWorkspaceDrag(null) }
+      else { setDrag(old => old?.over ? { ...old, over: null } : old); setWorkspaceDrag(old => old?.over ? { ...old, over: null } : old) }
+    },
+    renderLocal: (group, depth, children, section) => renderGroup({ ...group, containsCurrent: !panelActive && group.containsCurrent }, depth,
+      section?.active ? { activity: section.activity, toggle: section.toggle, limit: section.running } : undefined, children),
+    empty: <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} filter={spaceTag === null ? undefined : { tag: spaceTag, clear: () => { tagging?.runtime.setFilter(null) } }} t={t} />,
+  })
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
       {workspaceDropAtListStart && <span className={css.listTopDropIndicator} aria-hidden="true" />}
@@ -823,17 +820,9 @@ function SessionTree({
         className={clsx(css.list, workspaceDropAtListStart && css.listTopDropActive)}
         label={t('section.sessions')}
         rowKeys={rowKeys}
-        ready={list.phase === 'ready' && workspaceReady && !nativeDragActive && sections === undefined}
+        ready={presentation.provider === null && list.phase === 'ready' && workspaceReady && !nativeDragActive && sections === undefined}
         resetKey={JSON.stringify([animationResetKey, watermarkMotionKey])}
       >
-        {groups.length === 0 && (
-          <EmptySessions
-            rowState={rowState}
-            onLeaveArchivedOnly={onLeaveArchivedOnly}
-            filter={spaceTag === null ? undefined : { tag: spaceTag, clear: () => { tagging?.runtime.setFilter(null) } }}
-            t={t}
-          />
-        )}
         {groupRows}
       </AnimatedRows>
       <span className={css.fade} />
@@ -845,9 +834,10 @@ function SessionTree({
 function FlatList({
   list, sessionIds, rowState, onLeaveArchivedOnly, useSessionStatus, open, onSessionRenameRequest,
   usePanelInfo, setSessionOrder, workspaceReady, animationResetKey,
-  revealSessionId, onSessionRevealed, renderSlot, space, t,
+  revealSessionId, onSessionRevealed, renderSlot, space, t, presentation,
 }: Pick<
   SessionTreeProps,
+  | 'presentation'
   | 'useSessionStatus'
   | 'open'
   | 'onSessionRenameRequest'
@@ -887,16 +877,17 @@ function FlatList({
     if (nextOrder !== undefined) setSessionOrder(FLAT_SESSION_ORDER_KEY, nextOrder)
   }
   const now = Date.now()
+  const presented = flattenPresentation(presentation.groups, presentation.filter.order)
   return (
     <HoverCardGroup className={clsx(css.treeBody, css.wide)}>
       <AnimatedRows
         className={clsx(css.list, css.flatList)}
         label={t('section.sessions')}
-        rowKeys={rows.length === 0 ? ['empty'] : rows.map(row => `session:${row.id}`)}
-        ready={list.phase === 'ready' && workspaceReady && drag === null}
+        rowKeys={presented.length === 0 ? ['empty'] : presented.map(row => row.owner === 'local' ? `session:${row.native.id}` : row.key)}
+        ready={presentation.provider === null && list.phase === 'ready' && workspaceReady && drag === null}
         resetKey={animationResetKey}
       >
-        {rows.length === 0 && (
+        {!presentation.incomplete && presented.length === 0 && (
           <EmptySessions
             rowState={rowState}
             onLeaveArchivedOnly={onLeaveArchivedOnly}
@@ -904,12 +895,14 @@ function FlatList({
             t={t}
           />
         )}
-        {rows.map((node) => {
+        {presented.map((item) => {
+          if (item.owner === 'mirror') return <MirrorSessionRow key={item.key} session={item} context={presentation} rejectDrag={drop => { if (drop) { dropCommitted.current = true; setDrag(null) } else setDrag(old => old?.over ? { ...old, over: null } : old) }} />
+          const node = item.native
           const active = drag !== null && drag.pinned === node.pinned
           const normalizeHalf = (half: 'before' | 'after'): 'before' | 'after' =>
             node.blank ? 'after' : half
           return (
-            <SessionNodeItem
+            <PresentedRow key={item.key} row={item} context={presentation}><SessionNodeItem
               key={node.id}
               node={node}
               currentId={currentId}
@@ -942,7 +935,7 @@ function FlatList({
                 },
               }}
               t={t}
-            />
+            /></PresentedRow>
           )
         })}
       </AnimatedRows>
@@ -971,7 +964,7 @@ function SearchResults({
   remote,
   resultLimit,
   usePanelInfo,
-  t,
+  t, presentation,
 }: Pick<WorkspaceBrowserProps, 'useSessions' | 'useSessionStatus' | 'open' | 't' | 'usePanelInfo'> & {
   workspaces: readonly WorkspaceView[]
   archivedSessionIds: readonly SessionNode['id'][]
@@ -982,6 +975,7 @@ function SearchResults({
   query: string
   remote: RemoteSearchState
   resultLimit: number
+  presentation: PresentationContext
 }) {
   const panelActive = usePanelInfo(info => info.activePanelId !== null)
   const list = useSessions(s => s)
@@ -1002,6 +996,8 @@ function SearchResults({
     ),
     [list, workspaces, query, archivedSessionIds, archivedFilter, statuses, currentRemote, resultLimit],
   )
+  const allPresented = flattenPresentation(presentation.groups, presentation.filter.order)
+  const presented = allPresented.slice(0, resultLimit)
   const pending = currentRemote.status === 'loading'
   const currentId = panelActive
     ? undefined
@@ -1010,23 +1006,19 @@ function SearchResults({
   return (
     <div className={clsx(css.treeBody, css.wide)}>
       <div className={css.list}>
+        {presentation.provider && <p className={css.searchStatus}>{t('unified.searchScope')}</p>}
         <div className={css.searchTree} role="tree" aria-label={t('search.results.aria')}>
-          {results.items.map(result => (
-            <SearchResultItem
-              key={result.id}
-              result={result}
-              currentId={currentId}
-              onOpen={open}
-              onUnarchive={onUnarchive}
-              t={t}
-            />
-          ))}
+          {presented.map(item => {
+            if (item.owner === 'mirror') return <MirrorSessionRow key={item.key} session={item} context={presentation} />
+            const result = results.items.find(row => row.id === item.native.id) ?? { ...item.native, workspace: presentation.groups.find(group => group.sessions.some(session => session.key === item.key))?.title ?? '' }
+            return <PresentedRow key={item.key} row={item} context={presentation}><SearchResultItem result={result} currentId={currentId} onOpen={open} onUnarchive={onUnarchive} t={t} /></PresentedRow>
+          })}
         </div>
         {pending && (
           /* Two skeleton rows on an empty list, one when local matches already
              show and only the content hits are outstanding. */
           <div role="status" aria-label={t('search.pending')}>
-            {(results.items.length === 0 ? [0, 1] : [0]).map(i => (
+            {(presented.length === 0 ? [0, 1] : [0]).map(i => (
               <div key={i} className={css.skeletonRow} aria-hidden="true">
                 <span className={css.skeletonDot} />
                 <span className={css.skeletonBars}>
@@ -1037,10 +1029,10 @@ function SearchResults({
             ))}
           </div>
         )}
-        {!pending && results.items.length === 0 && (
+        {!presentation.incomplete && !pending && presented.length === 0 && (
           <div className={css.empty}>{t('search.noMatches')}</div>
         )}
-        {results.hasMore && (
+        {(results.hasMore || allPresented.length > resultLimit) && (
           <div className={css.searchStatus}>
             {t('search.hasMore', { n: resultLimit })}
           </div>
@@ -1056,12 +1048,14 @@ function SearchResults({
  * owns the status subscription its badges need, and it counts every Workspace,
  * whatever the filter hides.
  */
-function SpaceSwitcherSeat({ runtime, state, filter, list, workspaces, ungroupedSessionIds, rowState, useSessionStatus, t }: Pick<
+function SpaceSwitcherSeat({ presentation, runtime, state, filter, showActivity = true, list, workspaces, ungroupedSessionIds, rowState, useSessionStatus, t }: Pick<
   SessionTreeProps, 'list' | 'workspaces' | 'ungroupedSessionIds' | 'rowState' | 'useSessionStatus' | 't'
 > & {
+  presentation: PresentationContext
   runtime: TagRuntime
   state: TagState
   filter: WorkspaceTag | null
+  showActivity?: boolean
 }) {
   const statuses = useSessionStatus(s => s)
   const activity = useMemo(() => activityBySpace(deriveGroups(list, workspaces, rowState, statuses, {
@@ -1069,7 +1063,7 @@ function SpaceSwitcherSeat({ runtime, state, filter, list, workspaces, ungrouped
     ungroupedOrder: ungroupedSessionIds,
   }), state), [list, workspaces, rowState, statuses, ungroupedSessionIds, state])
   const tags = useMemo(() => tagsByName(state.tags), [state.tags])
-  return <SpaceSwitcher tags={tags} filter={filter?.id ?? null} activity={activity} onPick={runtime.setFilter} t={asTagTranslate(t)} />
+  return <SpaceSwitcher tags={tags} filter={filter?.id ?? null} activity={presentationActivity(projectPresentation(presentation.all, state, { ...presentation.filter, query: '', tagId: null }), state)} onPick={id => { if (id === UNTAGGED_FILTER) runtime.setUntaggedOnly?.(true); else runtime.setFilter(id) }} t={asTagTranslate(t)} />
 }
 
 /**
@@ -1140,7 +1134,13 @@ export function WorkspaceBrowser({
   const tagView = useTagging(tagging)
   const sectionMode = tagging === undefined ? null : tagView.view.mode
   const tagState = tagView.snapshot.state
-  const spaceTag = tagging === undefined ? null : liveFilter(tagState, tagView.view.filter)
+  const [providerState, setProviderState] = useState<{ lease: object; value: MirrorContribution | null; error?: string; phase?: 'loading' | 'ready' | 'error' } | null>(null)
+  const publishPresentation = useCallback((lease: object, value: MirrorContribution | null, error?: string, phase?: 'loading' | 'ready' | 'error') => {
+    setProviderState(old => phase || error || value ? { lease, value, error, phase } : old?.lease === lease ? null : old)
+  }, [])
+  const provider = providerState?.value ?? null
+  const presentationStatuses = useSessionStatus(value => value)
+  const spaceTag = tagging === undefined ? null : tagView.view.untaggedOnly ? { id: UNTAGGED_FILTER, name: asTagTranslate(t)('tags.section.untagged'), color: 'gray' as const } : liveFilter(tagState, tagView.view.filter)
   const flatSpace = useMemo(() => spaceTag === null || tagging === undefined ? undefined : {
     tag: spaceTag,
     sessionIds: new Set(workspaces.filter(workspace => inSpace(tagState, spaceTag.id, workspace.workspaceId))
@@ -1387,6 +1387,20 @@ export function WorkspaceBrowser({
     }
   }, [normalizedQuery, searchSessions])
 
+  const allPresentation = useMemo(() => collectPresentation(deriveGroups(list, orderedWorkspaces, { ...rowState, archivedFilter: 'show' }, presentationStatuses, {
+    expandedGroups: [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY], ungroupedOrder: orderedUngroupedSessionIds,
+  }), tagState, provider, new Map(workspaces.map(workspace => [workspace.workspaceId, Math.max(0, ...workspace.sessionIds.map(id => list.byId[id]?.updatedAt ?? 0))]))), [list, orderedWorkspaces, rowState, presentationStatuses, workspaces, orderedUngroupedSessionIds, tagState, provider])
+  const presentationInput = groupBy === 'flat' && sectionMode === null
+    ? allPresentation.map(group => ({ ...group, sessions: group.sessions.map(session => session.owner === 'local' ? { ...session, order: orderedFlatSessionIds.indexOf(session.native.id) } : session) }))
+    : allPresentation
+  const presentationFilter = { tagId: normalizedQuery !== '' && providerState === null ? null : spaceTag?.id ?? null, archived: archivedFilter, query: normalizedQuery, order: orderBy }
+  const localMatches = normalizedQuery === '' ? [] : deriveSearchResults(list, workspaces, normalizedQuery, archivedSessionIds, archivedFilter, presentationStatuses, remoteSearch.query === normalizedQuery ? remoteSearch : { items: [], hasMore: false }, Number.MAX_SAFE_INTEGER).items
+  const contentMatches = new Set(localMatches.map(item => `local:${item.id}`))
+  const presentation: PresentationContext = {
+    all: allPresentation, groups: projectPresentation(presentationInput, tagState, presentationFilter, contentMatches),
+    incomplete: providerState?.phase === 'loading' || !!providerState?.error, tags: tagState, provider, labels: { untitled: t('unified.untitled') }, filter: presentationFilter, filterKey: JSON.stringify([spaceTag?.id, normalizedQuery, archivedFilter, groupBy, sectionMode]),
+  }
+
   // Rename dialog (browser-owned so it outlives row unmounts during collapse).
   // The stored title decides whether confirming is a real rename; the draft is
   // seeded with the label on screen. They differ for a Workspace still
@@ -1532,6 +1546,7 @@ export function WorkspaceBrowser({
         <div className={clsx(css.headerActions, wide && searchExpanded && css.headerActionsHidden)}>
           {wide && (
             <ViewOptionsMenu
+            renderRemoteOptions={owner => renderSlot('sidebar.workspaces.viewOptions', owner)}
               groupBy={groupBy}
               sectionMode={sectionMode}
               onSectionPick={tagging?.setMode}
@@ -1583,10 +1598,14 @@ export function WorkspaceBrowser({
         />
       </div>
 
-      {/* workspace-tags: the space switcher, while there are tags and no search query. */}
-      {wide && tagging !== undefined && tagState.tags.length > 0 && normalizedQuery === '' && (
+      {renderSlot('sidebar.workspaces.presentation', { publish: publishPresentation })}
+      {wide && providerState?.phase === 'loading' && <p role="status" className={css.searchStatus}>{t('unified.loading')}</p>}
+      {wide && providerState?.error && <p role="status" className={css.searchStatus}>{t('unified.unavailable')}</p>}
+      {/* Device identity and shared project tags are independent filters. */}
+      {wide && tagging !== undefined && (normalizedQuery === '' || providerState !== null) && (
         <SpaceSwitcherSeat
           runtime={tagging}
+          presentation={presentation}
           state={tagState}
           filter={spaceTag}
           list={list}
@@ -1618,9 +1637,11 @@ export function WorkspaceBrowser({
       {/* Always-mounted seat keeps the region's flex slot while the list
           itself is wide-only. */}
       <div className={css.listArea}>
+        <div className={css.presentationListArea}>
         {wide && (normalizedQuery !== ''
           ? (
             <SearchResults
+                presentation={presentation}
               usePanelInfo={usePanelInfo}
               useSessions={useSessions}
               useSessionStatus={useSessionStatus}
@@ -1638,6 +1659,7 @@ export function WorkspaceBrowser({
           : groupBy === 'flat' && sectionMode === null
             ? (
               <FlatList
+                presentation={presentation}
                 usePanelInfo={usePanelInfo}
                 list={list}
                 sessionIds={orderedFlatSessionIds}
@@ -1658,6 +1680,8 @@ export function WorkspaceBrowser({
             )
             : (
               <SessionTree
+                onWorkspaceReorder={() => actions.setOrderBy('manual', activeSessionOrders)}
+                presentation={presentation}
                 usePanelInfo={usePanelInfo}
                 list={list}
                 shortcuts={shortcuts}
@@ -1698,6 +1722,7 @@ export function WorkspaceBrowser({
                 }}
               />
             ))}
+        </div>
       </div>
 
       <Modal

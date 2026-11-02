@@ -10,6 +10,9 @@ import type { GroupNode, SessionNode } from '../upstream/tree.ts'
 import type { SectionMode } from './contract.ts'
 
 /** What a Session can be doing besides nothing, most urgent first: the Status sections' order. */
+/** Internal projection key only; never persisted in the tag catalogue or assignments. */
+export const UNTAGGED_FILTER = '@workspace-tags/untagged-filter'
+
 export const ACTIVE_STATUSES = ['waiting', 'completed', 'running'] as const
 export type ActiveStatus = typeof ACTIVE_STATUSES[number]
 
@@ -77,6 +80,7 @@ export function liveFilter(state: TagState, filter: string | null): WorkspaceTag
 
 /** Whether a group shows under the space filter; the Ungrouped bucket has no tags. */
 export function inSpace(state: TagState, filter: string | null, workspaceId: string | undefined): boolean {
+  if (filter === UNTAGGED_FILTER) return workspaceId === undefined || !(state.assignments[workspaceId] ?? []).some(id => state.tags.some(tag => tag.id === id))
   return filter === null || (workspaceId !== undefined && (state.assignments[workspaceId] ?? []).includes(filter))
 }
 

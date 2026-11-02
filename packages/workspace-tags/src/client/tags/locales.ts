@@ -4,6 +4,9 @@
  */
 
 export const tagZh = {
+  'tags.filter.untaggedEmpty': '没有未打标签的本机工作区',
+  'tags.filter.projects': '项目标签',
+  'tags.filter.sharedHint': '项目标签在设备间共享；同名标签不是设备开关。',
   'groupBy.tag': '按标签',
   'groupBy.status': '按状态',
   'tags.section.untagged': '未加标签',
@@ -68,6 +71,9 @@ export const tagZh = {
 } satisfies Record<string, string>
 
 export const tagEn = {
+  'tags.filter.untaggedEmpty': 'No untagged local workspaces',
+  'tags.filter.projects': 'Project tags',
+  'tags.filter.sharedHint': 'Project tags are shared across devices; a matching name is not a device switch.',
   'groupBy.tag': 'Tag',
   'groupBy.status': 'Status',
   'tags.section.untagged': 'Untagged',

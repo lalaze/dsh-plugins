@@ -13,8 +13,8 @@ import { TagStore } from './server/store.js'
 import { TagError, TAGS_ROUTE, type TagOperation, type TagState } from './shared/tags.js'
 
 /**
- * What other host plugins may do with the tags, as the service `workspaceTags`. dsh-device-sync uses it to share
- * tags between paired machines.
+ * What other host plugins may do with the tags, as the service `workspaceTags`. dsh-mobile reads it to group a
+ * phone's sessions as the sidebar does.
  */
 export interface WorkspaceTagsService {
   readonly version: 1

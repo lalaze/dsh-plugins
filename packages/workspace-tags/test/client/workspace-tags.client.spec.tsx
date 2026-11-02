@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useSyncExternalStore } from 'react'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -76,7 +77,7 @@ const tagged: TagState = {
 }
 
 afterEach(cleanup)
-beforeEach(() => { localStorage.clear() })
+beforeEach(() => { localStorage.clear(); window.sessionStorage.clear() })
 
 describe('sections', () => {
   const node = (id: string, overrides: Partial<SessionNode> = {}): SessionNode => ({
@@ -264,7 +265,7 @@ describe('WorkspaceBrowser with tags', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View options' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /^Tag/ }))
     expect(runtime.view.getSnapshot().mode).toBe('tag')
-    expect(sectionNames()).toEqual([['Client', ['alpha', 'beta']], ['Urgent', ['alpha']], ['Untagged', ['gamma', 'delta']]])
+    expect(sectionNames()).toEqual([['Client', ['alpha', 'beta']], ['Urgent', ['alpha']], ['Untagged', ['delta', 'gamma']]])
     fireEvent.click(screen.getByRole('button', { name: 'View options' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /^Status/ }))
     // What needs the user leads; Idle, the catch-all, starts folded.
@@ -375,13 +376,13 @@ describe('WorkspaceBrowser with tags', () => {
     const { runtime, store } = await mount({ open }, spaces)
     const chips = within(screen.getByRole('group', { name: 'Show workspaces by tag' })).getAllByRole('button')
     expect(chips.map(button => [button.getAttribute('aria-label'), button.getAttribute('aria-pressed')])).toEqual([
-      ['All', 'true'], ['Empty', 'false'], ['Home, 2 items need you', 'false'], ['Work, running', 'false'],
+      ['All', 'true'], ['Untagged', 'false'], ['Empty', 'false'], ['Home, 2 items need you', 'false'], ['Work, running', 'false'],
     ])
     fireEvent.click(chip(/^Work/))
     expect(runtime.view.getSnapshot().filter).toBe('work')
     expect(sectionNames()).toEqual([])
     expect(workspaceRow('alpha')).toHaveLength(1)
-    expect(['gamma', 'delta'].map(name => workspaceRow(name).length)).toEqual([0, 0])
+    expect(['delta', 'gamma'].map(name => workspaceRow(name).length)).toEqual([0, 0])
     // A selected space drops its marks; All now runs and needs the user.
     expect(chip(/^Work/).getAttribute('aria-label')).toBe('Work')
     expect(chip(/^All/).getAttribute('aria-label')).toBe('All, 2 items need you, running')
@@ -426,7 +427,7 @@ describe('WorkspaceBrowser with tags', () => {
     expect(workspaceRow('alpha').map(row => row.getAttribute('draggable'))).toEqual(['false', 'false'])
     fireEvent.click(sectionHeader('Client'))
     expect(runtime.view.getSnapshot().collapsed).toEqual({ 'tag:client': true })
-    expect(sectionNames()).toEqual([['Client', []], ['Urgent', ['alpha']], ['Untagged', ['gamma', 'delta']]])
+    expect(sectionNames()).toEqual([['Client', []], ['Urgent', ['alpha']], ['Untagged', ['delta', 'gamma']]])
   })
 
   it('shows tag dots and opens the tag menu from a right-click or the row menu', async () => {

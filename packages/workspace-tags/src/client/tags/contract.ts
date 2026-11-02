@@ -18,6 +18,8 @@ export interface TagViewState {
   collapsed: Record<string, boolean>
   /** The space filter: the one tag whose Workspaces every grouping shows, or null for all. */
   filter: string | null
+  /** Independent filter mode, never a stored project tag. */
+  untaggedOnly?: boolean
 }
 
 /** Where the tag menu opens: a right-click point or a menu button's box. */
@@ -39,6 +41,7 @@ export interface TagRuntime {
   setMode(mode: SectionMode | null): void
   setSectionCollapsed(key: string, collapsed: boolean): void
   setFilter(tagId: string | null): void
+  setUntaggedOnly?(enabled: boolean): void
   openMenu(request: TagMenuRequest | null): void
   openDialog(request: TagDialogRequest | null): void
   /** Drop a deleted Workspace's tags; failures only log. */

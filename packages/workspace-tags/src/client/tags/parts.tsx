@@ -10,6 +10,7 @@ import { emptyTagState, type TagColor, type TagState, type WorkspaceTag } from '
 import type { TagRuntime, TagSnapshot, TagViewState } from './contract.ts'
 import type { Attention, BrowserSection, RowActivity, SpaceActivity } from './sections.ts'
 import css from './tags.module.css'
+import { UNTAGGED_FILTER } from './sections.ts'
 
 type Translate = (key: never, vars?: Record<string, string | number>) => string
 /** The browser's `workspace` translator, narrowed to what these parts need. */
@@ -130,10 +131,11 @@ export function SpaceSwitcher({ tags, filter, activity, onPick, t }: {
     )
   }
   return (
-    <div className={css.switcher} role="group" aria-label={t('tags.filter.label')}>
+    <div className={css.filterRow}><span className={css.filterLabel} title={t('tags.filter.sharedHint')}>{t('tags.filter.projects')}</span><div className={css.switcher} role="group" aria-label={t('tags.filter.label')}>
       {chip(null, t('tags.filter.all'), null)}
+      {chip(UNTAGGED_FILTER, t('tags.section.untagged'), null)}
       {tags.map(tag => chip(tag.id, tag.name, <TagDot color={tag.color} />))}
-    </div>
+    </div></div>
   )
 }
 
@@ -159,7 +161,7 @@ function StatusIcon({ kind }: { kind: keyof typeof statusIcon }) {
 
 /** One Tag or Status section: a fold header over its Workspace groups. */
 export function SectionBlock({ section, collapsed, onToggle, t, children }: {
-  section: BrowserSection
+  section: Pick<BrowserSection, 'key' | 'kind' | 'tag' | 'count'>
   collapsed: boolean
   onToggle: () => void
   t: TagTranslate

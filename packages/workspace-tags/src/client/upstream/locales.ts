@@ -7,6 +7,18 @@ import { tagEn, tagZh } from '../tags/locales.ts'
 
 /** Simplified Chinese dictionary (the key-set source of truth). */
 export const zh = {
+  'unified.loading': '正在加载同步历史；本机工作区仍可使用。',
+  'unified.unavailable': '暂时无法读取同步历史；本机工作区仍可使用。',
+  'unified.untitled': '未命名会话',
+  'unified.searchScope': '本机会话支持全文搜索；其他设备仅搜索已同步标题和工作区元数据。',
+  'unified.ownerActions': '会话仍由所属设备执行。禁止跨设备拖动；新建、重命名等本机操作不可用于镜像。',
+  'unified.ungrouped': '未分组',
+  'unified.untagged': '未加标签',
+  'unified.more': '显示更多',
+  'unified.waiting': '等待处理',
+  'unified.completed': '已完成',
+  'unified.running': '运行中',
+  'unified.idle': '空闲',
   'defaultWorkspace.failed': '无法创建默认工作区，请通过“选择工作区”选择文件夹',
   'draft.workspaceRequired': '请先选择工作区',
   'draft.initializationFailed': '暂时无法填入草稿，请稍后重试',
@@ -135,6 +147,18 @@ export type WorkspaceKey = keyof typeof zh
 
 /** English dictionary, checked complete against the zh key set. */
 export const en = {
+  'unified.loading': 'Loading synced history; local workspaces remain available.',
+  'unified.unavailable': 'Synced history is temporarily unavailable; local workspaces remain available.',
+  'unified.untitled': 'Untitled session',
+  'unified.searchScope': 'Local sessions include full-text results; other devices search synced titles and workspace metadata only.',
+  'unified.ownerActions': 'Sessions execute on their owning device. Cross-device dragging and native-only workspace actions are unavailable for mirrors.',
+  'unified.ungrouped': 'Ungrouped',
+  'unified.untagged': 'Untagged',
+  'unified.more': 'Show more',
+  'unified.waiting': 'Waiting',
+  'unified.completed': 'Completed',
+  'unified.running': 'Running',
+  'unified.idle': 'Idle',
   'defaultWorkspace.failed': 'Unable to create default workspace. Use Choose workspace to select a folder.',
   'draft.workspaceRequired': 'Choose a workspace first.',
   'draft.initializationFailed': 'Could not fill the draft. Please try again shortly.',

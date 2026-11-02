@@ -38,6 +38,8 @@
  * session-scoped seat would force a Session binding, which would activate and
  * retain every listed Session.
  */
+import type { PresentationProviderOwner } from '../presentation.ts'
+import type { ReactNode } from 'react'
 import type {
   HostObservable, InjectFace, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore, SlotHookFactory,
 } from '@deepseek-ai/dsh-client-ui-slots'
@@ -114,8 +116,18 @@ export interface SessionRowScheduleOwnerProps {
   readonly sessionId: SessionId
 }
 
+/** Component options appended to the existing sliders menu. The contributor owns its state. */
+export interface WorkspaceViewOptionsOwnerProps {
+  renderOption(option: { id: string; label: string; checked: boolean; onToggle(): void }): ReactNode
+}
+
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface SlotMap {
+    /** Client-only remote records. Never pass their identities to local workspace/session controllers. */
+    'sidebar.workspaces.presentation': { kind: 'single'; scope: 'root'; owner: PresentationProviderOwner }
+    'sidebar.workspaces.viewOptions': { kind: 'list'; scope: 'root'; owner: WorkspaceViewOptionsOwnerProps }
+    'sidebar.workspaces.deviceFilter': { kind: 'single'; scope: 'root'; owner: { deviceId: string | null; onDevicePick(value: { deviceId: string | null; showLocal: boolean }): void } }
+    'sidebar.workspaces.remote': { kind: 'list'; scope: 'root'; owner: { tagId: string | null; untaggedOnly?: boolean; deviceId?: string | null; localVisible?: boolean; query: string; archivedFilter: 'default' | 'show' | 'only' } }
     /** Directory-flow hole under the conversation empty-state picker (declared by the WorkspacePicker entry). */
     'conversation.hero.workspace.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
     /** Directory-flow hole under the sidebar browsing region (declared by the WorkspaceBrowser entry). */
@@ -276,6 +288,7 @@ export type WorkspaceBrowserInjected = {
   // workspace-tags: tag dots, the tag menu and the Tag/Status Group by modes.
   // Optional so upstream's specs, which build the browser without it, still apply.
   tagging?: TagRuntime | undefined
+  deviceFilterAvailability?: HostObservable<boolean> | undefined
 }
 
 /** The browser's declared viewing store handle, shared with the row actions that write view state. */
@@ -473,6 +486,10 @@ export type WorkspaceBrowserProps =
   PropsRuntime<'sidebar.workspaces'>
   & PropsRenderSlots<
     | 'sidebar.workspaces.directoryFlow'
+    | 'sidebar.workspaces.remote'
+    | 'sidebar.workspaces.deviceFilter'
+    | 'sidebar.workspaces.viewOptions'
+    | 'sidebar.workspaces.presentation'
     | 'sidebar.workspaces.session.menu.item'
     | 'sidebar.workspaces.session.row.action'
     | 'sidebar.session.row.leading'

@@ -427,3 +427,7 @@
   font-size: 13px;
   color: var(--dsw-alias-label-tertiary);
 }
+
+.filterRow { flex: none; display: flex; align-items: center; min-width: 0; gap: 6px; margin-bottom: 4px; }
+.filterLabel { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary); padding-left: 4px; }
+.filterRow .switcher { flex: 1; min-width: 0; margin: 0; }

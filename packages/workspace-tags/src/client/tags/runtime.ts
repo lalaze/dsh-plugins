@@ -10,8 +10,7 @@ import type { SectionMode, TagDialogRequest, TagMenuRequest, TagRuntime, TagSnap
 import { sectionFoldedByDefault } from './sections.ts'
 
 /**
- * Other clients of the same host (desktop and remote web) and paired machines (through dsh-device-sync) can change
- * tags. A refresh that finds the same revision costs an empty response.
+ * Other clients of the same host (desktop and remote web) and other host plugins can change tags. A refresh that finds the same revision costs an empty response.
  */
 const REFRESH_MS = 3_000
 const VIEW_KEY = 'dsh-workspace-tags.view.v1'
@@ -34,6 +33,7 @@ export function createTagRuntime(options: TagRuntimeOptions = {}): TagRuntime & 
     mode: isMode(stored?.mode) ? stored.mode : null,
     collapsed: Object.fromEntries(Object.entries(stored?.collapsed ?? {})
       .filter(([key, value]) => typeof value === 'boolean' && value !== sectionFoldedByDefault(key))),
+    ...(stored?.untaggedOnly === true ? { untaggedOnly: true } : {}),
     filter: typeof stored?.filter === 'string' && stored.filter !== '' ? stored.filter : null,
   })
   const menu = createSnapshotStore<TagMenuRequest | null>(null, { flush: 'sync' })
@@ -98,7 +98,8 @@ export function createTagRuntime(options: TagRuntimeOptions = {}): TagRuntime & 
         else delete draft.collapsed[key]
       })
     },
-    setFilter: (tagId) => { view.update((draft) => { draft.filter = tagId }) },
+    setFilter: (tagId) => { view.update((draft) => { draft.filter = tagId; delete draft.untaggedOnly }) },
+    setUntaggedOnly: (enabled) => { view.update((draft) => { draft.untaggedOnly = enabled; draft.filter = null }) },
     openMenu: next => { menu.set(next) },
     openDialog: next => { dialog.set(next) },
     forget: (workspaceId) => {
