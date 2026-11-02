@@ -1,6 +1,6 @@
 {
   "name": "dsh-mobile",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Read and steer this machine's DSH sessions from your phone through a relay, with end-to-end encryption, pairing by QR code and notifications",
   "type": "module",
   "main": "lib/server/index.js",

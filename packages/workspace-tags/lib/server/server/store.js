@@ -52,7 +52,7 @@ export class TagStore {
         return this.write(state => applyTagOperation(state, operation, () => randomUUID()));
     }
     /**
-     * Save a whole state at once, for host plugins that merge tags from elsewhere (dsh-device-sync). The state is
+     * Save a whole state at once, for host plugins that merge tags from elsewhere. The state is
      * normalized like a stored file, so invalid tags and assignments are dropped rather than saved.
      */
     replace(next) {

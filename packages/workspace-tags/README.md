@@ -6,7 +6,7 @@ Supports English and Simplified Chinese, following DSH’s language setting with
 
 `dsh-workspace-tags` adds colored tags to the workspaces in the DeepSeek Harness sidebar, a row of tag chips that narrows the sidebar to one tag, and two more **Group by** choices in the sidebar’s view options.
 
-Under the sidebar header, **All** and one chip per tag pick which workspaces the sidebar shows, in every grouping, so tags such as “Work” and “Personal” act as separate spaces. Pick a chip again to go back to All. A chip you are not in shows a spinner while any of its sessions runs, and how many of its sessions need you (waiting for you, or finished and not opened yet), orange when any is waiting. Search still covers every workspace; opening a result from another space switches back to All.
+Under the sidebar header, **All** and one chip per tag pick which workspaces the sidebar shows, in every grouping, so tags such as “Work” and “Personal” act as separate spaces. Pick a chip again to go back to All. A chip you are not in shows a spinner while any of its sessions runs, and how many of its sessions need you (waiting for you, or finished and not opened yet), orange when any is waiting. Without a unified provider, search covers every native workspace and opening another space switches to All.
 
 - **Tag**: one section per tag, in name order, then **Untagged**. A workspace with several tags appears under each of them.
 - **Status**: **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Completed** (a session finished and you have not opened it yet), **Running** (an agent is executing, itself or through a subagent), then **Idle**. A workspace with any running session appears only in **Running**, with all its sessions folded behind **Show more** as in the sidebar; the section badge counts only running sessions. Otherwise a workspace appears in each state its sessions qualify for, listing only the sessions in that state. **Idle** also holds workspaces without sessions, counts workspaces where the others count sessions, and starts folded. Each status has its own icon, and the sections follow live as agents start and stop.
@@ -20,10 +20,44 @@ Build and install:
 ```sh
 pnpm --filter dsh-workspace-tags check
 pnpm --filter dsh-workspace-tags pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.1.10.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.2.0.tgz"
 ```
 
 Requires DSH 0.2.1-rc.3 or a later 0.2 release.
+
+## 0.2.0 unified presentation
+
+> Device Sync was removed on 2026-11-02. The `sidebar.workspaces.presentation` and `sidebar.workspaces.viewOptions` slots remain; with no provider the sidebar shows this machine only, as in 0.1.10. The notes below and earlier are kept as released.
+
+Workspace Updated order uses the maximum timestamp of raw current members before search/archive/hidden/child visibility filters. A hidden native reusable blank contributes its timestamp without becoming a visible row. Retained removed mirror history stays readable but does not contribute workspace recency.
+
+Initial synced-history loading is disclosed in the shared header instead of prematurely claiming no matches. Errors remain explicit; provider withdrawal restores ordinary native empty states. Running status includes waiting and activity derived from existing same-owner direct-child metadata, independently of child visibility, without extending the sync protocol.
+
+With **Device Sync 0.2.0**, one owner-qualified presentation collection contains native and mirrored workspaces/history; the device dropdown and remote section are removed. Workspace, directory-tree, flat, tag and status views share filtering, search, sorting, counts and empty states. Existing labels are not renamed/merged/reassigned, and identical paths do not identify the same workspace.
+
+Project chips remain during unified search. Native full-text/metadata hits and mirror metadata hits share one result set, with a visible capability note. Without Device Sync, native cross-project search is retained. Updated ordering spans owners; Manual uses original owner workspace order plus a stable qualified tie-break, never local-first. There is no new synchronized global drag order: safe native-local reordering remains, cross-owner drops are rejected, and mirror IDs never enter native order storage. Unexported native pin/unread-completion state is not fabricated for mirrors.
+
+The new `sidebar.workspaces.presentation` slot is a renderless client bridge: combine first, then render, rather than concatenate lists. Genuine native nodes retain native actions; mirror branches cannot instantiate native action slots/controllers. Provider error/unmount invalidates old actions while retaining native browsing. The original sliders menu retains hidden/subagent options. Inline mirror tag editing preserves per-item acknowledgment, pinned editors, retry and filter-change cancellation; see Device Sync's documentation.
+
+Automated tests cover swapped-owner collection/order, identity collisions, native interactions, same-ID main-panel return, stale search, cross-owner drag rejection and tag edits. Real two-machine GUI acceptance remains a separate deployment step.
+
+## 0.1.13 release notes
+
+- Adds an optional `sidebar.workspaces.viewOptions` component slot to the **existing** sliders menu beside Workspaces. Device Sync 0.1.4 contributes a labeled remote-session group with the hidden/subagent visibility options; the owner supplies native menu-row rendering and the contributor retains state outside the menu lifetime.
+- Device selection and project-tag rows are unchanged. Without a contributor no remote section or empty separator appears. No execution or host registry behavior changes.
+
+## 0.1.12 release notes
+
+- Clearly labeled **Project tags** (All / Untagged / existing labels) plus an independent **Device** dropdown supplied by Device Sync 0.1.3. Device uses owning DSH identity, not tag names or SSH hosts. It filters both native and mirrored workspace lists without changing the active conversation/executor. Device-filter slot occupancy and provider error/loading cleanup keep local workspaces visible when the provider is unavailable.
+- Untagged is independent view state, not a catalogue entry; deleted-tag residue is ignored. All existing tags, names and assignments are preserved. Labels remain shared across machines. Global search remains cross-project within the chosen devices; the project row is hidden during search.
+- Local Group by behavior is unchanged. Activity badges remain local-only and are hidden in remote-only views. Remote workspace tag names and in-place Save/Cancel editing are provided by Device Sync; only explicit assignment deltas are sent. See its README for partial-write, cancellation and linked-workspace semantics.
+- Device control is single-line, project chips scroll horizontally, and the remote branch fills the available list area in remote-only mode.
+
+## 0.1.11 release notes
+
+- Adds the optional `sidebar.workspaces.remote` client-only extension seat inside the ordinary workspace browser, with the current tag ID, query and archive filter. Device Sync 0.1.2 contributes owner-qualified remote workspaces and sessions here and opens a real main-area conversation panel. With Device Sync absent, local browsing is unchanged.
+- Remote nodes never enter the native host workspace/session registries or local row action menus. While the remote conversation panel is active, local new/add/fork/archive/rename shortcuts cannot operate on the previously selected local session. Returning to local chat restores its normal shortcuts.
+- The remote branch preserves device/workspace grouping. Local Group by modes and local activity counters are unchanged; assigning remote groups remains in Device Sync settings.
 
 ## 0.1.10 release notes
 
