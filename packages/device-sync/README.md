@@ -88,8 +88,12 @@ Build and install on both machines:
 ```sh
 pnpm --filter dsh-device-sync check
 pnpm --filter dsh-device-sync pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.3.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.4.tgz"
 ```
+
+## 0.1.4 release notes
+
+- Remote workspaces: group chips lock with the reason when a change could never reach the other machine (this machine does not share with it, or it is no longer paired); while it is paused or offline, a note says the change arrives later. Such assignments are also refused by the plugin, and conflicts on the removed workspace links are no longer shown.
 
 ## 0.1.3 release notes
 

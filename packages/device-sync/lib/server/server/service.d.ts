@@ -77,6 +77,11 @@ export declare class DeviceSync {
     private observeTags;
     private groupsRev;
     private projectTags;
+    /**
+     * Only this machine's workspaces, or those of a paired machine this one shares with, take groups: that machine
+     * pulls the change from here, so without sharing it never arrives. Paused or offline machines get it later.
+     */
+    private assignable;
     /** A local group edit that is not in dsh-workspace-tags (another machine's workspace, or a link). */
     private groupsChanged;
     private schedule;
