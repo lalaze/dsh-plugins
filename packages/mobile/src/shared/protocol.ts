@@ -57,6 +57,10 @@ export interface SessionEntry {
   pending: PendingInteraction[]
   /** The model the session uses, from its latest selection. */
   model?: ModelSelection
+  /** Its permission preset, such as `workspace-write`. */
+  permission?: string
+  /** Not started yet; DSH lists such sessions but its sidebar hides them. */
+  blank?: boolean
   /** No longer listed by DSH. */
   removed?: boolean
 }

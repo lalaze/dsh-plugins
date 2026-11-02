@@ -237,3 +237,24 @@ function decryptPush(body: Uint8Array, browser: ReturnType<typeof createECDH>, a
   assert.equal(plain[plain.length - 1], 2, 'last-record delimiter')
   return JSON.parse(plain.subarray(0, plain.length - 1).toString('utf8'))
 }
+
+test('a phone sees sessions as DSH shows them: first message as title, injected context left out, blanks marked', async t => {
+  const setup = await startHub(t)
+  setup.host.addWorkspace('w1', 'project')
+  setup.host.addSession('blank', 'w1')
+  setup.host.addSession('s1', 'w1')
+  setup.host.append('s1', 'user/message', { role: 'user', content: [{ type: 'text', text: 'Fix the login redirect' }], source: { kind: 'user' } })
+  setup.host.append('s1', 'user/message', { role: 'user', content: [{ type: 'text', text: '<system-reminder>skills…</system-reminder>' }], source: { kind: 'skill-catalog', form: 'catalog' } })
+  setup.host.append('s1', 'user/message', { role: 'user', content: [{ type: 'text', text: 'Time sampled…' }], source: { kind: 'time-context', form: 'snapshot' } })
+  setup.host.append('s1', 'assistant/message', { message: { role: 'assistant', content: [{ type: 'text', text: 'Done' }], source: { kind: 'model', provider: 'p', model: 'm', replayState: { big: 'x'.repeat(1000) } } } })
+  const { client } = await pairedPhone(t, setup)
+  let sessions: SessionEntry[] = []
+  await waitFor(async () => { sessions = (await client.call('sessions.changes', {})).sessions; return sessions.length === 2 }, 5000, 'listed')
+  assert.equal(sessions.find(s => s.sessionId === 's1')?.title, 'Fix the login redirect')
+  assert.equal(sessions.find(s => s.sessionId === 'blank')?.blank, true)
+  assert.equal(sessions.find(s => s.sessionId === 's1')?.blank, undefined)
+  const { events } = await client.call('session.events', { sessionId: 's1', limit: 50 })
+  assert.deepEqual(events.filter(e => e.type === 'user/message').map(e => (e.data as { content: { text: string }[] }).content[0].text), ['Fix the login redirect'])
+  const source = (events.find(e => e.type === 'assistant/message')!.data as { message: { source: Record<string, unknown> } }).message.source
+  assert.deepEqual(source, { kind: 'model', provider: 'p', model: 'm' })
+})

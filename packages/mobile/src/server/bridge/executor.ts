@@ -7,7 +7,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { Command, CommandResult, LiveFrame, ModelSelection, PendingInteraction, PromptPart, SessionEntry, SyncedEvent, WorkspaceEntry } from '../../shared/protocol.js'
-import { attachmentRefs, chunkText, modelOf, openApprovals, openQuestions, shareEvent, titleOf } from './events.js'
+import { attachmentRefs, chunkText, firstPrompt, modelOf, openApprovals, openQuestions, shareEvent, titleOf } from './events.js'
 import type { ApprovalAsk, HostApi, HostAttachmentRef, HostInspection, HostSessionSummary, HostWorkspaceState } from './host.js'
 import { AsyncQueue, sleep } from './queue.js'
 
@@ -18,7 +18,7 @@ export class CommandError extends Error {
 
 /** What survives a restart: the last inspected position of each session, and handled request IDs. */
 export interface ExecutorData {
-  sessions: Record<string, { updatedAt: number; running: boolean; lastSeq: number; title?: string; forkOf?: string; approvals?: PendingInteraction[]; model?: ModelSelection }>
+  sessions: Record<string, { updatedAt: number; running: boolean; lastSeq: number; title?: string; preview?: string; forkOf?: string; approvals?: PendingInteraction[]; model?: ModelSelection }>
   handled: Record<string, { at: number; result: CommandResult }>
 }
 export const emptyExecutorData = (): ExecutorData => ({ sessions: {}, handled: {} })
@@ -177,10 +177,14 @@ export class Executor {
       const inspection = await this.host.inspect(id, signal)
       const record = this.remember(id, inspection)
       info = { updatedAt: summary.updatedAt, running: summary.running, lastSeq: record.lastSeq,
-        title: titleOf(inspection.events), forkOf: inspection.meta.parentSession, approvals: openApprovals(inspection.events), model: modelOf(inspection.events) }
+        title: titleOf(inspection.events), preview: firstPrompt(inspection.events), forkOf: inspection.meta.parentSession, approvals: openApprovals(inspection.events), model: modelOf(inspection.events) }
       this.options.data.sessions[id] = info
     }
-    const projectedTitle = summary.projections?.values?.title
+    const values = summary.projections?.values ?? {}
+    const projectedTitle = typeof values.title === 'string' ? values.title : (values.title as { title?: unknown } | null | undefined)?.title
+    const selection = values.modelSelection as { next?: ModelSelection | null; lastUsed?: ModelSelection | null } | undefined
+    const projectedModel = selection?.next ?? selection?.lastUsed ?? undefined
+    const permission = (values.permissions as { currentValue?: unknown } | undefined)?.currentValue
     const pending: PendingInteraction[] = [
       ...[...this.approvals.values()].filter(a => a.sessionId === id).map(a => ({ kind: 'approval' as const, id: a.id, toolName: a.toolName, askedAt: a.askedAt, answerable: true,
         ...(a.callId ? { callId: a.callId } : {}), ...(a.reason ? { reason: a.reason } : {}) })),
@@ -192,12 +196,14 @@ export class Executor {
       state: pending.length > 0 && summary.running ? 'waiting' : summary.running ? 'running' : 'idle',
       pending: summary.running ? pending : [],
       ...(workspaceId ? { workspaceId } : {}),
-      ...(typeof projectedTitle === 'string' && projectedTitle ? { title: projectedTitle } : info!.title ? { title: info!.title } : {}),
+      ...(typeof projectedTitle === 'string' && projectedTitle ? { title: projectedTitle } : info!.title ? { title: info!.title } : info!.preview ? { title: info!.preview } : {}),
       ...(summary.cwd ? { cwd: summary.cwd } : {}),
       ...(info!.forkOf ? { forkOf: info!.forkOf } : {}),
       ...(summary.parentSessionId ? { parentSessionId: summary.parentSessionId } : {}),
       ...(summary.origin ? { origin: summary.origin } : {}),
-      ...(info!.model ? { model: info!.model } : {}),
+      ...(projectedModel?.provider ? { model: projectedModel } : info!.model ? { model: info!.model } : {}),
+      ...(typeof permission === 'string' && permission ? { permission } : {}),
+      ...(summary.blank ? { blank: true } : {}),
     }
     return this.put(entry)
   }

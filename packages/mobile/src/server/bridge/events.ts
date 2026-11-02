@@ -10,7 +10,7 @@ import type { HostAttachmentRef, HostEvent } from './host.js'
 
 const SHARED = new Set([
   'user/message', 'assistant/message', 'tool/call', 'tool/result', 'turn/start', 'turn/end',
-  'session/title', 'approval/asked', 'approval/decided', 'model/selection', 'session/end-seed',
+  'session/title', 'approval/asked', 'approval/decided', 'model/selection',
 ])
 
 type Dict = Record<string, unknown>
@@ -20,11 +20,34 @@ const asDict = (value: unknown): Dict => (typeof value === 'object' && value !==
 export function shareEvent(event: HostEvent): SyncedEvent | undefined {
   if (!SHARED.has(event.type)) return undefined
   let data = event.data
-  if (event.type === 'assistant/message') {
+  if (event.type === 'user/message') {
+    // DSH injects context as user messages (instructions, skill catalog, runtime and time snapshots); its own view
+    // hides them, and they can be large.
+    if (isInjected(data)) return undefined
+  } else if (event.type === 'assistant/message') {
     const { stream: _stream, ...rest } = asDict(data)
-    data = rest
+    const message = asDict(rest.message), source = asDict(message.source)
+    // The provider's replay state is for resuming the model, not for reading.
+    data = message.source ? { ...rest, message: { ...message, source: { kind: source.kind, provider: source.provider, model: source.model } } } : rest
   }
   return { type: event.type, seq: event.seq, time: event.time, data }
+}
+
+/** A user message DSH added as context rather than one a person sent. */
+export function isInjected(data: unknown): boolean {
+  const source = asDict(asDict(data).source)
+  return typeof source.form === 'string' || (typeof source.kind === 'string' && /-(context|catalog|instructions)$/.test(source.kind))
+}
+
+/** Text of the first message a person sent, as DSH's sidebar shows a session without a title. */
+export function firstPrompt(events: readonly { type: string; data: unknown }[]): string | undefined {
+  for (const event of events) {
+    if (event.type !== 'user/message' || isInjected(event.data)) continue
+    const data = asDict(event.data), content = data.content ?? asDict(data.message).content
+    const text = (Array.isArray(content) ? content.map(block => (asDict(block).type === 'text' ? String(asDict(block).text ?? '') : '')).join(' ') : typeof content === 'string' ? content : '').replace(/\s+/g, ' ').trim()
+    if (text) return text.slice(0, 120)
+  }
+  return undefined
 }
 
 /** Images and files a shared event refers to. */

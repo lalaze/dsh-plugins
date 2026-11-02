@@ -121,9 +121,13 @@ export function dshHost(ctx: Context): HostApi {
           }
         }),
       })).filter(group => group.models.length > 0)
+      // DSH's default may name a provider that is not signed in here; a new session needs one it can use.
       const fallback = asDict(catalog.default)
+      const usable = groups.some(group => group.id === fallback.provider && group.models.some(model => model.id === fallback.model))
+      const first = groups[0]?.models[0]
+      const defaultModel = usable ? fallback as unknown as ModelSelection : first ? { provider: groups[0].id, model: first.id } : undefined
       return {
-        ...(typeof fallback.provider === 'string' && typeof fallback.model === 'string' ? { default: fallback as unknown as ModelSelection } : {}),
+        ...(defaultModel ? { default: defaultModel } : {}),
         groups,
         permissions: (permissions.options as Dict[] | undefined ?? []).filter(option => option.value !== 'custom').map(option => ({
           value: String(option.value), name: String(option.name ?? option.value), ...(typeof option.description === 'string' ? { description: option.description } : {}) })),

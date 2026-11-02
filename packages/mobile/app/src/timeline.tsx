@@ -90,6 +90,28 @@ function Tools({ tools }: { tools: ToolRow[] }) {
 
 const OUTCOMES: Record<string, string> = { 'allowed-once': 'Allowed once', rejected: 'Denied', cancelled: 'Withdrawn', unavailable: 'Nobody could answer' }
 
+/** Context DSH injected as a user message (instructions, skills, runtime and time snapshots); its view hides it too. */
+const injected = (data: Dict) => typeof asDict(data.source).form === 'string' || /-(context|catalog|instructions)$/.test(String(asDict(data.source).kind ?? ''))
+
+function duration(ms: number): string {
+  const seconds = Math.max(1, Math.round(ms / 1000))
+  if (seconds < 60) return ui('{0}s', { 0: seconds })
+  const minutes = Math.floor(seconds / 60)
+  return minutes < 60 ? ui('{0}m {1}s', { 0: minutes, 1: seconds % 60 }) : ui('{0}h {1}m', { 0: Math.floor(minutes / 60), 1: minutes % 60 })
+}
+
+function TurnMeta({ ms, text }: { ms?: number; text: string }) {
+  const [copied, setCopied] = useState(false)
+  return <div className="turn-meta">
+    {text && <button type="button" aria-label={ui('Copy')} onClick={() => { void navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) }) }}>
+      {copied
+        ? <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+        : <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" /><path fill="none" stroke="currentColor" strokeWidth="1.8" d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2" /></svg>}
+    </button>}
+    {ms !== undefined && <span>{ui('Worked for {0}', { 0: duration(ms) })}</span>}
+  </div>
+}
+
 export function Timeline({ events, draft, state, sessionId }: { events: SyncedEvent[]; draft?: { text: string; reasoning: string }; state: HubState; sessionId: string }) {
   const results = new Map<string, Dict>()
   const announced = new Set<string>()
@@ -99,11 +121,14 @@ export function Timeline({ events, draft, state, sessionId }: { events: SyncedEv
   }
   const rows: React.ReactNode[] = []
   let tools: ToolRow[] = []
+  let turnStart: number | undefined, turnText = ''
   const flush = (key: string) => { if (tools.length) { rows.push(<Tools key={`tools-${key}`} tools={tools} />); tools = [] } }
   for (const event of events) {
     const data = asDict(event.data)
     switch (event.type) {
+      case 'turn/start': turnStart = event.time; turnText = ''; break
       case 'user/message': {
+        if (injected(data)) break
         flush(String(event.seq))
         const message = data.content ? data : asDict(data.message)
         rows.push(<div key={event.seq} className="msg user"><Content content={message.content} state={state} sessionId={sessionId} /></div>)
@@ -113,6 +138,7 @@ export function Timeline({ events, draft, state, sessionId }: { events: SyncedEv
         const content = Array.isArray(asDict(data.message).content) ? asDict(data.message).content as unknown[] : []
         const reasoning = content.map(asDict).filter(block => block.type === 'reasoning' && block.text).map(block => String(block.text)).join('\n\n')
         const text = blockText(content)
+        if (text) turnText = text
         if (reasoning || text) flush(String(event.seq))
         if (reasoning) rows.push(<details key={`r${event.seq}`} className="reasoning"><summary>{ui('Thinking')}</summary><Text text={reasoning} /></details>)
         if (text || content.some(block => ['image', 'file'].includes(asDict(block).type))) rows.push(<div key={event.seq} className="msg assistant"><Content content={content.filter(block => asDict(block).type !== 'tool-call' && asDict(block).type !== 'reasoning')} state={state} sessionId={sessionId} /></div>)
@@ -130,14 +156,16 @@ export function Timeline({ events, draft, state, sessionId }: { events: SyncedEv
       case 'approval/decided':
         rows.push(<div key={event.seq} className="marker">{ui(OUTCOMES[String(data.outcome)] ?? String(data.outcome))}</div>)
         break
-      case 'turn/end':
+      case 'turn/end': {
         flush(String(event.seq))
-        if (data.reason && data.reason !== 'completed' && data.reason !== 'stop') rows.push(<div key={event.seq} className="marker">{ui('Turn ended: {0}', { 0: String(asDict(data.reason).kind ?? data.reason) })}</div>)
+        const reason = asDict(data.reason), kind = String(reason.kind ?? data.reason ?? 'completed')
+        if (kind === 'cancelled' || kind === 'interrupted' || kind === 'aborted') rows.push(<div key={event.seq} className="marker">{ui('Stopped')}</div>)
+        else if (kind === 'error' || kind === 'failed') rows.push(<div key={event.seq} className="marker error">{ui('Failed: {0}', { 0: String(reason.message ?? asDict(reason.error).message ?? kind) })}</div>)
+        else if (kind !== 'completed' && kind !== 'stop' && kind !== 'end-turn') rows.push(<div key={event.seq} className="marker">{ui('Turn ended: {0}', { 0: kind })}</div>)
+        rows.push(<TurnMeta key={`m${event.seq}`} ms={turnStart !== undefined ? event.time - turnStart : undefined} text={turnText} />)
+        turnStart = undefined; turnText = ''
         break
-      case 'session/end-seed':
-        flush(String(event.seq))
-        rows.push(<div key={event.seq} className="marker">{ui('Forked here')}</div>)
-        break
+      }
       default: break
     }
   }

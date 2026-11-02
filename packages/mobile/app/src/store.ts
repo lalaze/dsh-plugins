@@ -3,7 +3,8 @@
  * computer's session list is kept up to date while connected.
  */
 import { useSyncExternalStore } from 'react'
-import { base64url, decodeOffer, fromBase64url, type SessionEntry, type WorkspaceEntry } from '../../src/shared/protocol.js'
+import { useEffect, useState } from 'react'
+import { base64url, decodeOffer, fromBase64url, type ModelChoices, type SessionEntry, type WorkspaceEntry } from '../../src/shared/protocol.js'
 import { HubClient, hubFromOffer, nobleX25519, type Identity, type SavedHub } from './hub-client.js'
 
 const KEY = 'dsh-mobile/v1'
@@ -15,7 +16,7 @@ interface Persisted {
   seen: Record<string, number>
   /** The computer notifications are on for; a browser holds one push key at a time. */
   pushHubId?: string
-  view?: { archived?: boolean; subagents?: boolean }
+  view?: { archived?: boolean; subagents?: boolean; outside?: boolean }
 }
 
 function load(): Persisted {
@@ -66,6 +67,34 @@ export class HubState {
 
   /** Apply an entry a live stream reported, ahead of the next list refresh. */
   update(entry: SessionEntry) { this.sessions.set(entry.sessionId, entry); this.changed() }
+
+  private choices?: { at: number; value: Promise<ModelChoices> }
+  /** Models and permission presets of this machine, fetched at most every five minutes. */
+  models(): Promise<ModelChoices> {
+    if (!this.choices || Date.now() - this.choices.at > 300_000) {
+      const value = this.client.call('models', {})
+      this.choices = { at: Date.now(), value }
+      value.catch(() => { if (this.choices?.value === value) this.choices = undefined })
+    }
+    return this.choices.value
+  }
+
+  workspaceTitle(workspaceId: string | undefined): string | undefined {
+    return this.workspaces.find(workspace => workspace.workspaceId === workspaceId)?.title
+  }
+}
+
+/** A machine's model choices once connected. */
+export function useModels(state: HubState | undefined): ModelChoices | undefined {
+  const [choices, setChoices] = useState<ModelChoices>()
+  const online = state?.client.state === 'online' && state.client.info?.phone !== undefined
+  useEffect(() => {
+    if (!state || !online) return
+    let live = true
+    void state.models().then(value => { if (live) setChoices(value) }, () => {})
+    return () => { live = false }
+  }, [state, online])
+  return choices
 }
 
 export class AppStore {

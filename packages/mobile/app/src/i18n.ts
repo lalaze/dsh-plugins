@@ -110,6 +110,23 @@ const zh: Record<string, string> = {
   'Open on {0}': '在{0}上打开',
   'Earlier messages are on the computer.': '更早的消息在电脑上。',
   'Disconnected': '已断开',
+  'More': '更多',
+  'New': '新建',
+  'Archived': '已归档',
+  'Outside workspaces': '不在工作区中',
+  'Show sessions outside workspaces': '显示不在工作区中的会话',
+  'Describe the task': '描述要做的事',
+  'No workspaces on this computer yet.': '这台电脑上还没有工作区。',
+  'Stopped': '已停止',
+  'Failed: {0}': '失败：{0}',
+  'Worked for {0}': '用时 {0}',
+  '{0}s': '{0} 秒',
+  '{0}m {1}s': '{0} 分 {1} 秒',
+  '{0}h {1}m': '{0} 小时 {1} 分',
+  'Workspace write': '工作区写入',
+  'Full access': '完全访问',
+  'Auto review': '自动审查',
+  'Custom': '自定义',
 }
 
 const language = languageOf(globalThis.navigator?.language)

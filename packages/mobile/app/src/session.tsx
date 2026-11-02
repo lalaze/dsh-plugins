@@ -1,19 +1,23 @@
 /** One conversation: its history from the end, live updates, answers it waits for, and the message input. */
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { LiveFrame, PendingInteraction, QuestionAnswer, SessionEntry, SyncedEvent } from '../../src/shared/protocol.js'
+import type { LiveFrame, ModelSelection, PendingInteraction, QuestionAnswer, SessionEntry, SyncedEvent } from '../../src/shared/protocol.js'
 import { Composer, draftContent, type Draft } from './composer.js'
+import { effortLabel, EffortSheet, icons, ModelSheet, modelLabel, Option, permissionLabel, Pill, Sheet } from './controls.js'
 import { errorText, ui } from './i18n.js'
 import { requestId, StatusDot, statusOf } from './parts.js'
 import type { HubState } from './store.js'
-import { store, useStore } from './store.js'
+import { store, useModels, useStore } from './store.js'
 import { Timeline } from './timeline.js'
 
 const PAGE = 60
 const drafts = new Map<string, Draft>()
 
+type Open = 'menu' | 'rename' | 'model' | 'effort' | undefined
+
 export function SessionView({ state, sessionId, onBack }: { state: HubState; sessionId: string; onBack(): void }) {
   useStore()
   const entry = state.sessions.get(sessionId)
+  const choices = useModels(state)
   const [events, setEvents] = useState<SyncedEvent[]>([])
   const [hasEarlier, setHasEarlier] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -24,7 +28,7 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
   const [draft, setDraftState] = useState<Draft>(() => drafts.get(key) ?? { text: '', images: [] })
   const setDraft = (next: Draft) => { drafts.set(key, next); setDraftState(next) }
   const [sending, setSending] = useState(false)
-  const [menu, setMenu] = useState(false)
+  const [open, setOpen] = useState<Open>()
   const scroller = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
   const control = state.client.info?.phone?.grants.control === true
@@ -52,7 +56,7 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
   useEffect(() => {
     let cancelled = false
     setLoading(true); setError(undefined); setEvents([]); held.current = -1
-    const open = async () => {
+    const load = async () => {
       try {
         const result = await state.client.call('session.events', { sessionId, limit: PAGE })
         if (cancelled) return
@@ -61,7 +65,7 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
         setLoading(false)
       } catch (failure) { if (!cancelled) { setError(errorText(failure)); setLoading(false) } }
     }
-    void open()
+    void load()
     const handle = state.client.follow('session.live', { sessionId }, raw => {
       const frame = raw as LiveFrame
       if (frame.type === 'event') {
@@ -97,6 +101,8 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
     } catch (failure) { setError(errorText(failure)) }
   }
 
+  const command = (task: Promise<unknown>) => { void task.catch(failure => setError(errorText(failure))) }
+
   const send = async () => {
     const content = draftContent(draft)
     if (!content.length) return
@@ -114,20 +120,32 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
     } finally { setSending(false) }
   }
 
-  const stop = () => { void state.client.call('command', { kind: 'cancel', requestId: requestId(), sessionId }).catch(failure => setError(errorText(failure))) }
+  const stop = () => command(state.client.call('command', { kind: 'cancel', requestId: requestId(), sessionId }))
+  const selectModel = (model: ModelSelection) => {
+    setOpen(undefined)
+    if (entry) state.update({ ...entry, model })
+    command(state.client.call('command', { kind: 'model', requestId: requestId(), sessionId, model }))
+  }
 
   const title = entry?.title || ui('Untitled session')
   const running = entry !== undefined && entry.state !== 'idle'
+  const model = entry?.model ?? choices?.default
+  const effort = effortLabel(choices, model)
+  const workspace = state.workspaceTitle(entry?.workspaceId)
+  const pills = <>
+    <Pill icon={icons.model} title={ui('Model')} label={modelLabel(choices, model)} open={open === 'model'} onClick={control && choices ? () => setOpen('model') : undefined} />
+    {effort && <Pill icon={icons.brain} title={ui('Reasoning')} label={effort} open={open === 'effort'} onClick={control && model ? () => setOpen('effort') : undefined} />}
+    {entry?.permission && <Pill icon={icons.shield} title={ui('Permission')} label={permissionLabel(entry.permission, choices)} />}
+  </>
   return <div className="screen session">
-    <header className="bar">
+    <header className="bar divided">
       <button className="icon" aria-label={ui('Back')} onClick={onBack}><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M15 5l-7 7 7 7" /></svg></button>
       <div className="bar-title">
         <div className="title-line">{entry && <StatusDot status={statusOf(entry, -1)} />}<span className="ellipsis">{title}</span></div>
-        <div className="subtitle ellipsis">{[state.hub.name, entry?.model?.model].filter(Boolean).join(' · ')}</div>
+        <div className="subtitle ellipsis">{[workspace, state.hub.name].filter(Boolean).join(' · ')}</div>
       </div>
-      {control && entry && <button className="icon" aria-label={ui('Settings')} onClick={() => setMenu(!menu)}><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.7" fill="currentColor" /><circle cx="12" cy="12" r="1.7" fill="currentColor" /><circle cx="19" cy="12" r="1.7" fill="currentColor" /></svg></button>}
+      {control && entry && <button className="icon" aria-label={ui('More')} onClick={() => setOpen('menu')}><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="5" cy="12" r="1.6" fill="currentColor" /><circle cx="12" cy="12" r="1.6" fill="currentColor" /><circle cx="19" cy="12" r="1.6" fill="currentColor" /></svg></button>}
     </header>
-    {menu && entry && <SessionMenu state={state} entry={entry} onClose={() => setMenu(false)} onError={setError} />}
     <div className="scroll" ref={scroller} onScroll={event => { const element = event.currentTarget; stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80 }}>
       <div className="timeline">
         {hasEarlier && <button className="link center" onClick={() => void earlier()}>{ui('Load earlier')}</button>}
@@ -139,24 +157,26 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
     </div>
     {error && <div className="error" role="alert">{error}</div>}
     {control
-      ? <Composer draft={draft} onDraft={setDraft} onSend={() => void send()} onStop={stop} running={running} busy={sending} disabled={state.client.state !== 'online'} />
+      ? <Composer draft={draft} onDraft={setDraft} onSend={() => void send()} onStop={stop} running={running} busy={sending} disabled={state.client.state !== 'online'} pills={pills} />
       : <div className="readonly">{ui('This phone may only read sessions.')}</div>}
+    {open === 'model' && <ModelSheet choices={choices} value={model} onPick={selectModel} onClose={() => setOpen(undefined)} />}
+    {open === 'effort' && model && <EffortSheet choices={choices} value={model} onPick={selectModel} onClose={() => setOpen(undefined)} />}
+    {open === 'menu' && entry && <Sheet title={title} onClose={() => setOpen(undefined)}>
+      <Option label={ui('Rename')} onClick={() => setOpen('rename')} />
+      <Option label={entry.archived ? ui('Unarchive') : ui('Archive')} onClick={() => { setOpen(undefined); command(state.client.call('command', { kind: 'archive', requestId: requestId(), sessionId, archived: !entry.archived }).then(() => { if (!entry.archived) onBack() })) }} />
+    </Sheet>}
+    {open === 'rename' && entry && <Rename entry={entry} onClose={() => setOpen(undefined)} onSave={title => { setOpen(undefined); command(state.client.call('command', { kind: 'rename', requestId: requestId(), sessionId, title })) }} />}
   </div>
 }
 
-function SessionMenu({ state, entry, onClose, onError }: { state: HubState; entry: SessionEntry; onClose(): void; onError(message: string): void }) {
-  const [renaming, setRenaming] = useState(false)
+function Rename({ entry, onClose, onSave }: { entry: SessionEntry; onClose(): void; onSave(title: string): void }) {
   const [title, setTitle] = useState(entry.title ?? '')
-  const run = (task: Promise<unknown>) => { void task.then(onClose, failure => onError(errorText(failure))) }
-  if (renaming) return <form className="sheet" onSubmit={event => { event.preventDefault(); run(state.client.call('command', { kind: 'rename', requestId: requestId(), sessionId: entry.sessionId, title })) }}>
-    <label className="field"><span>{ui('Title')}</span><input value={title} autoFocus onChange={event => setTitle(event.target.value)} /></label>
-    <div className="row-actions"><button type="button" className="button" onClick={onClose}>{ui('Cancel')}</button><button type="submit" className="button primary" disabled={!title.trim()}>{ui('Save')}</button></div>
-  </form>
-  return <div className="sheet">
-    <button className="sheet-item" onClick={() => setRenaming(true)}>{ui('Rename')}</button>
-    <button className="sheet-item" onClick={() => run(state.client.call('command', { kind: 'archive', requestId: requestId(), sessionId: entry.sessionId, archived: !entry.archived }))}>{entry.archived ? ui('Unarchive') : ui('Archive')}</button>
-    <button className="sheet-item muted" onClick={onClose}>{ui('Cancel')}</button>
-  </div>
+  return <Sheet title={ui('Rename')} onClose={onClose}>
+    <form onSubmit={event => { event.preventDefault(); if (title.trim()) onSave(title.trim()) }}>
+      <input className="input" value={title} autoFocus onChange={event => setTitle(event.target.value)} />
+      <div className="row-actions"><button type="button" className="button" onClick={onClose}>{ui('Cancel')}</button><button type="submit" className="button primary" disabled={!title.trim()}>{ui('Save')}</button></div>
+    </form>
+  </Sheet>
 }
 
 function Pending({ item, state, sessionId, control, onError }: { item: PendingInteraction; state: HubState; sessionId: string; control: boolean; onError(message: string): void }) {
@@ -174,7 +194,7 @@ function Pending({ item, state, sessionId, control, onError }: { item: PendingIn
           <button className="button" disabled={busy} onClick={() => void run(() => state.client.call('command', { kind: 'approval', requestId: requestId(), sessionId, approvalId: item.id, outcome: 'rejected' }))}>{ui('Deny')}</button>
           <button className="button primary" disabled={busy} onClick={() => void run(() => state.client.call('command', { kind: 'approval', requestId: requestId(), sessionId, approvalId: item.id, outcome: 'allowed-once' }))}>{ui('Allow once')}</button>
         </div>
-        : <div className="card-text muted">{ui('Answer this on the computer.')}</div>}
+        : <div className="card-text">{ui('Answer this on the computer.')}</div>}
     </div>
   }
   return <Questions item={item} control={control} busy={busy} onSubmit={answers => void run(() => state.client.call('command', { kind: 'answer', requestId: requestId(), sessionId, callId: item.callId, answers }))} />
@@ -198,11 +218,11 @@ function Questions({ item, control, busy, onSubmit }: { item: Extract<PendingInt
           <input type={question.multiSelect ? 'checkbox' : 'radio'} name={question.id} checked={checked} onChange={() => setSelected(current => ({
             ...current, [question.id]: question.multiSelect ? (checked ? (current[question.id] ?? []).filter(label => label !== option.label) : [...(current[question.id] ?? []), option.label]) : [option.label],
           }))} />
-          <span><span>{option.label}</span>{option.description && <span className="muted block">{option.description}</span>}</span>
+          <span><span>{option.label}</span>{option.description && <span className="muted block small">{option.description}</span>}</span>
         </label>
       })}
       <input className="input" placeholder={ui('Other answer')} value={custom[question.id] ?? ''} onChange={event => setCustom(current => ({ ...current, [question.id]: event.target.value }))} />
     </fieldset>)}
-    {control ? <div className="row-actions"><button type="submit" className="button primary" disabled={busy || !complete}>{ui('Submit')}</button></div> : <div className="card-text muted">{ui('Answer this on the computer.')}</div>}
+    {control ? <div className="row-actions"><button type="submit" className="button primary" disabled={busy || !complete}>{ui('Submit')}</button></div> : <div className="card-text">{ui('Answer this on the computer.')}</div>}
   </form>
 }
