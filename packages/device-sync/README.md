@@ -26,7 +26,7 @@ With permission (see below), the host API accepts these requests for the other m
 
 Each request carries an ID, so a retry after a lost connection never runs it twice. When the other machine is offline, a request is held and sent only after you confirm it again; it is never run on this machine instead.
 
-Open **Settings → Device sync → Synced sessions** and select a title to read its mirrored timeline, including attachments and live drafts. Sessions are grouped by machine and workspace; hidden and subagent sessions are excluded until their filters are enabled. Hide/restore affects only this machine. Archived and deleted sessions remain readable.
+Open **Settings → Device sync → Synced sessions** and select a title to read its mirrored timeline, including attachments and live drafts. Sessions are grouped by machine and workspace. Each machine’s card starts folded and shows its session count; each workspace lists its five most recent sessions until you choose **Show more**. Search matches titles, session IDs, workspace names and folders, and unfolds every match. Hidden and subagent sessions are excluded until their filters are enabled. Hide/restore affects only this machine. Archived and deleted sessions remain readable.
 
 While the viewer is open and the peer is online with history sharing allowed, an interrupted live stream reconnects after 3 seconds. Only one stream is active per viewer. Closing/switching the viewer, going offline, revoking history access or deleting the remote session cancels its live stream and retry delay and clears the draft. Permanent HTTP denials such as 403/404 stop retries until the viewer is reopened or eligibility changes. History polling errors and live-stream errors are displayed independently; a successful history fetch does not hide a failed live connection.
 
@@ -93,6 +93,7 @@ dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.1.tgz"
 
 ## 0.1.1 release notes
 
+- Synced sessions can be searched; machine cards fold, and each workspace shows its five most recent sessions until expanded.
 - The conversation header shows the paired machine and whether it is online, or that syncing failed; select it to open Device sync settings in a window.
 
 ## 0.1.0 release notes

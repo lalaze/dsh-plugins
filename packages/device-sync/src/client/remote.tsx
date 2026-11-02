@@ -3,14 +3,19 @@ import { workspaceRef, type LocalStatus } from '../shared/protocol.js'
 import { act } from './api.js'
 import { ago, localizeError, ui } from './i18n.js'
 import { SessionViewer } from './sessions.js'
-import { canCommand, tagColor, visibleSessions } from './view-model.js'
+import { canCommand, matchSessions, tagColor, visibleSessions } from './view-model.js'
 import { deliveryMessage, SessionFacts, type Delivery } from './session-common.js'
+
+/** Sessions listed per workspace before "Show more". */
+const PREVIEW = 5
 
 export function RemoteSettings({ status, refresh }: { status: LocalStatus; refresh(): Promise<void> }) {
   const [busy, setBusy] = useState(false), locked = useRef(false)
   const [error, setError] = useState(''), [notice, setNotice] = useState('')
   const [hidden, setHidden] = useState(false), [children, setChildren] = useState(false)
   const [selected, setSelected] = useState<{ deviceId: string; sessionId: string }>()
+  const [query, setQuery] = useState('')
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({}), [collapsed, setCollapsed] = useState<Record<string, boolean>>({}), [showAll, setShowAll] = useState<Record<string, boolean>>({})
   const run = async (task: () => Promise<unknown>) => {
     if (locked.current) return
     locked.current = true; setBusy(true); setError(''); setNotice('')
@@ -19,7 +24,9 @@ export function RemoteSettings({ status, refresh }: { status: LocalStatus; refre
   const peerName = (id: string) => status.peers.find(p => p.deviceId === id)?.name ?? id
   const local = status.workspaces.find(w => w.deviceId === status.device.deviceId)?.items ?? []
   const session = status.sessions.find(s => s.deviceId === selected?.deviceId && s.sessionId === selected?.sessionId)
-  const sessions = visibleSessions(status.sessions, hidden, children)
+  const workspaceTitle = (deviceId: string, workspaceId?: string) => status.workspaces.find(w => w.deviceId === deviceId)?.items.find(w => w.workspaceId === workspaceId)?.title
+  const searching = query.trim() !== ''
+  const sessions = matchSessions(visibleSessions(status.sessions, hidden, children), query, s => workspaceTitle(s.deviceId, s.workspaceId))
   const devices = [...new Set(sessions.map(s => s.deviceId))]
   return <>
     {error && <p className="dsy-error" role="alert">{error}</p>}
@@ -52,15 +59,37 @@ export function RemoteSettings({ status, refresh }: { status: LocalStatus; refre
       </div>)}
     </section>}
     <section className="dsy-section"><h3>{ui('Synced sessions')}</h3>
-      <label className="dsy-check"><input type="checkbox" checked={hidden} onChange={e => setHidden(e.target.checked)} />{ui('Show hidden sessions')}</label>
-      <label className="dsy-check"><input type="checkbox" checked={children} onChange={e => setChildren(e.target.checked)} />{ui('Show subagent sessions')}</label>
+      <input className="dsy-input" type="search" aria-label={ui('Search synced sessions')} placeholder={ui('Search synced sessions')} value={query} onChange={e => setQuery(e.target.value)} />
+      <div className="dsy-filters">
+        <label className="dsy-check"><input type="checkbox" checked={hidden} onChange={e => setHidden(e.target.checked)} />{ui('Show hidden sessions')}</label>
+        <label className="dsy-check"><input type="checkbox" checked={children} onChange={e => setChildren(e.target.checked)} />{ui('Show subagent sessions')}</label>
+      </div>
       {!sessions.length && <p className="dsy-hint">{ui('No synced sessions match these filters.')}</p>}
-      {devices.map(deviceId => <div className="dsy-card" key={deviceId}><h4>{peerName(deviceId)}</h4>
-        {[...new Set(sessions.filter(s => s.deviceId === deviceId).map(s => s.workspaceId))].map(workspaceId => <section className="dsy-section" key={workspaceId ?? ''}><h4>{status.workspaces.find(w => w.deviceId === deviceId)?.items.find(w => w.workspaceId === workspaceId)?.title ?? ui('Other sessions')}</h4>
-          {sessions.filter(s => s.deviceId === deviceId && s.workspaceId === workspaceId).sort((a, b) => b.updatedAt - a.updatedAt).map(s => <div className="dsy-row" key={s.sessionId}><div><button type="button" className="dsy-link" onClick={() => setSelected({ deviceId, sessionId: s.sessionId })}>{s.title || s.sessionId}</button><SessionFacts session={s} /></div>
-            <button type="button" className="dsy-btn" disabled={busy} onClick={() => void run(() => act({ action: 'hideSession', deviceId, sessionId: s.sessionId, hidden: !s.hidden }))}>{ui(s.hidden ? 'Restore' : 'Hide')}</button></div>)}
-        </section>)}
-      </div>)}
+      {devices.map(deviceId => {
+        const own = sessions.filter(s => s.deviceId === deviceId)
+        // Device cards start folded; a search unfolds every card and group that has a match.
+        const deviceOpen = searching || !!expanded[deviceId]
+        return <div className="dsy-card" key={deviceId}>
+          <h4><button type="button" className="dsy-fold" aria-expanded={deviceOpen} onClick={() => setExpanded(old => ({ ...old, [deviceId]: !deviceOpen }))}><span className="dsy-chevron" aria-hidden="true">›</span><span className="dsy-ws-title">{peerName(deviceId)}</span><span className="dsy-count">{ui('{0} sessions', { 0: own.length })}</span></button></h4>
+          {deviceOpen && [...new Set(own.map(s => s.workspaceId))].map(workspaceId => {
+            const key = `${deviceId}/${workspaceId ?? ''}`
+            const rows = own.filter(s => s.workspaceId === workspaceId).sort((a, b) => b.updatedAt - a.updatedAt)
+            const groupOpen = searching || !collapsed[key]
+            const shown = searching || showAll[key] ? rows : rows.slice(0, PREVIEW)
+            return <section className="dsy-group" key={key}>
+              <button type="button" className="dsy-fold dsy-fold-group" aria-expanded={groupOpen} onClick={() => setCollapsed(old => ({ ...old, [key]: groupOpen }))}><span className="dsy-chevron" aria-hidden="true">›</span><span className="dsy-ws-title">{workspaceTitle(deviceId, workspaceId) ?? ui('Other sessions')}</span><span className="dsy-count">{rows.length}</span></button>
+              {groupOpen && <>
+                {shown.map(s => <div className="dsy-srow" key={s.sessionId} aria-current={s.deviceId === selected?.deviceId && s.sessionId === selected.sessionId}>
+                  <button type="button" className="dsy-link dsy-srow-title" title={s.title || s.sessionId} onClick={() => setSelected({ deviceId, sessionId: s.sessionId })}>{s.title || s.sessionId}</button>
+                  <SessionFacts session={s} />
+                  <button type="button" className="dsy-btn dsy-btn-sm" disabled={busy} onClick={() => void run(() => act({ action: 'hideSession', deviceId, sessionId: s.sessionId, hidden: !s.hidden }))}>{ui(s.hidden ? 'Restore' : 'Hide')}</button>
+                </div>)}
+                {!searching && rows.length > PREVIEW && <button type="button" className="dsy-link dsy-more" onClick={() => setShowAll(old => ({ ...old, [key]: !old[key] }))}>{showAll[key] ? ui('Show fewer') : ui('Show {0} more', { 0: rows.length - PREVIEW })}</button>}
+              </>}
+            </section>
+          })}
+        </div>
+      })}
     </section>
     {selected && <section className="dsy-card" aria-label={ui('Remote sessions')}><div className="dsy-actions"><button type="button" className="dsy-btn" onClick={() => setSelected(undefined)}>{ui('Close')}</button></div>
       {session ? <SessionViewer key={`${session.deviceId}:${session.sessionId}`} session={session} peer={status.peers.find(p => p.deviceId === session.deviceId)} outbox={status.outbox} refresh={refresh} /> : <p className="dsy-hint">{ui('This synced session is no longer available.')}</p>}

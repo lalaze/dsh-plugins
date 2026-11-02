@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert'
 import { test } from 'node:test'
-import { canCommand, canInteract, isDefiniteRejection, mergeEvents, visibleSessions } from '../src/client/view-model.js'
+import { canCommand, canInteract, isDefiniteRejection, matchSessions, mergeEvents, visibleSessions } from '../src/client/view-model.js'
 import type { MirrorSessionView, PeerStatus, SyncedEvent } from '../src/shared/protocol.js'
 
 const peer = (connection: PeerStatus['connection'], command = true) => ({ connection, grantsFromPeer: { command, history: true } } as PeerStatus)
@@ -21,6 +21,18 @@ test('hidden and subagent sessions are opt-in; archive/deletion remain visible h
   assert.equal(visibleSessions(sessions, true, false).length, 4)
   assert.equal(visibleSessions(sessions, false, true).length, 4)
   assert.equal(visibleSessions(sessions, true, true).length, 5)
+})
+test('session search matches title, id, workspace and folder, ignoring case', () => {
+  const sessions = [session({ sessionId: 'a1', title: '部署连通性测试' }), session({ sessionId: 'session-2249', workspaceId: 'w' }), session({ sessionId: 'c3', title: 'Push to Tailscale', cwd: '/srv/zebox' })]
+  const workspace = (s: MirrorSessionView) => s.workspaceId === 'w' ? 'dsh-plugins' : undefined
+  const ids = (query: string) => matchSessions(sessions, query, workspace).map(s => s.sessionId)
+  assert.deepEqual(ids('  '), ['a1', 'session-2249', 'c3'])
+  assert.deepEqual(ids('连通'), ['a1'])
+  assert.deepEqual(ids('SESSION-22'), ['session-2249'])
+  assert.deepEqual(ids('dsh-PLUG'), ['session-2249'])
+  assert.deepEqual(ids('tailscale'), ['c3'])
+  assert.deepEqual(ids('zebox'), ['c3'])
+  assert.deepEqual(ids('missing'), [])
 })
 test('overlapping history fetches deduplicate and preserve sequence gaps', () => {
   const event = (seq: number, data = ''): SyncedEvent => ({ seq, data, time: 0, type: 'user/message' })

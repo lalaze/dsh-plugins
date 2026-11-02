@@ -38,6 +38,20 @@ export const styles = `
 .dsy-settings{display:flex;flex-direction:column;gap:18px;max-width:760px}
 .dsy-section{display:grid;gap:6px}
 .dsy-pair{display:flex;gap:6px;flex-wrap:wrap}
+.dsy-filters{display:flex;flex-wrap:wrap;gap:4px 16px}
+.dsy-fold{display:flex;align-items:center;gap:6px;width:100%;padding:0;border:0;background:transparent;text-align:left}
+.dsy-card>h4{font-size:13px;font-weight:500}
+.dsy-fold-group{padding:2px 0;color:var(--dsy-secondary);font-size:12px}
+.dsy-chevron{flex:none;width:12px;display:inline-flex;justify-content:center;color:var(--dsy-muted);transition:transform .15s}
+.dsy-fold[aria-expanded=true]>.dsy-chevron{transform:rotate(90deg)}
+.dsy-count{flex:none;color:var(--dsy-muted);font-size:11px;font-variant-numeric:tabular-nums}
+.dsy-group{display:grid;gap:0}
+.dsy-srow{display:flex;align-items:center;gap:8px;min-height:32px;padding:3px 4px 3px 18px;border-radius:var(--dsy-r-sm)}
+.dsy-srow:hover,.dsy-srow[aria-current=true]{background:var(--dsy-hover)}
+.dsy-srow-title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;font-size:13px}
+.dsy-srow>.dsy-hint{flex:none;white-space:nowrap}
+.dsy-btn-sm{height:22px;padding:0 8px;font-size:11px}
+.dsy-more{justify-self:start;margin:2px 0 0 18px}
 .dsy-pair .dsy-input{flex:1 1 220px}
 
 .dsy-overlay{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:max(20px,var(--dsh-frame-overlay-top,20px)) 20px;-webkit-app-region:no-drag}

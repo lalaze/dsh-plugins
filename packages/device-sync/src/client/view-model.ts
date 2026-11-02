@@ -12,6 +12,12 @@ export const canInteract = (peer?: PeerStatus) => canCommand(peer) && peer?.conn
 export function visibleSessions(sessions: MirrorSessionView[], hidden: boolean, children: boolean) {
   return sessions.filter(s => (hidden || !s.hidden) && (children || s.origin !== 'subagent'))
 }
+/** Case-insensitive match on title, session id, workspace title and folder; a blank query keeps everything. */
+export function matchSessions(sessions: MirrorSessionView[], query: string, workspaceTitle: (session: MirrorSessionView) => string | undefined) {
+  const q = query.trim().toLocaleLowerCase()
+  if (!q) return sessions
+  return sessions.filter(s => [s.title, s.sessionId, workspaceTitle(s), s.cwd].some(value => value?.toLocaleLowerCase().includes(q)))
+}
 export function mergeEvents(old: SyncedEvent[], next: SyncedEvent[]): SyncedEvent[] {
   return [...new Map([...old, ...next].map(e => [e.seq, e])).values()].sort((a, b) => a.seq - b.seq)
 }
