@@ -73,6 +73,12 @@ test('Claude usage reports keep the windows the account has and the extra usage 
     ],
   });
   assert.deepEqual(claudeAccountUsage({ subscriptionType: 'Claude Pro' }, { rate_limits_available: false, rate_limits: null }, checkedAt), { provider: 'claude', checkedAt, windows: [], plan: 'Claude Pro' });
+  // A CLI signed in before an upgrade still says Pro; a Fable weekly window only comes with Max, so it decides first.
+  const stale = { subscription_type: 'pro', rate_limits: { ...usage.rate_limits } };
+  assert.equal(claudeAccountUsage({ subscriptionType: 'Claude Pro' }, stale, checkedAt).plan, 'Max');
+  assert.equal(claudeAccountUsage({ subscriptionType: 'Claude Pro' }, { rate_limits: stale.rate_limits }, checkedAt).plan, 'Max');
+  assert.equal(claudeAccountUsage({}, { subscription_type: 'pro', rate_limits: { ...stale.rate_limits, model_scoped: [] } }, checkedAt).plan, 'Pro');
+  assert.equal(claudeAccountUsage({}, { subscription_type: 'team', rate_limits: { ...stale.rate_limits, model_scoped: [] } }, checkedAt).plan, 'Team');
 });
 
 test('ring labels use compact token counts and reset times', () => {
