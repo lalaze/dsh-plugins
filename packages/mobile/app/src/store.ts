@@ -4,7 +4,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import { useEffect, useState } from 'react'
-import { base64url, decodeOffer, fromBase64url, type ModelChoices, type SessionEntry, type WorkspaceEntry } from '../../src/shared/protocol.js'
+import { base64url, decodeOffer, fromBase64url, type ModelChoices, type SessionEntry, type TagState, type WorkspaceEntry } from '../../src/shared/protocol.js'
 import { HubClient, hubFromOffer, nobleX25519, type Identity, type SavedHub } from './hub-client.js'
 
 const KEY = 'dsh-mobile/v1'
@@ -31,12 +31,13 @@ function load(): Persisted {
 export class HubState {
   readonly sessions = new Map<string, SessionEntry>()
   workspaces: WorkspaceEntry[] = []
+  tags: TagState = { tags: [], assignments: {} }
   private cursor?: string
   private refreshing?: Promise<void>
   private again = false
   loaded = false
 
-  constructor(readonly client: HubClient, private readonly changed: () => void) {
+  constructor(readonly client: HubClient, private readonly changed: () => void, private readonly loadedEntries?: (entries: SessionEntry[]) => void) {
     client.subscribe(() => { if (client.state === 'online' && client.info?.phone) void this.refresh(); changed() })
     client.onNotice(message => { if ('n' in message && (message.n === 'changed' || message.n === 'paired')) void this.refresh() })
   }
@@ -56,7 +57,10 @@ export class HubState {
           for (const entry of changes.sessions) { if (entry.removed) this.sessions.delete(entry.sessionId); else this.sessions.set(entry.sessionId, entry) }
           if (changes.workspaces) this.workspaces = changes.workspaces
           this.cursor = changes.cursor
+          // Workspace Tags may be missing on that machine; then there are simply no tags.
+          this.tags = await this.client.call('tags', undefined).catch(() => this.tags)
           this.loaded = true
+          this.loadedEntries?.(changes.sessions)
           this.changed()
         } while (this.again)
       } catch { /* the next change or reconnect tries again */ }
@@ -125,7 +129,7 @@ export class AppStore {
   }
 
   private attach(hub: SavedHub): HubState {
-    const state = new HubState(new HubClient(hub, this.identity), this.emit)
+    const state = new HubState(new HubClient(hub, this.identity), this.emit, entries => this.baseline(hub.hubId, entries))
     this.hubs.set(hub.hubId, state)
     state.client.connect()
     return state
@@ -158,6 +162,16 @@ export class AppStore {
   }
 
   seen(hubId: string, sessionId: string): number { return this.data.seen[`${hubId}/${sessionId}`] ?? -1 }
+  /**
+   * A session this phone has not seen before counts as read up to where it is now, so only later progress marks it
+   * Completed, as a finished turn nobody looked at does in DSH's sidebar.
+   */
+  private baseline(hubId: string, entries: SessionEntry[]) {
+    for (const entry of entries) {
+      const key = `${hubId}/${entry.sessionId}`
+      if (this.data.seen[key] === undefined && !entry.removed) this.data.seen[key] = entry.state === 'idle' ? entry.lastSeq : 0
+    }
+  }
   markSeen(hubId: string, sessionId: string, seq: number) {
     if (this.seen(hubId, sessionId) >= seq) return
     this.data.seen[`${hubId}/${sessionId}`] = seq

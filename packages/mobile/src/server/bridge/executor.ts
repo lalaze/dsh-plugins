@@ -18,10 +18,14 @@ export class CommandError extends Error {
 
 /** What survives a restart: the last inspected position of each session, and handled request IDs. */
 export interface ExecutorData {
+  /** What the cached session facts were derived with; see {@link EXECUTOR_DATA_VERSION}. */
+  version?: number
   sessions: Record<string, { updatedAt: number; running: boolean; lastSeq: number; title?: string; preview?: string; forkOf?: string; approvals?: PendingInteraction[]; model?: ModelSelection }>
   handled: Record<string, { at: number; result: CommandResult }>
 }
-export const emptyExecutorData = (): ExecutorData => ({ sessions: {}, handled: {} })
+/** Raise when the facts read from a session log change, so every session is read again. */
+export const EXECUTOR_DATA_VERSION = 2
+export const emptyExecutorData = (): ExecutorData => ({ version: EXECUTOR_DATA_VERSION, sessions: {}, handled: {} })
 
 interface Entry extends SessionEntry { rev: number }
 interface Approval { id: string; sessionId: string; toolName: string; callId?: string; reason?: string; askedAt: number; resolve(outcome: 'allowed-once' | 'rejected'): void }

@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url'
 import { APP_ROUTE, LOCAL_ROUTE, type LocalAction } from './shared/protocol.js'
 import { CommandError } from './server/bridge/executor.js'
 import { dshHost } from './server/bridge/host.js'
-import { Hub, HttpError } from './server/hub.js'
+import { Hub, HttpError, type WorkspaceTagsService } from './server/hub.js'
 
 export const name = 'dsh-mobile'
 export const inject = ['connection']
@@ -41,7 +41,7 @@ const failure = (error: unknown) => {
 export async function apply(ctx: Context, config: Config = {}): Promise<void> {
   const log = (message: string) => (ctx.get('logger') as { warn?(m: string): void } | undefined)?.warn?.(message) ?? console.warn(`[dsh-mobile] ${message}`)
   const version = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')).version as string
-  const hub = await Hub.open({ stateDir: config.stateDir ?? defaultStateDir(), host: dshHost(ctx), version, defaults: { relay: config.relay, appUrl: config.appUrl }, log })
+  const hub = await Hub.open({ stateDir: config.stateDir ?? defaultStateDir(), host: dshHost(ctx), tags: () => ctx.get('workspaceTags') as WorkspaceTagsService | undefined, version, defaults: { relay: config.relay, appUrl: config.appUrl }, log })
   await hub.start()
   ctx.effect(() => () => { void hub.close() })
   // The host connection authenticates these routes; only the owner's browsers reach them.

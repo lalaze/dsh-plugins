@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
 import { createDecipheriv, createECDH, hkdfSync } from 'node:crypto'
 import { test, type TestContext } from 'node:test'
-import { decodeOffer, type LiveFrame, type SessionEntry } from '../src/shared/protocol.js'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { decodeOffer, type LiveFrame, type SessionEntry, type TagState } from '../src/shared/protocol.js'
 import { HubClient, hubFromOffer, nobleX25519 } from '../app/src/hub-client.js'
 import { Hub } from '../src/server/hub.js'
-import { startHub, waitFor, type TestHub } from './fakes.js'
+import { FakeHost, FakeRelay, startHub, waitFor, type TestHub } from './fakes.js'
 
 const requestId = () => `req-${Math.random().toString(36).slice(2, 12)}`
 
@@ -257,4 +260,40 @@ test('a phone sees sessions as DSH shows them: first message as title, injected 
   assert.deepEqual(events.filter(e => e.type === 'user/message').map(e => (e.data as { content: { text: string }[] }).content[0].text), ['Fix the login redirect'])
   const source = (events.find(e => e.type === 'assistant/message')!.data as { message: { source: Record<string, unknown> } }).message.source
   assert.deepEqual(source, { kind: 'model', provider: 'p', model: 'm' })
+  // A session that never chose a model shows the one that wrote its latest reply.
+  assert.deepEqual(sessions.find(s => s.sessionId === 's1')?.model, { provider: 'p', model: 'm' })
+})
+
+test('a phone reads Workspace Tags through the hub, and hears when they change', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-mobile-tags-'))
+  const relay = new FakeRelay(); const address = await relay.listen()
+  const host = new FakeHost()
+  let state: TagState = { tags: [{ id: 't1', name: 'Work', color: 'green' }], assignments: { w1: ['t1'] } }
+  const listeners = new Set<(next: TagState) => void>()
+  const tags = { snapshot: () => state, subscribe: (listener: (next: TagState) => void) => { listeners.add(listener); return () => { listeners.delete(listener) } } }
+  const hub = await Hub.open({ stateDir: dir, host, tags: () => tags, version: '0', defaults: { relay: address, appUrl: 'https://phone.example/app/' } })
+  t.after(async () => { await hub.close(); await relay.close(); await rm(dir, { recursive: true, force: true }) })
+  await hub.start()
+  await waitFor(() => hub.status().relay.state === 'online', 5000, 'relay online')
+  host.addWorkspace('w1', 'project')
+  const { client } = await pairedPhone(t, { hub, host, relay, dir })
+  assert.deepEqual(await client.call('tags', undefined), state)
+  const notices: string[] = []
+  client.onNotice(message => { if ('n' in message) notices.push(message.n) })
+  state = { tags: [...state.tags, { id: 't2', name: 'Home', color: 'blue' }], assignments: { w1: ['t1', 't2'] } }
+  for (const listener of listeners) listener(state)
+  await waitFor(() => notices.includes('changed'), 5000, 'change notice')
+  assert.equal((await client.call('tags', undefined)).tags.length, 2)
+})
+
+test('facts cached by an older version are read again on start', async t => {
+  const setup = await startHub(t)
+  setup.hub.state.executor.sessions['old'] = { updatedAt: 1, running: false, lastSeq: 0 }
+  delete setup.hub.state.executor.version
+  await setup.hub.store.flush()
+  await setup.hub.close()
+  const reopened = await Hub.open({ stateDir: setup.dir, host: setup.host, version: '0' })
+  assert.equal(reopened.state.executor.sessions['old'], undefined)
+  assert.equal(reopened.state.executor.version, 2)
+  await reopened.close()
 })

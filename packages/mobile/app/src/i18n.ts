@@ -127,6 +127,11 @@ const zh: Record<string, string> = {
   'Full access': '完全访问',
   'Auto review': '自动审查',
   'Custom': '自定义',
+  'Waiting for you': '等待你处理',
+  'Completed': '已完成',
+  'All': '全部',
+  'Show {0} more sessions': '展开其余 {0} 个会话',
+  'Show less': '收起',
 }
 
 const language = languageOf(globalThis.navigator?.language)

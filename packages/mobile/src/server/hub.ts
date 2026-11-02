@@ -7,7 +7,7 @@ import { Channel, ChannelError, hubHandshake, type Hello } from '../shared/chann
 import {
   DEFAULT_GRANTS, encodeOffer, OFFER_TTL_MS, pairingCode,
   type ClientMessage, type Command, type Grants, type HubInfo, type HubMessage, type LiveFrame, type LocalAction, type LocalStatus, type Method,
-  type Offer, type PushPreferences, type PushSubscriptionJson, type SessionEntry,
+  type Offer, type PushPreferences, type PushSubscriptionJson, type SessionEntry, type TagState,
 } from '../shared/protocol.js'
 import { CommandError, Executor } from './bridge/executor.js'
 import { lastAssistantText } from './bridge/events.js'
@@ -22,9 +22,16 @@ export class HttpError extends Error {
   constructor(message: string, readonly status = 400) { super(message) }
 }
 
+/** dsh-workspace-tags' host service, when installed. */
+export interface WorkspaceTagsService {
+  snapshot(): TagState
+  subscribe?(listener: (state: TagState) => void): () => void
+}
+
 export interface HubOptions {
   stateDir: string
   host: HostApi
+  tags?: () => WorkspaceTagsService | undefined
   version: string
   /** Initial settings for a new state; the settings page changes them later. */
   defaults?: { name?: string; relay?: string; appUrl?: string }
@@ -78,6 +85,7 @@ export class Hub {
     this.executor.start()
     this.stops.push(this.options.host.bridgeApprovals(this.executor.approvalBridge))
     this.stops.push(this.executor.onEntry((entry, previous) => this.observe(entry, previous)))
+    this.followTags()
     this.restartRelay()
   }
 
@@ -101,6 +109,23 @@ export class Hub {
       WebSocket: this.options.WebSocket, fetch: this.options.fetch,
     })
     this.relay.start()
+  }
+
+  /** Tell phones when tags change. Workspace Tags may load after this plugin, so look for it until it is there. */
+  private followTags(): void {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const attach = () => {
+      const service = this.options.tags?.()
+      if (service?.subscribe) { this.stops.push(service.subscribe(() => this.notifyChanged())); return }
+      if (this.options.tags) timer = setTimeout(attach, 10_000)
+    }
+    attach()
+    this.stops.push(() => clearTimeout(timer))
+  }
+
+  tags(): TagState {
+    const state = this.options.tags?.()?.snapshot()
+    return state ? { tags: state.tags.map(({ id, name, color }) => ({ id, name, color })), assignments: state.assignments } : { tags: [], assignments: {} }
   }
 
   online(phoneId: string): boolean { return [...this.connections].some(connection => connection.phone?.id === phoneId) }
@@ -329,6 +354,7 @@ export class Hub {
         return undefined
       }
       case 'models': return this.options.host.modelChoices()
+      case 'tags': return this.tags()
       case 'attachment': {
         const sessionId = String(input.sessionId), attachmentId = String(input.attachmentId)
         const ref = await this.executor.sharesAttachment(sessionId, attachmentId, signal)

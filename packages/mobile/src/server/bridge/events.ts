@@ -68,9 +68,17 @@ export function attachmentRefs(event: SyncedEvent): HostAttachmentRef[] {
   return refs
 }
 
-/** The model of the latest `model/selection` in a log. */
+/**
+ * The model a session uses: its latest `model/selection`, or the model that wrote its latest reply when it never chose
+ * one (a session on DSH's default).
+ */
 export function modelOf(events: readonly { type: string; data: unknown }[]): ModelSelection | undefined {
   for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i].type === 'assistant/message') {
+      const source = asDict(asDict(asDict(events[i].data).message).source)
+      if (typeof source.provider === 'string' && typeof source.model === 'string') return { provider: source.provider, model: source.model }
+      continue
+    }
     if (events[i].type !== 'model/selection') continue
     const data = asDict(events[i].data), selection = data.provider ? data : asDict(data.selection ?? data.next ?? data.model)
     if (typeof selection.provider === 'string' && typeof selection.model === 'string') {

@@ -4,7 +4,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import type { Grants, PushPreferences, PushSubscriptionJson } from '../shared/protocol.js'
-import { emptyExecutorData, type ExecutorData } from './bridge/executor.js'
+import { EXECUTOR_DATA_VERSION, emptyExecutorData, type ExecutorData } from './bridge/executor.js'
 import { generateVapidKeys, type VapidKeys } from './push.js'
 import { nodeX25519 } from './x25519.js'
 
@@ -57,6 +57,8 @@ export class Store {
       if (state.version !== 1 || !state.hub?.secretKey) throw new Error(`Unsupported state in ${file}`)
       state.executor ??= emptyExecutorData()
       state.executor.sessions ??= {}; state.executor.handled ??= {}
+      // Facts cached by an older version (titles, models) are read again.
+      if (state.executor.version !== EXECUTOR_DATA_VERSION) { state.executor.sessions = {}; state.executor.version = EXECUTOR_DATA_VERSION }
       state.phones ??= {}
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error

@@ -180,6 +180,9 @@ export interface HubInfo {
   pushKey?: string
 }
 
+/** Workspace Tags' tags and which workspaces carry them, as its sidebar shows them. */
+export interface TagState { tags: { id: string; name: string; color: string }[]; assignments: Record<string, string[]> }
+
 export interface PushSubscriptionJson { endpoint: string; keys: { p256dh: string; auth: string } }
 export interface PushPreferences { finished: boolean; attention: boolean }
 
@@ -191,6 +194,7 @@ export interface Methods {
   'sessions.changes': { args: { since?: string }; result: { cursor: string; sessions: SessionEntry[]; workspaces?: WorkspaceEntry[] } }
   'session.events': { args: { sessionId: string; after?: number; before?: number; limit?: number }; result: { events: SyncedEvent[]; lastSeq: number; hasMore: boolean; hasEarlier: boolean } }
   'session.live': { args: { sessionId: string }; result: undefined }
+  'tags': { args: undefined; result: TagState }
   'command': { args: Command; result: CommandResult }
   'models': { args: { workspaceId?: string }; result: ModelChoices }
   'attachment': { args: { sessionId: string; attachmentId: string }; result: { mediaType: string; data: string; name?: string } }
