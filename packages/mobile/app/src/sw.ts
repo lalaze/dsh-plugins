@@ -7,7 +7,7 @@ declare const self: ServiceWorkerGlobalScope
 declare const __VERSION__: string
 
 const CACHE = `dsh-mobile-${__VERSION__}`
-const SHELL = ['./', './index.html', './app.js', './app.css', './manifest.webmanifest', './icon-192.png', './icon-512.png']
+const SHELL = ['./index.html', './app.js', './app.css', './manifest.webmanifest', './icon-192.png', './icon-512.png']
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()))

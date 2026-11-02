@@ -1,6 +1,6 @@
 import qrcode from 'qrcode-generator'
 import React, { useEffect, useMemo, useState } from 'react'
-import { APP_ROUTE, DEFAULT_GRANTS, type Grants, type LocalStatus, type PhoneStatus } from '../shared/protocol.js'
+import { APP_ENTRY, DEFAULT_GRANTS, type Grants, type LocalStatus, type PhoneStatus } from '../shared/protocol.js'
 import { act, useStatus } from './api.js'
 import { localizeError, relative, ui, useLocale } from './i18n.js'
 import { styles } from './styles.js'
@@ -42,7 +42,7 @@ function Setup({ status, run, busy }: { status: LocalStatus; run: Run; busy?: st
   const [relay, setRelay] = useState(status.relay.endpoint.replace(/^wss:\/\//, ''))
   const [appUrl, setAppUrl] = useState(status.appUrl)
   const [saved, setSaved] = useState(false)
-  const here = `${location.origin}${APP_ROUTE}/`
+  const here = `${location.origin}${APP_ENTRY}`
   const dirty = name !== status.name || relay !== status.relay.endpoint.replace(/^wss:\/\//, '') || appUrl !== status.appUrl
   const state = status.relay.state
   return <form className="dsm-card" onSubmit={async event => {
@@ -65,7 +65,7 @@ function Setup({ status, run, busy }: { status: LocalStatus; run: Run; busy?: st
         {location.protocol === 'https:' && appUrl !== here && <button type="button" className="dsm-btn" onClick={() => setAppUrl(here)}>{ui('Use this DSH')}</button>}
       </span>
     </label>
-    <p className="dsm-hint">{ui('Where the phone app is hosted over HTTPS. To try it from a browser signed in to this DSH, use this DSH’s address followed by {0}.', { 0: `${APP_ROUTE}/` })}</p>
+    <p className="dsm-hint">{ui('Where the phone app is hosted over HTTPS. To try it from a browser signed in to this DSH, use this DSH’s address followed by {0}.', { 0: APP_ENTRY })}</p>
     <div className="dsm-actions" style={{ justifyContent: 'flex-start' }}>
       <button type="submit" className="dsm-btn" data-kind="primary" disabled={!dirty || busy !== undefined}>{saved ? ui('Saved') : ui('Save')}</button>
     </div>

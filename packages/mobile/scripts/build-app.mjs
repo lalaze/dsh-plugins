@@ -47,7 +47,7 @@ await writeFile(resolve(out, 'index.html'), `<!doctype html>
 `)
 
 await writeFile(resolve(out, 'manifest.webmanifest'), JSON.stringify({
-  name: 'DSH Mobile', short_name: 'DSH', id: './', start_url: './', scope: './', display: 'standalone',
+  name: 'DSH Mobile', short_name: 'DSH', id: './', start_url: './index.html', scope: './', display: 'standalone',
   background_color: '#111113', theme_color: '#111113', description: 'Read and steer your computer’s DSH sessions',
   icons: [192, 512].map(size => ({ src: `./icon-${size}.png`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any maskable' })),
 }, null, 2))

@@ -38,7 +38,7 @@
 
 `pnpm --filter dsh-mobile build` 会把应用输出到 `packages/mobile/lib/app/`。这些是静态文件，可以放在任意 HTTPS 主机上（子路径也可以）。应用只与中继通信，托管主机看不到你的数据。
 
-如果只想先试用、暂不托管，可以使用此 DSH 自己的地址加上 `/api/dsh-mobile/app/`（**使用此 DSH** 会自动填入）。这个副本只能在已登录此 DSH 的浏览器中打开，适合同一 Tailscale 网络中的手机，不适合在外面的手机。
+如果只想先试用、暂不托管，可以使用此 DSH 自己的地址加上 `/api/dsh-mobile/app/index.html`（**使用此 DSH** 会自动填入）。这个副本只能在已登录此 DSH 的浏览器中打开，适合同一 Tailscale 网络中的手机，不适合在外面的手机。
 
 ## 手机与权限
 

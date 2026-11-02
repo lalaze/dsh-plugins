@@ -46,7 +46,11 @@ export async function apply(ctx: Context, config: Config = {}): Promise<void> {
   ctx.effect(() => () => { void hub.close() })
   // The host connection authenticates these routes; only the owner's browsers reach them.
   ctx.effect(() => ctx.connection.fetch.register({ path: LOCAL_ROUTE, methods: ['GET', 'POST'], requestBody: 'buffered', fetch: request => handleLocal(hub, request) }))
-  for (const route of await appRoutes()) ctx.effect(() => ctx.connection.fetch.register({ path: route.path, methods: ['GET'], requestBody: 'buffered', fetch: () => route.respond() }))
+  // The app copy is optional: a route DSH refuses must not take the plugin down with it.
+  for (const route of await appRoutes()) {
+    try { ctx.effect(() => ctx.connection.fetch.register({ path: route.path, methods: ['GET'], requestBody: 'buffered', fetch: () => route.respond() })) }
+    catch (error) { log(`Could not serve ${route.path}: ${error instanceof Error ? error.message : String(error)}`) }
+  }
 }
 
 export async function handleLocal(hub: Hub, request: Request): Promise<Response> {
@@ -65,17 +69,22 @@ const TYPES: Record<string, string> = {
   '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json',
 }
 
-/** One exact route per file of the built phone app; DSH routes do not match prefixes. */
+/**
+ * DSH's rule for an exact route: `/api` followed by segments of letters, digits and `_$.-`, none empty. A path it
+ * refuses makes route registration throw, which unloads the whole plugin.
+ */
+export const isRoutePath = (path: string) => /^\/api(\/[A-Za-z0-9_$.-]+)+$/.test(path) && !path.split('/').some(segment => segment === '.' || segment === '..')
+
+/** The phone app's files DSH can serve: one exact route each, since DSH routes do not match prefixes. */
+export const appFiles = (files: string[]) => files.filter(file => Object.hasOwn(TYPES, extname(file)) && isRoutePath(`${APP_ROUTE}/${file}`))
+
 async function appRoutes(): Promise<{ path: string; respond(): Promise<Response> }[]> {
   const dir = join(packageRoot, 'lib', 'app')
   let files: string[]
-  try { files = (await readdir(dir)).filter(file => Object.hasOwn(TYPES, extname(file))) } catch { return [] }
+  try { files = appFiles(await readdir(dir)) } catch { return [] }
   const serve = (file: string) => async () => new Response(new Uint8Array(await readFile(join(dir, file))), { headers: {
     'Content-Type': TYPES[extname(file)], 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff',
     ...(file === 'sw.js' ? { 'Service-Worker-Allowed': `${APP_ROUTE}/` } : {}),
   } })
-  return [
-    { path: `${APP_ROUTE}/`, respond: serve('index.html') },
-    ...files.map(file => ({ path: `${APP_ROUTE}/${file}`, respond: serve(file) })),
-  ]
+  return files.map(file => ({ path: `${APP_ROUTE}/${file}`, respond: serve(file) }))
 }

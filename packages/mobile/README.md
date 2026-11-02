@@ -38,7 +38,7 @@ On iPhone, add the app to the Home Screen (Share → Add to Home Screen) and ope
 
 `pnpm --filter dsh-mobile build` writes the app to `packages/mobile/lib/app/`: static files to put on any HTTPS host (a subpath works). The app only talks to the relay; the host never sees your data.
 
-To try it without hosting, use this DSH’s own address followed by `/api/dsh-mobile/app/` (**Use this DSH** fills it in). That copy only opens in browsers already signed in to this DSH, so it suits a phone on the same Tailscale network, not a phone elsewhere.
+To try it without hosting, use this DSH’s own address followed by `/api/dsh-mobile/app/index.html` (**Use this DSH** fills it in). That copy only opens in browsers already signed in to this DSH, so it suits a phone on the same Tailscale network, not a phone elsewhere.
 
 ## Phones and permissions
 

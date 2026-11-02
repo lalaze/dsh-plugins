@@ -8,6 +8,8 @@ export const PROTOCOL = 'dsh-mobile/1'
 export const LOCAL_ROUTE = '/api/dsh-mobile'
 /** The phone app, served to browsers already signed in to this DSH, for trying it out before it is hosted elsewhere. */
 export const APP_ROUTE = '/api/dsh-mobile/app'
+/** Its entry page. DSH routes are exact and may not end in `/`, so the app opens at `index.html`. */
+export const APP_ENTRY = `${APP_ROUTE}/index.html`
 /** How long a pairing code shown on the desktop stays valid. */
 export const OFFER_TTL_MS = 10 * 60_000
 
