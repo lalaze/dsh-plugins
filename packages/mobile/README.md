@@ -4,14 +4,14 @@
 
 Supports English and Simplified Chinese: the settings page follows DSH’s language setting, the phone app follows the phone’s language.
 
-`dsh-mobile` lets you read and steer one machine’s DeepSeek Harness sessions from your phone, from anywhere, the way Paseo’s app does. The phone connects through a relay, so neither the machine nor the phone needs an open port or a VPN. Everything the phone and the machine exchange is encrypted end to end; the relay only routes bytes it cannot read. Sessions always run on the machine, with its files and sign-ins, including sessions that use remote CLIs from [Remote Agents](../remote-agents/README.md).
+`dsh-mobile` lets you read and steer your machines’ DeepSeek Harness sessions from your phone, from anywhere, the way Paseo’s app does. The phone connects through a relay, so neither the machine nor the phone needs an open port or a VPN. Everything the phone and the machine exchange is encrypted end to end; the relay only routes bytes it cannot read. Sessions always run on the machine, with its files and sign-ins, including sessions that use remote CLIs from [Remote Agents](../remote-agents/README.md).
 
 ## What the phone can do
 
-- **Sessions**: every session of the machine, grouped by workspace, with what needs you first: amber when a session waits for an approval or an answer, blue while it runs, green when it finished with something you have not seen. Search by title or workspace; archived and sub-agent sessions on request.
-- **Conversations**: read from the end and load earlier messages; Markdown replies, collapsed reasoning, consecutive tool calls folded into one row; images open on tap. Replies stream in while they are written.
-- **Steering**: send a message with images (scaled down on the phone first). Sending while a task runs interrupts it with your message, as in Paseo; with nothing typed, the button stops the task. Approve or deny tool calls, answer questions, rename and archive sessions.
-- **New sessions**: choose a workspace, model, reasoning level and permission preset, then write the first message.
+- **Sessions**: grouped as [Workspace Tags](../workspace-tags/README.md) groups DSH's sidebar by status: **Waiting for you**, **Completed** (finished since you last looked), **Running** and **Idle** (folded). A workspace with a running session goes to Running whole. Workspaces keep their sidebar order and tag dots; sessions keep their workspace's order, five at a time with **Show more**, each with its model's logo. Tag chips narrow the list to one tag. As in DSH, blank sessions and sessions outside any workspace are hidden (the latter can be shown). Pair several machines and their sessions appear together.
+- **Conversations**: read from the end and load earlier messages; Markdown replies, collapsed reasoning, consecutive tool calls folded into one row, each turn's duration with a copy button; images open on tap. Replies stream in while they are written. Context DSH injects (workspace instructions, skill catalog, time snapshots) stays hidden, as in DSH.
+- **Steering**: send a message with images (scaled down on the phone first). Sending while a task runs interrupts it with your message, as in Paseo; with nothing typed, the button stops the task. Under the input, pills show the session's model, reasoning level and permission; change the model or reasoning level from them. Approve or deny tool calls, answer questions, rename and archive sessions.
+- **New sessions**: prompt first, as in Paseo: write the task, and pick the workspace, model, reasoning level and permission preset from the pills under it.
 - **Notifications** (optional): when a task finishes or a session needs you, even while the app is closed. A notification for the session already on screen is skipped.
 
 Every request carries an ID, so a retry after a lost connection never runs twice. The app reconnects by itself and catches up on what it missed.
@@ -77,6 +77,11 @@ Change either at any time; **Unpair** disconnects the phone at once and refuses 
 - Sessions of other machines paired through Device Sync are not shown yet; pair the phone with each machine.
 - Remote Agents’ background sessions under **Open sessions** are not listed yet; main conversations that use remote CLIs are.
 - Attachments over 16 MB do not open on the phone.
+- An existing session's permission preset is shown but cannot be changed from the phone; DSH changes it only on a running session.
+
+## Acknowledgments
+
+The app uses DeepSeek Harness's icon (from `@deepseek-ai/dsh-web-frontend`, MIT) and model vendor logos from LobeHub (MIT, through dsh-session-models); see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Development
 
