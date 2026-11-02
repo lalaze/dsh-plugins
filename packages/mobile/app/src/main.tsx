@@ -63,5 +63,5 @@ function App() {
   return <SessionList onOpen={(hubId, sessionId) => go(`s/${encodeURIComponent(hubId)}/${encodeURIComponent(sessionId)}`)} onNew={hubId => go(`new/${encodeURIComponent(hubId)}`)} onSettings={() => go('settings')} />
 }
 
-if ('serviceWorker' in navigator) void navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => { /* notifications stay off */ })
+if ('serviceWorker' in navigator) void navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' }).catch(() => { /* notifications stay off */ })
 createRoot(document.getElementById('root')!).render(<App />)

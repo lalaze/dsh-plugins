@@ -20,13 +20,14 @@ self.addEventListener('activate', event => {
   })())
 })
 
-// Network first, so a new version arrives as soon as it is online; the cache serves offline starts.
+// Network first, so a new version arrives as soon as it is online; the cache serves offline starts. Requests
+// revalidate with the server even when a CDN in front of it hands out long browser cache lifetimes.
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url)
   if (event.request.method !== 'GET' || url.origin !== self.location.origin || !url.pathname.startsWith(new URL('./', self.registration.scope).pathname)) return
   event.respondWith((async () => {
     try {
-      const response = await fetch(event.request)
+      const response = await fetch(event.request, { cache: 'no-cache' })
       if (response.ok) { const copy = response.clone(); void caches.open(CACHE).then(cache => cache.put(event.request, copy)) }
       return response
     } catch {
