@@ -266,6 +266,42 @@
       ]
     },
     {
+      "name": "dsh-mobile",
+      "title": "DSH Mobile",
+      "description": {
+        "en": "Read and steer this machine's DSH sessions from your phone through a relay, with end-to-end encryption, pairing by QR code and notifications",
+        "zh": "经中继用手机查看并指挥本机的 DSH 会话：端到端加密、扫码配对、通知"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/mobile",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/mobile"
+      },
+      "metadata": {
+        "keywords": [
+          "mobile",
+          "relay",
+          "remote"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793616073,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "35cfc807eea887a4aefeac8670297ca5daba6465",
+            "path": "packages/mobile"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.3 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
       "name": "dsh-usage-stats",
       "title": {
         "en": "DSH Usage Statistics",
