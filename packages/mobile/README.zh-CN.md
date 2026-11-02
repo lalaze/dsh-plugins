@@ -68,13 +68,11 @@
 ## 如何使用 DSH
 
 - 会话通过 DSH 的会话控制器读取（`list`、`inspect`、`follow`，读取日志时不会启动智能体），并通过它的 `prompt`、`cancel`、`create`、`selectModel` 和 `rename` 指挥。归档通过工作区控制器，回答问题通过 `userQuestions`，权限预设通过 `permissionPresets`。
-- DSH 没有供其他设备回答工具审批的接口。与 [Device Sync](../device-sync/README.zh-CN.md) 一样，插件加入 DSH 的 `approval/request` 链；任何失败都不会改变 DSH 自己的审批链。
-- 会话部分改编自 Device Sync 的执行端，两者保持同步，直到抽成共享包。
+- DSH 没有供其他设备回答工具审批的接口。插件加入 DSH 的 `approval/request` 链：审批同时发给手机和本机的浏览器，先回答的一方生效；任何失败都不会改变 DSH 自己的审批链。
 
 ## 限制
 
 - 每台手机同一时间只能接收一台已配对机器的通知，因为浏览器只能持有一个推送密钥。
-- 暂不显示通过 Device Sync 配对的其他机器的会话；请让手机分别与每台机器配对。
 - 暂不列出 Remote Agents **打开的会话** 中的后台会话；使用远程 CLI 的主对话会列出。
 - 超过 16 MB 的附件无法在手机上打开。
 - 已有会话的权限预设只显示、不能在手机上修改；DSH 只能在会话运行时修改它。

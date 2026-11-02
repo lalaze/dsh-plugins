@@ -12,7 +12,6 @@
 | `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.zh-CN.md) | 用 VS Code 的编辑器（Monaco）编辑本地工作区的代码和文本文件，并预览 Markdown 与 SVG |
 | `dsh-git-view` | [packages/git-view](packages/git-view/README.zh-CN.md) | 移植自 dsh-git-panel 的 IDE 风格 Git 面板（分支树与提交图总览、提交与 Amend、文件浏览、AI 生成提交信息、输入框标记），适用于本地与远程工作区，并提供 Monaco 差异与冲突处理；远程功能需搭配 Remote Agents 0.2.62 或更新版本 |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
-| `dsh-device-sync` | [packages/device-sync](packages/device-sync/README.zh-CN.md) | 通过 Tailscale 配对两台 DSH 机器：共享工作区分组和对话记录，互相指挥会话，每个会话只在所属机器上执行 |
 | `dsh-mobile` | [packages/mobile](packages/mobile/README.zh-CN.md) | 经中继用手机查看并指挥本机的 DSH 会话：端到端加密、扫码配对、通知 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
@@ -92,7 +91,6 @@ packages/
   git-view/             # 本地/远程工作区的 Git 侧栏、差异编辑与冲突处理
   file-view/            # 私有的共享代码/差异编辑器与文件预览
   workspace-tags/       # 工作区标签，侧栏按标签或状态分组
-  device-sync/          # 两台机器之间的配对、分组和历史共享，以及远程指挥
   mobile/               # 经中继的手机访问，以及手机应用
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景

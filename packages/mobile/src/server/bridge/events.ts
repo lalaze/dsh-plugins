@@ -2,8 +2,6 @@
  * Which session events reach a phone, and in what form. A phone reads and steers, it does not resume the session,
  * so it gets what a person reads (messages, tool calls and results, titles, confirmations) and not what only the
  * model needs: system prompts, request headers, and the token-by-token stream an assistant message contains in full.
- *
- * Adapted from dsh-device-sync's `server/events.ts`.
  */
 import type { ModelSelection, PendingInteraction, SyncedEvent } from '../../shared/protocol.js'
 import type { HostAttachmentRef, HostEvent } from './host.js'

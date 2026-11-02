@@ -1,9 +1,6 @@
 /**
  * This machine's sessions and workspaces, described for paired phones, and the requests they may send. Only this
  * module reaches DSH's session API; nothing here writes a session log directly.
- *
- * Adapted from dsh-device-sync's `server/executor.ts` (its executing half); keep the two in step until they share a
- * package.
  */
 import { randomUUID } from 'node:crypto'
 import type { Command, CommandResult, LiveFrame, ModelSelection, PendingInteraction, PromptPart, SessionEntry, SyncedEvent, WorkspaceEntry } from '../../shared/protocol.js'

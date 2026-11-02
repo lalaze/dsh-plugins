@@ -3,8 +3,6 @@
  * {@link dshHost} adapts DSH 0.2.1-rc.3's services: `sessionController` and `workspaceController` (cold reads, live
  * follow, prompt, cancel, models, archive and rename), `permissionPresets`, `attachments`, `userQuestions`, and the
  * `approval/request` event.
- *
- * Adapted from dsh-device-sync's `server/host.ts`; keep the two in step until they share a package.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type { ModelChoices, ModelSelection, QuestionAnswer } from '../../shared/protocol.js'

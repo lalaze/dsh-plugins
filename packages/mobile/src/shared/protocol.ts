@@ -1,6 +1,6 @@
 /**
  * What the phone app and this machine say to each other through the relay, and what the desktop settings page asks
- * the host. Session shapes follow dsh-device-sync's, so a phone reads a session as a paired machine would.
+ * the host.
  */
 
 export const PROTOCOL = 'dsh-mobile/1'
@@ -14,7 +14,7 @@ export const APP_ENTRY = `${APP_ROUTE}/index.html`
 export const OFFER_TTL_MS = 10 * 60_000
 
 // ---------------------------------------------------------------------------------------------------------------
-// Sessions (the shapes of dsh-device-sync's protocol)
+// Sessions
 
 export type ExecutionState = 'idle' | 'running' | 'waiting'
 

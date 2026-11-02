@@ -68,13 +68,11 @@ Change either at any time; **Unpair** disconnects the phone at once and refuses 
 ## How it uses DSH
 
 - Sessions are read through DSH’s session controller (`list`, `inspect` and `follow`), which reads logs without starting agents, and steered through its `prompt`, `cancel`, `create`, `selectModel` and `rename`. Archiving goes through the workspace controller, questions through `userQuestions`, permission presets through `permissionPresets`.
-- DSH has no interface for answering tool approvals from another device. Like [Device Sync](../device-sync/README.md), the plugin joins DSH’s `approval/request` chain; any failure leaves DSH’s own chain unchanged.
-- The session code is adapted from Device Sync’s executing half; the two stay in step until they share a package.
+- DSH has no interface for answering tool approvals from another device. The plugin joins DSH’s `approval/request` chain: the question goes to the phone and to this machine’s browsers, and whichever answers first wins; any failure leaves DSH’s own chain unchanged.
 
 ## Limitations
 
 - Notifications work for one paired machine at a time per phone, because a browser holds one push key.
-- Sessions of other machines paired through Device Sync are not shown yet; pair the phone with each machine.
 - Remote Agents’ background sessions under **Open sessions** are not listed yet; main conversations that use remote CLIs are.
 - Attachments over 16 MB do not open on the phone.
 - An existing session's permission preset is shown but cannot be changed from the phone; DSH changes it only on a running session.
