@@ -253,5 +253,5 @@ function platform(): string | undefined {
 
 function deviceName(): string {
   const system = platform()
-  return system === 'iOS' ? 'iPhone' : system === 'Android' ? 'Android phone' : system ? `${system} browser` : 'Phone'
+  return system === 'iOS' ? 'iPhone' : system === 'Android' ? 'Android phone' : system && system !== 'Browser' ? `${system} browser` : system ?? 'Phone'
 }
