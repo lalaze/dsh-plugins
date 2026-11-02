@@ -91,6 +91,10 @@ pnpm --filter dsh-device-sync pack:plugin
 dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.3.tgz"
 ```
 
+## 0.1.3 release notes
+
+- Version bump only; same features as 0.1.2.
+
 ## 0.1.2 release notes
 
 - Synced sessions can be searched; machine cards fold, and each workspace shows its five most recent sessions until expanded.

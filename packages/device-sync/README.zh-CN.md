@@ -91,6 +91,10 @@ pnpm --filter dsh-device-sync pack:plugin
 dsh plugin --profile web add "$PWD/dist/dsh-device-sync-0.1.3.tgz"
 ```
 
+## 0.1.3 更新说明
+
+- 仅调整版本号，功能与 0.1.2 相同。
+
 ## 0.1.2 更新说明
 
 - 已同步会话支持搜索；机器卡片可收起，每个工作区先显示最近 5 个会话，其余可展开查看。
