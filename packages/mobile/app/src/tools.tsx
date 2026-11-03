@@ -27,7 +27,7 @@ type Kind = 'command' | 'read' | 'write' | 'edit' | 'search' | 'web' | 'todo' | 
 interface Described { kind: Kind; verb: string; target: string }
 
 const KIND_ICONS: Record<Kind, ReactNode> = {
-  command: icons.terminal, read: icons.file, write: icons.file, edit: icons.edit, search: icons.find, web: icons.globe, todo: icons.list, agent: icons.agent, other: icons.tool,
+  command: icons.terminal, read: icons.file, write: icons.fileWrite, edit: icons.edit, search: icons.find, web: icons.globe, todo: icons.list, agent: icons.agent, other: icons.tool,
 }
 
 export function parseArgs(raw: unknown): Dict {

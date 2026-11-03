@@ -2,6 +2,7 @@
 import React, { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ModelChoices, ModelSelection, WorkspaceEntry } from '../../src/shared/protocol.js'
 import { ui } from './i18n.js'
+import { LUCIDE } from './lucide.js'
 import { openOverlay } from './nav.js'
 
 /** Close an overlay with the phone's back gesture, as well as with its own controls. */
@@ -84,45 +85,54 @@ export async function copyText(text: string): Promise<void> {
 /** A short buzz on phones that can, for actions that take effect at once. */
 export const haptic = () => { try { navigator.vibrate?.(8) } catch { /* not supported */ } }
 
-const icon = (size: number, body: ReactNode, fill = false) => <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" fill={fill ? 'currentColor' : 'none'} stroke={fill ? 'none' : 'currentColor'} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{body}</svg>
+/** A Lucide icon at a size, in the current text colour; `fill` paints it solid. */
+const icon = (size: number, name: keyof typeof LUCIDE, fill = false) => <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true"
+  fill={fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+  {LUCIDE[name].map(([tag, attributes], index) => React.createElement(tag, { key: index, ...attributes }))}
+</svg>
 
+/** Every icon of the app, from Lucide (the set Paseo's app uses). */
 export const icons = {
-  folder: icon(15, <path d="M3.5 7.5a2 2 0 012-2h4l2 2h7a2 2 0 012 2v7.5a2 2 0 01-2 2h-13a2 2 0 01-2-2z" />),
-  model: icon(14, <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />),
-  brain: icon(14, <path d="M5 18c3-1 4-3 4-6M19 18c-3-1-4-3-4-6M12 4v16M8 6c-2 0-3 1.5-3 3.5S6 13 8 13M16 6c2 0 3 1.5 3 3.5S18 13 16 13" />),
-  shield: icon(14, <path d="M12 3l7 3v5.5c0 4.2-3 7.7-7 9.5-4-1.8-7-5.3-7-9.5V6z" />),
-  computer: icon(14, <><rect x="3.5" y="4.5" width="17" height="11.5" rx="2" /><path d="M8.5 20h7M12 16v4" /></>),
-  back: icon(24, <path d="M15 5l-7 7 7 7" strokeWidth="2" />),
-  more: icon(22, <><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none" /></>),
-  search: icon(21, <><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4 4" /></>),
-  filter: icon(21, <path d="M4 6.5h16M7 12h10M10 17.5h4" />),
-  // Lucide's "settings" (ISC, see THIRD_PARTY_NOTICES.md).
-  gear: icon(21, <><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /><circle cx="12" cy="12" r="3" /></>),
-  plus: icon(20, <path d="M12 5v14M5 12h14" strokeWidth="2.2" />),
-  close: icon(20, <path d="M6 6l12 12M18 6L6 18" strokeWidth="2" />),
-  check: icon(18, <path d="M5 12.5l4.5 4.5L19 7.5" strokeWidth="2.2" />),
-  chevronDown: icon(12, <path d="M7 10l5 5 5-5" strokeWidth="2.2" />),
-  chevronRight: icon(14, <path d="M10 7l5 5-5 5" strokeWidth="2" />),
-  arrowDown: icon(20, <path d="M12 5v14M6 13l6 6 6-6" strokeWidth="2" />),
-  arrowUp: icon(18, <path d="M12 19V5M6 11l6-6 6 6" strokeWidth="2.2" />),
-  stop: icon(14, <rect x="5" y="5" width="14" height="14" rx="2.5" />, true),
-  attach: icon(21, <path d="M20 11.5l-7.8 7.8a5 5 0 01-7.1-7.1l8.5-8.5a3.3 3.3 0 014.7 4.7l-8.5 8.5a1.7 1.7 0 01-2.4-2.4l7.8-7.8" />),
-  copy: icon(16, <><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2" /></>),
-  pencil: icon(18, <path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" />),
-  archive: icon(18, <><rect x="3.5" y="4.5" width="17" height="4.5" rx="1.2" /><path d="M5.5 9v9a2 2 0 002 2h9a2 2 0 002-2V9M10 13h4" /></>),
-  unarchive: icon(18, <><rect x="3.5" y="4.5" width="17" height="4.5" rx="1.2" /><path d="M5.5 9v9a2 2 0 002 2h9a2 2 0 002-2V9M12 17v-5M9.5 14l2.5-2.5 2.5 2.5" /></>),
-  refresh: icon(18, <path d="M19.5 12a7.5 7.5 0 11-2.2-5.3M19.5 4.5v3.8h-3.8" />),
-  terminal: icon(15, <><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M7 9.5l3 2.5-3 2.5M12.5 15h4.5" /></>),
-  file: icon(15, <><path d="M6 3.5h8l4 4V20a.5.5 0 01-.5.5h-11.5A.5.5 0 015.5 20V4a.5.5 0 01.5-.5z" /><path d="M13.5 3.5V8h4.5" /></>),
-  edit: icon(15, <path d="M4 20h4L19 9l-4-4L4 16zM13.5 6.5l4 4" />),
-  find: icon(15, <><circle cx="11" cy="11" r="6" /><path d="M15.5 15.5l4 4" /></>),
-  globe: icon(15, <><circle cx="12" cy="12" r="8.5" /><path d="M3.5 12h17M12 3.5c2.5 2.6 2.5 14.4 0 17M12 3.5c-2.5 2.6-2.5 14.4 0 17" /></>),
-  list: icon(15, <path d="M9 6.5h11M9 12h11M9 17.5h11M4.5 6.5l.8.8 1.6-1.8M4.5 12l.8.8 1.6-1.8M4.5 17.5h2" />),
-  agent: icon(15, <><circle cx="12" cy="8.5" r="3.5" /><path d="M5.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5" /></>),
-  tool: icon(15, <path d="M14.5 5.5a4 4 0 00-5.2 5.2L4 16l4 4 5.3-5.3a4 4 0 005.2-5.2l-2.6 2.6-2.8-.6-.6-2.8z" />),
-  sparkle: icon(14, <path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" />),
-  warning: icon(16, <><path d="M12 4l9 15.5H3z" /><path d="M12 10v4.2M12 16.8v.1" strokeWidth="2" /></>),
-  offline: icon(16, <><path d="M3 3l18 18M8.5 16a5 5 0 017 0M5 12.5a10 10 0 015-2.6M14.5 10a10 10 0 014.5 2.5M2 9a15 15 0 015-2.9M12 5.1a15 15 0 0110 3.9" /><circle cx="12" cy="19.5" r=".6" fill="currentColor" /></>),
+  folder: icon(15, 'folder'),
+  model: icon(14, 'sparkle'),
+  brain: icon(14, 'brain'),
+  shield: icon(14, 'shield'),
+  computer: icon(14, 'monitor'),
+  back: icon(24, 'chevron-left'),
+  more: icon(22, 'ellipsis'),
+  search: icon(21, 'search'),
+  filter: icon(19, 'list-filter'),
+  gear: icon(21, 'settings'),
+  plus: icon(20, 'plus'),
+  close: icon(20, 'x'),
+  check: icon(18, 'check'),
+  chevronDown: icon(13, 'chevron-down'),
+  chevronRight: icon(14, 'chevron-right'),
+  arrowDown: icon(20, 'arrow-down'),
+  arrowUp: icon(18, 'arrow-up'),
+  stop: icon(11, 'square', true),
+  attach: icon(20, 'paperclip'),
+  copy: icon(15, 'copy'),
+  pencil: icon(18, 'pencil'),
+  archive: icon(18, 'archive'),
+  unarchive: icon(18, 'archive-restore'),
+  refresh: icon(18, 'refresh-cw'),
+  terminal: icon(15, 'square-terminal'),
+  file: icon(15, 'file-text'),
+  fileWrite: icon(15, 'file-plus'),
+  edit: icon(15, 'file-pen-line'),
+  find: icon(15, 'text-search'),
+  globe: icon(15, 'globe'),
+  list: icon(15, 'list-todo'),
+  agent: icon(15, 'bot'),
+  tool: icon(15, 'wrench'),
+  sparkle: icon(14, 'sparkles'),
+  warning: icon(16, 'triangle-alert'),
+  offline: icon(16, 'wifi-off'),
+  running: icon(17, 'circle-play'),
+  completed: icon(17, 'circle-check'),
+  idle: icon(17, 'moon'),
+  tasks: icon(17, 'list'),
 }
 
 const PERMISSION_NAMES: Record<string, string> = {

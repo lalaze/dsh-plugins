@@ -73,15 +73,7 @@ function statusSections(groups: Group[], activity: (group: Group, entry: Session
   return sections
 }
 
-const SectionIcon = ({ kind }: { kind: SectionKind }) => {
-  const paths: Record<SectionKind, React.ReactNode> = {
-    running: <><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.7" /><path d="M10.2 8.8l5 3.2-5 3.2z" fill="currentColor" /></>,
-    waiting: <><path d="M12 4l9 15.5H3z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" /><path d="M12 10v4.2M12 16.8v.1" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" /></>,
-    completed: <><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.7" /><path d="M8.3 12.3l2.6 2.6 4.9-5.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></>,
-    idle: <path d="M19.5 14.6A7.8 7.8 0 019.4 4.5a7.8 7.8 0 1010.1 10.1z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />,
-  }
-  return <svg className={`section-icon ${kind}`} viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">{paths[kind]}</svg>
-}
+const SectionIcon = ({ kind }: { kind: SectionKind }) => <span className={`section-icon ${kind}`}>{kind === 'waiting' ? icons.warning : icons[kind]}</span>
 
 /** Pull the list down from its top to reconnect and reload. */
 function usePullToRefresh(scroller: RefObject<HTMLDivElement | null>, onRefresh: () => Promise<void>) {
@@ -296,7 +288,7 @@ export function SessionList({ onOpen, onOpenTask, onNew, onSettings }: { onOpen(
       })}
       {tasks.length > 0 && <section className="status-section">
         <button type="button" className="section-head" aria-expanded={!tasksFolded} onClick={() => fold('tasks', !tasksFolded)}>
-          <svg className="section-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 7.5h16M4 12h16M4 16.5h10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+          <span className="section-icon">{icons.tasks}</span>
           <span>{ui('Background tasks')}</span>
           <span className="section-count">{tasks.length}</span>
           <span className="section-arrow">{icons.chevronRight}</span>

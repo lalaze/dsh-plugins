@@ -124,7 +124,7 @@ p { margin: 0 0 12px; }
 .section-head:active { background: var(--surface1); }
 .section-arrow { color: var(--fg-faint); transition: transform .15s ease; display: flex; flex: none; }
 .section-head[aria-expanded=true] .section-arrow { transform: rotate(90deg); }
-.section-icon { flex: none; color: var(--fg-muted); }
+.section-icon { display: flex; flex: none; color: var(--fg-muted); }
 .section-icon.running { color: var(--dot-running); }
 .section-icon.waiting { color: var(--dot-warning); }
 .section-icon.completed { color: var(--dot-success); }
