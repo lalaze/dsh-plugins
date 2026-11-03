@@ -3,7 +3,7 @@ import { test, type TestContext } from 'node:test';
 import { setTimeout as pause } from 'node:timers/promises';
 import { delegationTools, type WaitResult } from '../src/agents/tools.js';
 import type { ToolDefinition, ToolHost } from '../src/core/dsh-host.js';
-import type { Agent } from '../src/core/domain.js';
+import type { Agent, DshPermission } from '../src/core/domain.js';
 import { fixture } from './fakes.js';
 
 type Approval = Parameters<ToolHost['approval']['request']>[0];
@@ -82,6 +82,30 @@ test('starting a remote agent without per-action approval needs explicit DSH app
   decision = 'allowed-once';
   const result = await run('remote_agent_create', { host: 'build-box', cwd: '/srv/project', provider: 'codex', prompt: 'Deploy', mode: 'Full access' });
   assert.equal(result.agents[0].mode, 'Full access'); assert.equal(remote.creates, 1);
+});
+
+test('an unattended team member delegates within its own sandbox, and nobody is asked', async t => {
+  const base = await fixture(t), dsh = dshHost('rejected');
+  let permission: DshPermission = 'workspace-write';
+  const tools = delegationTools(dsh.host, base.service, () => ({ permission, unattended: true }));
+  const create = async (args: Record<string, unknown>) => (await tools.find(d => d.name === 'remote_agent_create')!.execute({ host: 'build-box', cwd: '/srv/project', provider: 'codex', ...args }, call())) as WaitResult;
+  base.remote.catalog[0].modes.push({ id: 'workspace-write', label: 'Workspace write' });
+  scripted(base.remote, '', agent => { agent.pendingPermissions = [{ id: 'escalate', name: 'Bash', kind: 'tool', actions: [
+    { id: 'accept', label: 'Allow', behavior: 'allow' }, { id: 'cancel', label: 'Cancel', behavior: 'deny' }, { id: 'decline', label: 'Deny', behavior: 'deny' }] }]; });
+  const running = create({ prompt: 'Fix the tests' });
+  await until(() => base.remote.answers.length >= 1);
+  const agent = [...base.remote.agents.values()][0]; agent.pendingPermissions = []; agent.status = 'idle'; agent.activeTurn = null;
+  await running;
+  assert.equal(base.remote.created!.modeId, 'workspace-write', 'not the remote CLI settings, which may be read-only');
+  assert.equal(base.remote.created!.unattended, true);
+  assert.equal(base.remote.answers[0].answer.behavior, 'deny'); assert.equal(base.remote.answers[0].answer.selectedActionId, 'decline');
+  assert.equal(dsh.approvals.length, 0, 'DSH is not asked for the remote request');
+  await assert.rejects(create({ prompt: 'Deploy', mode: 'full-access' }), /needs the user's approval \(rejected\)/, 'more than the member may do still needs approval');
+  assert.equal(dsh.approvals.length, 1);
+  permission = 'danger-full-access'; scripted(base.remote, 'Deployed.');
+  assert.equal((await create({ prompt: 'Deploy' })).agents[0].reply, 'Deployed.');
+  assert.equal(base.remote.created!.modeId, 'full-access', 'a member with full access may start its matching mode');
+  assert.equal(dsh.approvals.length, 1);
 });
 
 test('remote permission requests become one-time DSH approvals while a call waits', async t => {

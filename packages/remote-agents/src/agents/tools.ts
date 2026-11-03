@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
-import { busy, permissionModes, questionsOf, remotePath, type AgentState, type AgentSummary, type Choice, type Permission, type PermissionAnswer } from '../core/domain.js';
+import { busy, permissionModes, presetMode, questionsOf, remotePath, type AgentState, type AgentSummary, type Choice, type DshPermission, type Permission, type PermissionAnswer } from '../core/domain.js';
 import type { RemoteAgentsService } from './service.js';
 import type { ToolCall, ToolDefinition, ToolHost } from '../core/dsh-host.js';
 
@@ -95,7 +95,10 @@ export async function decidePermission(host: ToolHost, permission: Permission, e
  * replies. Permission requests are forwarded to the user as native DSH prompts while a call waits;
  * unanswered requests remain pending and can be shown again by another wait.
  */
-export function delegationTools(host: ToolHost, service: RemoteAgentsService): ToolDefinition[] {
+/** How the calling agent's conversation may act; see `accessOf` in core/dsh-host.ts. */
+export type CallerAccess = (agent: unknown) => { permission?: DshPermission; unattended: boolean };
+
+export function delegationTools(host: ToolHost, service: RemoteAgentsService, accessOf: CallerAccess = () => ({ unattended: false })): ToolDefinition[] {
   /** Prompts currently shown for `${agentId}:${permissionId}`, shared so parallel waits never ask twice. */
   const asking = new Map<string, AbortController>();
   const hostLabel = (id: string) => service.hosts().find(h => h.id === id)?.label ?? id;
@@ -127,7 +130,7 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
     })) };
   }
   async function settle(ids: string[], exec: ToolCall, timeout: number): Promise<WaitResult> {
-    const deadline = Date.now() + timeout * 1000, mine = new Set<string>(), deferred = new Set<string>();
+    const deadline = Date.now() + timeout * 1000, mine = new Set<string>(), deferred = new Set<string>(), unattended = accessOf(exec.agent).unattended;
     try {
       while (true) {
         exec.signal.throwIfAborted();
@@ -144,7 +147,8 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
             waiting = true;
             if (asking.has(key)) continue;
             const controller = new AbortController(); asking.set(key, controller); mine.add(key);
-            void decidePermission(host, permission, exec, AbortSignal.any([exec.signal, controller.signal]), subject(agent))
+            // Nobody answers an unattended team member: deny at once so the remote CLI goes on and reports it.
+            void (unattended ? Promise.resolve(unattendedAnswer(permission)) : decidePermission(host, permission, exec, AbortSignal.any([exec.signal, controller.signal]), subject(agent)))
               .then(answer => answer ? service.respond(agent.id, permission.id, answer) : void deferred.add(key))
               .catch(() => { deferred.add(key); })
               .finally(() => { if (asking.get(key) === controller) asking.delete(key); mine.delete(key); });
@@ -218,18 +222,21 @@ export function delegationTools(host: ToolHost, service: RemoteAgentsService): T
         if (provider.status !== 'ready') throw new Error(`${provider.label} is ${provider.status} on ${target.label}${provider.error ? `: ${provider.error}` : ''}`);
         const model = pick(provider.models, optional(args.model, 'model'), 'model') ?? provider.models.find(m => m.isDefault) ?? provider.models[0];
         // Without an explicit mode, Claude and Codex follow the permission config already set up on the remote machine.
-        const modes = permissionModes(provider.id, provider.modes);
-        const mode = pick(modes, optional(args.mode, 'mode'), 'mode') ?? modes.find(m => m.id === 'inherit') ?? modes.find(m => m.id === provider.defaultModeId);
+        // An unattended team member delegates within its own sandbox instead: that config may be read-only, and nobody could approve more.
+        const access = accessOf(exec.agent), modes = permissionModes(provider.id, provider.modes);
+        const own = access.unattended ? presetMode(provider.id, provider.modes, access.permission) : undefined;
+        const mode = pick(modes, optional(args.mode, 'mode'), 'mode') ?? modes.find(m => m.id === own) ?? modes.find(m => m.id === 'inherit') ?? modes.find(m => m.id === provider.defaultModeId);
         const thinking = pick(model.thinkingOptions ?? [], optional(args.thinking, 'thinking'), 'thinking level') ?? model.thinkingOptions?.find(o => o.id === model.defaultThinkingOptionId);
         const speed = pick(model.serviceTiers ?? [], optional(args.speed, 'speed'), 'speed');
-        if (mode && unrestricted(mode)) {
+        // A member whose own DSH permission is full access already allows its matching mode.
+        if (mode && unrestricted(mode) && mode.id !== own) {
           // The remote CLI would act without per-action approval; that needs the user's explicit consent.
           const outcome = exec.agent ? await host.approval.request({ agent: exec.agent, toolName: 'remote_agent_create', callId: exec.callId, signal: exec.signal,
             reason: `Start ${provider.label} on ${target.label}:${cwd} in "${mode.label}" mode. It will not ask before running commands or editing files.` }) : 'unavailable';
           if (outcome !== 'allowed-once') throw new Error(`Starting a remote agent in "${mode.label}" mode needs the user's approval (${outcome}). Use a mode that asks before acting.`);
         }
         const created = await service.create({ id: randomUUID(), hostId: target.id, cwd, provider: provider.id, model: model.id, prompt, ...(mode ? { modeId: mode.id } : {}), ...(thinking ? { thinkingOptionId: thinking.id } : {}), ...(speed ? { serviceTier: speed.id } : {}) },
-          { origin: 'dsh', ...(ownerOf(exec.agent) ? { owner: { sessionId: ownerOf(exec.agent)! } } : {}), ...(optional(args.title, 'title') ? { title: optional(args.title, 'title')!.slice(0, 100) } : {}) });
+          { origin: 'dsh', ...(access.unattended ? { unattended: true } : {}), ...(ownerOf(exec.agent) ? { owner: { sessionId: ownerOf(exec.agent)! } } : {}), ...(optional(args.title, 'title') ? { title: optional(args.title, 'title')!.slice(0, 100) } : {}) });
         if (created.status === 'error') throw new Error(`The remote agent did not start: ${created.error ?? 'unknown error'}. Agent ${created.id} is saved; use remote_agent_list to inspect its status.`);
         return args.wait === false ? report([await service.state(created.id)], new Set(), false) : settle([created.id], exec, timeout);
       },

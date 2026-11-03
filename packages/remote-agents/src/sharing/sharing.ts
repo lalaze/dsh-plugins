@@ -215,9 +215,12 @@ export class Sharing implements LaunchSharing {
   }
   /** The AgentTeams member tools DSH has loaded; captain tools are never shared. */
   private teamTools(): SharedTool[] { return (this.host.tools?.schemas() ?? []).filter(tool => TEAM_MEMBER_TOOLS.includes(tool.name)); }
-  /** A CLI working as an AgentTeams member gets the member tools without any sharing setting: the team needs them. */
+  /**
+   * A CLI working as an AgentTeams member gets the member tools without any sharing setting: the team needs them.
+   * Only the member's own CLI: one the member delegates to must not claim or report its tasks for it.
+   */
   private teamOwner(task: Task): boolean {
-    const owner = this.owner(task);
+    const owner = task.chat?.sessionId;
     return !!owner && !!this.host.agent && this.host.teamMember?.(owner) === true && this.teamTools().length > 0;
   }
   private async skillList(signal?: AbortSignal): Promise<SkillSummary[]> {

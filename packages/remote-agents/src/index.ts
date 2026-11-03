@@ -1,5 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-client-connection';
+import type { Session } from '@deepseek-ai/dsh-session';
 import Schema from '@deepseek-ai/schemastery';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -10,7 +11,7 @@ import { remoteUsageRecord, type RemoteUsageRecord } from './agents/usage.js';
 import { installChat, scheduleSessionRepair } from './chat/install.js';
 import { ChatProjects } from './chat/projects.js';
 import type { SyncAgent } from './chat/native-chat.js';
-import { loggerOf, type ToolDefinition, type ToolHost } from './core/dsh-host.js';
+import { accessOf, loggerOf, type ToolDefinition, type ToolHost } from './core/dsh-host.js';
 import { Store } from './core/store.js';
 import { createHandler } from './http.js';
 import { installSharingHost } from './sharing/install.js';
@@ -58,6 +59,6 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   // Native conversation routes and settings also work without the delegation tool registry.
   ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { tools: { register(tool: ToolDefinition): unknown } };
-    for (const tool of delegationTools(host, service)) host.tools.register(tool);
+    for (const tool of delegationTools(host, service, agent => accessOf(scoped, (agent as { session?: Session } | undefined)?.session))) host.tools.register(tool);
   });
 }

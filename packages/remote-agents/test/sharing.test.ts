@@ -380,7 +380,7 @@ test('DSH instances sharing a remote account keep their own skills; a skill the 
 });
 
 test('an AgentTeams member CLI gets the member tools without any sharing setting; others and captain tools never do', async t => {
-  const { home, sharing, transport, host, task, calls, tools, agent } = await setup(t);
+  const { home, sharing, transport, host, task, calls, tools, agent, store } = await setup(t);
   tools.push(...['agent_teams_claim_task', 'agent_teams_update_task', 'agent_teams_send_message', 'agent_teams_status', 'agent_teams_create'].map(name => ({ name, description: name, parameters: { type: 'object', properties: {} } })));
   let member = false; sharing.host.teamMember = id => member && id === 'session-1';
   assert.deepEqual((await sharing.prepare(host, transport, task('chat-task'), 'codex')).servers.map(s => s.name), ['dsh'], 'an ordinary conversation gets no team tools');
@@ -389,6 +389,8 @@ test('an AgentTeams member CLI gets the member tools without any sharing setting
   const proxy = launch.servers.find(s => s.name === 'dsh-agent-teams')!;
   assert.ok(proxy, 'a member gets the team server even though no MCP server is shared');
   assert.deepEqual((await sharing.prepare(host, transport, task('panel-task'), 'codex')).servers.map(s => s.name), ['dsh'], 'a CLI without a DSH conversation gets none');
+  await store.update(state => { state.tasks.push({ ...task('panel-task'), id: 'delegated-task', owner: { sessionId: 'session-1' } }); });
+  assert.deepEqual((await sharing.prepare(host, transport, task('delegated-task'), 'codex')).servers.map(s => s.name), ['dsh'], 'a CLI the member delegates to cannot act for the member');
 
   const client = mcp(t, proxy.command, proxy.args, home);
   assert.equal((await client.request('initialize', { protocolVersion: '2025-11-25' })).result.serverInfo.name, 'dsh-agent-teams');
