@@ -65,6 +65,17 @@ test('binary transfers are atomic, preserve exact bytes and require the current 
   await assert.rejects(files.upload(remote, 'large.bin', hash('stale'), 0, (async function* () {})()), /file changed/);
   assert.deepEqual(await readFile(join(remote, 'large.bin')), data);
 });
+test('a file a CLI named by absolute path is read exactly, with a size limit, and only as a regular file', async t => {
+  const { root, remote, files } = await directory(t), data = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 255]);
+  await mkdir(join(root, 'elsewhere')); await writeFile(join(root, 'elsewhere', 'shot one.png'), data);
+  assert.deepEqual(await files.readAbsolute(join(root, 'elsewhere', 'shot one.png'), 1024), data);
+  assert.equal(await files.readAbsolute(join(root, 'elsewhere', 'shot one.png'), 4), undefined, 'a file over the limit is not transferred');
+  await assert.rejects(files.readAbsolute(join(root, 'elsewhere', 'missing.png'), 1024));
+  await assert.rejects(files.readAbsolute('elsewhere/shot one.png', 1024), /absolute/);
+  await symlink(join(root, 'elsewhere', 'shot one.png'), join(remote, 'link.png'));
+  await assert.rejects(files.readAbsolute(join(remote, 'link.png'), 1024), 'a link to another directory is refused as in a workspace');
+});
+
 test('remote commands preserve stdout, stderr and exit codes', async t => {
   const { remote, files } = await directory(t);
   const result = await files.operate(remote, { op: 'command', path: '.', command: 'printf output; printf problem >&2; exit 7' });

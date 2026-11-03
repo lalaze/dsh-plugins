@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { CHAT_IMAGE_LIMIT, CHAT_IMAGES, chatImageName, imageExtensionOf, viewedImageExtension, viewedImagePath, writeChatImage, type ViewedImage } from '../chat/images.js';
 import { list, questionsOf, type Agent, type ContextUsage, type FinishedTurn, type TurnUsage, type NativeAttachment, type NativeProtocol, type Permission, type PermissionAnswer, type Task, type TimelineEntry, type TokenUsage } from '../core/domain.js';
 import { JsonlPeer, type Frame, type WireMessage } from '../core/ssh.js';
 import { RelayExit, RelayReleased, type RelayLink } from './relay.js';
@@ -7,6 +9,8 @@ import type { Store } from '../core/store.js';
 import { configureAcpSession } from './acp.js';
 import { acpTurnUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTurnUsage, contextUsage } from './usage.js';
 
+/** The file name an image is shown with, from the remote path it was read from. */
+const imageName = (path: unknown) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
 const contentText = (content: unknown): string => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
 export async function initializeCodex(peer: JsonlPeer): Promise<void> {
   await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.1.0' }, capabilities: {} });
@@ -55,6 +59,8 @@ export class CliSession {
   private imageInput = false;
   /** Items produced by the output line being processed, saved together with its relay offset. */
   private batch?: { item: Item; turnId?: string }[];
+  /** Images in that line's tool results, saved before its items so a chat reading them finds the files. */
+  private viewed?: { file: string; data: Uint8Array }[];
   private permissions = new Map<string, (answer: PermissionAnswer) => WireMessage>();
   private tools = new Map<string, Record<string, unknown>>();
   private stopWaiters = new Set<() => void>();
@@ -95,12 +101,39 @@ export class CliSession {
   private position(at = this.peer.position) { return this.relay ? { id: this.relay.id, at, ...(this.partialText ? { partial: true as const } : {}) } : undefined; }
   /** Process one output line; its history items are saved in one write with the offset after it. */
   private frame(message: WireMessage, frame: Frame): void {
-    this.batch = [];
+    this.batch = []; this.viewed = [];
     try { this.message(message); } catch (error) { this.fail(error); }
     finally {
-      const items = this.batch; this.batch = undefined;
-      if (items.length && !this.diskFailed) void this.history.appendBatch(items, this.position(frame.end)).catch(error => this.diskFailure(error));
+      const items = this.batch, images = this.viewed; this.batch = undefined; this.viewed = undefined;
+      // An image that cannot be saved is not shown; the history is still written.
+      const save = images.length ? async () => { for (const { file, data } of images) await writeChatImage(join(this.store.directory, CHAT_IMAGES), file, data).catch(() => {}); } : undefined;
+      if (items.length && !this.diskFailed) void this.history.appendBatch(items, this.position(frame.end), save).catch(error => this.diskFailure(error));
     }
+  }
+  /**
+   * Queue an image's base64 bytes to be saved with this output line, and return its copy's name; undefined when the chat
+   * cannot show it. The bytes stay out of the history, which other DSHs copy: it records only the name.
+   */
+  private keepImage(encoded: unknown, mediaType?: unknown): string | undefined {
+    if (!this.viewed || typeof encoded !== 'string' || !encoded || encoded.length * 0.75 > CHAT_IMAGE_LIMIT) return;
+    const data = Buffer.from(encoded, 'base64'), extension = viewedImageExtension(mediaType) ?? imageExtensionOf(data);
+    if (!data.length || !extension) return;
+    const file = chatImageName(data, extension);
+    if (!this.viewed.some(v => v.file === file)) this.viewed.push({ file, data });
+    return file;
+  }
+  /**
+   * The images in a tool's output, as Claude (`source`) or MCP (`data`, `mimeType`) image blocks, such as a screenshot
+   * it read. `path` is the remote file the tool read, when it names one, for a DSH without the copy.
+   */
+  private toolImages(content: unknown, path?: unknown, name = imageName(path)): ViewedImage[] {
+    const images: ViewedImage[] = [];
+    for (const block of list(content)) {
+      if (block?.type !== 'image') continue;
+      const file = block.source ? (block.source.type === 'base64' ? this.keepImage(block.source.data, block.source.media_type) : undefined) : this.keepImage(block.data, block.mimeType);
+      if (file) images.push({ file, ...(viewedImagePath(path) ? { path } : {}), name });
+    }
+    return images;
   }
   private write(message: WireMessage, id?: string): void { this.peer.send(message, this.relay ? id : undefined); }
   /** `mcpServers` are DSH's shared servers in ACP's stdio form; other protocols receive them as launch options. */
@@ -243,8 +276,8 @@ export class CliSession {
     const message = error instanceof Error ? error.message : String(error);
     this.complete('failed'); this.agent.status = 'error'; this.agent.lastError = message; this.append({ type: 'error', message });
   }
-  private tool(id: string, name: string, status: string, detail: unknown): void {
-    const item = { type: 'tool_call' as const, callId: id, name, status, detail };
+  private tool(id: string, name: string, status: string, detail: unknown, images: ViewedImage[] = []): void {
+    const item = { type: 'tool_call' as const, callId: id, name, status, detail, ...(images.length ? { images } : {}) };
     this.tools.set(id, item); this.append(item);
   }
   private permission(id: string, permission: Omit<Permission, 'id'>, wire: WireMessage, respond: (answer: PermissionAnswer) => WireMessage): void {
@@ -295,8 +328,21 @@ export class CliSession {
     if (m.method === 'item/agentMessage/delta') { this.confirm(); this.append({ type: 'assistant_message', text: String(p.delta ?? '') }); }
     if (m.method?.startsWith('item/reasoning/') && m.method.endsWith('Delta')) this.append({ type: 'reasoning', text: String(p.delta ?? '') });
     if (m.method === 'item/started' || m.method === 'item/completed') {
-      const item = p.item;
-      if (item?.type === 'commandExecution' || item?.type === 'fileChange' || item?.type === 'mcpToolCall') this.tool(String(item.id), item.type === 'commandExecution' ? 'Bash' : item.type === 'fileChange' ? 'Edit' : String(item.tool ?? 'MCP'), m.method === 'item/started' ? 'running' : item.status === 'failed' ? 'failed' : item.status === 'declined' ? 'canceled' : 'completed', item);
+      const item = p.item, done = m.method === 'item/completed';
+      const status = !done ? 'running' : item?.status === 'failed' || item?.failure ? 'failed' : item?.status === 'declined' ? 'canceled' : 'completed';
+      if (item?.type === 'commandExecution' || item?.type === 'fileChange') this.tool(String(item.id), item.type === 'commandExecution' ? 'Bash' : 'Edit', status, item);
+      if (item?.type === 'mcpToolCall') {
+        // Screenshots and other images an MCP tool returns are shown; their bytes are kept out of the saved detail.
+        const content = list(item.result?.content), images = status === 'completed' ? this.toolImages(content, undefined, String(item.tool ?? '')) : [];
+        const detail = content.some(b => b?.type === 'image') ? { ...item, result: { ...item.result, content: content.map(b => b?.type === 'image' ? { type: 'image', mimeType: b.mimeType } : b) } } : item;
+        this.tool(String(item.id), String(item.tool ?? 'MCP'), status, detail, images);
+      }
+      // view_image reports only the path; the chat fetches the image from the remote machine.
+      if (item?.type === 'imageView') this.tool(String(item.id), 'view_image', status, item, done && viewedImagePath(item.path) ? [{ path: item.path, name: imageName(item.path) }] : []);
+      if (item?.type === 'imageGeneration') {
+        const { result, ...detail } = item, file = status === 'completed' ? this.keepImage(result) : undefined, path = viewedImagePath(item.savedPath) ? item.savedPath as string : undefined;
+        this.tool(String(item.id), 'image_generation', status, detail, status === 'completed' && (file || path) ? [{ ...(file ? { file } : {}), ...(path ? { path } : {}), name: imageName(path) || 'Generated image' }] : []);
+      }
     }
     if (m.method === 'error') this.append({ type: 'error', message: String(p.error?.message ?? p.message ?? 'Remote CLI error') });
     if (m.method === 'serverRequest/resolved') this.resolved(`rpc-${p.requestId}`);
@@ -329,7 +375,10 @@ export class CliSession {
       }
       this.partialText = false;
     }
-    if (m.type === 'user') for (const block of list(m.message?.content)) if (block.type === 'tool_result') this.tool(String(block.tool_use_id), String(this.tools.get(String(block.tool_use_id))?.name ?? 'Tool'), block.is_error ? 'failed' : 'completed', contentText(block.content));
+    if (m.type === 'user') for (const block of list(m.message?.content)) if (block.type === 'tool_result') {
+      const call = this.tools.get(String(block.tool_use_id)), input = call?.detail as Record<string, unknown> | undefined;
+      this.tool(String(block.tool_use_id), String(call?.name ?? 'Tool'), block.is_error ? 'failed' : 'completed', contentText(block.content), block.is_error ? [] : this.toolImages(block.content, input?.file_path ?? input?.path));
+    }
     if (m.type === 'result') { this.confirm(); this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success'); if (m.is_error || m.subtype !== 'success') this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed')); else this.complete(); void this.claudeContext(); }
   }
   /** Codex `turn/start` and ACP `session/prompt` responses for the active message. */

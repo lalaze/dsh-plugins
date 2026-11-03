@@ -8,7 +8,7 @@ import {
 import type { Session } from '@deepseek-ai/dsh-session';
 import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Cursor, type DshPermission, type Model, type TimelineEntry } from '../core/domain.js';
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
-import { ChatImageLinks, saveChatImage } from './images.js';
+import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
 import { transcript } from './transcript.js';
 import { decidePermission } from '../agents/tools.js';
@@ -48,6 +48,8 @@ export interface ChatHost extends Partial<ToolHost> {
   permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
   /** A file from the conversation's verified remote workspace, or undefined when it is too large to show. */
   image?(sessionId: NonNullable<GenerateOptions['sessionId']>, path: string, signal: AbortSignal): Promise<Uint8Array | undefined>;
+  /** A file the CLI looked at by absolute path on the conversation's verified machine, inside the workspace or not; undefined when too large. */
+  viewedImage?(sessionId: NonNullable<GenerateOptions['sessionId']>, path: string, signal: AbortSignal): Promise<Uint8Array | undefined>;
   attachments?: AttachmentAccess;
 }
 const hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
@@ -326,10 +328,29 @@ export class RemoteCliAdapter extends LlmAdapter {
       yield type === 'text' ? { type: 'text-delta', index: open!.index, text } : { type: 'reasoning-delta', index: open!.index, text };
     };
     // Remote CLIs name images by workspace path; the DSH chat can only show files on the DSH host.
+    const imageDirectory = join(service.store.directory, CHAT_IMAGES);
     const images = new ChatImageLinks(async path => {
       const data = await this.host.image?.(sessionId, path, signal);
-      return data && saveChatImage(join(service.store.directory, 'chat-images'), path, data);
+      return data && saveChatImage(imageDirectory, path, data);
     });
+    // Images the CLI looked at with its tools, such as screenshots it read, appear in the reply where it read them, once each.
+    // Codex's view_image names only a path; a DSH without the copy fetches it, each path once per reply.
+    const shownImages = new Set<string>(), fetched = new Map<string, Promise<string | undefined>>();
+    const fetchImage = (path: string) => {
+      let local = fetched.get(path);
+      if (!local) {
+        local = (async () => {
+          const data = await this.host.viewedImage?.(sessionId, path, signal), extension = data && imageExtensionOf(data);
+          return extension ? writeChatImage(imageDirectory, chatImageName(data, extension), data) : undefined;
+        })().catch(() => undefined);
+        fetched.set(path, local);
+      }
+      return local;
+    };
+    const viewed = async function* (item: TimelineEntry['item']): AsyncGenerator<StreamChunk> {
+      const markdown = await viewedImageMarkdown(imageDirectory, item.images, shownImages, fetchImage);
+      if (markdown) { yield* textChunk('text', markdown); yield* endBlock(); }
+    };
     // Record what reached this conversation, so output produced while DSH was away is shown later.
     let savedAt = 0, reached: { id: string; cursor: Cursor | undefined } | undefined;
     const delivered = async (id: string, cursor: Cursor | undefined, done = false, force = false) => {
@@ -359,7 +380,10 @@ export class RemoteCliAdapter extends LlmAdapter {
           if (entry.item.type === 'assistant_message') { yield* textChunk('text', await images.push(String(entry.item.text ?? ''))); continue; }
           yield* textChunk('text', images.flush());
           if (entry.item.type === 'reasoning') yield* textChunk('reasoning', String(entry.item.text ?? ''));
-          if (entry.item.type === 'tool_call') { yield* endBlock(); if (!rows.write(entry)) yield* textChunk('reasoning', `${entry.item.name ?? 'Tool'} · ${entry.item.status ?? ''}\n${typeof entry.item.detail === 'string' ? entry.item.detail : JSON.stringify(entry.item.detail ?? {})}\n`); }
+          if (entry.item.type === 'tool_call') {
+            yield* endBlock(); if (!rows.write(entry)) yield* textChunk('reasoning', `${entry.item.name ?? 'Tool'} · ${entry.item.status ?? ''}\n${typeof entry.item.detail === 'string' ? entry.item.detail : JSON.stringify(entry.item.detail ?? {})}\n`);
+            yield* viewed(entry.item);
+          }
           if (entry.item.type === 'error') { if (recovered) yield* textChunk('text', `\n\n${String(entry.item.message)}\n`); else throw new LlmError(String(entry.item.message), 'REMOTE_CLI_FAILED'); }
           if (entry.item.type === 'interrupted') interrupted = true;
         }

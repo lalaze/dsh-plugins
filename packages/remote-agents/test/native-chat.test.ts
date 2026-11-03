@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { Context } from '@deepseek-ai/cordis';
 import LlmRuntime, { createUserMessage, createAssistantMessage, createSystemMessage, MessageId, ReasoningEffortId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm';
@@ -133,6 +136,48 @@ test('remote workspace images in replies are copied to the DSH host so the chat 
   assert.ok(local?.startsWith(`${store.directory.replace(/\\/g, '/')}/chat-images/`), reply);
   assert.equal(reply, `See ![Before](<${local}>) and ![Site](https://example.com/a.png) ![unfinished`);
   assert.deepEqual(requested, ['shots/before.png']);
+});
+
+test('images the CLI read with its tools appear in the reply where it read them, once each', async t => {
+  const { adapter, options, remote, store } = await setup(t);
+  const directory = join(store.directory, 'chat-images'), shot = `${'a'.repeat(64)}.png`, gone = `${'b'.repeat(64)}.jpg`;
+  await mkdir(directory, { recursive: true }); await writeFile(join(directory, shot), 'png');
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'assistant_message', text: 'Look at the receipt:' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'read-1', name: 'Read', status: 'running', detail: { file_path: '/tmp/a1-receipt.png' } });
+    // Only content-hash names are files here; one another DSH saved has no copy on this host.
+    remote.append(agent.id, { type: 'tool_call', callId: 'read-1', name: 'Read', status: 'completed', detail: '',
+      images: [{ file: shot, name: 'a1-[receipt].png' }, { file: '../state.png', name: 'escape' }, { file: gone, name: 'elsewhere.jpg' }] });
+    remote.append(agent.id, { type: 'assistant_message', text: 'Again:' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'read-2', name: 'Read', status: 'completed', detail: '', images: [{ file: shot, name: 'same.png' }] });
+    remote.append(agent.id, { type: 'assistant_message', text: 'Done' });
+  };
+  const chunks = await collect(adapter.stream(options()));
+  const blocks = chunks.flatMap(c => c.type === 'block-end' && c.block.type === 'text' ? [c.block.text] : []);
+  assert.deepEqual(blocks, ['Look at the receipt:', `![a1-receipt.png](<${join(directory, shot).replace(/\\/g, '/')}>)`, 'Again:', 'Done']);
+});
+
+test('an image the CLI viewed by path, as Codex does, is fetched from the remote machine once per reply and only if it is an image', async t => {
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('pixels')]), fetched: string[] = [];
+  const { adapter, options, remote, store } = await setup(t, { viewedImage: async (_id, path) => {
+    fetched.push(path);
+    if (path === '/tmp/qa/missing.png') throw new Error('No such file');
+    return path === '/tmp/qa/shot.png' ? png : Buffer.from('not an image');
+  } });
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'tool_call', callId: 'view-1', name: 'view_image', status: 'completed', images: [{ path: '/tmp/qa/shot.png', name: 'shot.png' }] });
+    // No copy here: the generated image's saved path is fetched, and the same picture is not shown twice.
+    remote.append(agent.id, { type: 'tool_call', callId: 'gen-1', name: 'image_generation', status: 'completed', images: [{ file: `${'c'.repeat(64)}.png`, path: '/tmp/qa/shot.png', name: 'gen.png' }] });
+    remote.append(agent.id, { type: 'tool_call', callId: 'view-2', name: 'view_image', status: 'completed',
+      images: [{ path: 'relative.png', name: 'r' }, { path: '/tmp/qa/fake.png', name: 'f' }, { path: '/tmp/qa/missing.png', name: 'm' }, { path: '/etc/passwd', name: 'p' }] });
+    remote.append(agent.id, { type: 'assistant_message', text: 'Seen' });
+  };
+  const chunks = await collect(adapter.stream(options()));
+  const blocks = chunks.flatMap(c => c.type === 'block-end' && c.block.type === 'text' ? [c.block.text] : []);
+  const local = join(store.directory, 'chat-images', `${createHash('sha256').update(png).digest('hex')}.png`);
+  assert.deepEqual(blocks, [`![shot.png](<${local.replace(/\\/g, '/')}>)`, 'Seen']);
+  assert.deepEqual(await readFile(local), png);
+  assert.deepEqual(fetched, ['/tmp/qa/shot.png', '/tmp/qa/fake.png', '/tmp/qa/missing.png']);
 });
 
 test('turn token usage is not reported to DSH, whose usage chunks describe the conversation context', async t => {

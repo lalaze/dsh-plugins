@@ -63,6 +63,14 @@ export class WorkspaceService {
     revision(rev); const target = await this.target(sessionId, signal, expected);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.download(target.cwd, path, rev, signal));
   }
+  /**
+   * A file a remote CLI of this conversation named by absolute path, such as an image Codex viewed, read on the
+   * conversation's verified machine. It may be outside the workspace: the CLI there already read it.
+   */
+  async readViewed(sessionId: string, path: string, limit: number, signal: AbortSignal): Promise<Buffer | undefined> {
+    const target = await this.target(sessionId, signal);
+    return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
+  }
   async upload(sessionId: string, path: string, rev: string | null, size: number, input: AsyncIterable<Uint8Array>, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown> {
     revision(rev); const target = await this.target(sessionId, signal, expected);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.upload(target.cwd, path, rev, size, input, signal));

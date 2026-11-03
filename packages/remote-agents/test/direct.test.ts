@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { randomUUID } from 'node:crypto';
-import { mkdtemp, rm, readFile, writeFile, stat } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, readdir, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SshBackend, CLI_PROVIDERS } from '../src/agents/backend.js';
@@ -891,4 +891,69 @@ test('JSONL frames report exact byte offsets for multi-byte text split anywhere'
   let at = 100;
   assert.deepEqual(frames, lines.map((line, i) => ({ start: at, end: (at += line.length), text: ['你好🌏', 'ascii', 3][i] })));
   assert.equal(peer.position, at);
+});
+
+test('images in Claude tool results are saved on the DSH host and named on their tool calls, never stored in the history', async t => {
+  const { service, ssh, request, store } = await fixture(t, 'claude');
+  const agent = await service.create(request); await tick();
+  const png = Buffer.from('png bytes'), jpeg = Buffer.from('jpeg bytes');
+  const image = (data: Buffer, media_type: string) => ({ type: 'image', source: { type: 'base64', media_type, data: data.toString('base64') } });
+  const file = (data: Buffer, extension: string) => `${createHash('sha256').update(data).digest('hex')}${extension}`;
+  ssh.live.emit({ type: 'assistant', parent_tool_use_id: null, message: { content: [
+    { type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: '/tmp/qa/shots/a1-receipt.png' } },
+    { type: 'tool_use', id: 'shot-1', name: 'mcp__browser__screenshot', input: {} },
+    { type: 'tool_use', id: 'read-2', name: 'Read', input: { file_path: '/tmp/qa/gone.png' } },
+  ] } });
+  ssh.live.emit({ type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [
+    { type: 'tool_result', tool_use_id: 'read-1', content: [image(png, 'image/png')] },
+    // Text stays the result; a media type the chat cannot show is left out.
+    { type: 'tool_result', tool_use_id: 'shot-1', content: [{ type: 'text', text: 'Captured' }, image(jpeg, 'image/jpeg'), image(jpeg, 'image/tiff')] },
+    { type: 'tool_result', tool_use_id: 'read-2', is_error: true, content: [image(png, 'image/png')] },
+  ] } });
+  const entries = (await service.detail(agent.id)).timeline!.entries;
+  const results = entries.filter(e => e.item.type === 'tool_call' && e.item.status !== 'running').map(e => [e.item.callId, e.item.images]);
+  assert.deepEqual(results, [
+    // The path read lets a DSH without the copy fetch the image.
+    ['read-1', [{ file: file(png, '.png'), path: '/tmp/qa/shots/a1-receipt.png', name: 'a1-receipt.png' }]],
+    ['shot-1', [{ file: file(jpeg, '.jpg'), name: '' }]],
+    ['read-2', undefined],
+  ]);
+  assert.match(String(entries.find(e => e.item.callId === 'shot-1' && e.item.status === 'completed')!.item.detail), /^Captured/);
+  // Saved before the entries that name them, so a chat reading the entry finds the file.
+  const directory = join(store.directory, 'chat-images');
+  assert.deepEqual((await readdir(directory)).sort(), [file(png, '.png'), file(jpeg, '.jpg')].sort());
+  assert.deepEqual(await readFile(join(directory, file(png, '.png'))), png);
+  const saved = await readFile(join(store.directory, 'events', `${agent.id}.jsonl`), 'utf8');
+  assert.equal(saved.includes(png.toString('base64')) || saved.includes(jpeg.toString('base64')), false, 'image bytes stay out of the shared history');
+});
+
+test('Codex images are recorded: view_image by path, MCP and generated images by copy, with bytes kept out of the history', async t => {
+  const { service, ssh, request, store } = await fixture(t);
+  const agent = await service.create(request); await tick();
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('generated')]), jpeg = Buffer.from('screenshot bytes');
+  const file = (data: Buffer, extension: string) => `${createHash('sha256').update(data).digest('hex')}${extension}`;
+  const item = (method: string, value: Record<string, unknown>) => ssh.live.emit({ method, params: { item: value, threadId: 'thread-remote', turnId: 'turn-1' } });
+  item('item/started', { type: 'imageView', id: 'view-1', path: '/tmp/qa/shot.png' });
+  item('item/completed', { type: 'imageView', id: 'view-1', path: '/tmp/qa/shot.png' });
+  item('item/completed', { type: 'imageView', id: 'view-2', path: 'relative.png' });
+  item('item/completed', { type: 'mcpToolCall', id: 'mcp-1', server: 'browser', tool: 'screenshot', status: 'completed', arguments: {},
+    result: { content: [{ type: 'text', text: 'Captured' }, { type: 'image', data: jpeg.toString('base64'), mimeType: 'image/jpeg' }], structuredContent: null, _meta: null } });
+  item('item/started', { type: 'imageGeneration', id: 'gen-1', status: 'in_progress', revisedPrompt: null, result: '', failure: null });
+  item('item/completed', { type: 'imageGeneration', id: 'gen-1', status: 'completed', revisedPrompt: 'An apple', result: png.toString('base64'), failure: null, savedPath: '/home/builder/.codex/generated_images/t/gen-1.png' });
+  item('item/completed', { type: 'imageGeneration', id: 'gen-2', status: 'failed', result: '', failure: { message: 'blocked' } });
+  const entries = (await service.detail(agent.id)).timeline!.entries.filter(e => e.item.type === 'tool_call');
+  assert.deepEqual(entries.map(e => [e.item.callId, e.item.name, e.item.status, e.item.images]), [
+    ['view-1', 'view_image', 'running', undefined],
+    ['view-1', 'view_image', 'completed', [{ path: '/tmp/qa/shot.png', name: 'shot.png' }]],
+    ['view-2', 'view_image', 'completed', undefined],
+    ['mcp-1', 'screenshot', 'completed', [{ file: file(jpeg, '.jpg'), name: 'screenshot' }]],
+    ['gen-1', 'image_generation', 'running', undefined],
+    ['gen-1', 'image_generation', 'completed', [{ file: file(png, '.png'), path: '/home/builder/.codex/generated_images/t/gen-1.png', name: 'gen-1.png' }]],
+    ['gen-2', 'image_generation', 'failed', undefined],
+  ]);
+  const mcp = entries.find(e => e.item.callId === 'mcp-1')!.item.detail as { result: { content: unknown[] } };
+  assert.deepEqual(mcp.result.content, [{ type: 'text', text: 'Captured' }, { type: 'image', mimeType: 'image/jpeg' }]);
+  assert.deepEqual((await readdir(join(store.directory, 'chat-images'))).sort(), [file(png, '.png'), file(jpeg, '.jpg')].sort());
+  const saved = await readFile(join(store.directory, 'events', `${agent.id}.jsonl`), 'utf8');
+  assert.equal(saved.includes(png.toString('base64')) || saved.includes(jpeg.toString('base64')), false, 'image bytes stay out of the shared history');
 });

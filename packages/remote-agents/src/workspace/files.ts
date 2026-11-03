@@ -161,6 +161,13 @@ node -e ${quote(REMOTE_DSH_RUNNER)} ${request}`;
     if (digest(data) !== revision) throw new RemoteError('The file changed. Reload it before saving.', 409);
     return data;
   }
+  /** A file by absolute path, read from its own directory, or undefined when it is larger than `limit` bytes. */
+  async readAbsolute(path: string, limit: number, signal?: AbortSignal): Promise<Buffer | undefined> {
+    if (!path.startsWith('/')) throw new RemoteError('Enter an absolute remote path');
+    const directory = posix.dirname(path), name = posix.basename(path);
+    const file = await this.operate(directory, { op: 'stat', path: name }, signal) as { revision: string; size: number };
+    return file.size <= limit ? this.download(directory, name, file.revision, signal) : undefined;
+  }
   async upload(cwd: string, path: string, revision: string | null, size: number, input: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<unknown> {
     if (!Number.isSafeInteger(size) || size < 0 || size > FILE_LIMIT) throw new RemoteError('File exceeds the 50 MB transfer limit', 413);
     if (revision !== null && !/^[a-f0-9]{64}$/.test(revision)) throw new RemoteError('A file revision is required');
