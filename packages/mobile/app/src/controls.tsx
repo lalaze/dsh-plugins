@@ -96,7 +96,8 @@ export const icons = {
   more: icon(22, <><circle cx="5.5" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="18.5" cy="12" r="1.5" fill="currentColor" stroke="none" /></>),
   search: icon(21, <><circle cx="11" cy="11" r="6.5" /><path d="M16 16l4 4" /></>),
   filter: icon(21, <path d="M4 6.5h16M7 12h10M10 17.5h4" />),
-  gear: icon(21, <><path d="M12 15a3 3 0 100-6 3 3 0 000 6z" /><path d="M19.4 13a7.6 7.6 0 000-2l2-1.5-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3.6h-4l-.4 2.4a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.5a7.6 7.6 0 000 2l-2 1.5 2 3.4 2.3-.9c.5.4 1.1.7 1.7 1l.4 2.4h4l.4-2.4c.6-.3 1.2-.6 1.7-1l2.3.9 2-3.4z" /></>),
+  // Lucide's "settings" (ISC, see THIRD_PARTY_NOTICES.md).
+  gear: icon(21, <><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /><circle cx="12" cy="12" r="3" /></>),
   plus: icon(20, <path d="M12 5v14M5 12h14" strokeWidth="2.2" />),
   close: icon(20, <path d="M6 6l12 12M18 6L6 18" strokeWidth="2" />),
   check: icon(18, <path d="M5 12.5l4.5 4.5L19 7.5" strokeWidth="2.2" />),
