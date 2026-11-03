@@ -251,12 +251,12 @@
       },
       "versions": [
         {
-          "version": "0.3.1",
-          "publishTimestamp": 1793691033,
+          "version": "0.3.2",
+          "publishTimestamp": 1793722605,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "d2c6f2e27d4badfa07744516a5c5a3d5a3f8cd3c",
+            "commit": "1de8b82ed897a5b7dee28f8303d3c94586bfe450",
             "path": "packages/mobile"
           },
           "engines": {
