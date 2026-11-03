@@ -57,6 +57,8 @@ export class SshBackend {
     histories = new Map();
     starting = new Map();
     accounts = new Map();
+    /** The plan each CLI's account last showed, for answers that cannot tell it. */
+    plans = new Map();
     /** Tasks with an operation in flight; their sessions are never evicted. */
     leases = new Map();
     relayClient;
@@ -71,7 +73,8 @@ export class SshBackend {
         this.host = host;
         this.store = store;
         this.sharing = sharing;
-        this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection));
+        // Commands to the host share one SSH connection; its sockets live in this plugin's private state directory.
+        this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') });
         this.workspaceFiles = new WorkspaceFiles(this.transport);
         if (this.transport.relays && sharesSessions(host))
             this.shared = new SharedSessions(this.transport, store, {
@@ -94,6 +97,13 @@ export class SshBackend {
     controller(taskId) { return this.shared?.controller(taskId); }
     async sharedWorkspaces(timeout) { if (!this.shared)
         return []; return this.shared.listWorkspaces(timeout); }
+    onSharedWorkspaces(listener) {
+        const shared = this.shared;
+        if (!shared)
+            return () => { };
+        shared.workspaceListeners.add(listener);
+        return () => { shared.workspaceListeners.delete(listener); };
+    }
     async setWorkspaceTags(path, tags) {
         if (!this.shared)
             throw new Error('Sessions are not shared on this host');
@@ -715,17 +725,21 @@ done`}`, 15_000, { login: false });
         const cached = this.accounts.get(provider);
         if (cached && !refresh && Date.now() - cached.at < ACCOUNT_TTL)
             return cached.value;
-        const value = this.readAccount(definition, cwd);
+        const value = this.readAccount(definition, cwd, this.plans.get(provider)).then(usage => {
+            if (usage.plan)
+                this.plans.set(provider, usage.plan);
+            return usage;
+        });
         this.accounts.set(provider, { at: Date.now(), value });
         value.catch(() => { if (this.accounts.get(provider)?.value === value)
             this.accounts.delete(provider); });
         return value;
     }
     /** Ask a running session of this CLI, or briefly start one without a prompt. */
-    async readAccount(definition, cwd) {
+    async readAccount(definition, cwd, lastPlan) {
         const live = [...this.sessions.values()].find(s => s.alive && s.task.provider === definition.id && s.agent.status !== 'initializing');
         if (live)
-            return readAccountUsage(live.peer, definition.protocol, live.account);
+            return readAccountUsage(live.peer, definition.protocol, live.account, lastPlan);
         const path = await this.transport.exec(`printf '%s' "$(command -v ${quote(definition.command)} 2>/dev/null || true)"`);
         this.assertOpen();
         if (!path.startsWith('/'))
@@ -741,7 +755,7 @@ done`}`, 15_000, { login: false });
                 return await readAccountUsage(peer, 'codex');
             }
             const init = await peer.control({ subtype: 'initialize' });
-            return await readAccountUsage(peer, 'claude', init?.account);
+            return await readAccountUsage(peer, 'claude', init?.account, lastPlan);
         }
         finally {
             this.probes.delete(peer);

@@ -33,11 +33,23 @@ export interface SshTransport {
         login?: boolean;
     }): Promise<Buffer>;
 }
+export interface OpenSshOptions {
+    /**
+     * A private local directory for connection-sharing sockets: every command to the host then runs over one SSH connection
+     * instead of a handshake each. Without it, or where sharing is unavailable (Windows, an unusable path), each command connects.
+     */
+    controlDirectory?: string;
+}
 export declare class OpenSshTransport implements SshTransport {
     private readonly binary;
     readonly relays: boolean;
     private readonly args;
-    constructor(connection: string, binary?: string);
+    private readonly control?;
+    /** The connection-sharing options once the socket directory was checked; empty when sharing is unavailable. */
+    private sharing?;
+    constructor(connection: string, binary?: string, options?: OpenSshOptions);
+    /** OpenSSH connection sharing, once its socket directory is known to be private to this user. */
+    private multiplexing;
     private spawn;
     transfer(script: string, options: {
         input?: AsyncIterable<Uint8Array>;

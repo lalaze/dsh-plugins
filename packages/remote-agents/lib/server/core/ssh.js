@@ -1,6 +1,9 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmodSync, lstatSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { Readable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import { pipeline } from 'node:stream/promises';
 import { field, remotePath, RemoteError } from './domain.js';
 export const quote = (value) => `'${value.replace(/'/g, "'\\''")}'`;
@@ -58,14 +61,59 @@ export function connectionInput(value) {
         throw new RemoteError('Invalid SSH port');
     return `ssh://${username ? `${username}@` : ''}${url.hostname}${url.port ? `:${url.port}` : ''}`;
 }
+/**
+ * Ends a connection that stopped answering within about 45 seconds, as after the computer slept or changed networks.
+ * Without it a relay attachment or the shared registry waits on a dead connection until TCP gives up, which can take hours.
+ */
+const KEEPALIVE = ['-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3'];
+/**
+ * ssh binds a control socket as `<path>.<16 random characters>` before renaming it, and Unix socket paths are limited to
+ * 104 bytes on macOS. Only plain ASCII paths are used: ssh expands `%`, `$` and `~` and splits on spaces and quotes.
+ */
+const CONTROL_PATH_LIMIT = 104 - 1 - 17;
+const CONTROL_PATH = /^[A-Za-z0-9_./@+,:=-]+$/;
+/** How long a shared connection stays open after its last command; commands in that time skip the SSH handshake. */
+const CONTROL_PERSIST = 60;
 export class OpenSshTransport {
     binary;
     relays = true;
     args;
-    constructor(connection, binary = 'ssh') {
+    control;
+    /** The connection-sharing options once the socket directory was checked; empty when sharing is unavailable. */
+    sharing;
+    constructor(connection, binary = 'ssh', options = {}) {
         this.binary = binary;
-        const url = new URL(connectionInput(connection));
-        this.args = ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', ...(url.port ? ['-p', url.port] : []), '--', `${decodeURIComponent(url.username) ? `${decodeURIComponent(url.username)}@` : ''}${url.hostname}`];
+        const canonical = connectionInput(connection), url = new URL(canonical);
+        this.args = ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', ...KEEPALIVE, ...(url.port ? ['-p', url.port] : []), '--', `${decodeURIComponent(url.username) ? `${decodeURIComponent(url.username)}@` : ''}${url.hostname}`];
+        const directory = options.controlDirectory;
+        if (directory && process.platform !== 'win32') {
+            const socket = join(directory, createHash('sha256').update(canonical).digest('hex').slice(0, 16));
+            if (CONTROL_PATH.test(socket) && Buffer.byteLength(socket) <= CONTROL_PATH_LIMIT)
+                this.control = { directory, socket };
+        }
+    }
+    /** OpenSSH connection sharing, once its socket directory is known to be private to this user. */
+    multiplexing() {
+        if (this.sharing)
+            return this.sharing;
+        this.sharing = [];
+        if (!this.control)
+            return this.sharing;
+        try {
+            mkdirSync(this.control.directory, { recursive: true, mode: 0o700 });
+            const info = lstatSync(this.control.directory);
+            // Another user's directory, or a link to one, could hand ssh a socket that is not this user's connection.
+            if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid()))
+                return this.sharing;
+            if (info.mode & 0o077)
+                chmodSync(this.control.directory, 0o700);
+        }
+        catch {
+            return this.sharing;
+        }
+        // `auto` falls back to a connection of its own when the shared one is missing, stale or refuses another session.
+        this.sharing = ['-o', 'ControlMaster=auto', '-o', `ControlPath=${this.control.socket}`, '-o', `ControlPersist=${CONTROL_PERSIST}`];
+        return this.sharing;
     }
     spawn(script) {
         // Auth/proxy exports often live after an interactive-shell guard in the user's rc file.
@@ -109,6 +157,7 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
         }
         else
             chunks.push(data); });
+        child.stderr.setEncoding('utf8');
         child.stderr.on('data', data => { stderr = (stderr + data).slice(-4000); });
         const completed = new Promise((accept, reject) => {
             child.on('error', reject);
@@ -132,23 +181,25 @@ exec /bin/sh -c ${quote(REMOTE_PATH + script)}
     }
     /** Runs a POSIX shell command on the SSH host. */
     spawnRemote(command) {
-        return spawn(this.binary, [...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+        return spawn(this.binary, [...this.multiplexing(), ...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     }
     exec(script, timeout = 20_000, options = {}) {
         return new Promise((resolve, reject) => {
-            const child = options.login === false ? this.spawnRemote(script) : this.spawn(script);
-            let stdout = '', stderr = '', bytes = 0;
+            const child = options.login === false ? this.spawnRemote(script) : this.spawn(script), chunks = [];
+            let stderr = '', bytes = 0;
+            child.stderr.setEncoding('utf8');
             const timer = setTimeout(() => { child.kill(); reject(new Error('SSH probe timed out')); }, timeout);
-            child.stdout.on('data', data => { bytes += data.length; if (bytes > 2_000_000) {
+            // Decoded once at the end: a character split between two reads would otherwise turn into replacement characters.
+            child.stdout.on('data', (data) => { bytes += data.length; if (bytes > 2_000_000) {
                 child.kill();
                 reject(new Error('SSH probe exceeded output limit'));
             }
             else
-                stdout += data.toString(); });
+                chunks.push(data); });
             child.stderr.on('data', data => { stderr = (stderr + data).slice(-4000); });
             child.on('error', error => { clearTimeout(timer); reject(error); });
             child.on('close', code => { clearTimeout(timer); if (code === 0)
-                resolve(stdout);
+                resolve(Buffer.concat(chunks).toString('utf8'));
             else
                 reject(new Error(stderr.trim() || `SSH exited (${code})`)); });
             child.stdin.on('error', () => { });
@@ -185,6 +236,8 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
 `;
         const child = this.spawn(script);
         let stdout = '', stderr = '', ended = false;
+        child.stdout.setEncoding('utf8');
+        child.stderr.setEncoding('utf8');
         const abort = () => child.kill('SIGTERM');
         const timer = setTimeout(abort, 300_000);
         signal?.addEventListener('abort', abort, { once: true });
@@ -225,7 +278,8 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
             listener(error); };
         process.stdout.on('data', chunk => { for (const listener of data)
             listener(chunk); });
-        process.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); options.stderr?.(chunk); });
+        const decoder = new StringDecoder('utf8');
+        process.stderr.on('data', (chunk) => { stderr = (stderr + decoder.write(chunk)).slice(-4000); options.stderr?.(chunk); });
         process.stdin.on('error', error => end(error));
         process.on('error', end);
         process.on('close', code => end(new Error(stderr.trim() || `Remote CLI exited (${code})`)));

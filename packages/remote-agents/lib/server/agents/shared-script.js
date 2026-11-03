@@ -243,7 +243,8 @@ function scan(report) {
     seen.set(id, value);
     if (report) { const current = state(id); if (!current.missing) changed.push(current); }
   }
-  for (const id of [...seen.keys()]) if (!names.includes(id)) { seen.delete(id); if (report) changed.push({ id, deleted: true }); }
+  const present = new Set(names);
+  for (const id of [...seen.keys()]) if (!present.has(id)) { seen.delete(id); if (report) changed.push({ id, deleted: true }); }
   let shared; try { shared = String(fs.statSync(workspaceFile, { bigint: true }).mtimeNs); } catch { shared = ''; }
   const workspacesChanged = shared !== seenWorkspaces; seenWorkspaces = shared;
   if (report && workspacesChanged) send({ jsonrpc: '2.0', method: 'changed', params: { sessions: [], workspaces: workspaces() } });

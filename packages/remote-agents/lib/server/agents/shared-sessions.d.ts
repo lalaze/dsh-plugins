@@ -50,6 +50,8 @@ export declare class SharedSessions {
     private unavailable?;
     error?: string;
     workspaces: SharedWorkspace[];
+    /** Called when the host reports its shared workspaces, at connecting and whenever another DSH changes them. */
+    readonly workspaceListeners: Set<() => void>;
     private readonly waiters;
     /** Changes reported while the full list is applied; they follow it in order. */
     private queued;
@@ -87,6 +89,7 @@ export declare class SharedSessions {
     /** Started sessions of this host, as it is identified now: those of a machine whose identity changed belong to the earlier one. */
     private publishable;
     private changed;
+    private workspacesChanged;
     /** Apply the host's sessions. A full list also publishes the sessions the host does not have yet. */
     private reconcile;
     private update;

@@ -38,6 +38,6 @@ export declare function claudeTokenUsage(usage: any): TokenUsage | undefined;
 /** Codex `account/read` and `account/rateLimits/read`. Extra metered buckets follow the main one. */
 export declare function codexAccountUsage(account: any, limits: any, checkedAt?: string): AccountUsage;
 /** Claude `initialize` account details and the `get_usage` control response behind `/usage`. */
-export declare function claudeAccountUsage(account: any, usage: any, checkedAt?: string): AccountUsage;
+export declare function claudeAccountUsage(account: any, usage: any, checkedAt?: string, lastPlan?: string): AccountUsage;
 /** Read plan limits through the CLI itself, so credentials never leave the SSH host. */
-export declare function readAccountUsage(peer: JsonlPeer, protocol: NativeProtocol, claudeAccount?: unknown): Promise<AccountUsage>;
+export declare function readAccountUsage(peer: JsonlPeer, protocol: NativeProtocol, claudeAccount?: unknown, lastPlan?: string): Promise<AccountUsage>;

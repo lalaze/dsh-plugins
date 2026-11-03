@@ -63,9 +63,10 @@ export class WorkspaceTagSync {
             catch (error) {
                 this.host.warn?.(`Workspace tags could not be synced: ${error instanceof Error ? error.message : String(error)}`);
             }
+            // Changes on either side trigger a round; this one only catches what no report announced, and retries.
             finally {
                 this.running = undefined;
-                this.schedule(this.options.every ?? 5000);
+                this.schedule(this.options.every ?? 30_000);
             }
         })();
         return this.running;

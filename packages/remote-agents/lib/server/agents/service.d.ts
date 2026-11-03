@@ -34,6 +34,8 @@ export declare class RemoteAgentsService {
     readonly store: Store;
     private readonly readSshConfig;
     private readonly connections;
+    /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
+    readonly sharedWorkspaceListeners: Set<(hostId: string) => void>;
     private readonly locks;
     private readonly restoring;
     private readonly catalogListeners;

@@ -7,6 +7,8 @@ export class RemoteAgentsService {
     store;
     readSshConfig;
     connections = new Map();
+    /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
+    sharedWorkspaceListeners = new Set();
     locks = new Map();
     restoring = new Map();
     catalogListeners = new Set();
@@ -199,6 +201,8 @@ export class RemoteAgentsService {
         if (!connection) {
             connection = { backend: this.factory(this.host(hostId)), status: 'disconnected' };
             this.connections.set(hostId, connection);
+            connection.backend.onSharedWorkspaces?.(() => { for (const listener of this.sharedWorkspaceListeners)
+                listener(hostId); });
         }
         return connection;
     }

@@ -44,6 +44,8 @@ export interface Backend {
     /** Forget a session here only: a shared one stays on the host for other DSH instances, and its CLI keeps running. */
     forgetLocal?(task: Task): Promise<void>;
     sharedWorkspaces?(timeout?: number): Promise<SharedWorkspace[]>;
+    /** Called when the host reports its shared workspaces changed; returns the unsubscribe function. */
+    onSharedWorkspaces?(listener: () => void): () => void;
     shareWorkspace?(path: string): Promise<void>;
     setWorkspaceTags?(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
     /** Stop sharing the given sessions started here; other DSH instances forget them. */
@@ -97,6 +99,8 @@ export declare class SshBackend implements Backend {
     private histories;
     private starting;
     private accounts;
+    /** The plan each CLI's account last showed, for answers that cannot tell it. */
+    private plans;
     /** Tasks with an operation in flight; their sessions are never evicted. */
     private leases;
     private relayClient?;
@@ -112,6 +116,7 @@ export declare class SshBackend implements Backend {
     sharingError(): string | undefined;
     controller(taskId: string): string | undefined;
     sharedWorkspaces(timeout?: number): Promise<SharedWorkspace[]>;
+    onSharedWorkspaces(listener: () => void): () => void;
     setWorkspaceTags(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
     shareWorkspace(path: string): Promise<void>;
     sharingReachable(timeout: number): Promise<boolean>;

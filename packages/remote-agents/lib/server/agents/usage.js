@@ -121,14 +121,18 @@ const CLAUDE_WINDOWS = [['five_hour', 'Session'], ['seven_day', 'Weekly'], ['sev
 /**
  * The CLI keeps the plan it saw at sign-in, so an upgraded account still reports Pro until it signs in again.
  * Pro pays for Fable with usage credits; only Max gives it a weekly window of its own, so that window decides first.
+ * The CLI leaves per-model windows out when the usage endpoint did not answer (it read its last request's headers or a snapshot
+ * instead); such an answer says nothing about the plan, so the plan shown last stands.
  */
-function claudePlan(plan, limits) {
-    return list(limits?.model_scoped).some(window => /^fable\b/i.test(String(window?.display_name ?? ''))) ? 'Max' : plan;
+function claudePlan(plan, limits, last) {
+    if (!Array.isArray(limits?.model_scoped))
+        return last ?? plan;
+    return limits.model_scoped.some((window) => /^fable\b/i.test(String(window?.display_name ?? ''))) ? 'Max' : plan;
 }
 /** Claude `initialize` account details and the `get_usage` control response behind `/usage`. */
-export function claudeAccountUsage(account, usage, checkedAt = new Date().toISOString()) {
+export function claudeAccountUsage(account, usage, checkedAt = new Date().toISOString(), lastPlan) {
     const limits = usage?.rate_limits;
-    const plan = claudePlan(typeof usage?.subscription_type === 'string' ? capitalize(usage.subscription_type) : account?.subscriptionType, limits);
+    const plan = claudePlan(typeof usage?.subscription_type === 'string' ? capitalize(usage.subscription_type) : account?.subscriptionType, limits, lastPlan);
     const windows = [
         ...CLAUDE_WINDOWS.map(([id, label]) => ({ id, label, window: limits?.[id] })),
         ...list(limits?.model_scoped).map((window, index) => ({ id: `model_scoped:${index}`, label: `Weekly · ${window?.display_name ?? 'Model'}`, window })),
@@ -144,12 +148,12 @@ export function claudeAccountUsage(account, usage, checkedAt = new Date().toISOS
     };
 }
 /** Read plan limits through the CLI itself, so credentials never leave the SSH host. */
-export async function readAccountUsage(peer, protocol, claudeAccount) {
+export async function readAccountUsage(peer, protocol, claudeAccount, lastPlan) {
     if (protocol === 'codex') {
         const [account, limits] = await Promise.all([peer.request('account/read', {}, 20_000).catch(() => undefined), peer.request('account/rateLimits/read', {}, 20_000)]);
         return codexAccountUsage(account, limits);
     }
     if (protocol === 'claude')
-        return claudeAccountUsage(claudeAccount, await peer.control({ subtype: 'get_usage' }, 20_000));
+        return claudeAccountUsage(claudeAccount, await peer.control({ subtype: 'get_usage' }, 20_000), undefined, lastPlan);
     throw new Error('This CLI does not report plan limits');
 }

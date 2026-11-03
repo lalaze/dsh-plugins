@@ -22,4 +22,6 @@ export interface WorkspaceHosts {
     /** Every shared workspace with its tags, undefined while the machine's registry cannot be reached; and setting them. */
     sharedWorkspaceList(hostId: string, timeout?: number): Promise<SharedWorkspace[] | undefined>;
     setWorkspaceTags(hostId: string, path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
+    /** Told the machine whose shared workspaces another DSH changed. */
+    readonly sharedWorkspaceListeners?: Set<(hostId: string) => void>;
 }

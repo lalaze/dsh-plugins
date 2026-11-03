@@ -92,6 +92,8 @@ export class SharedSessions {
     unavailable;
     error;
     workspaces = [];
+    /** Called when the host reports its shared workspaces, at connecting and whenever another DSH changes them. */
+    workspaceListeners = new Set();
     waiters = new Set();
     /** Changes reported while the full list is applied; they follow it in order. */
     queued = [];
@@ -207,6 +209,7 @@ export class SharedSessions {
             for (const done of [...this.waiters])
                 done(current);
             this.schedulePublish();
+            this.workspacesChanged();
         }
         catch (error) {
             if (peer && peer === this.peer)
@@ -273,9 +276,19 @@ export class SharedSessions {
             && !task.chat?.sessionId.startsWith('remote-compaction-');
     }
     async changed(params) {
-        if (Array.isArray(params?.workspaces))
+        if (Array.isArray(params?.workspaces)) {
             this.workspaces = params.workspaces;
+            this.workspacesChanged();
+        }
         await this.reconcile(Array.isArray(params?.sessions) ? params.sessions : [], false);
+    }
+    workspacesChanged() {
+        for (const listener of this.workspaceListeners) {
+            try {
+                listener();
+            }
+            catch { /* A listener must not stop the registry. */ }
+        }
     }
     /** Apply the host's sessions. A full list also publishes the sessions the host does not have yet. */
     async reconcile(list, full) {

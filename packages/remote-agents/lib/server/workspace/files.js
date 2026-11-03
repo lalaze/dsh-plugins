@@ -22,6 +22,34 @@ function locate(cwd, value) {
 const nulSplit = (text) => text.split('\0').filter(Boolean);
 /** A Git request's ID, which also names its job file on the SSH host. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/**
+ * Operations that only read and write files need nothing the login shell sets up, and skipping it saves its startup on
+ * every request, often longer than the request itself. Commands keep the login environment: they may need its tools,
+ * credentials or proxies.
+ */
+const FILE_OPERATIONS = new Set(['list', 'read', 'download', 'stat', 'upload', 'mkdir', 'remove', 'move', 'manifest', 'search', 'gitCancel']);
+/** Git subcommands that only read the repository: they never reach a remote or run hooks or the user's editor. */
+const GIT_READS = new Set(['status', 'diff', 'log', 'show', 'rev-parse', 'symbolic-ref', 'for-each-ref', 'show-ref', 'ls-files', 'ls-tree', 'cat-file', 'blame',
+    'rev-list', 'merge-base', 'describe', 'name-rev', 'check-ignore', 'shortlog', 'count-objects']);
+/** The subcommand of a Git argument list, after any `-c name=value` and `-C path` options. */
+function gitSubcommand(argv) {
+    for (let i = 0; i < argv.length; i++) {
+        if (argv[i] === '-c' || argv[i] === '-C') {
+            i++;
+            continue;
+        }
+        if (!argv[i].startsWith('-'))
+            return argv[i];
+    }
+}
+/** A batch of reads, as Git View marks them, made only of commands that stay inside the repository. */
+const localGitReads = (batch) => batch.optionalLocks === false && batch.commands.every(({ argv }) => {
+    const subcommand = gitSubcommand(argv);
+    // `ls-remote --get-url` only expands the configured URL; any other `ls-remote` contacts the remote.
+    return !!subcommand && (GIT_READS.has(subcommand) || (subcommand === 'ls-remote' && argv.includes('--get-url')));
+});
+/** Without the login shell, tools such as Homebrew's Git are still found where a login PATH has them. */
+const BASIC_PATH = 'PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"; export PATH\n';
 export class WorkspaceFiles {
     transport;
     constructor(transport) {
@@ -33,7 +61,8 @@ export class WorkspaceFiles {
             throw new RemoteError('File transfers are unavailable on this host', 501);
         const assignments = Object.entries({ op, cwd: remotePath(cwd), path: at.path, parent: at.parent, base: at.base, id: randomUUID(), ...values })
             .map(([name, value]) => `dsh_${name}=${quote(value)}\n`).join('');
-        const output = await this.transport.transfer(assignments + WORKSPACE_SHELL, { ...options, maxBytes: options.maxBytes + 4096 });
+        const { login = !FILE_OPERATIONS.has(op), ...transfer } = options;
+        const output = await this.transport.transfer(assignments + (login ? '' : BASIC_PATH) + WORKSPACE_SHELL, { ...transfer, maxBytes: options.maxBytes + 4096, login });
         if (output.subarray(0, 3).toString('latin1') === 'ok\n')
             return output.subarray(3);
         const failure = /^error (\d{3}) ([\s\S]*)$/.exec(output.subarray(0, 8192).toString('utf8'));
@@ -200,7 +229,7 @@ node -e ${quote(REMOTE_DSH_RUNNER)} ${request}`;
             throw new RemoteError('Invalid Git timeout');
         const at = locate(remotePath(cwd), batch.path ?? '');
         const data = await this.run('git', cwd, at, { ...values, id: batch.id, count: String(commands.length), limit: String(batch.maxBytes),
-            stop: batch.stopOnError ? '1' : '', optional_locks: batch.optionalLocks === false ? '0' : '1' }, { maxBytes: commands.length * (batch.maxBytes + 65_600), signal });
+            stop: batch.stopOnError ? '1' : '', optional_locks: batch.optionalLocks === false ? '0' : '1' }, { maxBytes: commands.length * (batch.maxBytes + 65_600), signal, login: !localGitReads(batch) });
         const runs = [];
         for (let offset = 0; runs.length < commands.length;) {
             const newline = data.indexOf(10, offset);
