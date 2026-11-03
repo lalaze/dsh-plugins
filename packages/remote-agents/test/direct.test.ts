@@ -319,6 +319,11 @@ test('Claude plan limits come from its own /usage data on the SSH host', async t
   assert.equal(report?.account?.plan, 'Pro'); assert.equal(report?.account?.email, 'dev@example.com'); assert.equal(report?.account?.extraUsage, false);
   assert.deepEqual(ssh.children.at(-1)!.argv.slice(1), ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence']);
   assert.equal(ssh.admissions.length, 0, 'no prompt is sent');
+  const cached = ssh.claudeUsage as any, read = async () => (await service.usage('chat-claude-limits', { route: `${hostId}/claude/claude-remote`, target: { hostId, provider: 'claude' }, account: true, refresh: true }))?.account?.plan;
+  ssh.claudeUsage = { ...cached, rate_limits: { ...cached.rate_limits, model_scoped: [{ display_name: 'Fable', utilization: 0, resets_at: null }] } };
+  assert.equal(await read(), 'Max');
+  ssh.claudeUsage = cached;
+  assert.equal(await read(), 'Max', 'an answer from the CLI\'s cached usage keeps the plan shown last');
 });
 
 test('Codex MCP tool approvals become permission prompts; other elicitations are declined', async t => {

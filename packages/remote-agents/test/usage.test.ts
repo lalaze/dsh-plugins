@@ -79,6 +79,11 @@ test('Claude usage reports keep the windows the account has and the extra usage 
   assert.equal(claudeAccountUsage({ subscriptionType: 'Claude Pro' }, { rate_limits: stale.rate_limits }, checkedAt).plan, 'Max');
   assert.equal(claudeAccountUsage({}, { subscription_type: 'pro', rate_limits: { ...stale.rate_limits, model_scoped: [] } }, checkedAt).plan, 'Pro');
   assert.equal(claudeAccountUsage({}, { subscription_type: 'team', rate_limits: { ...stale.rate_limits, model_scoped: [] } }, checkedAt).plan, 'Team');
+  // Answered from cached usage, the CLI leaves per-model windows out; that says nothing about the plan, so the last one stands.
+  const { model_scoped: _, ...cachedLimits } = stale.rate_limits;
+  assert.equal(claudeAccountUsage({}, { subscription_type: 'pro', rate_limits: cachedLimits }, checkedAt, 'Max').plan, 'Max');
+  assert.equal(claudeAccountUsage({}, { subscription_type: 'pro', rate_limits: cachedLimits }, checkedAt).plan, 'Pro');
+  assert.equal(claudeAccountUsage({}, { subscription_type: 'pro', rate_limits: { ...cachedLimits, model_scoped: [] } }, checkedAt, 'Max').plan, 'Pro', 'an endpoint answer still decides');
 });
 
 test('ring labels use compact token counts and reset times', () => {

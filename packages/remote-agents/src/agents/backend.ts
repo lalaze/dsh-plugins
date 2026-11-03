@@ -104,6 +104,8 @@ export class SshBackend implements Backend {
   private histories = new Map<string, Promise<TaskHistory>>();
   private starting = new Map<string, Promise<Agent>>();
   private accounts = new Map<string, { at: number; value: Promise<AccountUsage> }>();
+  /** The plan each CLI's account last showed, for answers that cannot tell it. */
+  private plans = new Map<string, string>();
   /** Tasks with an operation in flight; their sessions are never evicted. */
   private leases = new Map<string, number>();
   private relayClient?: { at: number; value: Promise<RelayClient | undefined> };
@@ -593,15 +595,18 @@ done`}`, 15_000, { login: false });
     if (definition?.protocol !== 'codex' && definition?.protocol !== 'claude') return null;
     const cached = this.accounts.get(provider);
     if (cached && !refresh && Date.now() - cached.at < ACCOUNT_TTL) return cached.value;
-    const value = this.readAccount(definition, cwd);
+    const value = this.readAccount(definition, cwd, this.plans.get(provider)).then(usage => {
+      if (usage.plan) this.plans.set(provider, usage.plan);
+      return usage;
+    });
     this.accounts.set(provider, { at: Date.now(), value });
     value.catch(() => { if (this.accounts.get(provider)?.value === value) this.accounts.delete(provider); });
     return value;
   }
   /** Ask a running session of this CLI, or briefly start one without a prompt. */
-  private async readAccount(definition: typeof CLI_PROVIDERS[number], cwd: string | undefined): Promise<AccountUsage> {
+  private async readAccount(definition: typeof CLI_PROVIDERS[number], cwd: string | undefined, lastPlan?: string): Promise<AccountUsage> {
     const live = [...this.sessions.values()].find(s => s.alive && s.task.provider === definition.id && s.agent.status !== 'initializing');
-    if (live) return readAccountUsage(live.peer, definition.protocol, live.account);
+    if (live) return readAccountUsage(live.peer, definition.protocol, live.account, lastPlan);
     const path = await this.transport.exec(`printf '%s' "$(command -v ${quote(definition.command)} 2>/dev/null || true)"`);
     this.assertOpen();
     if (!path.startsWith('/')) throw new Error(`${definition.label} is not installed on this SSH host`);
@@ -611,7 +616,7 @@ done`}`, 15_000, { login: false });
       peer.onMessage(message => { if (message.method && message.id !== undefined) peer.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Usage checks do not execute tools' } }); });
       if (definition.protocol === 'codex') { await initializeCodex(peer); return await readAccountUsage(peer, 'codex'); }
       const init = await peer.control({ subtype: 'initialize' });
-      return await readAccountUsage(peer, 'claude', init?.account);
+      return await readAccountUsage(peer, 'claude', init?.account, lastPlan);
     } finally { this.probes.delete(peer); peer.close(); }
   }
   /** Shutdown releases persistent sessions, which keep running and are restored on the next start. */
