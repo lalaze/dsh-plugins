@@ -3,7 +3,7 @@ import type { RemoteAgentsService } from './agents/service.js';
 import { ChatProjects } from './chat/projects.js';
 import type { WorkspacePlacement } from './workspace/access.js';
 import type { RemoteWorkspaces } from './workspace/remote-workspaces.js';
-import { workspaceAction, type WorkspaceFeatures } from './workspace/http.js';
+import { workspaceAction, worktreeAction, type WorkspaceFeatures } from './workspace/http.js';
 import type { Sharing } from './sharing/sharing.js';
 
 export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Partial<Pick<RemoteWorkspaces, 'create' | 'shared' | 'publish'>>, features?: WorkspaceFeatures, sharing?: Pick<Sharing, 'catalog' | 'set' | 'status'>) {
@@ -26,6 +26,10 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'workspaceTunnels': case 'addWorkspaceTunnel': case 'startWorkspaceTunnel': case 'stopWorkspaceTunnel': case 'removeWorkspaceTunnel': {
           if (!features) throw new RemoteError('Remote workspaces are unavailable', 501);
           result = await workspaceAction(features, action, input, request.signal); break;
+        }
+        case 'worktreeProjects': case 'worktreeInspect': case 'createWorktree': case 'worktreeJob': case 'worktreeJobAction': case 'worktreeArchiveCheck': case 'archiveWorktree': {
+          if (!features?.worktrees) throw new RemoteError('Worktree workspaces are unavailable', 501);
+          result = await worktreeAction(features.worktrees, action, input, request.signal); break;
         }
         case 'workspaceModels': result = workspace ? await workspace(field(input.sessionId, 'session ID', 256), request.signal) : { hostIds: [] }; break;
         case 'hostCatalogs': result = projects.hosts(); break;

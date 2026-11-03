@@ -602,6 +602,13 @@ export class RemoteAgentsService {
       await backend.respond(agent.id, permission.id, answer, permission.input);
     });
   }
+  /** Archives every session working in a remote folder or below it, as when a worktree is removed. */
+  async archiveSessionsIn(hostId: string, folder: string): Promise<void> {
+    const prefix = folder.endsWith('/') ? folder : `${folder}/`;
+    for (const task of this.store.tasks(t => t.hostId === hostId && !t.archived && (t.cwd === folder || t.cwd.startsWith(prefix)))) {
+      await this.archive(task.id).catch(() => {});
+    }
+  }
   /** Soft delete: interrupt, release the CLI process and hide the agent. Output and the native session are kept. */
   async archive(id: string, archived = true, options: { onlyIdle?: boolean } = {}): Promise<AgentSummary> {
     return this.serial(id, async () => {

@@ -212,4 +212,51 @@ node -e ${quote(REMOTE_DSH_RUNNER)} ${request}`;
     if (!UUID.test(id)) throw new RemoteError('Invalid Git request');
     await this.run('gitCancel', cwd, locate(remotePath(cwd), ''), { job_id: id }, { maxBytes: 0, signal });
   }
+  /**
+   * A shell command in `cwd` with the login environment and `env`, for as long as it takes, as for a worktree's setup.
+   * Both output streams arrive together as they are written. Resolves the exit code; aborting stops the command and
+   * every process it started, and resolves null.
+   */
+  async stream(cwd: string, command: string, env: Record<string, string>, output: (data: Buffer) => void, signal: AbortSignal): Promise<number | null> {
+    signal.throwIfAborted();
+    if (Object.keys(env).some(name => !/^[A-Z_][A-Z0-9_]*$/.test(name))) throw new RemoteError('Invalid environment variable name');
+    const id = randomUUID(), marker = `__dsh_exit_${id}__ `, jobs = '"$HOME/.dsh-remote-agents/jobs"';
+    const exports = Object.entries(env).map(([name, value]) => `${name}=${quote(value)}; export ${name}\n`).join('');
+    // The command runs in its own process group, whose leader's ID is kept so a stop reaches everything it started.
+    const script = `exec 2>&1 </dev/null
+(umask 077; mkdir -p ${jobs}) || exit 1
+${exports}if command -v setsid >/dev/null 2>&1; then setsid /bin/sh -c ${quote(command)} &
+else set -m 2>/dev/null; /bin/sh -c ${quote(command)} & set +m 2>/dev/null; fi
+dsh_pid=$!
+printf '%s\\n' "$dsh_pid" > ${jobs}/${id}
+wait "$dsh_pid"; dsh_code=$?
+rm -f ${jobs}/${id}
+printf '\\n${marker}%s\\n' "$dsh_code"
+`;
+    const child = this.transport.start(remotePath(cwd), ['/bin/sh', '-c', script]);
+    // The exit marker comes last and is never shown: output waits only while its ending could be the marker's start.
+    const tag = Buffer.from(`\n${marker}`);
+    let pending = Buffer.alloc(0);
+    child.onData(chunk => {
+      pending = Buffer.concat([pending, chunk]);
+      let hold = pending.indexOf(tag);
+      if (hold >= 0) hold = pending.length - hold;
+      else for (hold = Math.min(tag.length - 1, pending.length); hold > 0 && !pending.subarray(pending.length - hold).equals(tag.subarray(0, hold)); hold--);
+      if (pending.length > hold) { output(pending.subarray(0, pending.length - hold)); pending = pending.subarray(pending.length - hold); }
+    });
+    const stop = () => {
+      const kill = `dsh_p=$(cat ${jobs}/${id} 2>/dev/null); case $dsh_p in ''|*[!0-9]*) ;; *) kill -s TERM -- "-$dsh_p" 2>/dev/null || kill -s TERM "$dsh_p" 2>/dev/null ;; esac; rm -f ${jobs}/${id}`;
+      void this.transport.exec(kill, 15_000, { login: false }).catch(() => {}).finally(() => child.stop());
+    };
+    signal.addEventListener('abort', stop, { once: true });
+    try {
+      return await new Promise<number | null>(resolve => child.onExit(() => {
+        const text = pending.toString('latin1'), at = text.lastIndexOf(`\n${marker}`);
+        if (at < 0) { if (pending.length) output(pending); resolve(null); return; }
+        if (at > 0) output(pending.subarray(0, at));
+        const code = Number(text.slice(at + 1 + marker.length).trim());
+        resolve(signal.aborted || !Number.isInteger(code) ? null : code);
+      }));
+    } finally { signal.removeEventListener('abort', stop); }
+  }
 }

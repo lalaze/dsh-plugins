@@ -15,6 +15,7 @@ import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
+import { WorktreeService, type DshWorkspaceController } from './worktrees.js';
 
 /**
  * What other DSH plugins on this host may do in a conversation's remote workspace, as the service `remoteAgentsWorkspaces`:
@@ -43,7 +44,7 @@ export interface Workspaces {
   /** The verified placement of a DSH conversation, rechecked so a workspace switch during verification yields none. */
   placement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
   workspaces: RemoteWorkspaces;
-  features: WorkspaceFeatures & { tunnels: WorkspaceTunnels };
+  features: WorkspaceFeatures & { tunnels: WorkspaceTunnels; worktrees: WorktreeService };
 }
 
 /**
@@ -112,7 +113,15 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     for (const tool of workspaceTools(files, host, agent => accessOf(scoped, (agent as { session?: Session } | undefined)?.session).permission)) host.tools.register(tool);
   });
   installTagSync(ctx, store, machines, access);
-  return { access, placement, workspaces, features: { files, tunnels, terminal } };
+  // New workspaces from a project: a Git worktree here or on a saved machine.
+  const worktrees = new WorktreeService({
+    machines, access, anchors: workspaces,
+    dsh: () => ctx.get('workspaceController') as DshWorkspaceController | undefined,
+    tags: () => ctx.get('workspaceTags') as WorkspaceTagsService | undefined,
+    stopRemoteSessions: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
+  });
+  ctx.effect(() => () => worktrees.close());
+  return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees } };
 }
 
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */

@@ -3,9 +3,32 @@ import { FILE_LIMIT, type WorkspaceTarget } from './domain.js';
 import type { WorkspaceService } from './service.js';
 import { revision, workspacePath } from './service.js';
 import type { WorkspaceTunnels } from './tunnels.js';
+import type { JobAction, WorktreeService } from './worktrees.js';
 
 /** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
-export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string } }
+export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string }; worktrees?: WorktreeService }
+const JOB_ACTIONS: readonly JobAction[] = ['cancel', 'retry', 'skip', 'discard'];
+/** Worktree workspaces: a project's DSH workspace path, a worktree's path on its machine, and operation IDs. */
+export async function worktreeAction(worktrees: WorktreeService, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+  const path = () => workspacePath(input.path, 'workspace path'), job = () => identifier(input.jobId);
+  const name = (value: unknown, label: string) => value === undefined || value === '' ? undefined : field(value, label, 250);
+  switch (action) {
+    case 'worktreeProjects': return worktrees.projects(signal);
+    case 'worktreeInspect': return worktrees.inspect(path(), signal);
+    case 'createWorktree': {
+      if (input.mode !== 'new' && input.mode !== 'existing') throw new RemoteError('Invalid worktree mode');
+      return worktrees.create({ path: path(), mode: input.mode, base: name(input.base, 'branch'), branch: name(input.branch, 'branch') });
+    }
+    case 'worktreeJob': return worktrees.job(job());
+    case 'worktreeJobAction': {
+      if (!JOB_ACTIONS.includes(input.jobAction as JobAction)) throw new RemoteError('Invalid worktree action');
+      return worktrees.act(job(), input.jobAction as JobAction);
+    }
+    case 'worktreeArchiveCheck': return worktrees.archiveCheck(path(), workspacePath(input.worktree, 'worktree'), signal);
+    case 'archiveWorktree': return worktrees.archive({ path: path(), worktree: workspacePath(input.worktree, 'worktree'), deleteBranch: input.deleteBranch === true });
+  }
+  throw new RemoteError('Unknown workspace action');
+}
 export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   if (value === undefined) return;
   if (!value || typeof value !== 'object') throw new RemoteError('Invalid workspace target');

@@ -22,6 +22,7 @@ import { WorkspaceService } from '../src/workspace/service.ts';
 import { WorkspaceTunnels } from '../src/workspace/tunnels.ts';
 import { workspaceTransferHandler } from '../src/workspace/http.ts';
 import { editorHandler } from '../src/workspace/editor-route.ts';
+import { WorktreeService } from '../src/workspace/worktrees.ts';
 
 const directory = await mkdtemp(join(tmpdir(), 'dsh-remote-preview-'));
 const workspaceRoot = join(directory, 'remote-project'), mirrorRoot = join(directory, 'local-mirror');
@@ -86,9 +87,28 @@ Object.assign(sharing.host, {
     { name: 'design-qa', description: 'Compare an implementation with its design reference', source: 'bundled', invocation: { modelInvocable: true } },
   ], get: async () => undefined },
 });
+// Worktree workspaces over a real Git project; DSH's workspace registry is in memory and empty until the fixture seeds it.
+const git = (cwd, ...args) => execFileSync('git', args, { cwd, stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 'Preview', GIT_AUTHOR_EMAIL: 'p@e', GIT_COMMITTER_NAME: 'Preview', GIT_COMMITTER_EMAIL: 'p@e' } });
+const gitProject = join(directory, 'code', 'shop-app'), gitOrigin = join(directory, 'origin.git');
+git(directory, 'init', '-q', '--bare', '-b', 'main', gitOrigin); git(directory, 'clone', '-q', gitOrigin, gitProject);
+await mkdir(join(gitProject, '.dsh'));
+await writeFile(join(gitProject, '.dsh', 'worktree.json'), JSON.stringify({ setup: ['echo "Installing dependencies for ${DSH_BRANCH_NAME}…"; sleep 1; echo "added 412 packages in 1s"', 'cp "$DSH_SOURCE_CHECKOUT_PATH/README.md" .env.example && echo "Copied .env.example"'], teardown: ['echo "Stopping dev server"'] }, null, 2));
+await writeFile(join(gitProject, 'README.md'), '# Shop app\n');
+git(gitProject, 'add', '-A'); git(gitProject, 'commit', '-q', '-m', 'Initial commit'); git(gitProject, 'push', '-q', 'origin', 'main');
+for (const branch of ['feature/checkout-redesign', 'fix/cart-rounding', 'chore/deps']) { git(gitProject, 'checkout', '-q', '-b', branch); git(gitProject, 'commit', '-q', '--allow-empty', '-m', branch); git(gitProject, 'push', '-q', 'origin', branch); }
+git(gitProject, 'checkout', '-q', 'main'); git(gitProject, 'branch', '-q', '-D', 'chore/deps', 'fix/cart-rounding');
+git(gitProject, 'checkout', '-q', '-b', 'local-experiment'); git(gitProject, 'commit', '-q', '--allow-empty', '-m', 'try'); git(gitProject, 'checkout', '-q', 'main');
+const dshWorkspaces = { items: [], next: 1,
+  async create({ path }) { let item = this.items.find(i => i.path === path); if (item) return { workspace: item, created: false }; item = { workspaceId: `preview-ws-${this.next++}`, path, title: path.split('/').pop(), sessionIds: [] }; this.items.push(item); return { workspace: item, created: true }; },
+  async rename({ workspaceId, title }) { this.items.find(i => i.workspaceId === workspaceId).title = title; },
+  async delete({ workspaceId }) { this.items = this.items.filter(i => i.workspaceId !== workspaceId); },
+  async insertBefore() {}, async archiveSession() {},
+  async *follow() { yield { type: 'baseline', value: { items: this.items.map(i => ({ ...i })) } }; },
+};
+const worktrees = new WorktreeService({ machines: service, access, anchors: workspaces, dsh: () => dshWorkspaces, home: join(directory, 'dsh-home') });
 const handler = createHandler(service, undefined, placement, {
   create: async (...args) => { if (createDelay) await new Promise(resolve => setTimeout(resolve, createDelay)); return workspaces.create(...args); },
-}, { files: workspaceService, tunnels }, sharing);
+}, { files: workspaceService, tunnels, worktrees }, sharing);
 const transfer = workspaceTransferHandler(workspaceService);
 // The code editor bundle file views load, built as the package build writes it.
 execFileSync(process.execPath, [fileURLToPath(new URL('../../../scripts/build-editor.mjs', import.meta.url)), join(directory, 'editor.js')], { stdio: 'ignore' });
@@ -115,6 +135,10 @@ const server = createServer(async (request, response) => {
         if (input.sshConfig) { sshConfig.hosts = input.sshConfig.hosts; sshConfig.warnings = input.sshConfig.warnings ?? []; }
         if (input.workspaceContent !== undefined) await writeFile(join(workspaceRoot, 'hello.txt'), String(input.workspaceContent));
         if (input.loseSend) remote.loseSend = true;
+        if (input.worktrees) {
+          if (!dshWorkspaces.items.length) { await dshWorkspaces.create({ path: gitProject }); await mkdir(join(directory, 'notes'), { recursive: true }); await dshWorkspaces.create({ path: join(directory, 'notes') }); }
+          if (input.worktrees === 'busy') { await writeFile(join(gitProject, '.dsh', 'worktree.json'), JSON.stringify({ setup: ['echo "Installing…"; sleep 2; echo "npm ERR! missing script: bootstrap" >&2; exit 1'] })); git(gitProject, 'commit', '-q', '-am', 'Failing setup'); }
+        }
         if (input.seedUsage) {
           let [project] = new ChatProjects(service).hosts();
           if (!project) { await service.addHost({ label: 'macmini', connection: 'ssh://macmini' }, { discoverModels: true }); [project] = new ChatProjects(service).hosts(); }
