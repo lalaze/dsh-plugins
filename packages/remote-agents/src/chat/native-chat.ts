@@ -11,7 +11,8 @@ import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, sta
 import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
 import { transcript } from './transcript.js';
-import { decidePermission } from '../agents/tools.js';
+import { decidePermission, unattendedAnswer } from '../agents/tools.js';
+import { isTeamPrompt, teamMemberNote, type TeamMember } from './agent-teams.js';
 import type { ToolHost } from '../core/dsh-host.js';
 import type { WorkspacePlacement } from '../workspace/access.js';
 
@@ -46,6 +47,10 @@ export interface ChatHost extends Partial<ToolHost> {
   userContent?(sessionId: NonNullable<GenerateOptions['sessionId']>, messageId: string): readonly ContentBlock[] | undefined;
   /** The conversation's permission from the DSH composer; undefined for a custom value or without permission presets. */
   permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
+  /** A delegated subagent nobody answers (DSH approval policy `never`): the CLI must not wait for approvals or answers. */
+  unattended?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
+  /** The AgentTeams team and member this conversation runs as, when it is a team member. */
+  teamMember?(sessionId: NonNullable<GenerateOptions['sessionId']>): TeamMember | undefined;
   /** A file from the conversation's verified remote workspace, or undefined when it is too large to show. */
   image?(sessionId: NonNullable<GenerateOptions['sessionId']>, path: string, signal: AbortSignal): Promise<Uint8Array | undefined>;
   /** A file the CLI looked at by absolute path on the conversation's verified machine, inside the workspace or not; undefined when too large. */
@@ -56,6 +61,8 @@ const hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(
 /** DSH aborts streams with a cancel cause; disposal is a shutdown, not a user's Stop. */
 const disposal = (reason: unknown) => !!reason && typeof reason === 'object' && ['disposed', 'released'].includes(String((reason as { kind?: unknown }).kind));
 const RELEASED = { kind: 'released' } as const;
+/** What the CLI is asked to do: human messages and AgentTeams assignments, never context DSH injects. */
+const prompted = (m: GenerateOptions['messages'][number]) => m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source));
 const blockText = (content: readonly { type: string; text?: string }[]) => content.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n');
 /**
  * DSH frames title input as an instruction line followed by a JSON array of `{ text }` human
@@ -261,13 +268,13 @@ export class RemoteCliAdapter extends LlmAdapter {
     const sessionId = options.sessionId;
     if (!sessionId) throw new LlmError('Select a remote CLI in a DSH conversation to use it.', 'SESSION_REQUIRED');
     // DSH adds context of its own after the notice, such as the time: the latest human message or notice decides.
-    const final = options.messages.findLast(m => m.role === 'user' && (!m.source || m.source.kind === 'user' || m.source.kind === SYNC_SOURCE));
+    const final = options.messages.findLast(m => prompted(m) || m.role === 'user' && m.source?.kind === SYNC_SOURCE);
     const sync = final?.source?.kind === SYNC_SOURCE;
     if (this.active.has(sessionId)) throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
     const { project, provider, model, serviceTier: routeTier } = this.route(options.provider, options.model), service = this.projects.service;
     // A route saved with a tier keeps it; otherwise the conversation's lightning switch picks the Fast tier.
     const serviceTier = routeTier ?? (service.store.chatFast(sessionId) ? fastTierOf(model)?.id : undefined);
-    const lastUser = options.messages.findLast(m => m.role === 'user' && (!m.source || m.source.kind === 'user'));
+    const lastUser = options.messages.findLast(prompted);
     // A conversation continued from another DSH starts with the notice that shows its history, before any message of its own.
     if (!sync && (!lastUser || lastUser.role !== 'user')) throw new LlmError('A user message is required for the remote CLI.', 'INVALID_REQUEST');
     const contentOf = (message: NonNullable<typeof lastUser>) => restoreFiles(message.content, message.id ? this.host.userContent?.(sessionId, message.id) : undefined);
@@ -310,9 +317,12 @@ export class RemoteCliAdapter extends LlmAdapter {
     const previousIndex = task?.chat?.lastUserId ? options.messages.findIndex(m => m.id === task.chat?.lastUserId) : -1;
     const lastOwn = task ? options.messages.slice(0, Math.max(currentIndex, 0)).findLastIndex(own) : -1;
     const contextStart = Math.max(previousIndex + 1, lastOwn + 1);
-    const previous = options.messages.slice(contextStart, currentIndex).filter(m => m.role === 'assistant' ? !own(m) : m.role === 'user' && (!m.source || m.source.kind === 'user'))
+    const previous = options.messages.slice(contextStart, currentIndex).filter(m => m.role === 'assistant' ? !own(m) : prompted(m))
       .map(m => `${m.role}: ${blockText(m.role === 'user' ? contentOf(m) : m.content)}`).filter(t => t.trim() !== 'user:' && t.trim() !== 'assistant:').join('\n\n');
-    const prompt = previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt;
+    const unattended = this.host.unattended?.(sessionId) === true, member = this.host.teamMember?.(sessionId);
+    // A team member's new CLI session learns once how the team tools replace the DSH tools it does not have.
+    const note = member && !task ? `${teamMemberNote(member, unattended)}\n\n` : '';
+    const prompt = note + (previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt);
     const taskId = task?.id ?? messageId;
     let admitted = false, settled = false, index = 0;
     const rows = new NativeToolRows(this.host.step(sessionId), options, `${provider.label} on ${project.label}:${cwd}`);
@@ -393,10 +403,11 @@ export class RemoteCliAdapter extends LlmAdapter {
         for (const permission of state.permissions) {
           if (questions.has(permission.id)) continue;
           const agent = this.host.agent(sessionId), pending = new AbortController(); questions.set(permission.id, pending);
-          if (!agent || !this.host.approval || !this.host.userQuestions) throw new LlmError('DSH approvals are unavailable. Enable approval and userQuestions services before using remote CLI chat.', 'APPROVAL_UNAVAILABLE');
+          if (!unattended && (!agent || !this.host.approval || !this.host.userQuestions)) throw new LlmError('DSH approvals are unavailable. Enable approval and userQuestions services before using remote CLI chat.', 'APPROVAL_UNAVAILABLE');
           const questionSignal = AbortSignal.any([signal, pending.signal]);
-          void decidePermission({ approval: this.host.approval, userQuestions: this.host.userQuestions }, permission,
-            { agent, callId: `remote-${taskId}-${permission.id}`, signal: questionSignal }, questionSignal, `${provider.label} on ${project.label}:${cwd}`)
+          // DSH rejects every prompt of an unattended subagent; deny here so the CLI goes on rather than cancelling the turn.
+          void (unattended ? Promise.resolve(unattendedAnswer(permission)) : decidePermission({ approval: this.host.approval!, userQuestions: this.host.userQuestions! }, permission,
+            { agent, callId: `remote-${taskId}-${permission.id}`, signal: questionSignal }, questionSignal, `${provider.label} on ${project.label}:${cwd}`))
             .then(async answer => {
               if (questionSignal.aborted) return;
               if (!answer) { permissionNotice = true; return; }
@@ -453,7 +464,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         } else { settled = true; yield* textChunk('text', 'The remote CLI produced no further output.'); }
         yield* endBlock(); rows.close(); yield { type: 'finish', reason: { kind: 'stop' } }; return;
       }
-      const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => m.role === 'user' && (!m.source || m.source.kind === 'user') ? [...contentOf(m)] : []);
+      const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => prompted(m) ? [...contentOf(m)] : []);
       // DSH Desktop cites dropped non-image files by their path on this machine: send copies along with the attachments.
       const stageInput = async () => {
         const local = await stageLocalFiles(service.store.directory, taskId, messageId, localFileMentions(blockText(blocks), cwd), signal);
@@ -469,7 +480,7 @@ export class RemoteCliAdapter extends LlmAdapter {
           // Native chats follow the DSH composer's permission. Without a matching mode Claude and Codex follow the
           // remote CLI's own permission config; old cached Claude catalogs must not override it.
           ...(composerMode ? { modeId: composerMode } : provider.id === 'codex' ? { modeId: 'inherit' } : provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) },
-        { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, signal });
+        { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, ...(unattended ? { unattended } : {}), signal });
         if (!agent.started) throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
       } else {
         // A receipt left by a failed HTTP/model response is replayed, never delivered again.

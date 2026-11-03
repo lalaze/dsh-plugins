@@ -119,6 +119,15 @@ DSH 自己的智能体会获得 6 个工具，用来把任务交给远程 CLI，
 - **连接方式。**每台机器使用一条 SSH 反向转发，远端是 `~/.dsh-remote-agents/bridge` 下仅本人可访问的 Unix socket；每个任务带独立令牌，多台电脑上的 DSH 可共用同一个远程账号。DSH 未连接时，代理仍列出上次看到的工具，调用会返回 DSH 未连接的说明；重新连上后自动恢复。服务器若禁止 Unix socket 转发（`AllowStreamLocalForwarding no`），设置页会显示错误，skill 不受影响。
 - **各 CLI 的接入方式：**Claude Code 使用 `--plugin-dir`、`--mcp-config` 和 `--allowedTools`；Codex 使用 `-c mcp_servers.<名称>…` 覆盖配置，并设置 `default_tools_approval_mode = "approve"`；ACP CLI（DSH、Grok、CodeBuddy）使用 `session/new` 的 `mcpServers`。这些只是本次启动的参数，不修改远程 CLI 的配置文件。Antigravity 没有按启动传入 MCP 或 skill 的方式，因此不支持。
 
+## 智能体团队
+
+装了 NanmiCoder 的 [`dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-teams)（0.1.28 起）后，团队成员可以用远程 CLI 当模型，队长仍是 DSH 模型（比如 DeepSeek）。在 `/agent-teams` 的目标里写明成员用哪个模型即可，例如“reviewer 用这台机器上的 Codex”；也可以在团队模板里给成员填 `provider: remote-cli-codex` 和模型菜单里那个模型的 ID。团队在远程工作区里工作时：
+
+- **DSH 模型成员**（例如 DeepSeek）用 `remote_workspace` 读写远程文件。成员沿用队长的权限：队长是 **工作区内修改** 时，成员直接修改工作区里的文件；远程命令没有沙箱，需要审批，而成员会话没有人能批准，所以会被拒绝，成员会把它当作阻碍报告给队长。要让这类成员也能运行远程命令，请给队长 **完全权限**。
+- **远程 CLI 成员**在工作区对应的远程目录里运行，每个成员是一个独立的 CLI 会话。队长分配的任务和协调消息会作为提示发给 CLI；CLI 通过名为 `dsh-agent-teams` 的 MCP 服务器拿到四个成员工具（`agent_teams_claim_task`、`agent_teams_update_task`、`agent_teams_send_message`、`agent_teams_status`），按任务领取、更新状态并汇报。这些工具在 DSH 里以该成员的身份执行，队长专用的工具不会交给 CLI。不需要在 **共享给远程 CLI** 里打开任何 MCP 服务器，但和共享 MCP 一样，需要远程机器上有 Node.js 并允许 SSH 反向转发；拿不到这些工具时，CLI 用最后一条回复说明结果，队长同样能收到。
+- **没有人审批。**成员会话不询问任何人：Codex 在 DSH 权限对应的沙箱里工作，不再请求授权；Claude Code 在 **工作区内修改** 时自动允许编辑文件，命令在 Claude Code 自带的沙箱里自动运行，只能写工作区（主机不支持该沙箱时，命令会被拒绝）。仍需审批的请求直接被拒绝，CLI 继续工作，把做不到的事报告给队长，不会停下来等待。
+- 成员的 CLI 会话也会出现在 **打开会话** 中，可以查看它做了什么。
+
 ## 支持的 CLI
 
 | CLI | 直连协议 |

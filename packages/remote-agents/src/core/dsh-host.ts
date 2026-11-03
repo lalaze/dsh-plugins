@@ -12,6 +12,22 @@ export function permissionOf(ctx: Context, session: Session | undefined): DshPer
   if (preset === 'auto') return 'auto';
   try { return presets.resolve(preset).sandbox; } catch { return; }
 }
+const SANDBOXES: readonly string[] = ['read-only', 'workspace-write', 'danger-full-access'];
+/**
+ * How a remote CLI may act for a conversation. A subagent DSH delegated with the `never` approval policy is
+ * unattended: nobody answers its prompts, and its knobs (workspace sandbox, never ask) match no preset, so its
+ * sandbox sets the CLI's limits. Other conversations keep {@link permissionOf}, where `custom` keeps the CLI's mode.
+ */
+export function accessOf(ctx: Context, session: Session | undefined): { permission?: DshPermission; unattended: boolean } {
+  const permission = permissionOf(ctx, session);
+  if (!session?.header.parentSession || permission === 'auto') return { permission, unattended: false };
+  let knobs: { sandbox?: unknown; approval?: unknown } | undefined;
+  try { knobs = (ctx.get('sessionProjections') as { stateOf?(session: Session, name: string): typeof knobs } | undefined)?.stateOf?.(session, 'permissions'); } catch { knobs = undefined; }
+  const approval = knobs?.approval ?? (ctx.get('approval') as { config?: { policy?: unknown } } | undefined)?.config?.policy ?? 'ask';
+  if (approval !== 'never') return { permission, unattended: false };
+  const sandbox = knobs?.sandbox ?? (ctx.get('shell') as { sandboxMode?: unknown } | undefined)?.sandboxMode;
+  return { permission: permission ?? (SANDBOXES.includes(String(sandbox)) ? sandbox as DshPermission : undefined), unattended: true };
+}
 type Schema = Record<string, unknown>;
 /** The narrow DSH host surface the plugin's tools use: approvals and questions in the calling conversation. */
 export interface ToolHost {

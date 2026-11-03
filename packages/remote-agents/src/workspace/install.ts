@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { join } from 'node:path';
-import { permissionOf, type ToolDefinition, type ToolHost } from '../core/dsh-host.js';
+import { accessOf, type ToolDefinition, type ToolHost } from '../core/dsh-host.js';
 import { sharesSessions } from '../core/domain.js';
 import type { Store } from '../core/store.js';
 import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type WorkspaceRuntime } from './access.js';
@@ -108,7 +108,8 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
   });
   ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { tools: { register(tool: ToolDefinition): unknown } };
-    for (const tool of workspaceTools(files, host, agent => permissionOf(scoped, (agent as { session?: Session } | undefined)?.session))) host.tools.register(tool);
+    // A delegated team member's sandbox counts as its permission: it may edit the workspace, and nobody can approve more.
+    for (const tool of workspaceTools(files, host, agent => accessOf(scoped, (agent as { session?: Session } | undefined)?.session).permission)) host.tools.register(tool);
   });
   installTagSync(ctx, store, machines, access);
   return { access, placement, workspaces, features: { files, tunnels, terminal } };

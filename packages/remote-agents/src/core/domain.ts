@@ -195,6 +195,8 @@ export interface Task extends TaskInput {
   origin?: 'dsh';
   /** The DSH conversation whose agent delegated this task; it runs the task's shared MCP calls. */
   owner?: { sessionId: string };
+  /** Runs for a DSH subagent nobody answers: the CLI is started so it does not ask (Codex approval policy `never`). */
+  unattended?: true;
   agentId?: string;
   executionCwd?: string;
   native?: { protocol: NativeProtocol; sessionId: string; argv: string[]; resumable?: boolean; initialSent: boolean; imageInput?: boolean };

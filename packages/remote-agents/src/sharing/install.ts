@@ -1,4 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
+import type { Session } from '@deepseek-ai/dsh-session';
+import { teamMemberOf } from '../chat/agent-teams.js';
 import type { Sharing, SharingAttachments, SharingSkills, SharingTools } from './sharing.js';
 
 /** Shared MCP calls run through DSH's tool pipeline with the owning conversation's agent; skills come from its registry. */
@@ -22,5 +24,11 @@ export function installSharingHost(ctx: Context, sharing: Sharing): void {
     const agents = scoped.get('agents') as { get(id: string): unknown };
     sharing.host.agent = id => agents.get(id);
     scoped.effect(() => () => { delete sharing.host.agent; });
+  });
+  // A CLI working as an AgentTeams member reaches the team through the member tools.
+  ctx.inject(['sessions'], scoped => {
+    const sessions = scoped.get('sessions') as { get(id: string): Session | undefined };
+    sharing.host.teamMember = id => !!teamMemberOf(sessions.get(id));
+    scoped.effect(() => () => { delete sharing.host.teamMember; });
   });
 }

@@ -8,6 +8,7 @@ import { BRIDGE_SCRIPT, BRIDGE_VERSION } from './bridge-script.js';
 import { RemoteError, type HostConfig, type NativeProtocol, type Task } from '../core/domain.js';
 import { connectionInput, quote, type SshTransport } from '../core/ssh.js';
 import type { Store } from '../core/store.js';
+import { TEAM_MCP_NAME, TEAM_MEMBER_TOOLS, TEAM_SERVER } from '../chat/agent-teams.js';
 
 /** One stdio MCP server a remote CLI starts: the bridge script in proxy or skills mode. */
 export interface SharedServer { name: string; command: string; args: string[] }
@@ -48,7 +49,11 @@ export interface SharingSkills {
 export interface SharingAttachments {
   readImageRequest(ref: SharedImageRef, target: { width: number; height: number; maxBytes: number }, signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>;
 }
-export interface SharingHost { tools?: SharingTools; skills?: SharingSkills; attachments?: SharingAttachments; agent?(sessionId: string): unknown }
+export interface SharingHost {
+  tools?: SharingTools; skills?: SharingSkills; attachments?: SharingAttachments; agent?(sessionId: string): unknown;
+  /** Whether the conversation is an AgentTeams member, whose CLI then gets the member tools. */
+  teamMember?(sessionId: string): boolean;
+}
 
 export interface SharingCatalog {
   /** Whether DSH's tool and skill registries are loaded; without them nothing can be shared. */
@@ -208,6 +213,13 @@ export class Sharing implements LaunchSharing {
     }
     return servers;
   }
+  /** The AgentTeams member tools DSH has loaded; captain tools are never shared. */
+  private teamTools(): SharedTool[] { return (this.host.tools?.schemas() ?? []).filter(tool => TEAM_MEMBER_TOOLS.includes(tool.name)); }
+  /** A CLI working as an AgentTeams member gets the member tools without any sharing setting: the team needs them. */
+  private teamOwner(task: Task): boolean {
+    const owner = this.owner(task);
+    return !!owner && !!this.host.agent && this.host.teamMember?.(owner) === true && this.teamTools().length > 0;
+  }
   private async skillList(signal?: AbortSignal): Promise<SkillSummary[]> {
     return [...await this.host.skills?.list({ signal }) ?? []].filter(s => s.invocation.modelInvocable && shareableSource(s.source) && SKILL.test(s.name));
   }
@@ -240,7 +252,7 @@ export class Sharing implements LaunchSharing {
     this.toolsTimer = setTimeout(() => {
       const servers = this.mcpServers();
       for (const [name, seen] of this.listed) {
-        const now = toolSet(servers.get(name));
+        const now = toolSet(name === TEAM_SERVER ? this.teamTools() : servers.get(name));
         if (now !== seen) { this.listed.set(name, now); this.changed(name); }
       }
     }, 200);
@@ -304,12 +316,13 @@ export class Sharing implements LaunchSharing {
     });
   }
   private async hello(message: Record<string, any>): Promise<{ server: string; task: string } | undefined> {
-    if (message.op !== 'hello' || typeof message.task !== 'string' || typeof message.token !== 'string' || typeof message.server !== 'string' || !SERVER.test(message.server)) return;
+    if (message.op !== 'hello' || typeof message.task !== 'string' || typeof message.token !== 'string' || typeof message.server !== 'string' || !SERVER.test(message.server) && message.server !== TEAM_SERVER) return;
     const expected = Buffer.from(await this.token(message.task), 'hex'), given = Buffer.from(/^[a-f0-9]{64}$/.test(message.token) ? message.token : '', 'hex');
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return;
     return this.store.task(t => t.id === message.task) ? { server: message.server, task: message.task } : undefined;
   }
   private async handle(connection: { server: string; task: string; calls: Map<number, AbortController> }, message: Record<string, any>): Promise<unknown> {
+    if (connection.server === TEAM_SERVER) return this.handleTeam(connection, message);
     const { server } = connection, tools = this.mcpServers().get(server), prefix = `mcp__${server}__`;
     if (message.op === 'list') {
       if (!this.mcpShared(server)) return { tools: [] };
@@ -330,6 +343,28 @@ export class Sharing implements LaunchSharing {
     try {
       const input = message.arguments && typeof message.arguments === 'object' && !Array.isArray(message.arguments) ? message.arguments : {};
       const result = await this.host.tools.execute({ callId: `remote-mcp-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
+      return { content: await mcpContent(result, this.host.attachments, controller.signal), ...(result.isError ? { isError: true } : {}) };
+    } finally { connection.calls.delete(message.id); }
+  }
+
+  /** The member tools keep their DSH names; AgentTeams itself checks that the calling conversation is a member. */
+  private async handleTeam(connection: { task: string; calls: Map<number, AbortController> }, message: Record<string, any>): Promise<unknown> {
+    const task = this.store.task(t => t.id === connection.task), member = !!task && this.teamOwner(task), tools = member ? this.teamTools() : [];
+    if (message.op === 'list') {
+      this.listed.set(TEAM_SERVER, toolSet(tools));
+      return { tools: tools.map(tool => ({ name: tool.name, description: tool.description,
+        inputSchema: tool.parameters && typeof tool.parameters === 'object' ? tool.parameters : { type: 'object', properties: {} } })) };
+    }
+    if (message.op !== 'call') throw new Error('Unknown bridge request');
+    const failure = (text: string) => ({ content: [{ type: 'text', text }], isError: true });
+    const tool = tools.find(t => t.name === String(message.name));
+    if (!tool || !this.host.tools) return failure(member ? `DSH has no AgentTeams tool named "${String(message.name)}".` : 'This session is no longer an AgentTeams member in DSH.');
+    const agent = this.host.agent?.(this.owner(task!)!);
+    if (!agent) return failure('DSH runs team tools with the member conversation that started this CLI. Open that conversation in DSH, then retry.');
+    const controller = new AbortController(); connection.calls.set(message.id, controller);
+    try {
+      const input = message.arguments && typeof message.arguments === 'object' && !Array.isArray(message.arguments) ? message.arguments : {};
+      const result = await this.host.tools.execute({ callId: `remote-team-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
       return { content: await mcpContent(result, this.host.attachments, controller.signal), ...(result.isError ? { isError: true } : {}) };
     } finally { connection.calls.delete(message.id); }
   }
@@ -516,7 +551,10 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
     const servers: SharedServer[] = [], launch: SharedLaunch = { servers };
     if (protocol === 'antigravity' || this.closed) return launch;
     const owner = this.owner(task);
-    const proxies = owner && this.host.agent ? [...this.mcpServers().keys()].filter(name => this.mcpShared(name)) : [];
+    const team = this.teamOwner(task);
+    // A shared MCP server named like the team server would get the same CLI name: the team's tools win.
+    const proxies = owner && this.host.agent ? [...this.mcpServers().keys()].filter(name => this.mcpShared(name) && !(team && `dsh-${name}` === TEAM_MCP_NAME)) : [];
+    if (team) proxies.push(TEAM_SERVER);
     const wantsSkills = !!this.host.skills;
     if (!proxies.length && !wantsSkills) return launch;
     const bridge = this.bridge(host, transport);
@@ -544,7 +582,7 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
         const forward = this.ensureForward(bridge, info).catch(error => this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`));
         const timeout = delay(FORWARD_WAIT, undefined, { signal, ref: false }); timeout.catch(() => {});
         await Promise.race([forward, timeout]);
-        for (const name of proxies) servers.push({ name: `dsh-${name}`, command: info.node, args: [script, 'proxy', file, name] });
+        for (const name of proxies) servers.push({ name: name === TEAM_SERVER ? TEAM_MCP_NAME : `dsh-${name}`, command: info.node, args: [script, 'proxy', file, name] });
       } catch (error) { signal?.throwIfAborted(); this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`); }
     }
     return launch;
@@ -552,7 +590,7 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
   attached(host: HostConfig, transport: SshTransport, task: Task): void {
     try {
       // The settings decide, not DSH's tools: its MCP servers may still be connecting while CLIs are reattached.
-      if (this.closed || !this.owner(task) || !Object.values(this.settings().mcp ?? {}).some(Boolean)) return;
+      if (this.closed || !this.owner(task) || !Object.values(this.settings().mcp ?? {}).some(Boolean) && !this.teamOwner(task)) return;
       this.keep(this.bridge(host, transport));
     } catch (error) { this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`); }
   }

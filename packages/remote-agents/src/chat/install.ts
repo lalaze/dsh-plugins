@@ -2,13 +2,14 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { join } from 'node:path';
 import type { RemoteAgentsService } from '../agents/service.js';
-import { loggerOf, permissionOf, type ToolHost } from '../core/dsh-host.js';
+import { accessOf, loggerOf, type ToolHost } from '../core/dsh-host.js';
 import type { Store } from '../core/store.js';
 import type { WorkspaceAccess } from '../workspace/access.js';
 import { dshHome } from '../workspace/access.js';
 import type { RemoteWorkspaces } from '../workspace/remote-workspaces.js';
 import type { WorkspaceService } from '../workspace/service.js';
 import { SharedChatAdoption } from './adopt.js';
+import { isTeamPrompt, teamMemberOf } from './agent-teams.js';
 import { CHAT_IMAGE_LIMIT } from './images.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter, type SyncAgent } from './native-chat.js';
 import type { ChatProjects } from './projects.js';
@@ -38,10 +39,13 @@ export function installChat(ctx: Context, service: RemoteAgentsService, projects
       if (event.type === 'step/start') steps.set(session.id, { session, ...event.data });
       else if (event.type === 'step/end' || event.type === 'turn/end') steps.delete(session.id);
     }, { global: true });
+    const sessionOf = (id: string) => steps.get(id)?.session ?? scoped.sessions.get(id as Parameters<typeof scoped.sessions.get>[0]);
     const adapter = new RemoteCliAdapter(projects, { approval: host.approval, userQuestions: host.userQuestions,
-      agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => steps.get(id)?.session.header.cwd ?? scoped.sessions.get(id)?.header.cwd,
-      permission: id => permissionOf(scoped, steps.get(id)?.session ?? scoped.sessions.get(id)),
-      userContent: (id, messageId) => (steps.get(id)?.session ?? scoped.sessions.get(id))?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user'))?.content,
+      agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => sessionOf(id)?.header.cwd,
+      permission: id => accessOf(scoped, sessionOf(id)).permission,
+      unattended: id => accessOf(scoped, sessionOf(id)).unattended,
+      teamMember: id => teamMemberOf(sessionOf(id)),
+      userContent: (id, messageId) => sessionOf(id)?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source)))?.content,
       attachments: {
         image: async (ref, signal) => {
           const storage = scoped.get('attachments');

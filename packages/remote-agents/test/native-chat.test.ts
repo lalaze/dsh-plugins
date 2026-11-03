@@ -363,6 +363,39 @@ for (const mode of ['acceptEdits', 'auto']) test(`new Claude chats inherit remot
   assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
 });
 
+test('an AgentTeams member CLI receives its assignments, learns the team tools once and never waits for approvals', async t => {
+  let asked = 0;
+  const { remote, adapter, options, store } = await setup(t, { teamMember: () => ({ team: 'web', member: 'coder' }), unattended: () => true,
+    approval: { request: async () => { asked++; return 'rejected'; } } });
+  // AgentTeams delivers later assignments and coordination with its own message source.
+  const team = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'agent-teams' } as never });
+  remote.onCreate = agent => {
+    agent.status = 'running'; agent.pendingPermissions = [{ id: 'escalate', kind: 'tool', name: 'Bash', actions: [
+      { id: 'accept', label: 'Allow once', behavior: 'allow' }, { id: 'cancel', label: 'Cancel', behavior: 'deny' }, { id: 'decline', label: 'Deny', behavior: 'deny' }] }];
+    void (async () => { while (!remote.answers.length) await pause(5); agent.pendingPermissions = []; remote.append(agent.id, { type: 'assistant_message', text: 'Done' }); agent.status = 'idle'; })();
+  };
+  const first = user('AgentTeams automatic task assignment: t1');
+  assert.equal(text(await collect(adapter.stream(options('', { messages: [first] })))), 'Done');
+  assert.match(remote.created!.prompt, /^You are member "coder" of the DSH AgentTeams team "web"/);
+  assert.match(remote.created!.prompt, /agent_teams_update_task/); assert.match(remote.created!.prompt, /Nobody can answer approval prompts/);
+  assert.match(remote.created!.prompt, /\n\nAgentTeams automatic task assignment: t1$/);
+  assert.equal(store.snapshot().tasks[0].unattended, true);
+  assert.equal(asked, 0, 'an unattended member does not ask DSH, which would only reject');
+  assert.deepEqual(remote.answers[0].answer, { behavior: 'deny', message: remote.answers[0].answer.message, selectedActionId: 'decline' }, 'the denial lets the turn go on');
+
+  let sent = ''; remote.onSend = (agent, message) => { sent = message; remote.append(agent.id, { type: 'assistant_message', text: 'Checked' }); };
+  assert.equal(text(await collect(adapter.stream(options('', { messages: [first, team('Captain: also check t2')] })))), 'Checked');
+  assert.equal(sent, 'Captain: also check t2', 'a team message is a prompt, without the note again');
+  assert.equal(remote.creates, 1); assert.equal(remote.sends, 1);
+});
+
+test('injected DSH context still never reaches the CLI as a prompt', async t => {
+  const { remote, adapter, options } = await setup(t);
+  const injected = createUserMessage({ content: [{ type: 'text', text: 'runtime context' }], source: { kind: 'runtime-context', form: 'snapshot' } as never });
+  await collect(adapter.stream(options('', { messages: [user('Fix it'), injected] })));
+  assert.equal(remote.created!.prompt, 'Fix it');
+});
+
 test('Claude chats follow the DSH composer permission over a mode chosen in Open sessions', async t => {
   let permission: DshPermission | undefined = 'workspace-write';
   const { remote, projects, project, adapter, options, service, store } = await setup(t, { permission: () => permission });

@@ -19,6 +19,8 @@ export interface UsageOptions {
 }
 export interface CreateOptions {
   title?: string; origin?: Task['origin']; chat?: Task['chat']; owner?: Task['owner']; signal?: AbortSignal;
+  /** For a DSH subagent nobody answers; see {@link Task.unattended}. */
+  unattended?: boolean;
   /** Recheck a workspace-bound request after discovery and immediately before CLI execution. */
   beforeStart?(): Promise<void>;
 }
@@ -420,7 +422,7 @@ export class RemoteAgentsService {
         if (request.serviceTier && !model.serviceTiers?.some(t => t.id === request.serviceTier)) throw new RemoteError('The selected speed is unavailable', 409);
         await options.beforeStart?.();
         const now = new Date().toISOString();
-        const task: Task = { ...request, serverId: host.serverId!, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), ...(options.owner ? { owner: options.owner } : {}), state: 'creating' };
+        const task: Task = { ...request, serverId: host.serverId!, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), ...(options.owner ? { owner: options.owner } : {}), ...(options.unattended ? { unattended: true as const } : {}), state: 'creating' };
         // Persist the exact execution intent and idempotency key before any remote mutation.
         await this.store.update(state => {
           if (!state.hosts.some(h => h.id === task.hostId && h.serverId === task.serverId)) throw new RemoteError('Remote host binding changed', 409);

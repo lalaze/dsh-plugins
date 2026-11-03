@@ -379,6 +379,41 @@ test('DSH instances sharing a remote account keep their own skills; a skill the 
   assert.deepEqual(Object.keys(JSON.parse(await readFile(join(mine, 'manifest.json'), 'utf8'))).sort(), ['embedded', 'notes', 'review']);
 });
 
+test('an AgentTeams member CLI gets the member tools without any sharing setting; others and captain tools never do', async t => {
+  const { home, sharing, transport, host, task, calls, tools, agent } = await setup(t);
+  tools.push(...['agent_teams_claim_task', 'agent_teams_update_task', 'agent_teams_send_message', 'agent_teams_status', 'agent_teams_create'].map(name => ({ name, description: name, parameters: { type: 'object', properties: {} } })));
+  let member = false; sharing.host.teamMember = id => member && id === 'session-1';
+  assert.deepEqual((await sharing.prepare(host, transport, task('chat-task'), 'codex')).servers.map(s => s.name), ['dsh'], 'an ordinary conversation gets no team tools');
+  member = true;
+  const launch = await sharing.prepare(host, transport, task('chat-task'), 'codex');
+  const proxy = launch.servers.find(s => s.name === 'dsh-agent-teams')!;
+  assert.ok(proxy, 'a member gets the team server even though no MCP server is shared');
+  assert.deepEqual((await sharing.prepare(host, transport, task('panel-task'), 'codex')).servers.map(s => s.name), ['dsh'], 'a CLI without a DSH conversation gets none');
+
+  const client = mcp(t, proxy.command, proxy.args, home);
+  assert.equal((await client.request('initialize', { protocolVersion: '2025-11-25' })).result.serverInfo.name, 'dsh-agent-teams');
+  assert.deepEqual((await client.request('tools/list')).result.tools.map((tool: { name: string }) => tool.name),
+    ['agent_teams_claim_task', 'agent_teams_update_task', 'agent_teams_send_message', 'agent_teams_status'], 'captain tools are not listed');
+  const result = (await client.request('tools/call', { name: 'agent_teams_claim_task', arguments: { task_id: 't1' } })).result;
+  assert.deepEqual(result, { content: [{ type: 'text', text: 'created #1 with token [redacted]' }] });
+  assert.deepEqual(calls, [{ name: 'agent_teams_claim_task', arguments: { task_id: 't1' }, agent }], 'the call runs as the member conversation');
+  assert.match((await client.request('tools/call', { name: 'agent_teams_create', arguments: {} })).result.content[0].text, /no AgentTeams tool/);
+
+  member = false;
+  assert.match((await client.request('tools/call', { name: 'agent_teams_status', arguments: {} })).result.content[0].text, /no longer an AgentTeams member/);
+  assert.deepEqual((await client.request('tools/list')).result.tools, []);
+  assert.equal(calls.length, 1);
+});
+
+test('a shared MCP server named like the team server gives way to it for members', async t => {
+  const { sharing, transport, host, task, tools } = await setup(t);
+  tools.push({ name: 'mcp__agent-teams__ping', description: 'ping' }, { name: 'agent_teams_status', description: 'status' });
+  await sharing.set('mcp', 'agent-teams', true);
+  sharing.host.teamMember = () => true;
+  const servers = (await sharing.prepare(host, transport, task('chat-task'), 'codex')).servers;
+  assert.deepEqual(servers.filter(s => s.name === 'dsh-agent-teams').map(s => s.args.at(-1)), ['.agent-teams']);
+});
+
 test('the bridge refuses a connection without the task token', async t => {
   const { sharing } = await setup(t);
   const port = await (sharing as unknown as { listen(): Promise<number> }).listen();

@@ -446,6 +446,17 @@ test('Codex inherit mode leaves approval policy and sandbox to the remote config
   assert.equal(params.approvalPolicy, undefined); assert.equal(params.sandbox, undefined); assert.equal(params.approvalsReviewer, undefined);
 });
 
+test('an unattended Codex task never asks: it works in the selected sandbox, or in the remote config one', async t => {
+  const { ssh, service, request } = await fixture(t);
+  await service.create({ ...request, modeId: 'workspace-write' }, { unattended: true }); await tick();
+  const params = ssh.live.sent.find(m => m.method === 'thread/start')!.params;
+  assert.equal(params.sandbox, 'workspace-write'); assert.equal(params.approvalPolicy, 'never'); assert.equal(params.approvalsReviewer, 'user');
+  assert.equal(service.store.task(t => t.id === request.id)!.unattended, true);
+  await service.create({ ...request, id: 'inherit-unattended', modeId: 'inherit' }, { unattended: true }); await tick();
+  const inherited = ssh.live.sent.filter(m => m.method === 'thread/start').at(-1)!.params;
+  assert.equal(inherited.approvalPolicy, 'never'); assert.equal(inherited.sandbox, undefined);
+});
+
 test('Codex auto review writes to the workspace and routes approval requests to its reviewer', async t => {
   const { ssh, service, request } = await fixture(t);
   await service.create({ ...request, modeId: 'auto-review' }); await tick();
@@ -610,6 +621,18 @@ test('mode changes release the idle session, and the next message resumes it wit
   assert.equal(argv[argv.indexOf('--permission-mode') + 1], 'plan');
   assert.equal(argv[argv.indexOf('--resume') + 1], cli.argv[cli.argv.indexOf('--session-id') + 1]);
   assert.equal(ssh.admissions.length, 2);
+});
+
+test('an unattended Claude task with workspace write runs commands in Claude Code\'s sandbox; others do not', async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const settings = () => ssh.live.argv.includes('--settings') ? JSON.parse(ssh.live.argv[ssh.live.argv.indexOf('--settings') + 1]) : undefined;
+  await service.create({ ...request, modeId: 'acceptEdits' }, { unattended: true });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'acceptEdits');
+  assert.deepEqual(settings(), { sandbox: { enabled: true, autoAllowBashIfSandboxed: true } });
+  await service.create({ ...request, id: 'attended', modeId: 'acceptEdits' });
+  assert.equal(settings(), undefined, 'someone answers an ordinary conversation');
+  await service.create({ ...request, id: 'read-only-member', modeId: 'default' }, { unattended: true });
+  assert.equal(settings(), undefined, 'the sandbox would let a read-only member write');
 });
 
 test('Claude Auto is available for new sessions and is explicitly passed to the non-interactive CLI', async t => {
