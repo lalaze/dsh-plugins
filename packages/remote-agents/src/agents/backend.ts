@@ -56,6 +56,8 @@ export interface Backend {
   /** Forget a session here only: a shared one stays on the host for other DSH instances, and its CLI keeps running. */
   forgetLocal?(task: Task): Promise<void>;
   sharedWorkspaces?(timeout?: number): Promise<SharedWorkspace[]>;
+  /** Called when the host reports its shared workspaces changed; returns the unsubscribe function. */
+  onSharedWorkspaces?(listener: () => void): () => void;
   shareWorkspace?(path: string): Promise<void>;
   setWorkspaceTags?(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
   /** Stop sharing the given sessions started here; other DSH instances forget them. */
@@ -117,7 +119,8 @@ export class SshBackend implements Backend {
   /** Sessions shared with other DSH instances on the same SSH account; needs relays. */
   private readonly shared?: SharedSessions;
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport, private readonly sharing: () => LaunchSharing | undefined = () => undefined) {
-    this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection));
+    // Commands to the host share one SSH connection; its sockets live in this plugin's private state directory.
+    this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') });
     this.workspaceFiles = new WorkspaceFiles(this.transport);
     if (this.transport.relays && sharesSessions(host)) this.shared = new SharedSessions(this.transport, store, {
       hostId: host.id,
@@ -134,6 +137,12 @@ export class SshBackend implements Backend {
   sharingError(): string | undefined { return this.shared?.status(); }
   controller(taskId: string): string | undefined { return this.shared?.controller(taskId); }
   async sharedWorkspaces(timeout?: number): Promise<SharedWorkspace[]> { if (!this.shared) return []; return this.shared.listWorkspaces(timeout); }
+  onSharedWorkspaces(listener: () => void): () => void {
+    const shared = this.shared;
+    if (!shared) return () => {};
+    shared.workspaceListeners.add(listener);
+    return () => { shared.workspaceListeners.delete(listener); };
+  }
   async setWorkspaceTags(path: string, tags: SharedTag[]): Promise<SharedWorkspace> {
     if (!this.shared) throw new Error('Sessions are not shared on this host');
     return this.shared.setWorkspaceTags(path, tags);

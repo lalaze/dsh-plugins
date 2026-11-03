@@ -153,6 +153,9 @@ function installTagSync(ctx: Context, store: Store, machines: WorkspaceHosts, ac
       await new Promise(resolve => { const timer = setTimeout(resolve, 10_000); timer.unref?.(); controller.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(undefined); }, { once: true }); });
     }
   })();
+  // Tags another DSH changed arrive with the host registry's report, so they are compared right away.
+  const changed = () => sync.trigger();
+  machines.sharedWorkspaceListeners?.add(changed);
   sync.start();
-  ctx.effect(() => () => { controller.abort(); sync.close(); });
+  ctx.effect(() => () => { controller.abort(); machines.sharedWorkspaceListeners?.delete(changed); sync.close(); });
 }

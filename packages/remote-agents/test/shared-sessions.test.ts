@@ -161,8 +161,13 @@ test('remote workspaces added in one DSH are offered to the others once', { skip
 
 test('a workspace\'s tags set in one DSH reach the others, the latest change wins, and adding workspaces keeps them', { skip: !supported }, async t => {
   const { h, second, secondHost } = await twoInstances(t);
+  // Workspace Tags sync compares as soon as the registry reports a change, rather than at its next round.
+  await waitFor(async () => await second.service.sharedWorkspaceList(secondHost), 'the other DSH reads the registry');
+  const reported: string[] = [], listener = (hostId: string) => { reported.push(hostId); };
+  second.service.sharedWorkspaceListeners.add(listener); t.after(() => { second.service.sharedWorkspaceListeners.delete(listener); });
   const set = await h.first.service.setWorkspaceTags(h.hostId, '/srv/app', [{ name: ' Dana ', color: 'lime' }, { name: '', color: 'red' }]);
   assert.deepEqual(set.tags, [{ name: 'Dana', color: 'lime' }]); assert.ok(set.tagsAt); assert.ok(set.tagsBy);
+  await waitFor(() => reported.includes(secondHost) || undefined, 'the other DSH is told its shared workspaces changed');
   const seen = await waitFor(async () => (await second.service.sharedWorkspaceList(secondHost))?.find(w => w.path === '/srv/app' && w.tags?.length), 'tags reach the other DSH');
   assert.deepEqual(seen.tags, [{ name: 'Dana', color: 'lime' }]);
   const cleared = await second.service.setWorkspaceTags(secondHost, '/srv/app', []);

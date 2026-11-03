@@ -29,6 +29,8 @@ export interface SendOptions {
 }
 export class RemoteAgentsService {
   private readonly connections = new Map<string, Connection>();
+  /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
+  readonly sharedWorkspaceListeners = new Set<(hostId: string) => void>();
   private readonly locks = new Map<string, Promise<unknown>>();
   private readonly restoring = new Map<string, Promise<void>>();
   private readonly catalogListeners = new Set<() => void>();
@@ -185,6 +187,7 @@ export class RemoteAgentsService {
     if (!connection) {
       connection = { backend: this.factory(this.host(hostId)), status: 'disconnected' };
       this.connections.set(hostId, connection);
+      connection.backend.onSharedWorkspaces?.(() => { for (const listener of this.sharedWorkspaceListeners) listener(hostId); });
     }
     return connection;
   }

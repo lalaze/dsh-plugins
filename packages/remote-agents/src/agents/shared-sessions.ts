@@ -110,6 +110,8 @@ export class SharedSessions {
   private unavailable?: string;
   error?: string;
   workspaces: SharedWorkspace[] = [];
+  /** Called when the host reports its shared workspaces, at connecting and whenever another DSH changes them. */
+  readonly workspaceListeners = new Set<() => void>();
   private readonly waiters = new Set<(peer?: JsonlPeer) => void>();
   /** Changes reported while the full list is applied; they follow it in order. */
   private queued: { sessions?: RemoteSession[]; workspaces?: SharedWorkspace[] }[] = [];
@@ -195,6 +197,7 @@ export class SharedSessions {
       this.listed = true; this.attempt = 0; this.error = undefined;
       for (const done of [...this.waiters]) done(current);
       this.schedulePublish();
+      this.workspacesChanged();
     } catch (error) {
       if (peer && peer === this.peer) this.peer = undefined;
       peer?.close();
@@ -242,8 +245,11 @@ export class SharedSessions {
       && !task.chat?.sessionId.startsWith('remote-compaction-');
   }
   private async changed(params: { sessions?: RemoteSession[]; workspaces?: SharedWorkspace[] }): Promise<void> {
-    if (Array.isArray(params?.workspaces)) this.workspaces = params.workspaces;
+    if (Array.isArray(params?.workspaces)) { this.workspaces = params.workspaces; this.workspacesChanged(); }
     await this.reconcile(Array.isArray(params?.sessions) ? params.sessions : [], false);
+  }
+  private workspacesChanged(): void {
+    for (const listener of this.workspaceListeners) { try { listener(); } catch { /* A listener must not stop the registry. */ } }
   }
   /** Apply the host's sessions. A full list also publishes the sessions the host does not have yet. */
   private async reconcile(list: RemoteSession[], full: boolean): Promise<void> {

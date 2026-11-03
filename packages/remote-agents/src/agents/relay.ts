@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { quote, type Child, type SshTransport } from '../core/ssh.js';
 import type { RelayUnavailable } from '../core/domain.js';
 import { REMOTE_HOME, remoteScript } from '../core/remote-host.js';
@@ -316,10 +317,12 @@ export class RelayLink implements Child {
     }
     this.admitted = false;
     let final: { exit?: RelayExit['exit']; missing?: boolean; evicted?: boolean; error?: string } = {}, errors = '';
+    // A marker line, such as an exit message in another language, may arrive split inside a character.
+    const decoder = new StringDecoder('utf8');
     // A missing script (an upgrade, or a deleted ~/.dsh-remote-agents) is reported and installed before retrying.
     const proc = this.transport.start('/', ['sh', '-c', `[ -f ${SCRIPT} ] || { printf '\\036DSH-RELAY {"install":true}\\n' >&2; exit 0; }; exec node ${SCRIPT} attach ${RELAYS} "$1" "$2"`, 'dsh-relay', this.id, String(this.bytes)], {
       stderr: chunk => {
-        errors += chunk.toString('utf8');
+        errors += decoder.write(chunk);
         let newline: number;
         while ((newline = errors.indexOf('\n')) >= 0) {
           const line = errors.slice(0, newline); errors = errors.slice(newline + 1);
