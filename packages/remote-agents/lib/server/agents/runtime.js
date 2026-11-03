@@ -181,7 +181,9 @@ export class CliSession {
             // Auto review routes approval requests to Codex's reviewer subagent; other modes route them back to the user,
             // since a resumed thread keeps the reviewer it last had. Codex releases without a reviewer ignore the field.
             const reviewer = mode === 'auto-review' ? 'auto_review' : 'user';
-            const policy = mode === 'inherit' ? {} : { approvalPolicy: mode === 'full-access' ? 'never' : 'on-request', sandbox: mode === 'read-only' ? 'read-only' : mode === 'full-access' ? 'danger-full-access' : 'workspace-write', approvalsReviewer: reviewer };
+            // An unattended task never asks: Codex works inside its sandbox and reports what it could not do.
+            const never = mode === 'full-access' || this.task.unattended === true;
+            const policy = mode === 'inherit' ? (never ? { approvalPolicy: 'never' } : {}) : { approvalPolicy: never ? 'never' : 'on-request', sandbox: mode === 'read-only' ? 'read-only' : mode === 'full-access' ? 'danger-full-access' : 'workspace-write', approvalsReviewer: reviewer };
             const params = { cwd: this.agent.cwd, model: this.task.model, ...(this.task.serviceTier ? { serviceTier: this.task.serviceTier } : {}), ...policy };
             let response;
             const method = resume ? 'thread/resume' : 'thread/start';
@@ -193,7 +195,7 @@ export class CliSession {
                 if (mode === 'inherit' || !/unknown variant|invalid.*(?:sandbox|approval)/i.test(String(error)))
                     throw error;
                 // Older releases spell enums in camelCase and name the reviewer `guardian_subagent`.
-                response = await this.peer.request(method, { ...params, ...binding, approvalPolicy: mode === 'full-access' ? 'never' : 'onRequest', sandbox: mode === 'read-only' ? 'readOnly' : mode === 'full-access' ? 'dangerFullAccess' : 'workspaceWrite',
+                response = await this.peer.request(method, { ...params, ...binding, approvalPolicy: never ? 'never' : 'onRequest', sandbox: mode === 'read-only' ? 'readOnly' : mode === 'full-access' ? 'dangerFullAccess' : 'workspaceWrite',
                     approvalsReviewer: reviewer === 'auto_review' ? 'guardian_subagent' : reviewer });
             }
             this.nativeId = response?.thread?.id;

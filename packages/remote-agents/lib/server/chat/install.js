@@ -1,7 +1,8 @@
 import { join } from 'node:path';
-import { loggerOf, permissionOf } from '../core/dsh-host.js';
+import { accessOf, loggerOf } from '../core/dsh-host.js';
 import { dshHome } from '../workspace/access.js';
 import { SharedChatAdoption } from './adopt.js';
+import { isTeamPrompt, teamMemberOf } from './agent-teams.js';
 import { CHAT_IMAGE_LIMIT } from './images.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import { repairStoredSessions } from './session-repair.js';
@@ -31,10 +32,13 @@ export function installChat(ctx, service, projects, workspace) {
             else if (event.type === 'step/end' || event.type === 'turn/end')
                 steps.delete(session.id);
         }, { global: true });
+        const sessionOf = (id) => steps.get(id)?.session ?? scoped.sessions.get(id);
         const adapter = new RemoteCliAdapter(projects, { approval: host.approval, userQuestions: host.userQuestions,
-            agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => steps.get(id)?.session.header.cwd ?? scoped.sessions.get(id)?.header.cwd,
-            permission: id => permissionOf(scoped, steps.get(id)?.session ?? scoped.sessions.get(id)),
-            userContent: (id, messageId) => (steps.get(id)?.session ?? scoped.sessions.get(id))?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user'))?.content,
+            agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => sessionOf(id)?.header.cwd,
+            permission: id => accessOf(scoped, sessionOf(id)).permission,
+            unattended: id => accessOf(scoped, sessionOf(id)).unattended,
+            teamMember: id => teamMemberOf(sessionOf(id)),
+            userContent: (id, messageId) => sessionOf(id)?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source)))?.content,
             attachments: {
                 image: async (ref, signal) => {
                     const storage = scoped.get('attachments');

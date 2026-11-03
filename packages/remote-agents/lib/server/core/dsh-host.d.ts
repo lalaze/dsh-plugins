@@ -8,6 +8,15 @@ export declare const loggerOf: (ctx: Context) => {
 } | undefined;
 /** A conversation's preset (composer or /permission), mapped through its sandbox so renamed presets still match; `custom` has no mapping. */
 export declare function permissionOf(ctx: Context, session: Session | undefined): DshPermission | undefined;
+/**
+ * How a remote CLI may act for a conversation. A subagent DSH delegated with the `never` approval policy is
+ * unattended: nobody answers its prompts, and its knobs (workspace sandbox, never ask) match no preset, so its
+ * sandbox sets the CLI's limits. Other conversations keep {@link permissionOf}, where `custom` keeps the CLI's mode.
+ */
+export declare function accessOf(ctx: Context, session: Session | undefined): {
+    permission?: DshPermission;
+    unattended: boolean;
+};
 type Schema = Record<string, unknown>;
 /** The narrow DSH host surface the plugin's tools use: approvals and questions in the calling conversation. */
 export interface ToolHost {

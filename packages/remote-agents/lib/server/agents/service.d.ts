@@ -22,6 +22,8 @@ export interface CreateOptions {
     chat?: Task['chat'];
     owner?: Task['owner'];
     signal?: AbortSignal;
+    /** For a DSH subagent nobody answers; see {@link Task.unattended}. */
+    unattended?: boolean;
     /** Recheck a workspace-bound request after discovery and immediately before CLI execution. */
     beforeStart?(): Promise<void>;
 }

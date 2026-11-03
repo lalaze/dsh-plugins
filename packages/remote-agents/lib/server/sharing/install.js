@@ -1,3 +1,4 @@
+import { teamMemberOf } from '../chat/agent-teams.js';
 /** Shared MCP calls run through DSH's tool pipeline with the owning conversation's agent; skills come from its registry. */
 export function installSharingHost(ctx, sharing) {
     ctx.inject(['tools'], scoped => {
@@ -19,5 +20,11 @@ export function installSharingHost(ctx, sharing) {
         const agents = scoped.get('agents');
         sharing.host.agent = id => agents.get(id);
         scoped.effect(() => () => { delete sharing.host.agent; });
+    });
+    // A CLI working as an AgentTeams member reaches the team through the member tools.
+    ctx.inject(['sessions'], scoped => {
+        const sessions = scoped.get('sessions');
+        sharing.host.teamMember = id => !!teamMemberOf(sessions.get(id));
+        scoped.effect(() => () => { delete sharing.host.teamMember; });
     });
 }

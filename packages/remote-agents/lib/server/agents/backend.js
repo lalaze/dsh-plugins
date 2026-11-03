@@ -41,6 +41,11 @@ export function codexServiceTiers(model) {
         : list(model.additionalSpeedTiers).filter((id) => typeof id === 'string' && !!id).map(id => ({ id, label: id[0].toUpperCase() + id.slice(1) }));
     return tiers.length ? tiers : undefined;
 }
+/**
+ * Nobody approves an unattended Claude task's commands. With workspace write it runs them in Claude Code's own sandbox,
+ * which confines writes to the workspace like DSH's sandbox; without a sandbox on the host they are asked and denied.
+ */
+export const unattendedClaude = (task) => task.unattended && task.modeId === 'acceptEdits' ? ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true } })] : [];
 export class SshBackend {
     host;
     store;
@@ -507,7 +512,7 @@ done`}`, 15_000, { login: false });
         if (profile.protocol === 'antigravity')
             argv = antigravityArguments(argv[0], task, resume);
         if (profile.protocol === 'claude')
-            argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : [])];
+            argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : []), ...unattendedClaude(task)];
         const relay = await this.relays();
         this.assertOpen();
         signal?.throwIfAborted();

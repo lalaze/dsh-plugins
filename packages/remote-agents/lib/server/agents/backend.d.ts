@@ -83,6 +83,11 @@ export declare const CLI_PROVIDERS: ({
 export declare function claudeModels(result: unknown): Model[];
 /** Codex speed tiers. `serviceTiers` carries request IDs such as `priority`; older CLIs only list `additionalSpeedTiers` names. */
 export declare function codexServiceTiers(model: Record<string, unknown>): Choice[] | undefined;
+/**
+ * Nobody approves an unattended Claude task's commands. With workspace write it runs them in Claude Code's own sandbox,
+ * which confines writes to the workspace like DSH's sandbox; without a sandbox on the host they are asked and denied.
+ */
+export declare const unattendedClaude: (task: Pick<Task, "unattended" | "modeId">) => string[];
 export declare class SshBackend implements Backend {
     private readonly host;
     private readonly store;

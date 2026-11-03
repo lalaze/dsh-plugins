@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { permissionOf } from '../core/dsh-host.js';
+import { accessOf } from '../core/dsh-host.js';
 import { sharesSessions } from '../core/domain.js';
 import { dshHome, under, WorkspaceAccess } from './access.js';
 import { editorHandler } from './editor-route.js';
@@ -77,7 +77,8 @@ export async function installWorkspaces(ctx, store, machines) {
     });
     ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {
         const host = scoped;
-        for (const tool of workspaceTools(files, host, agent => permissionOf(scoped, agent?.session)))
+        // A delegated team member's sandbox counts as its permission: it may edit the workspace, and nobody can approve more.
+        for (const tool of workspaceTools(files, host, agent => accessOf(scoped, agent?.session).permission))
             host.tools.register(tool);
     });
     installTagSync(ctx, store, machines, access);

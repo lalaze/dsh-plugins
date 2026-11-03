@@ -98,6 +98,8 @@ export interface SharingHost {
     skills?: SharingSkills;
     attachments?: SharingAttachments;
     agent?(sessionId: string): unknown;
+    /** Whether the conversation is an AgentTeams member, whose CLI then gets the member tools. */
+    teamMember?(sessionId: string): boolean;
 }
 export interface SharingCatalog {
     /** Whether DSH's tool and skill registries are loaded; without them nothing can be shared. */
@@ -167,6 +169,10 @@ export declare class Sharing implements LaunchSharing {
     mcpShared(server: string): boolean;
     skillShared(name: string): boolean;
     private mcpServers;
+    /** The AgentTeams member tools DSH has loaded; captain tools are never shared. */
+    private teamTools;
+    /** A CLI working as an AgentTeams member gets the member tools without any sharing setting: the team needs them. */
+    private teamOwner;
     private skillList;
     catalog(signal?: AbortSignal): Promise<SharingCatalog>;
     set(kind: unknown, name: unknown, shared: unknown): Promise<void>;
@@ -184,6 +190,8 @@ export declare class Sharing implements LaunchSharing {
     private accept;
     private hello;
     private handle;
+    /** The member tools keep their DSH names; AgentTeams itself checks that the calling conversation is a member. */
+    private handleTeam;
     private bridge;
     /**
      * Install the bridge script once per version; report the remote home, the absolute Node.js path ACP needs and the

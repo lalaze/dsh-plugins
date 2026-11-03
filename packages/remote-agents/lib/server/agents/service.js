@@ -496,7 +496,7 @@ export class RemoteAgentsService {
                     throw new RemoteError('The selected speed is unavailable', 409);
                 await options.beforeStart?.();
                 const now = new Date().toISOString();
-                const task = { ...request, serverId: host.serverId, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), ...(options.owner ? { owner: options.owner } : {}), state: 'creating' };
+                const task = { ...request, serverId: host.serverId, title, createdAt: now, updatedAt: now, modes: provider.modes, ...(options.origin ? { origin: options.origin } : {}), ...(options.chat ? { chat: options.chat } : {}), ...(options.owner ? { owner: options.owner } : {}), ...(options.unattended ? { unattended: true } : {}), state: 'creating' };
                 // Persist the exact execution intent and idempotency key before any remote mutation.
                 await this.store.update(state => {
                     if (!state.hosts.some(h => h.id === task.hostId && h.serverId === task.serverId))

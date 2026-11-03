@@ -57,6 +57,16 @@ function renderReports(result) {
     }
     return lines.join('\n').trim();
 }
+/** A denial that lets the turn go on: Codex also offers `cancel`, which ends the whole turn, so it comes last. */
+function denyAction(permission) {
+    const denials = permission.actions?.filter(a => a.behavior === 'deny') ?? [];
+    return denials.find(a => !/cancel|abort/i.test(a.id)) ?? denials[0];
+}
+/** The answer for a CLI running for an unattended DSH subagent: nobody can approve, so it is denied and the turn goes on. */
+export function unattendedAnswer(permission) {
+    const deny = denyAction(permission);
+    return { behavior: 'deny', message: 'Nobody can approve this: the session runs unattended for a DSH team. Continue without it, or report it as a blocker.', ...(deny ? { selectedActionId: deny.id } : {}) };
+}
 export async function decidePermission(host, permission, exec, signal, subject) {
     const questions = questionsOf(permission.input);
     if (permission.kind === 'question' && !permission.actions?.length) {
@@ -73,7 +83,7 @@ export async function decidePermission(host, permission, exec, signal, subject) 
     const outcome = await host.approval.request({ agent: exec.agent, toolName: permission.name, callId: exec.callId, signal,
         reason: [`Remote agent ${subject} asks: ${permission.title ?? permission.name}`, permission.description, detail,
             permission.actions?.some(a => a.behavior === 'allow' && (a.scope === 'session' || a.scope === 'project')) ? 'To remember a matching approval, open Settings → Remote agents → Open sessions.' : undefined].filter(Boolean).join('\n') });
-    const deny = permission.actions?.find(a => a.behavior === 'deny');
+    const deny = denyAction(permission);
     if (outcome === 'rejected')
         return { behavior: 'deny', message: 'The user denied this request', ...(deny ? { selectedActionId: deny.id } : {}) };
     if (outcome !== 'allowed-once')

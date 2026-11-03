@@ -3,6 +3,7 @@ import type { Session } from '@deepseek-ai/dsh-session';
 import { type DshPermission } from '../core/domain.js';
 import { type AttachmentAccess } from '../agents/attachments.js';
 import { ChatProjects } from './projects.js';
+import { type TeamMember } from './agent-teams.js';
 import type { ToolHost } from '../core/dsh-host.js';
 import type { WorkspacePlacement } from '../workspace/access.js';
 export declare const CHAT_PROVIDER = "remote-cli";
@@ -54,6 +55,10 @@ export interface ChatHost extends Partial<ToolHost> {
     userContent?(sessionId: NonNullable<GenerateOptions['sessionId']>, messageId: string): readonly ContentBlock[] | undefined;
     /** The conversation's permission from the DSH composer; undefined for a custom value or without permission presets. */
     permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
+    /** A delegated subagent nobody answers (DSH approval policy `never`): the CLI must not wait for approvals or answers. */
+    unattended?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
+    /** The AgentTeams team and member this conversation runs as, when it is a team member. */
+    teamMember?(sessionId: NonNullable<GenerateOptions['sessionId']>): TeamMember | undefined;
     /** A file from the conversation's verified remote workspace, or undefined when it is too large to show. */
     image?(sessionId: NonNullable<GenerateOptions['sessionId']>, path: string, signal: AbortSignal): Promise<Uint8Array | undefined>;
     /** A file the CLI looked at by absolute path on the conversation's verified machine, inside the workspace or not; undefined when too large. */

@@ -18,6 +18,8 @@ export interface WaitResult {
     agents: AgentReport[];
     timedOut: boolean;
 }
+/** The answer for a CLI running for an unattended DSH subagent: nobody can approve, so it is denied and the turn goes on. */
+export declare function unattendedAnswer(permission: Permission): PermissionAnswer;
 export declare function decidePermission(host: ToolHost, permission: Permission, exec: ToolCall, signal: AbortSignal, subject: string): Promise<PermissionAnswer | undefined>;
 /**
  * Paseo-style delegation for the DSH agent: start remote CLI agents, message them and collect their
