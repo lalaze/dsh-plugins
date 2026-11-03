@@ -5,6 +5,7 @@ import { createToolResultMessage, createUserMessage, LlmAdapter, LlmError, Messa
 import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath } from '../core/domain.js';
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles } from '../agents/attachments.js';
 import { ChatImageLinks, saveChatImage } from './images.js';
+import { transcript } from './transcript.js';
 import { decidePermission } from '../agents/tools.js';
 export const CHAT_PROVIDER = 'remote-cli';
 /** Wakes a conversation whose remote turn outlived DSH, so the missed output streams in without a new message. */
@@ -193,25 +194,53 @@ export class RemoteCliAdapter extends LlmAdapter {
         const service = this.projects.service;
         const task = service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route === route)
             ?? service.store.task(t => t.chat?.sessionId === sessionId && route.startsWith(`${t.chat.route.split('/').slice(0, 2).join('/')}/`));
-        return task?.agentId && task.chat?.delivered && !task.chat.delivered.done ? task : undefined;
+        return task?.agentId && (task.chat?.history || task.chat?.delivered && !task.chat.delivered.done) ? task : undefined;
     }
     /**
      * Wake a conversation whose last remote response was cut off when DSH quit or reloaded the plugin. Its turn
      * streams the output produced meanwhile and waits for the remote turn to finish. Only a conversation still
-     * routed to a remote CLI is woken: another model would answer the notice instead.
+     * routed to a remote CLI is woken: another model would answer the notice instead. A session continued from
+     * another DSH is woken the same way to show its saved history; it has made no request yet, so it has no header.
      */
     sync(agent) {
-        const config = agent.session.requestHeader()?.config;
-        if (this.released || !config || !CHAT_PROVIDERS.includes(config.provider) || this.active.has(agent.session.id))
+        const id = agent.session.id, config = agent.session.requestHeader()?.config;
+        if (this.released || this.active.has(id) || config && !CHAT_PROVIDERS.includes(config.provider))
             return false;
-        const task = this.unsynced(agent.session.id, config.model), pending = task?.chat?.delivered;
-        if (!task || !pending || this.woken.has(`${task.id}:${pending.messageId}`))
+        const task = config ? this.unsynced(id, config.model) : this.projects.service.store.task(t => t.chat?.sessionId === id && t.chat.history === 'pending' && !!t.agentId);
+        const pending = task?.chat?.history ? 'history' : task?.chat?.delivered?.messageId;
+        if (!task || !pending || this.woken.has(`${task.id}:${pending}`))
             return false;
-        this.woken.add(`${task.id}:${pending.messageId}`);
-        const summary = 'Remote CLI output produced while DSH was disconnected';
+        this.woken.add(`${task.id}:${pending}`);
+        const summary = pending === 'history' ? `Saved history of this ${CLI_NAMES[task.provider] ?? task.provider} session${task.shared?.creator ? `, started on ${task.shared.creator}` : ''}`
+            : 'Remote CLI output produced while DSH was disconnected';
         agent.send(createUserMessage({ source: { kind: SYNC_SOURCE, form: 'notice', summary },
             content: [{ type: 'text', text: `${summary}. It is shown below; no new request was sent to the remote CLI.` }] }), 'next-turn', true);
         return true;
+    }
+    /** A continued session's saved history, read from its start, as one markdown block. */
+    async history(taskId, signal) {
+        const service = this.projects.service, entries = [];
+        let cursor, resets = 0;
+        while (true) {
+            signal.throwIfAborted();
+            const page = await service.timeline(taskId, cursor, 'after');
+            if (!page)
+                break;
+            // The history was replaced while it was read, as when another DSH took the session over: read it again.
+            if (page.reset && cursor && resets++ < 3) {
+                entries.length = 0;
+                cursor = undefined;
+                continue;
+            }
+            entries.push(...page.entries);
+            if (!page.hasNewer || !page.endCursor) {
+                cursor = page.endCursor ?? cursor;
+                break;
+            }
+            cursor = page.endCursor;
+        }
+        const task = service.store.task(t => t.id === taskId);
+        return { ...transcript(entries, { cli: CLI_NAMES[task?.provider ?? ''] ?? task?.provider ?? 'Remote CLI', ...(task?.shared?.creator ? { creator: task.shared.creator } : {}) }), ...(cursor ? { end: cursor } : {}) };
     }
     async *stream(options) {
         if (options.purpose === 'session-title') {
@@ -243,23 +272,26 @@ export class RemoteCliAdapter extends LlmAdapter {
         const sessionId = options.sessionId;
         if (!sessionId)
             throw new LlmError('Select a remote CLI in a DSH conversation to use it.', 'SESSION_REQUIRED');
-        const final = options.messages.at(-1), sync = final?.role === 'user' && final.source?.kind === SYNC_SOURCE;
+        // DSH adds context of its own after the notice, such as the time: the latest human message or notice decides.
+        const final = options.messages.findLast(m => m.role === 'user' && (!m.source || m.source.kind === 'user' || m.source.kind === SYNC_SOURCE));
+        const sync = final?.source?.kind === SYNC_SOURCE;
         if (this.active.has(sessionId))
             throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
         const { project, provider, model, serviceTier: routeTier } = this.route(options.provider, options.model), service = this.projects.service;
         // A route saved with a tier keeps it; otherwise the conversation's lightning switch picks the Fast tier.
         const serviceTier = routeTier ?? (service.store.chatFast(sessionId) ? fastTierOf(model)?.id : undefined);
         const lastUser = options.messages.findLast(m => m.role === 'user' && (!m.source || m.source.kind === 'user'));
-        if (!lastUser || lastUser.role !== 'user')
+        // A conversation continued from another DSH starts with the notice that shows its history, before any message of its own.
+        if (!sync && (!lastUser || lastUser.role !== 'user'))
             throw new LlmError('A user message is required for the remote CLI.', 'INVALID_REQUEST');
         const contentOf = (message) => restoreFiles(message.content, message.id ? this.host.userContent?.(sessionId, message.id) : undefined);
-        const content = contentOf(lastUser);
+        const content = lastUser ? contentOf(lastUser) : [];
         if (content.some(b => !['text', 'image', 'file'].includes(b.type)))
             throw new LlmError('This remote CLI input type is unsupported', 'UNSUPPORTED_INPUT');
         if (content.some(b => b.type === 'image' && !b.offloaded) && !inputModalitiesOf(provider.id, model).includes('image'))
             throw new LlmError('This remote CLI does not support image input', 'UNSUPPORTED_INPUT');
         const currentPrompt = blockText(content).trim() || (content.some(b => b.type === 'image' || b.type === 'file') ? 'Inspect the attached images and files.' : '');
-        if (!currentPrompt)
+        if (!currentPrompt && !sync)
             throw new LlmError('Enter a message for the remote CLI.', 'INVALID_REQUEST');
         const effort = options.reasoningEffort ?? this.defaultEffort(options.model, model);
         if (effort && !model.thinkingOptions?.some(o => o.id === effort))
@@ -278,7 +310,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         const cwd = remotePath(placement.cwd);
         if (task && task.cwd !== cwd || project.id !== project.hostId && project.cwd !== cwd)
             throw new LlmError('The remote conversation belongs to a different workspace directory. Start a new conversation.', 'WORKSPACE_MISMATCH');
-        const userId = lastUser.id ?? hash(JSON.stringify(options.messages));
+        const userId = lastUser?.id ?? hash(JSON.stringify(options.messages));
         // A CLI that never started left only its first prompt. A new message starts afresh with that prompt as
         // context; retrying it would run the stale prompt first and reject this message as busy.
         if (!sync && task && !task.agentId && !this.active.has(sessionId) && task.id !== hash(hash(sessionId, task.chat?.receiptRoute ?? task.chat?.route ?? options.model), userId)) {
@@ -289,10 +321,16 @@ export class RemoteCliAdapter extends LlmAdapter {
         const messageId = hash(binding, userId);
         const controller = new AbortController(), signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
         signal.throwIfAborted();
-        const currentIndex = options.messages.lastIndexOf(lastUser);
+        const currentIndex = lastUser ? options.messages.lastIndexOf(lastUser) : -1;
         const previousIndex = task?.chat?.lastUserId ? options.messages.findIndex(m => m.id === task.chat?.lastUserId) : -1;
         const contextStart = previousIndex >= 0 ? previousIndex + 1 : 0;
-        const previous = options.messages.slice(contextStart, currentIndex).filter(m => m.role === 'assistant' || (m.role === 'user' && (!m.source || m.source.kind === 'user')))
+        // A bound CLI session already holds its own replies, including what sync turns showed, such as a continued session's
+        // history: only human messages and other models' replies are context. A new session has none of them, so it gets all.
+        const own = (m) => {
+            const source = m.role === 'assistant' ? m.source : undefined;
+            return !!task && !!source && CHAT_PROVIDERS.includes(String(source.provider)) && String(source.model ?? '').startsWith(`${project.id}/${encodeURIComponent(provider.id)}/`);
+        };
+        const previous = options.messages.slice(contextStart, currentIndex).filter(m => m.role === 'assistant' ? !own(m) : m.role === 'user' && (!m.source || m.source.kind === 'user'))
             .map(m => `${m.role}: ${blockText(m.role === 'user' ? contentOf(m) : m.content)}`).filter(t => t.trim() !== 'user:' && t.trim() !== 'assistant:').join('\n\n');
         const prompt = previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt;
         const taskId = task?.id ?? messageId;
@@ -442,8 +480,29 @@ export class RemoteCliAdapter extends LlmAdapter {
         try {
             if (sync) {
                 // A catch-up turn only shows what the remote CLI did meanwhile; it never sends anything.
-                const pending = task && service.store.task(t => t.id === task.id)?.chat?.delivered;
-                if (pending && !pending.done) {
+                const saved = task && service.store.task(t => t.id === task.id)?.chat, pending = saved?.delivered;
+                if (saved?.history) {
+                    const { text, lastMessageId, end } = await this.history(taskId, signal);
+                    yield* textChunk('text', text);
+                    // A turn still running where the session was started streams on here, as a catch-up does.
+                    const following = !!lastMessageId && busy(await service.summary(taskId));
+                    await service.store.update(state => {
+                        const chat = state.tasks.find(t => t.id === taskId)?.chat;
+                        if (!chat)
+                            return;
+                        delete chat.history;
+                        if (lastMessageId)
+                            chat.delivered = { messageId: lastMessageId, cursor: end ?? null, ...(following ? {} : { done: true }) };
+                    });
+                    if (following) {
+                        admitted = true;
+                        yield* textChunk('text', '\n\n---\n\n');
+                        yield* follow(lastMessageId, end, true);
+                        await delivered(lastMessageId, undefined, true);
+                    }
+                    settled = true;
+                }
+                else if (pending && !pending.done) {
                     admitted = true;
                     yield* follow(pending.messageId, pending.cursor ?? undefined, true);
                     settled = true;

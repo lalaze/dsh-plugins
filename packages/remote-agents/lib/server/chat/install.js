@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { loggerOf, permissionOf } from '../core/dsh-host.js';
 import { dshHome } from '../workspace/access.js';
+import { SharedChatAdoption } from './adopt.js';
 import { CHAT_IMAGE_LIMIT } from './images.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
 import { repairStoredSessions } from './session-repair.js';
@@ -20,7 +21,7 @@ export function scheduleSessionRepair(ctx, store) {
 }
 /** Remote CLI models in DSH's model picker and main conversation. */
 export function installChat(ctx, service, projects, workspace) {
-    const { access, files } = workspace;
+    const { access, files, workspaces } = workspace;
     ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
         const host = scoped;
         const steps = new Map();
@@ -64,5 +65,47 @@ export function installChat(ctx, service, projects, workspace) {
         scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
         for (const agent of host.agents.list?.() ?? [])
             wake(agent);
+        // Sessions other DSH instances started on shared hosts continue here as conversations in their remote workspaces.
+        const controller = (name) => {
+            const value = scoped.get(name);
+            if (!value)
+                throw new Error(`DSH ${name === 'sessionController' ? 'sessions are' : 'workspaces are'} not available yet`);
+            return value;
+        };
+        const adoption = new SharedChatAdoption(projects, {
+            anchor: async (hostId, cwd, signal) => (await workspaces.create(hostId, cwd, signal)).path,
+            workspace: async (path) => String((await controller('workspaceController').create({ path })).workspace.workspaceId),
+            sessions: async () => {
+                const items = (await controller('sessionController').list({})).items ?? [];
+                return new Map(items.map(item => [item.sessionId, { blank: item.blank === true }]));
+            },
+            create: async (workspaceId, sessionId) => String((await controller('sessionController').create({ workspaceId, sessionId })).sessionId),
+            select: async (sessionId, selection) => {
+                await controller('sessionController').selectModel({ sessionId, provider: selection.provider, model: selection.model, ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) });
+                // The composer's permission decides the CLI mode of the next message: start from the mode the session has. DSH has
+                // no read-only preset by default; a permission without one takes the closest stricter preset, else the strictest there is.
+                const presets = scoped.get('permissionPresets'), session = scoped.sessions.get(sessionId);
+                if (!selection.permission || !session || !presets?.set)
+                    return;
+                const levels = ['read-only', 'workspace-write', 'auto', 'danger-full-access'], at = levels.indexOf(selection.permission);
+                for (const preset of [...levels.slice(0, at + 1).reverse(), ...levels.slice(at + 1)]) {
+                    try {
+                        presets.set(session, preset);
+                        return;
+                    }
+                    catch { /* Not a preset of this DSH: try the next one. */ }
+                }
+            },
+            rename: async (sessionId, title) => { await controller('sessionController').rename({ sessionId, title }); },
+            wake: sessionId => { const agent = host.agents.get(sessionId); if (agent)
+                adapter.sync(agent); },
+            // DSH has no logger service by default: its output log keeps the reason a conversation could not be added.
+            warn: message => { const logger = loggerOf(scoped); if (logger?.warn)
+                logger.warn(message);
+            else
+                console.warn(`[dsh-remote-agents] ${message}`); },
+        });
+        adoption.start();
+        scoped.effect(() => () => adoption.close());
     });
 }

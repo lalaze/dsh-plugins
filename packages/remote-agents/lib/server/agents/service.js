@@ -538,6 +538,11 @@ export class RemoteAgentsService {
         const timeline = task.agentId ? await this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
         return { agent: delegated ? this.observeDelegation(task, live) : this.summarize(task, live), permissions: live?.pendingPermissions ?? [], timeline };
     }
+    /** Saved output only: nothing is restored or attached, so reading many sessions never connects their relays. */
+    async timeline(id, cursor, direction) {
+        const task = this.task(id);
+        return task.agentId ? this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
+    }
     async reply(id) {
         const task = this.task(id);
         return task.agentId ? this.connection(task.hostId).backend.reply(task.agentId) : '';

@@ -99,9 +99,12 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     /**
      * Wake a conversation whose last remote response was cut off when DSH quit or reloaded the plugin. Its turn
      * streams the output produced meanwhile and waits for the remote turn to finish. Only a conversation still
-     * routed to a remote CLI is woken: another model would answer the notice instead.
+     * routed to a remote CLI is woken: another model would answer the notice instead. A session continued from
+     * another DSH is woken the same way to show its saved history; it has made no request yet, so it has no header.
      */
     sync(agent: SyncAgent): boolean;
+    /** A continued session's saved history, read from its start, as one markdown block. */
+    private history;
     stream(options: GenerateOptions): AsyncGenerator<StreamChunk>;
 }
 export {};

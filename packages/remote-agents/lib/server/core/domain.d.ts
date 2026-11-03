@@ -54,6 +54,8 @@ export interface Choice {
 export declare function permissionModes(provider: string, modes: Choice[]): Choice[];
 /** The DSH conversation's permission, as its preset's sandbox mode or `auto` for Auto review. */
 export type DshPermission = 'read-only' | 'workspace-write' | 'danger-full-access' | 'auto';
+/** The DSH permission matching a CLI mode, for a conversation that continues a session started elsewhere. */
+export declare function modePermission(provider: string, modeId: string | undefined): DshPermission | undefined;
 /** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
 export declare function presetMode(provider: string, modes: Choice[], permission: DshPermission | undefined): string | undefined;
 /** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
@@ -264,6 +266,8 @@ export interface Task extends TaskInput {
             cursor: Cursor | null;
             done?: true;
         };
+        /** A session another DSH started, continued here: its saved history is the conversation's first response. */
+        history?: 'pending';
     };
     serverId: string;
     title: string;

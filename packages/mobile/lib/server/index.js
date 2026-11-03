@@ -26,7 +26,7 @@ const failure = (error) => {
 export async function apply(ctx, config = {}) {
     const log = (message) => ctx.get('logger')?.warn?.(message) ?? console.warn(`[dsh-mobile] ${message}`);
     const version = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8')).version;
-    const hub = await Hub.open({ stateDir: config.stateDir ?? defaultStateDir(), host: dshHost(ctx), tags: () => ctx.get('workspaceTags'), version, defaults: { relay: config.relay, appUrl: config.appUrl }, log });
+    const hub = await Hub.open({ stateDir: config.stateDir ?? defaultStateDir(), host: dshHost(ctx), tags: () => ctx.get('workspaceTags'), tasks: () => ctx.get('remoteAgentsTasks'), version, defaults: { relay: config.relay, appUrl: config.appUrl }, log });
     await hub.start();
     ctx.effect(() => () => { void hub.close(); });
     // The host connection authenticates these routes; only the owner's browsers reach them.

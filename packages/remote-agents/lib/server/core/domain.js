@@ -22,6 +22,11 @@ const PRESET_MODES = {
     claude: { 'read-only': 'default', 'workspace-write': 'acceptEdits', 'danger-full-access': 'bypassPermissions', auto: 'auto' },
     codex: { 'read-only': 'read-only', 'workspace-write': 'workspace-write', 'danger-full-access': 'full-access', auto: 'auto-review' },
 };
+/** The DSH permission matching a CLI mode, for a conversation that continues a session started elsewhere. */
+export function modePermission(provider, modeId) {
+    const modes = PRESET_MODES[provider];
+    return modes && modeId ? Object.keys(modes).find(permission => modes[permission] === modeId) : undefined;
+}
 /** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
 export function presetMode(provider, modes, permission) {
     const mode = permission && PRESET_MODES[provider]?.[permission];

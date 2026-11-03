@@ -3,7 +3,7 @@ import type { LaunchSharing } from '../sharing/sharing.js';
 import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type SharedWorkspace, type Task, type UsageReport } from '../core/domain.js';
+import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
 export interface UsageOptions {
     /** The conversation's selected route; picks its CLI when the conversation used several. */
     route?: string;
@@ -113,6 +113,8 @@ export declare class RemoteAgentsService {
     state(id: string): Promise<AgentState>;
     /** Saved output stays readable while the SSH host is offline. */
     detail(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<AgentDetail>;
+    /** Saved output only: nothing is restored or attached, so reading many sessions never connects their relays. */
+    timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage | null>;
     reply(id: string): Promise<string>;
     messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<import("../core/domain.js").MessageTimeline>;
     setThinking(id: string, thinkingOptionId?: string): Promise<void>;

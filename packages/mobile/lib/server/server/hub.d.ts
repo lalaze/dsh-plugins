@@ -16,6 +16,8 @@ export interface HubOptions {
     stateDir: string;
     host: HostApi;
     tags?: () => WorkspaceTagsService | undefined;
+    /** Remote Agents' `remoteAgentsTasks` service, when installed. */
+    tasks?: () => unknown;
     version: string;
     /** Initial settings for a new state; the settings page changes them later. */
     defaults?: {
@@ -38,6 +40,9 @@ export declare class Hub {
     private readonly lastFinished;
     private changedTimer?;
     private stops;
+    private tasksTimer?;
+    private tasksDue;
+    private tasksSeen?;
     private constructor();
     static open(options: HubOptions): Promise<Hub>;
     get state(): import("./store.js").State;
@@ -47,6 +52,12 @@ export declare class Hub {
     private restartRelay;
     /** Tell phones when tags change. Workspace Tags may load after this plugin, so look for it until it is there. */
     private followTags;
+    /**
+     * Tell phones when the task list changes. Remote Agents saves often while a reply streams, so the list is compared
+     * before telling anyone; it is also checked while a phone is connected, as a finished turn saves nothing.
+     */
+    private followTasks;
+    private tasks;
     tags(): TagState;
     online(phoneId: string): boolean;
     /** A phone's socket from the relay, before the handshake. */
@@ -92,6 +103,7 @@ export declare class Connection {
     private frame;
     send(message: HubMessage): void;
     changed(cursor: string): void;
+    tasksChanged(): void;
     paired(): void;
     /** Grants changed: streams the phone may no longer read end. */
     updated(): void;
