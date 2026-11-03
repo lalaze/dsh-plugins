@@ -2,7 +2,7 @@
 import { useSyncExternalStore } from 'react'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { allowAllAccess, bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
@@ -46,6 +46,14 @@ const approval = (id: string) => ({ key: `approval:${id}`, kind: 'approval', ses
 function hook<T>(snapshot: T) {
   return function select<S>(selector: (state: T) => S): S { return selector(snapshot) }
 }
+/** jsdom rows have an empty rect, so a negative clientY lands on the top half and a positive one on the bottom. */
+function fireDrag(row: HTMLElement, kind: 'dragOver' | 'drop', half: 'before' | 'after'): void {
+  const event = kind === 'dragOver' ? createEvent.dragOver(row) : createEvent.drop(row)
+  Object.defineProperty(event, 'clientY', { value: half === 'before' ? -1 : 1 })
+  Object.defineProperty(event, 'dataTransfer', { value: { effectAllowed: '', dropEffect: '' } })
+  fireEvent(row, event)
+}
+const dragData = () => ({ effectAllowed: 'uninitialized', dropEffect: 'none', setData: vi.fn() })
 const group = (key: string): GroupNode => ({
   key, workspaceId: key === UNGROUPED_KEY ? undefined : wid(key), cwd: undefined, createdAt: undefined, label: key,
   sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
@@ -428,6 +436,67 @@ describe('WorkspaceBrowser with tags', () => {
     fireEvent.click(sectionHeader('Client'))
     expect(runtime.view.getSnapshot().collapsed).toEqual({ 'tag:client': true })
     expect(sectionNames()).toEqual([['Client', []], ['Urgent', ['alpha']], ['Untagged', ['delta', 'gamma']]])
+  })
+
+  /** Session rows titled `name`, one per section copy, in document order. */
+  const sessionRows = (name: string) => screen.getAllByRole('treeitem')
+    .filter(row => row.hasAttribute('aria-selected') && within(row).queryByText(name) !== null)
+
+  it('reorders Sessions inside Status sections and remembers the order for the Workspace', async () => {
+    const { runtime, store } = await mount({
+      useSessions: hook(sessionState([summary('a1', { running: true }), summary('a2'), summary('a3'),
+        summary('c1'), summary('c2'), summary('c3'), summary('c4')])),
+      useSessionStatus: hook(statuses({
+        c1: { pendingInteraction: approval('c1') }, c3: { pendingInteraction: approval('c3') }, c4: { completionUnread: true },
+      })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1', 'a2', 'a3']), workspace('gamma', ['c1', 'c2', 'c3', 'c4'])])),
+    })
+    act(() => { runtime.setMode('status') })
+    expect(store.getSnapshot().orderBy).toBe('updated')
+    // Running lists every Session of its Workspace; the drop saves the Workspace's order and selects Manual.
+    fireEvent.dragStart(sessionRows('a3')[0]!, { dataTransfer: dragData() })
+    fireDrag(sessionRows('a1')[0]!, 'dragOver', 'before')
+    fireDrag(sessionRows('a1')[0]!, 'drop', 'before')
+    expect(store.getSnapshot().orderBy).toBe('manual')
+    expect(store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['a3', 'a1', 'a2'])
+    expect(sectionSessions()[2]).toEqual(['Running', [['alpha', ['a3', 'a1', 'a2']]]])
+    // Waiting shows only c1 and c3; moving c3 above c1 keeps the hidden Sessions where they were.
+    fireEvent.dragStart(sessionRows('c3')[0]!, { dataTransfer: dragData() })
+    fireDrag(sessionRows('c1')[0]!, 'drop', 'before')
+    expect(store.getSnapshot().sessionOrderByAccount.gamma).toEqual(['c3', 'c1', 'c2', 'c4'])
+    expect(sectionSessions()[0]).toEqual(['Waiting for you', [['gamma', ['c3', 'c1']]]])
+    // A Completed row does not drop among the same Workspace's Waiting rows.
+    const completed = sessionRows('c4')[0]!
+    fireEvent.dragStart(completed, { dataTransfer: dragData() })
+    fireDrag(sessionRows('c3')[0]!, 'dragOver', 'before')
+    fireDrag(sessionRows('c3')[0]!, 'drop', 'before')
+    fireEvent.dragEnd(completed)
+    expect(store.getSnapshot().sessionOrderByAccount.gamma).toEqual(['c3', 'c1', 'c2', 'c4'])
+  })
+
+  it('keeps a Session drag inside the Tag section it started in', async () => {
+    const { runtime, store } = await mount({
+      useSessions: hook(sessionState([summary('a1'), summary('a2'), summary('a3')])),
+      useSessionStatus: hook(statuses({})),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1', 'a2', 'a3'])])),
+    })
+    act(() => { runtime.setMode('tag') })
+    fireEvent.click(workspaceRow('alpha')[0]!)
+    // Alpha is in Client and in Urgent: the second copy of each row belongs to Urgent.
+    expect(sessionRows('a1')).toHaveLength(2)
+    const source = sessionRows('a3')[0]!
+    fireEvent.dragStart(source, { dataTransfer: dragData() })
+    fireDrag(sessionRows('a1')[1]!, 'dragOver', 'before')
+    fireDrag(sessionRows('a1')[1]!, 'drop', 'before')
+    fireEvent.dragEnd(source)
+    expect(store.getSnapshot().sessionOrderByAccount.alpha).toBeUndefined()
+    fireEvent.dragStart(source, { dataTransfer: dragData() })
+    fireDrag(sessionRows('a1')[0]!, 'drop', 'before')
+    expect(store.getSnapshot().sessionOrderByAccount.alpha).toEqual(['a3', 'a1', 'a2'])
+    expect(sectionSessions().map(([label, rows]) => [label, rows])).toEqual([
+      ['Client', [['alpha', ['a3', 'a1', 'a2']]]],
+      ['Urgent', [['alpha', ['a3', 'a1', 'a2']]]],
+    ])
   })
 
   it('shows tag dots and opens the tag menu from a right-click or the row menu', async () => {

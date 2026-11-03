@@ -233,6 +233,10 @@ function ViewOptionsMenu({ renderRemoteOptions, groupBy, sectionMode, orderBy, a
 interface DragState {
   /** Workspace id, or {@link UNGROUPED_KEY} for the browser-local loose-session account. */
   accountKey: string
+  // workspace-tags: a Workspace can show in several Tag sections, or in Waiting and Completed at
+  // once, so a Session drops only among the rows of the copy it left.
+  /** The account key, or `<section key>/<account key>` inside a Tag or Status section. */
+  scope: string
   sessionId: SessionNode['id']
   /** Source row was pinned at drag start; drop targets share the pinned block. */
   pinned: boolean
@@ -481,18 +485,21 @@ function SessionTree({
     return false
   }
   const now = Date.now()
-  const commitSessionDrag = (activeDrag: DragState, over: NonNullable<DragState['over']>): void => {
+  // workspace-tags: `renderedSessions` are the rows the drag passed over, which inside a
+  // section are that section's Sessions of the Workspace rather than its sidebar group's.
+  const commitSessionDrag = (
+    activeDrag: DragState,
+    over: NonNullable<DragState['over']>,
+    renderedSessions: readonly SessionNode[],
+  ): void => {
     if (sessionDropCommitted.current) return
     sessionDropCommitted.current = true
     setDrag(null)
-    const group = groups.find(candidate => candidate.key === activeDrag.accountKey)
-    if (group === undefined) return
     if (over.id === activeDrag.sessionId) return
     const accountSessionIds = activeDrag.accountKey === UNGROUPED_KEY
       ? ungroupedSessionIds
       : workspaces.find(workspace => workspace.workspaceId === activeDrag.accountKey)?.sessionIds
     if (accountSessionIds === undefined) return
-    const renderedSessions = watermarkRows(group.sessions, sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE).rows
     const nextOrder = sessionDragOrder(accountSessionIds, renderedSessions, activeDrag, over)
     if (nextOrder !== undefined) setSessionOrder(activeDrag.accountKey, nextOrder)
   }
@@ -578,7 +585,7 @@ function SessionTree({
 
   const rowKeys: string[] = groups.length === 0 ? ['empty'] : []
   // workspace-tags: `section` marks a Workspace in a Status section, whose Sessions are only
-  // those in the section's state: none drag, and a folded row's mark counts only them.
+  // those in the section's state: they drag among themselves, and a folded row's mark counts only them.
   // Waiting, Completed and Running pass `toggle` and fold on their own. Waiting and Completed show all
   // their rows; Running, which lists every Session of its Workspaces, passes `limit` to keep the
   // sidebar's "Show more", raised from its own rows since the sidebar's may be folded.
@@ -587,8 +594,10 @@ function SessionTree({
     depth: number,
     section?: { activity: RowActivity | undefined; toggle?: () => void; limit?: boolean },
     externalChildren?: ReactNode,
+    sectionKey?: string,
   ): ReactNode => {
     const workspaceId = group.workspaceId
+    const dragScope = sectionKey === undefined ? group.key : `${sectionKey}/${group.key}`
     const children = childrenByParent.get(group.key) ?? []
     const compatibleDrag = workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key)
     const baseline = section?.limit === true
@@ -728,14 +737,14 @@ function SessionTree({
         {sessions.map((node) => {
         // Session drag never leaves its browser-local account, and pinned
         // rows reorder only within their leading pinned block.
-          const sameGroupDrag = drag !== null && drag.accountKey === group.key
+          const sameGroupDrag = drag !== null && drag.scope === dragScope
           const compatibleTarget = sameGroupDrag && drag.pinned === node.pinned
           const normalizeHalf = (half: 'before' | 'after'): 'before' | 'after' =>
             node.blank ? 'after' : half
           const dragProps = {
             start: () => {
               sessionDropCommitted.current = false
-              setDrag({ accountKey: group.key, sessionId: node.id, pinned: node.pinned, over: null })
+              setDrag({ accountKey: group.key, scope: dragScope, sessionId: node.id, pinned: node.pinned, over: null })
             },
             active: compatibleTarget,
             marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
@@ -748,10 +757,10 @@ function SessionTree({
             drop: (half: 'before' | 'after') => {
             /* v8 ignore next -- narrowing guard: Rows gates drop on `active`, which is false while the drag state is null. */
               if (drag === null) return
-              commitSessionDrag(drag, { id: node.id, half: normalizeHalf(half) })
+              commitSessionDrag(drag, { id: node.id, half: normalizeHalf(half) }, sessions)
             },
             end: () => {
-              if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
+              if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over, sessions)
               else setDrag(null)
               sessionDropCommitted.current = false
             },
@@ -768,7 +777,7 @@ function SessionTree({
               onReveal={node.id === revealSessionId && group.key === revealGroup
                 ? () => { onSessionRevealed(node.id) }
                 : undefined}
-              drag={section === undefined ? dragProps : undefined}
+              drag={dragProps}
               t={t}
             />
           )
@@ -810,7 +819,7 @@ function SessionTree({
       else { setDrag(old => old?.over ? { ...old, over: null } : old); setWorkspaceDrag(old => old?.over ? { ...old, over: null } : old) }
     },
     renderLocal: (group, depth, children, section) => renderGroup({ ...group, containsCurrent: !panelActive && group.containsCurrent }, depth,
-      section?.active ? { activity: section.activity, toggle: section.toggle, limit: section.running } : undefined, children),
+      section?.active ? { activity: section.activity, toggle: section.toggle, limit: section.running } : undefined, children, section?.key),
     empty: <EmptySessions rowState={rowState} onLeaveArchivedOnly={onLeaveArchivedOnly} filter={spaceTag === null ? undefined : { tag: spaceTag, clear: () => { tagging?.runtime.setFilter(null) } }} t={t} />,
   })
   return (
@@ -916,7 +925,7 @@ function FlatList({
               drag={{
                 start: () => {
                   dropCommitted.current = false
-                  setDrag({ accountKey: FLAT_SESSION_ORDER_KEY, sessionId: node.id, pinned: node.pinned, over: null })
+                  setDrag({ accountKey: FLAT_SESSION_ORDER_KEY, scope: FLAT_SESSION_ORDER_KEY, sessionId: node.id, pinned: node.pinned, over: null })
                 },
                 active,
                 marker: active && drag.over?.id === node.id ? drag.over.half : null,
