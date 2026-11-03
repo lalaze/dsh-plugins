@@ -38,6 +38,8 @@ export declare class RemoteAgentsService {
     private readonly connections;
     /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
     readonly sharedWorkspaceListeners: Set<(hostId: string) => void>;
+    /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
+    readonly sharedHistoryListeners: Set<(taskId: string) => void>;
     private readonly locks;
     private readonly restoring;
     private readonly catalogListeners;
@@ -123,6 +125,12 @@ export declare class RemoteAgentsService {
     detail(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<AgentDetail>;
     /** Saved output only: nothing is restored or attached, so reading many sessions never connects their relays. */
     timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage | null>;
+    /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
+    sender(hostId: string, instance: string, label: string): {
+        self: true;
+    } | {
+        name: string;
+    };
     reply(id: string): Promise<string>;
     messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<import("../core/domain.js").MessageTimeline>;
     setThinking(id: string, thinkingOptionId?: string): Promise<void>;

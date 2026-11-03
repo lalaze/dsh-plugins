@@ -74,6 +74,7 @@ export class SshBackend {
     cleaning;
     /** Sessions shared with other DSH instances on the same SSH account; needs relays. */
     shared;
+    historyListeners = new Set();
     constructor(host, store, transport, sharing = () => undefined) {
         this.host = host;
         this.store = store;
@@ -94,12 +95,23 @@ export class SshBackend {
                 loaded: id => this.histories.has(id),
                 unload: id => { if (!this.sessions.has(id) && !this.restoring.has(id) && !this.starting.has(id))
                     this.histories.delete(id); },
+                followed: id => { for (const listener of this.historyListeners) {
+                    try {
+                        listener(id);
+                    }
+                    catch { /* A listener must not stop the registry. */ }
+                } },
             });
     }
     startSharing() { if (!this.closed)
         this.shared?.start(); }
     sharingError() { return this.shared?.status(); }
     controller(taskId) { return this.shared?.controller(taskId); }
+    onSharedHistory(listener) {
+        this.historyListeners.add(listener);
+        return () => { this.historyListeners.delete(listener); };
+    }
+    sender(instance, label) { return this.shared?.sender(instance, label) ?? { name: label }; }
     async sharedWorkspaces(timeout) { if (!this.shared)
         return []; return this.shared.listWorkspaces(timeout); }
     onSharedWorkspaces(listener) {
@@ -636,7 +648,9 @@ done`}`, 15_000, { login: false });
                 session = await this.attached(this.store.task(t => t.id === task.id) ?? task);
             }
             const files = await transferAttachments(this.transport, this.store.directory, task.id, messageId, task.executionCwd ?? task.cwd, attachments, signal);
-            await session.send(attachmentPrompt(text, files), messageId, files);
+            // Other DSH instances name where a message they did not send came from.
+            const sender = this.shared?.identity;
+            await session.send(attachmentPrompt(text, files), messageId, files, sender);
         }
         finally {
             release();

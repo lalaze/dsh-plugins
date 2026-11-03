@@ -23,6 +23,8 @@ export interface SharedOwner {
     loaded(taskId: string): boolean;
     /** Close a history nothing uses, to free its memory. */
     unload(taskId: string): void;
+    /** A history another DSH drives was brought up to date here, or that DSH's live status changed. */
+    followed?(taskId: string): void;
 }
 /**
  * The sessions of one SSH host, shared with every DSH connected to the same SSH account. The registry
@@ -71,6 +73,17 @@ export declare class SharedSessions {
     private readonly listener;
     constructor(transport: SshTransport, store: Store, owner: SharedOwner);
     private get me();
+    /** Who sent a message recorded in a shared history: this DSH, or another one by name. */
+    sender(instance: string, label: string): {
+        self: true;
+    } | {
+        name: string;
+    };
+    /** This DSH as the sender of the messages it records, once the registry answered. */
+    get identity(): {
+        instance: string;
+        label: string;
+    } | undefined;
     /** Another DSH's name; one on the same computer as this one is told apart by its ID. */
     private name;
     start(): void;

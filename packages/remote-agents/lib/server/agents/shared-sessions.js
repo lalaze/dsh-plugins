@@ -118,6 +118,12 @@ export class SharedSessions {
         store.changeListeners.add(this.listener);
     }
     get me() { return this.instance?.id ?? ''; }
+    /** Who sent a message recorded in a shared history: this DSH, or another one by name. */
+    sender(instance, label) {
+        return instance === this.me ? { self: true } : { name: this.name(instance, label) };
+    }
+    /** This DSH as the sender of the messages it records, once the registry answered. */
+    get identity() { return this.instance && { instance: this.instance.id, label: this.instance.label }; }
     /** Another DSH's name; one on the same computer as this one is told apart by its ID. */
     name(instance, label) {
         const name = label.slice(0, 80) || 'another DSH';
@@ -342,7 +348,7 @@ export class SharedSessions {
             void this.serial(id, () => this.push(id)).catch(() => { });
         // Histories are copied when read here; one already open, such as a session on screen, follows right away.
         else if (this.owner.loaded(id))
-            void this.serial(id, () => this.pull(id)).catch(() => { });
+            void this.serial(id, () => this.pull(id)).then(() => this.owner.followed?.(id)).catch(() => { });
         this.adoptIfOrphaned(id);
     }
     /** A CLI still running on the host whose DSH went away, or never had one, is driven from here. */

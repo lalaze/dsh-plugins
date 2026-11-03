@@ -46,6 +46,14 @@ export interface Backend {
     sharedWorkspaces?(timeout?: number): Promise<SharedWorkspace[]>;
     /** Called when the host reports its shared workspaces changed; returns the unsubscribe function. */
     onSharedWorkspaces?(listener: () => void): () => void;
+    /** Called with a task whose history another DSH drives, after it was brought up to date here; returns the unsubscribe function. */
+    onSharedHistory?(listener: (taskId: string) => void): () => void;
+    /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
+    sender?(instance: string, label: string): {
+        self: true;
+    } | {
+        name: string;
+    };
     shareWorkspace?(path: string): Promise<void>;
     setWorkspaceTags?(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
     /** Stop sharing the given sessions started here; other DSH instances forget them. */
@@ -116,10 +124,17 @@ export declare class SshBackend implements Backend {
     private cleaning?;
     /** Sessions shared with other DSH instances on the same SSH account; needs relays. */
     private readonly shared?;
+    private readonly historyListeners;
     constructor(host: HostConfig, store: Store, transport?: SshTransport, sharing?: () => LaunchSharing | undefined);
     startSharing(): void;
     sharingError(): string | undefined;
     controller(taskId: string): string | undefined;
+    onSharedHistory(listener: (taskId: string) => void): () => void;
+    sender(instance: string, label: string): {
+        self: true;
+    } | {
+        name: string;
+    };
     sharedWorkspaces(timeout?: number): Promise<SharedWorkspace[]>;
     onSharedWorkspaces(listener: () => void): () => void;
     setWorkspaceTags(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;

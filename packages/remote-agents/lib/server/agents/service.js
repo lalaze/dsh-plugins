@@ -9,6 +9,8 @@ export class RemoteAgentsService {
     connections = new Map();
     /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
     sharedWorkspaceListeners = new Set();
+    /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
+    sharedHistoryListeners = new Set();
     locks = new Map();
     restoring = new Map();
     catalogListeners = new Set();
@@ -203,6 +205,8 @@ export class RemoteAgentsService {
             this.connections.set(hostId, connection);
             connection.backend.onSharedWorkspaces?.(() => { for (const listener of this.sharedWorkspaceListeners)
                 listener(hostId); });
+            connection.backend.onSharedHistory?.(taskId => { for (const listener of this.sharedHistoryListeners)
+                listener(taskId); });
         }
         return connection;
     }
@@ -564,6 +568,12 @@ export class RemoteAgentsService {
     async timeline(id, cursor, direction) {
         const task = this.task(id);
         return task.agentId ? this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
+    }
+    /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
+    sender(hostId, instance, label) {
+        if (instance === this.store.instanceId())
+            return { self: true };
+        return this.connections.get(hostId)?.backend.sender?.(instance, label) ?? { name: label };
     }
     async reply(id) {
         const task = this.task(id);

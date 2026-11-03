@@ -74,6 +74,8 @@ export declare class Store {
     chatFast(sessionId: string): boolean;
     /** The reasoning effort last explicitly selected for a native chat model route, if any. */
     chatEffort(route: string): string | undefined;
+    /** This DSH's identity for shared hosts, if it was created. */
+    instanceId(): string | undefined;
     /** This DSH's identity for shared hosts, created on first use. */
     instance(): Promise<Instance>;
     tagSync(key: string): TagSyncRecord | undefined;

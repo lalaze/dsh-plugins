@@ -66,10 +66,31 @@ export function installChat(ctx, service, projects, workspace) {
         scoped.effect(() => () => adapter.close());
         // A response cut off by quitting DSH or reloading the plugin catches up when its conversation opens.
         // Restore only that conversation: eagerly attaching every saved relay would start an SSH storm on launch.
-        const wake = (agent) => { void service.resumeConversation(agent.session.id).then(() => adapter.sync(agent)).catch(() => { }); };
+        // Turns another DSH or Open sessions ran in its CLI session meanwhile are shown then too.
+        const wake = (agent) => { void service.resumeConversation(agent.session.id).then(() => adapter.sync(agent) || adapter.catchUp(agent)).catch(() => { }); };
         scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
         for (const agent of host.agents.list?.() ?? [])
             wake(agent);
+        // A conversation in use here shows a turn another DSH ran in its CLI session once that turn ends. The history
+        // changes many times during the turn: look once it has been quiet for a moment.
+        const followed = new Map();
+        const historyChanged = (taskId) => {
+            const sessionId = service.store.task(t => t.id === taskId)?.chat?.sessionId;
+            if (!sessionId)
+                return;
+            clearTimeout(followed.get(taskId));
+            const timer = setTimeout(() => {
+                followed.delete(taskId);
+                const agent = host.agents.get(sessionId);
+                if (agent)
+                    void adapter.catchUp(agent).catch(() => { });
+            }, 1000);
+            timer.unref?.();
+            followed.set(taskId, timer);
+        };
+        service.sharedHistoryListeners.add(historyChanged);
+        scoped.effect(() => () => { service.sharedHistoryListeners.delete(historyChanged); for (const timer of followed.values())
+            clearTimeout(timer); followed.clear(); });
         // Sessions other DSH instances started on shared hosts continue here as conversations in their remote workspaces.
         const controller = (name) => {
             const value = scoped.get(name);

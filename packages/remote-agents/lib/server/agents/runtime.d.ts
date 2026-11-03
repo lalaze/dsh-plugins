@@ -89,7 +89,11 @@ export declare class CliSession {
      */
     restore(): Promise<void>;
     private protocol;
-    send(text: string, messageId: string, attachments?: readonly NativeAttachment[]): Promise<void>;
+    /** `sentBy` names this DSH in a shared history, so the others can tell where the message came from. */
+    send(text: string, messageId: string, attachments?: readonly NativeAttachment[], sentBy?: {
+        instance: string;
+        label: string;
+    }): Promise<void>;
     private confirm;
     private complete;
     private setContext;
