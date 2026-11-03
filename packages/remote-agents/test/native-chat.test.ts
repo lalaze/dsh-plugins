@@ -698,4 +698,9 @@ test('follow-ups send the CLI only what it has not seen: never its own replies, 
   const prompt = sent();
   assert.match(prompt, /^Conversation context \(already occurred; do not repeat completed actions\):\nuser: Ask DeepSeek instead\n\nassistant: DeepSeek answer\n\nassistant: Claude CLI answer\n\nCurrent user request:\nBack to the CLI$/);
   assert.doesNotMatch(prompt, /First reply from the CLI|Now run the linter/);
+
+  // The message sent last was edited and resent, so DSH no longer has it: the CLI's latest reply still bounds the context.
+  const edited = user('Back to the CLI, edited');
+  await collect(adapter.stream({ ...first, messages: [user('Fix the tests, edited'), own, follow, own, ...detour, own, edited] }));
+  assert.equal(sent(), 'Back to the CLI, edited', 'nothing the CLI already saw is sent again');
 });

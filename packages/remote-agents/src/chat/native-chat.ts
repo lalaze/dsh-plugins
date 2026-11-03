@@ -297,14 +297,17 @@ export class RemoteCliAdapter extends LlmAdapter {
     const controller = new AbortController(), signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
     signal.throwIfAborted();
     const currentIndex = lastUser ? options.messages.lastIndexOf(lastUser) : -1;
-    const previousIndex = task?.chat?.lastUserId ? options.messages.findIndex(m => m.id === task.chat?.lastUserId) : -1;
-    const contextStart = previousIndex >= 0 ? previousIndex + 1 : 0;
     // A bound CLI session already holds its own replies, including what sync turns showed, such as a continued session's
     // history: only human messages and other models' replies are context. A new session has none of them, so it gets all.
     const own = (m: (typeof options.messages)[number]) => {
       const source = m.role === 'assistant' ? m.source as { provider?: unknown; model?: unknown } | undefined : undefined;
       return !!task && !!source && CHAT_PROVIDERS.includes(String(source.provider)) && String(source.model ?? '').startsWith(`${project.id}/${encodeURIComponent(provider.id)}/`);
     };
+    // Everything before the CLI's latest reply reached it too. The message sent last can be gone from the conversation,
+    // as after editing or resending it, or a compaction: without this bound the whole history and its files went again.
+    const previousIndex = task?.chat?.lastUserId ? options.messages.findIndex(m => m.id === task.chat?.lastUserId) : -1;
+    const lastOwn = task ? options.messages.slice(0, Math.max(currentIndex, 0)).findLastIndex(own) : -1;
+    const contextStart = Math.max(previousIndex + 1, lastOwn + 1);
     const previous = options.messages.slice(contextStart, currentIndex).filter(m => m.role === 'assistant' ? !own(m) : m.role === 'user' && (!m.source || m.source.kind === 'user'))
       .map(m => `${m.role}: ${blockText(m.role === 'user' ? contentOf(m) : m.content)}`).filter(t => t.trim() !== 'user:' && t.trim() !== 'assistant:').join('\n\n');
     const prompt = previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt;
