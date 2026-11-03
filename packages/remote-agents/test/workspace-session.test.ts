@@ -57,7 +57,7 @@ test('a workspace switch during CLI discovery is rejected before saving or start
   let cwd = '/srv/app';
   const service = new RemoteAgentsService(store, host => {
     const backend = remote.backend(host);
-    return { ...backend, providers: async (...args) => { const providers = await backend.providers(...args); cwd = '/srv/other'; return providers; } };
+    return { ...backend, target: async (...args) => { const provider = await backend.target(...args); cwd = '/srv/other'; return provider; } };
   });
   t.after(() => service.close());
   const handler = createHandler(service, undefined, async () => ({ hostIds: [hostId], cwd }));

@@ -103,9 +103,10 @@ class FakeSsh implements SshTransport {
   accountChecks: string[] = [];
   store?: Store;
   missingPath?: string;
+  execs: { script: string; login: boolean | undefined }[] = [];
   constructor(readonly installed = ['codex']) {}
-  async exec(script: string) {
-    this.scripts.push(script);
+  async exec(script: string, _timeout?: number, options: { login?: boolean } = {}) {
+    this.scripts.push(script); this.execs.push({ script, login: options.login });
     if (this.missingPath && script.startsWith(`cd ${quote(this.missingPath)} &&`)) throw new Error(`Remote directory does not exist: ${this.missingPath}`);
     if (script === 'printf \'%s\' "$HOME"') return '/home/builder';
     if (script.includes('uname -n')) return 'machine\0builder\0machine-id-1\0';
@@ -148,6 +149,46 @@ test('disabled CLI executables are never probed and changing selection invalidat
   assert.deepEqual(next.map(p => p.id), ['codebuddy']);
   assert.ok(ssh.children.slice(before).every(c => c.provider === 'codebuddy'));
   assert.equal(ssh.admissions.length, 0);
+});
+
+test('the machine identity and home probes skip the remote login shell; CLI discovery keeps it', async t => {
+  const { service, ssh, hostId } = await fixture(t);
+  await service.discoverHost(hostId);
+  const identity = ssh.execs.find(e => e.script.includes('uname -n'));
+  const home = ssh.execs.find(e => e.script === 'printf \'%s\' "$HOME"');
+  const discovery = ssh.execs.find(e => e.script.includes("command -v 'codex'"));
+  assert.equal(identity?.login, false, 'identity recheck does not load the login shell');
+  assert.equal(home?.login, false, 'home directory does not load the login shell');
+  assert.equal(discovery?.login, undefined, 'CLI discovery keeps the login shell for PATH');
+});
+
+test('starting a session probes only the target CLI, not every enabled CLI', async t => {
+  const { service, ssh, request } = await fixture(t);
+  ssh.installed.push('claude', 'dsh');
+  const agent = await service.create(request); await tick();
+  // Only the codex CLI is launched to validate and start; claude and dsh are never spawned or even probed.
+  assert.ok(agent.started, 'the session started');
+  assert.ok(ssh.children.every(c => c.provider === 'codex'), 'no other CLI was launched');
+  assert.ok(ssh.scripts.every(s => !s.includes("command -v 'claude'") && !s.includes("command -v 'dsh'")), 'other CLIs are not probed for their path');
+});
+
+test('an idle history is freed from memory and reloaded on demand, while a live one is kept', async t => {
+  const { service, ssh, request, backend } = await fixture(t);
+  const agent = await service.create(request); await tick(); ssh.live.finish(); await tick();
+  const b = backend() as unknown as { histories: Map<string, unknown>; historyUsed: Map<string, number>; sweepHistories(): void };
+  await service.detail(agent.id); // load the history into memory
+  // A session with a live CLI keeps its history even past the idle window.
+  b.historyUsed.set(agent.id, 0); b.sweepHistories();
+  assert.ok(b.histories.has(agent.id), 'a live session keeps its history');
+  // Once archived, nothing live holds it, so an idle history is freed.
+  await service.archive(agent.id);
+  const before = (await service.detail(agent.id)).timeline!.entries.length;
+  b.historyUsed.set(agent.id, 0); b.sweepHistories();
+  assert.ok(!b.histories.has(agent.id), 'an idle, unread history is freed from memory');
+  // Reading it again reloads the same content from disk.
+  const reopened = (await service.detail(agent.id)).timeline!;
+  assert.equal(reopened.entries.length, before, 'the reopened history has the same entries');
+  assert.ok(b.histories.has(agent.id), 'reading reloads it');
 });
 
 test('changing a model resumes the same native thread and preserves earlier output', async t => {

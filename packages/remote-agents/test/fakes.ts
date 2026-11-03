@@ -55,6 +55,12 @@ export class FakeRemote {
       return { path: target, home: this.home, truncated: false, entries: options.entries === false ? [] : names.map(name => ({ name, path: `${target}/${name}` })) };
     },
     providers: async () => { this.discoveries++; const enabled = enabledProvidersOf(this.store?.hosts().find(h => h.id === host.id) ?? host); return structuredClone(this.catalog.filter(p => enabled.includes(p.id))); },
+    target: async (_cwd, providerId) => {
+      this.discoveries++;
+      const enabled = enabledProvidersOf(this.store?.hosts().find(h => h.id === host.id) ?? host);
+      const provider = enabled.includes(providerId) ? this.catalog.find(p => p.id === providerId) : undefined;
+      return structuredClone(provider ?? { id: providerId, label: providerId, status: 'unavailable' as const, models: [], modes: [] });
+    },
     create: async task => {
       let agent = this.receipts.get(task.id);
       if (!agent) {

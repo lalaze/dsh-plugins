@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { access, mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenSshTransport, quote } from '../src/core/ssh.js';
@@ -17,18 +17,20 @@ IFS= read -r dsh_startup_input || true
 export DSH_TEST_STARTUP_INPUT="$dsh_startup_input"
 ${options.startup ?? ''}
 `;
+  // Records each login-shell invocation, so a test can see the cached environment skip it.
+  const loginMark = `printf x >> ${quote(join(root, 'login-count'))}\n`;
   if (shell === 'bash') {
     await writeFile(profile, startup);
     await writeFile(executable, `#!/bin/sh
 [ "$1" = '-lic' ] || exit 97
-shift
+${loginMark}shift
 exec /bin/bash --noprofile --rcfile ${quote(profile)} -ic "$@"
 `, { mode: 0o755 });
   } else {
     await writeFile(join(root, '.zprofile'), 'export DSH_TEST_LOGIN=loaded\n');
     await writeFile(join(root, '.zshrc'), startup + 'test "$DSH_TEST_LOGIN" = loaded || exit 96\n');
     await writeFile(executable, `#!/bin/sh
-export ZDOTDIR=${quote(root)}
+${loginMark}export ZDOTDIR=${quote(root)}
 exec /bin/zsh "$@"
 `, { mode: 0o755 });
   }
@@ -36,7 +38,7 @@ exec /bin/zsh "$@"
   await writeFile(ssh, `#!${process.execPath}
 const { spawn } = require('node:child_process');
 const child = spawn('/bin/sh', ['-c', process.argv.at(-1)], {
-  stdio: 'inherit', env: { ...process.env, SHELL: ${JSON.stringify(executable)}, TMPDIR: ${JSON.stringify(temporary)} }
+  stdio: 'inherit', env: { ...process.env, HOME: ${JSON.stringify(root)}, SHELL: ${JSON.stringify(executable)}, TMPDIR: ${JSON.stringify(temporary)} }
 });
 child.on('error', () => process.exit(98));
 child.on('exit', code => process.exit(code ?? 99));
@@ -105,6 +107,16 @@ for (const shell of ['bash', 'zsh'] as const) {
     const { temporary, transport } = await fixture(t, shell, { startup: `export DSH_TEST_COMPLEX=${quote(value)}` });
     assert.equal(await transport.exec('printf "%s" "$DSH_TEST_COMPLEX"'), value);
     assert.deepEqual(await readdir(temporary), []);
+  });
+
+  test(`${shell}: a fresh captured environment is cached so a burst of commands starts the login shell once`, async t => {
+    try { await access(`/bin/${shell}`); } catch { t.skip('Shell unavailable'); return; }
+    const { root, transport } = await fixture(t, shell);
+    const logins = async () => (await readFile(join(root, 'login-count'), 'utf8').catch(() => '')).length;
+    assert.equal(await transport.exec('printf "%s" "${DSH_TEST_REMOTE_AUTH:-missing}"'), 'profile-loaded');
+    assert.equal(await logins(), 1, 'the first command starts the login shell');
+    assert.equal(await transport.exec('printf "%s" "${DSH_TEST_REMOTE_AUTH:-missing}"'), 'profile-loaded', 'the cached environment is still complete');
+    assert.equal(await logins(), 1, 'the second command reuses the cached environment');
   });
 
   test(`${shell}: failed or interrupted login initialization leaves no saved environment`, async t => {

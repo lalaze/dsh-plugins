@@ -106,10 +106,13 @@ function daemon(id, cwd, argv) {
   const stop = why => { reason ??= why; if (ended) return; signal('SIGTERM'); kill ??= setTimeout(() => signal('SIGKILL'), 5000); };
   process.on('SIGTERM', () => stop('terminated'));
   child.stdin.on('error', () => {});
+  // Wake the attached reader when new output lands, so it need not poll; coalesced to one signal per tick.
+  let dataNotify = false;
+  const notifyClient = () => { if (dataNotify) return; dataNotify = true; setImmediate(() => { dataNotify = false; if (client && !client.destroyed) client.write(JSON.stringify({ data: 1 }) + '\n'); }); };
   child.stdout.on('data', chunk => {
     if (reason === 'output-limit') return;
     if (size + chunk.length > LIMITS.output) { stop('output-limit'); return; }
-    fs.writeSync(out, chunk); size += chunk.length; idleSince = Date.now();
+    fs.writeSync(out, chunk); size += chunk.length; idleSince = Date.now(); notifyClient();
   });
   child.stderr.on('data', chunk => {
     errorTail.push(chunk); while (errorTail.length > 8) errorTail.shift();
@@ -163,13 +166,16 @@ async function attach(id, from) {
   const fd = fs.openSync('out.log', 'r');
   let position = Number(from);
   if (!Number.isSafeInteger(position) || position < 0 || position > fs.fstatSync(fd).size) { control({ missing: true, error: 'The relay output is shorter than the saved position' }); return; }
-  let gone = false, exit;
+  let gone = false, exit, dataPending = false, wake;
+  // The daemon signals new output; a missed edge is caught by the safety timeout below.
+  const wakeReader = () => { dataPending = true; if (wake) { const w = wake; wake = undefined; w(); } };
   const socket = createConnection('sock');
   socket.write('!' + JSON.stringify({ op: 'attach' }) + '\n');
-  socket.on('error', () => { gone = true; }); socket.on('close', () => { gone = true; });
+  socket.on('error', () => { gone = true; wakeReader(); }); socket.on('close', () => { gone = true; wakeReader(); });
   socket.on('data', lines(line => {
     let value; try { value = JSON.parse(line.toString('utf8')); } catch { return; }
     if (value.evicted) { control({ evicted: true }); process.exit(0); }
+    if (value.data !== undefined) { wakeReader(); return; } // Remote-only wake; never forwarded to DSH.
     if (value.exit) exit = value.exit; else control(value);
   }, MB, () => {}));
   process.stdin.on('data', chunk => { if (!gone) socket.write(chunk); });
@@ -184,7 +190,9 @@ async function attach(id, from) {
     }
     // The daemon writes exit.json after the last output and before closing its socket.
     if (finished) break;
-    await sleep(50);
+    // Wait for the daemon's signal, the connection ending, or a safety timeout; no busy polling at idle.
+    if (!dataPending && !gone) await new Promise(resolve => { wake = resolve; const t = setTimeout(() => { if (wake === resolve) { wake = undefined; resolve(); } }, 1000); if (t.unref) t.unref(); });
+    dataPending = false;
   }
   exit ??= readJson('exit.json') ?? { code: null, signal: null, reason: 'relay-stopped', error: 'The remote relay stopped unexpectedly' };
   control({ exit });

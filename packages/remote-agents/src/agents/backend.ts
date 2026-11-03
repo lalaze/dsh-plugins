@@ -27,6 +27,8 @@ export interface Backend {
   /** Canonicalize a directory (`~` expands to the remote home) and optionally list its subdirectories. */
   listDirectory?(path: string | undefined, options?: { entries?: boolean }): Promise<DirectoryListing>;
   providers(cwd: string, refresh: boolean): Promise<Provider[]>;
+  /** Probe just the one CLI a session targets, to validate its model, mode and speed without launching the others. */
+  target(cwd: string, providerId: string): Promise<Provider>;
   create(task: Task, signal?: AbortSignal): Promise<Agent>;
   recover(task: Task, signal?: AbortSignal): Promise<Agent>;
   agent(id: string): Promise<Agent | null>;
@@ -110,11 +112,18 @@ export class SshBackend implements Backend {
   private closed = false;
   private readonly probes = new Set<JsonlPeer>();
   private identity?: { id: string; at: number };
-  private catalogs = new Map<string, { at: number; selection: string; profiles: Map<string, Profile>; providers: Provider[] }>();
+  private catalogs = new Map<string, { at: number; selection: string; providers: Provider[] }>();
+  /** One CLI's probe for the start path, keyed by `cwd\0provider`, so `create` and `open` do not probe twice. */
+  private targets = new Map<string, { at: number; provider: Provider; profile?: Profile }>();
   private sessions = new Map<string, CliSession>();
   /** Admitted starts/restores, including work not yet registered in sessions. */
   private readonly reservations = new Set<string>();
   private histories = new Map<string, Promise<TaskHistory>>();
+  /** When each loaded history was last used, so idle ones (no live session) are freed from memory. */
+  private readonly historyUsed = new Map<string, number>();
+  private historySweep?: ReturnType<typeof setInterval>;
+  /** How long a history with no live session is kept in memory after its last read, before it is reloaded on demand. */
+  readonly historyTtl = 300_000;
   private starting = new Map<string, Promise<Agent>>();
   private accounts = new Map<string, { at: number; value: Promise<AccountUsage> }>();
   /** The plan each CLI's account last showed, for answers that cannot tell it. */
@@ -182,7 +191,8 @@ export class SshBackend implements Backend {
   private assertOpen(): void { if (this.closed) throw new Error('SSH agent backend has stopped'); }
   async homeDirectory(): Promise<string> {
     this.assertOpen();
-    const path = await this.transport.exec('printf \'%s\' "$HOME"');
+    // $HOME is set by the system, so this never needs the remote login shell, which costs ~0.5s to load.
+    const path = await this.transport.exec('printf \'%s\' "$HOME"', 20_000, { login: false });
     this.assertOpen(); return remotePath(path);
   }
   async listDirectory(path: string | undefined, options: { entries?: boolean } = {}): Promise<DirectoryListing> {
@@ -208,19 +218,94 @@ done`}`, 15_000, { login: false });
   async connect(): Promise<string> {
     this.assertOpen();
     if (this.identity && Date.now() - this.identity.at < 15_000) return this.identity.id;
-    const [machine, user, unique] = (await this.transport.exec(MACHINE_IDENTITY)).split('\0');
+    // The identity is cat/uname/id only; skip the login shell, which `use()` would otherwise pay on every recheck.
+    const [machine, user, unique] = (await this.transport.exec(MACHINE_IDENTITY, 20_000, { login: false })).split('\0');
     if (!machine || !user || !unique) throw new Error('SSH did not report a valid machine identity');
     const id = serverIdOf(machine, user, unique);
     this.identity = { id, at: Date.now() }; return id;
   }
   private async history(id: string): Promise<TaskHistory> {
+    this.historyUsed.set(id, Date.now());
     let promise = this.histories.get(id);
     if (!promise) {
       const history = new TaskHistory(this.store.directory, id);
       history.onAppend = () => this.shared?.appended(id);
       promise = history.open().then(() => history); this.histories.set(id, promise);
+      // Reload-on-demand means a history nothing reads need not stay in memory; a hub opens many over its lifetime.
+      if (!this.historySweep && !this.closed) { this.historySweep = setInterval(() => this.sweepHistories(), 60_000); this.historySweep.unref?.(); }
     }
     return promise;
+  }
+  /**
+   * Drop histories no live session uses and nothing has read for a while; a later read reopens them from disk.
+   * A history an attached, restoring or starting session holds is kept: a second instance of the same file would
+   * append or read out of step with the one that session holds.
+   */
+  private sweepHistories(): void {
+    if (this.closed) return;
+    const now = Date.now();
+    for (const id of [...this.histories.keys()]) {
+      if (this.sessions.has(id) || this.restoring.has(id) || this.starting.has(id)) continue;
+      if (now - (this.historyUsed.get(id) ?? 0) < this.historyTtl) continue;
+      this.histories.delete(id); this.historyUsed.delete(id);
+    }
+    for (const id of [...this.historyUsed.keys()]) if (!this.histories.has(id)) this.historyUsed.delete(id);
+  }
+  /** Canonical cwd and the installed path of each probed CLI, in one SSH round trip. */
+  private async canonicalize(cwd: string, definitions: typeof CLI_PROVIDERS): Promise<{ canonical: string; installed: Map<string, string> }> {
+    const output = await this.transport.exec(`cd ${quote(cwd)} && printf '%s\\0' "$(pwd -P)" && ${definitions.map(p => `printf '%s\\0%s\\0' ${quote(p.id)} "$(command -v ${quote(p.command)} 2>/dev/null || true)"`).join(' && ')}`);
+    const [canonical, ...parts] = output.split('\0');
+    this.assertOpen();
+    if (!canonical?.startsWith('/')) throw new Error('Remote project does not exist or is not accessible');
+    const installed = new Map<string, string>(); for (let i = 0; i + 1 < parts.length; i += 2) if (parts[i + 1]) installed.set(parts[i], parts[i + 1]);
+    return { canonical, installed };
+  }
+  /** Probe one CLI in its canonical cwd: its models and modes, and the launch profile when it is ready. */
+  private async probeDefinition(definition: typeof CLI_PROVIDERS[number], canonical: string, path: string | undefined): Promise<{ provider: Provider; profile?: Profile }> {
+    const unavailable: Provider = { id: definition.id, label: definition.label, status: 'unavailable', models: [], modes: [], ...(definition.id === 'antigravity' ? { notice: ANTIGRAVITY_NOTICE } : {}) };
+    if (!path) return { provider: unavailable };
+    let peer: JsonlPeer | undefined;
+    try {
+      const argv = [path, ...definition.args];
+      if (definition.protocol === 'antigravity') {
+        const version = await this.transport.exec('node --version');
+        if (Number(version.trim().match(/^v(\d+)/)?.[1] ?? 0) < 22) throw new Error('Antigravity remote control requires Node.js 22 or newer on the SSH host');
+        const models = decodeAntigravityModels(await this.transport.exec(`cd ${quote(canonical)} && ${quote(path)} models`, 40_000));
+        if (!models.length) throw new Error('Antigravity returned no models. Sign in with agy and check agy models on the remote host.');
+        const provider: Provider = { ...unavailable, status: 'ready', models, defaultModeId: 'default', modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }, { id: 'accept-edits', label: 'Accept edits' }, { id: 'auto', label: 'Auto' }] };
+        return { provider, profile: { argv, protocol: definition.protocol, cwd: canonical, provider } };
+      }
+      const launch = definition.protocol === 'claude' ? [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'] : argv;
+      this.assertOpen();
+      peer = new JsonlPeer(this.transport.start(canonical, launch)); this.probes.add(peer);
+      peer.onMessage(message => { if (message.method && message.id !== undefined) peer?.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Discovery does not execute tools' } }); });
+      let models: Model[] = [], modes: Provider['modes'] = [], defaultModeId: string | undefined;
+      if (definition.protocol === 'codex') {
+        await initializeCodex(peer);
+        let cursor: string | undefined;
+        for (let page = 0; page < 20; page++) {
+          const result = await peer.request('model/list', { limit: 100, ...(cursor ? { cursor } : {}) });
+          models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']) as Model['inputModalities'], isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })), serviceTiers: codexServiceTiers(m) })));
+          cursor = result?.nextCursor; if (!cursor) break;
+        }
+        modes = permissionModes('codex', [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'auto-review', label: 'Workspace write · auto review' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]); defaultModeId = 'inherit';
+      } else if (definition.protocol === 'claude') {
+        await peer.control({ subtype: 'initialize' });
+        models = claudeModels(await peer.control({ subtype: 'list_models' }));
+        modes = permissionModes('claude', [{ id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }]); defaultModeId = 'inherit';
+      } else {
+        const capabilities = await initializeAcp(peer);
+        const session = await peer.request('session/new', { cwd: canonical, mcpServers: [] });
+        ({ models, modes, defaultModeId } = await discoverAcpCatalog(peer, session));
+        for (const model of models) model.inputModalities = capabilities.agentCapabilities?.promptCapabilities?.image === true ? ['text', 'image'] : ['text'];
+        if (capabilities.agentCapabilities?.sessionCapabilities?.close) await peer.request('session/close', { sessionId: session.sessionId });
+      }
+      models = [...new Map(models.filter(m => m.id && m.id !== 'undefined').map(m => [m.id, m])).values()];
+      if (!models.length) throw new Error('The remote CLI returned no models. Check its login and version.');
+      const provider: Provider = { ...unavailable, status: 'ready', models, modes, defaultModeId };
+      return { provider, profile: { argv, protocol: definition.protocol, cwd: canonical, provider } };
+    } catch (error) { return { provider: { ...unavailable, status: 'error' as const, error: error instanceof Error ? error.message : String(error) } }; }
+    finally { if (peer) { this.probes.delete(peer); peer.close(); } }
   }
   async providers(cwd: string, refresh: boolean): Promise<Provider[]> {
     this.assertOpen();
@@ -229,62 +314,31 @@ done`}`, 15_000, { login: false });
     if (!definitions.length) return [];
     const cached = this.catalogs.get(cwd);
     if (!refresh && cached?.selection === selection && Date.now() - cached.at < 30_000) return structuredClone(cached.providers);
-    const output = await this.transport.exec(`cd ${quote(cwd)} && printf '%s\\0' "$(pwd -P)" && ${definitions.map(p => `printf '%s\\0%s\\0' ${quote(p.id)} "$(command -v ${quote(p.command)} 2>/dev/null || true)"`).join(' && ')}`);
-    const [canonical, ...parts] = output.split('\0');
+    const { canonical, installed } = await this.canonicalize(cwd, definitions);
+    const probed = await Promise.all(definitions.map(definition => this.probeDefinition(definition, canonical, installed.get(definition.id))));
+    const providers = probed.map(({ provider }) => provider);
     this.assertOpen();
-    if (!canonical?.startsWith('/')) throw new Error('Remote project does not exist or is not accessible');
-    const installed = new Map<string, string>(); for (let i = 0; i + 1 < parts.length; i += 2) if (parts[i + 1]) installed.set(parts[i], parts[i + 1]);
-    const profiles = new Map<string, Profile>();
-    const providers = await Promise.all(definitions.map(async definition => {
-      const path = installed.get(definition.id);
-      const unavailable: Provider = { id: definition.id, label: definition.label, status: 'unavailable', models: [], modes: [], ...(definition.id === 'antigravity' ? { notice: ANTIGRAVITY_NOTICE } : {}) };
-      if (!path) return unavailable;
-      let peer: JsonlPeer | undefined;
-      try {
-        const argv = [path, ...definition.args];
-        if (definition.protocol === 'antigravity') {
-          const version = await this.transport.exec('node --version');
-          if (Number(version.trim().match(/^v(\d+)/)?.[1] ?? 0) < 22) throw new Error('Antigravity remote control requires Node.js 22 or newer on the SSH host');
-          const models = decodeAntigravityModels(await this.transport.exec(`cd ${quote(canonical)} && ${quote(path)} models`, 40_000));
-          if (!models.length) throw new Error('Antigravity returned no models. Sign in with agy and check agy models on the remote host.');
-          const provider: Provider = { ...unavailable, status: 'ready', models, defaultModeId: 'default', modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }, { id: 'accept-edits', label: 'Accept edits' }, { id: 'auto', label: 'Auto' }] };
-          profiles.set(definition.id, { argv, protocol: definition.protocol, cwd: canonical, provider }); return provider;
-        }
-        const launch = definition.protocol === 'claude' ? [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'] : argv;
-        this.assertOpen();
-        peer = new JsonlPeer(this.transport.start(canonical, launch)); this.probes.add(peer);
-        peer.onMessage(message => { if (message.method && message.id !== undefined) peer?.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Discovery does not execute tools' } }); });
-        let models: Model[] = [], modes: Provider['modes'] = [], defaultModeId: string | undefined;
-        if (definition.protocol === 'codex') {
-          await initializeCodex(peer);
-          let cursor: string | undefined;
-          for (let page = 0; page < 20; page++) {
-            const result = await peer.request('model/list', { limit: 100, ...(cursor ? { cursor } : {}) });
-            models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']) as Model['inputModalities'], isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })), serviceTiers: codexServiceTiers(m) })));
-            cursor = result?.nextCursor; if (!cursor) break;
-          }
-          modes = permissionModes('codex', [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'auto-review', label: 'Workspace write · auto review' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]); defaultModeId = 'inherit';
-        } else if (definition.protocol === 'claude') {
-          await peer.control({ subtype: 'initialize' });
-          models = claudeModels(await peer.control({ subtype: 'list_models' }));
-          modes = permissionModes('claude', [{ id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }]); defaultModeId = 'inherit';
-        } else {
-          const capabilities = await initializeAcp(peer);
-          const session = await peer.request('session/new', { cwd: canonical, mcpServers: [] });
-          ({ models, modes, defaultModeId } = await discoverAcpCatalog(peer, session));
-          for (const model of models) model.inputModalities = capabilities.agentCapabilities?.promptCapabilities?.image === true ? ['text', 'image'] : ['text'];
-          if (capabilities.agentCapabilities?.sessionCapabilities?.close) await peer.request('session/close', { sessionId: session.sessionId });
-        }
-        models = [...new Map(models.filter(m => m.id && m.id !== 'undefined').map(m => [m.id, m])).values()];
-        if (!models.length) throw new Error('The remote CLI returned no models. Check its login and version.');
-        const provider: Provider = { ...unavailable, status: 'ready', models, modes, defaultModeId };
-        profiles.set(definition.id, { argv, protocol: definition.protocol, cwd: canonical, provider }); return provider;
-      } catch (error) { return { ...unavailable, status: 'error' as const, error: error instanceof Error ? error.message : String(error) }; }
-      finally { if (peer) { this.probes.delete(peer); peer.close(); } }
-    }));
-    this.assertOpen();
-    this.catalogs.set(cwd, { at: Date.now(), selection, profiles, providers }); return structuredClone(providers);
+    this.catalogs.set(cwd, { at: Date.now(), selection, providers }); return structuredClone(providers);
   }
+  /**
+   * Probe only the one CLI a session needs, rather than launching every enabled CLI to list its models.
+   * Cached briefly so a session's validation (`create`) and its launch (`open`) share a single probe.
+   */
+  private async resolveTarget(cwd: string, providerId: string, refresh = false): Promise<{ provider: Provider; profile?: Profile }> {
+    this.assertOpen();
+    const key = `${cwd}\0${providerId}`, cached = this.targets.get(key);
+    if (!refresh && cached && Date.now() - cached.at < 30_000) return { provider: cached.provider, ...(cached.profile ? { profile: cached.profile } : {}) };
+    const enabled = enabledProvidersOf(this.store.hosts().find(h => h.id === this.host.id) ?? this.host);
+    const definition = CLI_PROVIDERS.find(p => p.id === providerId);
+    if (!definition || !enabled.includes(providerId)) return { provider: { id: providerId, label: PROVIDER_LABELS[providerId] ?? providerId, status: 'unavailable', models: [], modes: [] } };
+    const { canonical, installed } = await this.canonicalize(cwd, [definition]);
+    const result = await this.probeDefinition(definition, canonical, installed.get(providerId));
+    this.assertOpen();
+    this.targets.set(key, { at: Date.now(), provider: result.provider, profile: result.profile });
+    return result;
+  }
+  /** The one CLI a session targets, probed in its own cwd, for `create` to validate the model, mode and speed. */
+  async target(cwd: string, providerId: string): Promise<Provider> { return structuredClone((await this.resolveTarget(cwd, providerId)).provider); }
   private task(id: string): Task {
     const task = this.store.task(t => t.agentId === id && t.hostId === this.host.id);
     if (!task) throw new RemoteError('Remote agent not found', 404); return task;
@@ -454,9 +508,9 @@ done`}`, 15_000, { login: false });
       if (!task.native) throw new Error('No saved native CLI session exists. The task will not be replayed.');
       profile = { protocol: task.native.protocol, argv: task.native.argv, cwd: task.executionCwd ?? task.cwd, provider: { id: task.provider, label: task.provider, status: 'ready', models: [], modes: [] } };
     } else {
-      await this.providers(task.cwd, false);
-      const found = this.catalogs.get(task.cwd)?.profiles.get(task.provider);
-      if (!found) throw new Error('The selected CLI is not ready on this SSH host'); profile = found;
+      // Reuses the probe `create` just ran for this task, so starting a session launches only the one CLI it needs.
+      const resolved = await this.resolveTarget(task.cwd, task.provider);
+      if (!resolved.profile) throw new Error('The selected CLI is not ready on this SSH host'); profile = resolved.profile;
     }
     let argv = [...profile.argv];
     if (profile.protocol === 'antigravity') argv = antigravityArguments(argv[0], task, resume);
@@ -651,6 +705,7 @@ done`}`, 15_000, { login: false });
   /** Shutdown releases persistent sessions, which keep running and are restored on the next start. */
   async close(): Promise<void> {
     this.closed = true;
+    clearInterval(this.historySweep); this.historySweep = undefined;
     // Leases are kept: this DSH reattaches its CLIs when it starts again, unless another took them over.
     this.shared?.close();
     for (const probe of this.probes) probe.close();

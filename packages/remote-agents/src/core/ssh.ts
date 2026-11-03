@@ -129,10 +129,16 @@ export class OpenSshTransport implements SshTransport {
     // Load exported variables in a separate process: shell startup files may close
     // inherited descriptors. The parent retains the CLI streams throughout startup.
     // A private, short-lived directory keeps exports off stdout and out of argv.
+    // The capture is cached per shell for ~1 minute so a burst of commands pays the ~0.5s login shell once.
+    // Trade-off: the exported environment (which may hold secrets) sits in a 0600 file for up to that minute,
+    // and a value changed in the rc takes up to that long to apply; the window is kept near the connection's own.
     const command = `
 dsh_login_shell="\${SHELL:-/bin/sh}"
 case "\${dsh_login_shell##*/}" in
   bash|zsh|fish)
+    dsh_env_cache_dir="$HOME/.dsh-remote-agents/env"
+    dsh_env_cache="$dsh_env_cache_dir/\${dsh_login_shell##*/}"
+    if [ -f "$dsh_env_cache" ] && [ -n "$(find "$dsh_env_cache" -mmin -1 2>/dev/null)" ]; then . "$dsh_env_cache"; else
     dsh_environment_dir="$(mktemp -d "\${TMPDIR:-/tmp}/dsh-cli-env.XXXXXXXXXX")" || exit "$?"
     set -- "$dsh_environment_dir"
     trap 'rm -rf -- "$1"' 0
@@ -145,8 +151,10 @@ case "\${dsh_login_shell##*/}" in
     "$dsh_login_shell" -lic "$dsh_capture" dsh-login "$1/capture.sh" </dev/null 1>&2 || exit "$?"
     [ -s "$1/capture.sh.env" ] || { printf '%s\\n' 'Remote login shell did not export its environment' >&2; exit 1; }
     . "$1/capture.sh.env" || exit "$?"
+    (umask 077; mkdir -p "$dsh_env_cache_dir" && cp "$1/capture.sh.env" "$dsh_env_cache.$$" && mv -f "$dsh_env_cache.$$" "$dsh_env_cache") 2>/dev/null || true
     rm -rf -- "$1"
     trap - 0 1 2 15
+    fi
     ;;
 esac
 exec /bin/sh -c ${quote(REMOTE_PATH + script)}

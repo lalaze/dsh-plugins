@@ -26,11 +26,16 @@ export function useDashboard() {
   useEffect(() => {
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
+      let delay = 2000;
       try {
         const next = await api<Dashboard>(undefined, {}, controller.signal);
-        if (!controller.signal.aborted) { setDashboard(next); setError(''); }
+        if (!controller.signal.aborted) {
+          setDashboard(next); setError('');
+          // Refresh promptly while work is live; slow down when every session is idle to spare the host.
+          if (!next.agents.some(a => isWorking(a) || a.reconnecting || a.pendingPermissions > 0)) delay = 5000;
+        }
       } catch (e) { if (!controller.signal.aborted) setError(e instanceof Error ? e.message : String(e)); }
-      if (!controller.signal.aborted) timer = setTimeout(() => void poll(), 2000);
+      if (!controller.signal.aborted) timer = setTimeout(() => void poll(), delay);
     };
     void poll();
     return () => { controller.abort(); clearTimeout(timer); };
