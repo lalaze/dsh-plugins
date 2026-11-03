@@ -6,13 +6,15 @@ import { NewSession } from './new.js'
 import { PairScreen } from './pair.js'
 import { SessionView } from './session.js'
 import { SettingsScreen } from './settings.js'
+import { TaskView } from './task.js'
 import { store, useStore } from './store.js'
 
-type Route = { name: 'list' } | { name: 'session'; hubId: string; sessionId: string } | { name: 'new'; hubId: string } | { name: 'settings' } | { name: 'pair' }
+type Route = { name: 'list' } | { name: 'session'; hubId: string; sessionId: string } | { name: 'task'; hubId: string; taskId: string } | { name: 'new'; hubId: string } | { name: 'settings' } | { name: 'pair' }
 
 function parse(hash: string): Route {
   const [name, hubId, sessionId] = hash.replace(/^#\/?/, '').split('/').map(part => { try { return decodeURIComponent(part) } catch { return part } })
   if (name === 's' && hubId && sessionId) return { name: 'session', hubId, sessionId }
+  if (name === 't' && hubId && sessionId) return { name: 'task', hubId, taskId: sessionId }
   if (name === 'new' && hubId) return { name: 'new', hubId }
   if (name === 'settings') return { name: 'settings' }
   if (name === 'pair') return { name: 'pair' }
@@ -56,11 +58,15 @@ function App() {
     const state = store.hubs.get(route.hubId)
     if (state) return <SessionView key={`${route.hubId}/${route.sessionId}`} state={state} sessionId={route.sessionId} onBack={back} />
   }
+  if (route.name === 'task') {
+    const state = store.hubs.get(route.hubId)
+    if (state) return <TaskView key={`${route.hubId}/${route.taskId}`} state={state} taskId={route.taskId} onBack={back} onOpenSession={sessionId => go(`s/${encodeURIComponent(route.hubId)}/${encodeURIComponent(sessionId)}`)} />
+  }
   if (route.name === 'new' && store.hubs.has(route.hubId)) {
     return <NewSession hubId={route.hubId} onBack={back} onCreated={sessionId => go(`s/${encodeURIComponent(route.hubId)}/${encodeURIComponent(sessionId)}`, true)} />
   }
   if (route.name === 'settings') return <SettingsScreen onBack={back} onPair={() => go('pair')} />
-  return <SessionList onOpen={(hubId, sessionId) => go(`s/${encodeURIComponent(hubId)}/${encodeURIComponent(sessionId)}`)} onNew={hubId => go(`new/${encodeURIComponent(hubId)}`)} onSettings={() => go('settings')} />
+  return <SessionList onOpen={(hubId, sessionId) => go(`s/${encodeURIComponent(hubId)}/${encodeURIComponent(sessionId)}`)} onOpenTask={(hubId, taskId) => go(`t/${encodeURIComponent(hubId)}/${encodeURIComponent(taskId)}`)} onNew={hubId => go(`new/${encodeURIComponent(hubId)}`)} onSettings={() => go('settings')} />
 }
 
 if ('serviceWorker' in navigator) void navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' }).catch(() => { /* notifications stay off */ })

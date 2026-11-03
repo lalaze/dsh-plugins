@@ -32,7 +32,7 @@ function summary(args: unknown): string {
   return ''
 }
 
-const Text = memo(function Text({ text }: { text: string }) {
+export const Text = memo(function Text({ text }: { text: string }) {
   return <div className="md"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" /> }}>{text}</Markdown></div>
 })
 

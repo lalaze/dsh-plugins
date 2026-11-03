@@ -183,6 +183,69 @@ export interface HubInfo {
 /** Workspace Tags' tags and which workspaces carry them, as its sidebar shows them. */
 export interface TagState { tags: { id: string; name: string; color: string }[]; assignments: Record<string, string[]> }
 
+/**
+ * A remote CLI session with no DSH conversation, from Remote Agents on that machine: a task DSH's agent delegated, or
+ * one started from Remote agents → Open sessions.
+ */
+export interface TaskEntry {
+  id: string
+  title: string
+  /** The CLI, such as `claude` or `codex`, and its model. */
+  provider: string
+  model: string
+  host: string
+  cwd: string
+  status: 'starting' | 'running' | 'attention' | 'idle' | 'error' | 'closed'
+  /** Started by DSH's agent; `ownerSessionId` is the conversation that delegated it. */
+  delegated: boolean
+  ownerSessionId?: string
+  archived: boolean
+  createdAt: number
+  updatedAt: number
+  error?: string
+  /** The DSH instance that started it, when another one did, and the one driving it now. */
+  creator?: string
+  controller?: string
+}
+
+/** One item of a task's history. Long details are cut short for the phone. */
+export interface TaskItem {
+  seq: number
+  time: number
+  type: 'user' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'interrupted' | 'end'
+  text?: string
+  /** Tool calls: name, status and what they did. */
+  name?: string
+  status?: string
+  callId?: string
+}
+
+export interface TaskPermission {
+  id: string
+  title: string
+  description?: string
+  detail?: string
+  actions: { id: string; label: string; behavior: 'allow' | 'deny' }[]
+}
+
+export interface TaskPage {
+  /** A history that was replaced, as when another DSH took the session over, has a new epoch: read it again. */
+  epoch: string
+  items: TaskItem[]
+  /** Sequence numbers of the first and last history entries read, for the next page. */
+  first?: number
+  last?: number
+  hasOlder: boolean
+  hasNewer: boolean
+  /** The history was replaced since the phone's `epoch`: these are its newest items. */
+  reset?: true
+}
+
+export type TaskCommand =
+  | { kind: 'send'; taskId: string; requestId: string; text: string }
+  | { kind: 'stop'; taskId: string }
+  | { kind: 'respond'; taskId: string; permissionId: string; behavior: 'allow' | 'deny'; actionId?: string }
+
 export interface PushSubscriptionJson { endpoint: string; keys: { p256dh: string; auth: string } }
 export interface PushPreferences { finished: boolean; attention: boolean }
 
@@ -195,6 +258,11 @@ export interface Methods {
   'session.events': { args: { sessionId: string; after?: number; before?: number; limit?: number }; result: { events: SyncedEvent[]; lastSeq: number; hasMore: boolean; hasEarlier: boolean } }
   'session.live': { args: { sessionId: string }; result: undefined }
   'tags': { args: undefined; result: TagState }
+  /** `available` is false when Remote Agents is not installed on that machine, or too old. */
+  'tasks.list': { args: undefined; result: { available: boolean; tasks: TaskEntry[] } }
+  /** Newest items first by default; `before` or `after` a sequence number of the same `epoch` pages from there. */
+  'task.detail': { args: { taskId: string; before?: number; after?: number; epoch?: string }; result: { task: TaskEntry; permissions: TaskPermission[]; page: TaskPage } }
+  'task.command': { args: TaskCommand; result: { ok: true } }
   'command': { args: Command; result: CommandResult }
   'models': { args: { workspaceId?: string }; result: ModelChoices }
   'attachment': { args: { sessionId: string; attachmentId: string }; result: { mediaType: string; data: string; name?: string } }
@@ -214,6 +282,8 @@ export type HubMessage =
   | { id: number; end: true; e?: { code: string; message: string } }
   /** Something the phone should fetch again. */
   | { n: 'changed'; cursor: string }
+  /** Background tasks changed: fetch `tasks.list` again. */
+  | { n: 'tasks' }
   | { n: 'paired'; info: HubInfo }
   | { n: 'unpaired'; message: string }
 

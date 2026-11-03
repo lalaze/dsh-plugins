@@ -12,6 +12,7 @@ Supports English and Simplified Chinese: the settings page follows DSH’s langu
 - **Conversations**: read from the end and load earlier messages; Markdown replies, collapsed reasoning, consecutive tool calls folded into one row, each turn's duration with a copy button; images open on tap. Replies stream in while they are written. Context DSH injects (workspace instructions, skill catalog, time snapshots) stays hidden, as in DSH.
 - **Steering**: send a message with images (scaled down on the phone first). Sending while a task runs interrupts it with your message, as in Paseo; with nothing typed, the button stops the task. Under the input, pills show the session's model, reasoning level and permission; change the model or reasoning level from them. Approve or deny tool calls, answer questions, rename and archive sessions.
 - **New sessions**: prompt first, as in Paseo: write the task, and pick the workspace, model, reasoning level and permission preset from the pills under it.
+- **Background tasks**: with [Remote Agents](../remote-agents/README.md) 0.2.67 or later on the machine, its remote CLI sessions that have no DSH conversation, such as tasks DSH's agent delegated and sessions started from **Open sessions**, are listed under **Background tasks**: those waiting for an answer first, then running ones. Open one to read its history and follow it while it runs, send a message (sending while it runs interrupts it), stop it, or answer its approvals. A delegated task links to the conversation that delegated it.
 - **Notifications** (optional): when a task finishes or a session needs you, even while the app is closed. A notification for the session already on screen is skipped.
 
 Every request carries an ID, so a retry after a lost connection never runs twice. The app reconnects by itself and catches up on what it missed.
@@ -68,12 +69,13 @@ Change either at any time; **Unpair** disconnects the phone at once and refuses 
 ## How it uses DSH
 
 - Sessions are read through DSH’s session controller (`list`, `inspect` and `follow`), which reads logs without starting agents, and steered through its `prompt`, `cancel`, `create`, `selectModel` and `rename`. Archiving goes through the workspace controller, questions through `userQuestions`, permission presets through `permissionPresets`.
+- Background tasks come from Remote Agents' `remoteAgentsTasks` service on the same machine; without it the section is not shown.
 - DSH has no interface for answering tool approvals from another device. The plugin joins DSH’s `approval/request` chain: the question goes to the phone and to this machine’s browsers, and whichever answers first wins; any failure leaves DSH’s own chain unchanged.
 
 ## Limitations
 
 - Notifications work for one paired machine at a time per phone, because a browser holds one push key.
-- Remote Agents’ background sessions under **Open sessions** are not listed yet; main conversations that use remote CLIs are.
+- Background tasks take text only and send no notifications, and their questions are answered on the computer.
 - Attachments over 16 MB do not open on the phone.
 - An existing session's permission preset is shown but cannot be changed from the phone; DSH changes it only on a running session.
 

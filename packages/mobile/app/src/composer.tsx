@@ -34,7 +34,7 @@ export const draftContent = (draft: Draft): PromptPart[] => [
   ...(draft.text.trim() ? [{ type: 'text' as const, text: draft.text }] : []),
 ]
 
-export function Composer({ draft, onDraft, onSend, onStop, running, disabled, placeholder, busy, pills }: {
+export function Composer({ draft, onDraft, onSend, onStop, running, disabled, placeholder, busy, pills, images = true }: {
   draft: Draft
   onDraft(next: Draft): void
   onSend(): void
@@ -45,6 +45,8 @@ export function Composer({ draft, onDraft, onSend, onStop, running, disabled, pl
   busy?: boolean
   /** The session's controls under the input: model, reasoning, permission. */
   pills?: ReactNode
+  /** Whether images can be attached; background tasks take text only. */
+  images?: boolean
 }) {
   const input = useRef<HTMLTextAreaElement>(null)
   const files = useRef<HTMLInputElement>(null)
@@ -68,9 +70,9 @@ export function Composer({ draft, onDraft, onSend, onStop, running, disabled, pl
         onChange={event => onDraft({ ...draft, text: event.target.value })}
         onKeyDown={event => { if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); if (!empty) onSend() } }} />
       <div className="composer-bar">
-        <button type="button" className="attach" aria-label={ui('Add image')} disabled={disabled || reading} onClick={() => files.current?.click()}>
+        {images && <button type="button" className="attach" aria-label={ui('Add image')} disabled={disabled || reading} onClick={() => files.current?.click()}>
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M20 11.5l-7.8 7.8a5 5 0 01-7.1-7.1l8.5-8.5a3.3 3.3 0 014.7 4.7l-8.5 8.5a1.7 1.7 0 01-2.4-2.4l7.8-7.8" /></svg>
-        </button>
+        </button>}
         <input ref={files} type="file" accept="image/*" multiple hidden onChange={async event => {
           const list = Array.from(event.target.files ?? [])
           event.target.value = ''

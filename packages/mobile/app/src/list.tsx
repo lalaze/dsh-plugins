@@ -1,15 +1,17 @@
 /**
  * Every paired computer's sessions in the Status grouping of Workspace Tags, as the DSH sidebar shows them: Waiting
  * for you, Completed, Running and Idle sections; workspaces in sidebar order with their tag dots; sessions in each
- * workspace's own order, five at a time. Tag chips narrow every section to one tag.
+ * workspace's own order, five at a time. Tag chips narrow every section to one tag. Remote Agents' background tasks,
+ * which belong to no workspace, follow in a section of their own.
  */
 import React, { useState } from 'react'
-import type { SessionEntry, WorkspaceEntry } from '../../src/shared/protocol.js'
+import type { SessionEntry, TaskEntry, WorkspaceEntry } from '../../src/shared/protocol.js'
 import { brandOf, brandStyle } from './brands.js'
 import { icons } from './controls.js'
 import { ago, ui } from './i18n.js'
 import { ConnectionBadge, statusOf } from './parts.js'
 import { store, useStore, type HubState } from './store.js'
+import { busyTask, cliName } from './task.js'
 
 type Activity = 'waiting' | 'completed' | 'running'
 type SectionKind = Activity | 'idle'
@@ -28,6 +30,9 @@ const tagColor = (color: string) => TAG_COLORS[color] ?? color
 
 interface Group { key: string; hub: HubState; workspace?: WorkspaceEntry; title: string; sessions: SessionEntry[] }
 interface Section { kind: SectionKind; groups: Group[]; count: number }
+
+/** Tasks waiting for an answer first, then running ones, failed ones, and the rest by their latest change. */
+const taskRank = (task: TaskEntry) => task.status === 'attention' ? 0 : busyTask(task) ? 1 : task.status === 'error' ? 2 : 3
 
 const loadFolds = (): Record<string, boolean> => { try { return JSON.parse(localStorage.getItem(FOLD_KEY) ?? '{}') as Record<string, boolean> } catch { return {} } }
 
@@ -73,7 +78,7 @@ const SectionIcon = ({ kind }: { kind: SectionKind }) => {
   return <svg className={`section-icon ${kind}`} viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">{paths[kind]}</svg>
 }
 
-export function SessionList({ onOpen, onNew, onSettings }: { onOpen(hubId: string, sessionId: string): void; onNew(hubId: string): void; onSettings(): void }) {
+export function SessionList({ onOpen, onOpenTask, onNew, onSettings }: { onOpen(hubId: string, sessionId: string): void; onOpenTask(hubId: string, taskId: string): void; onNew(hubId: string): void; onSettings(): void }) {
   useStore()
   const [query, setQuery] = useState('')
   const [space, setSpace] = useState<string | null>(null)
@@ -113,6 +118,13 @@ export function SessionList({ onOpen, onNew, onSettings }: { onOpen(hubId: strin
     }
   }
   const sections = statusSections(groups, (group, entry) => activityOf(group.hub, entry, running.get(group.hub)!))
+  // Background tasks belong to no workspace, so a tag filter leaves them out.
+  const tasks = spaceName ? [] : hubs.flatMap(hub => hub.tasks
+    .filter(task => (view.archived || !task.archived) && (!needle || `${task.title} ${task.cwd} ${task.host}`.toLowerCase().includes(needle)))
+    .map(task => ({ hub, task })))
+    .sort((a, b) => taskRank(a.task) - taskRank(b.task) || b.task.updatedAt - a.task.updatedAt)
+  const tasksFolded = !needle && folds.tasks === true
+  const taskLimit = needle ? Infinity : shown.tasks ?? WATERMARK
 
   const fold = (key: string, value: boolean) => setFolds(current => { const next = { ...current, [key]: value }; localStorage.setItem(FOLD_KEY, JSON.stringify(next)); return next })
   const folded = (kind: SectionKind) => !needle && (folds[kind] ?? kind === 'idle')
@@ -163,7 +175,20 @@ export function SessionList({ onOpen, onNew, onSettings }: { onOpen(hubId: strin
           })}
         </section>
       })}
-      {loaded && sections.length === 0 && <div className="empty">{query ? ui('No sessions match.') : ui('No sessions yet.')}</div>}
+      {tasks.length > 0 && <section className="status-section">
+        <button type="button" className="section-head" aria-expanded={!tasksFolded} onClick={() => fold('tasks', !tasksFolded)}>
+          <svg className="section-arrow" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path d="M8 5l10 7-10 7z" fill="currentColor" /></svg>
+          <svg className="section-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7.5h16M4 12h16M4 16.5h10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+          <span>{ui('Background tasks')}</span>
+          <span className="section-count">{tasks.length}</span>
+        </button>
+        {!tasksFolded && <>
+          {tasks.slice(0, taskLimit).map(({ hub, task }) => <TaskRow key={`${hub.hub.hubId}/${task.id}`} hub={hub} task={task} showHub={hubs.length > 1} onOpen={onOpenTask} />)}
+          {tasks.length > taskLimit && <button type="button" className="show-more" onClick={() => setShown(current => ({ ...current, tasks: tasks.length - taskLimit <= WATERMARK ? Infinity : taskLimit + WATERMARK }))}>{ui('Show {0} more tasks', { 0: tasks.length - taskLimit })}</button>}
+          {!needle && taskLimit === Infinity && tasks.length > WATERMARK && <button type="button" className="show-more" onClick={() => setShown(current => ({ ...current, tasks: WATERMARK }))}>{ui('Show less')}</button>}
+        </>}
+      </section>}
+      {loaded && sections.length === 0 && tasks.length === 0 && <div className="empty">{query ? ui('No sessions match.') : ui('No sessions yet.')}</div>}
       <div className="view-options">
         <label><input type="checkbox" checked={view.archived === true} onChange={event => store.setView({ archived: event.target.checked })} /> {ui('Show archived')}</label>
         <label><input type="checkbox" checked={view.subagents === true} onChange={event => store.setView({ subagents: event.target.checked })} /> {ui('Show sub-agents')}</label>
@@ -174,6 +199,24 @@ export function SessionList({ onOpen, onNew, onSettings }: { onOpen(hubId: strin
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>{ui('New')}
     </button>}
   </div>
+}
+
+function TaskRow({ hub, task, showHub, onOpen }: { hub: HubState; task: TaskEntry; showHub: boolean; onOpen(hubId: string, taskId: string): void }) {
+  const brand = brandOf({ provider: `remote-cli-${task.provider}`, model: task.model })
+  const folder = task.cwd.split(/[\\/]/).filter(Boolean).at(-1) ?? task.cwd
+  return <button type="button" className="session-row task-row" onClick={() => onOpen(hub.hub.hubId, task.id)}>
+    <span className="brand-wrap" role="img" aria-label={cliName(task.provider)}>
+      <span className="brand" style={brandStyle(brand) as React.CSSProperties} />
+      {task.status === 'attention' && <span className="brand-badge" data-activity="waiting" />}
+    </span>
+    <span className="task-text">
+      <span className="session-title ellipsis">{task.title || ui('Untitled session')}</span>
+      <span className="task-sub ellipsis">{[cliName(task.provider), `${task.host}:${folder}`, ...(showHub ? [hub.hub.name] : [])].join(' · ')}</span>
+    </span>
+    {busyTask(task) && task.status !== 'attention' ? <span className="spinner" aria-label={ui('Running')} />
+      : task.status === 'error' ? <span className="task-error">{ui('Error')}</span>
+      : <span className="session-time">{ago(task.updatedAt)}</span>}
+  </button>
 }
 
 function SessionRow({ hub, entry, activity, onOpen }: { hub: HubState; entry: SessionEntry; activity?: Activity; onOpen(hubId: string, sessionId: string): void }) {

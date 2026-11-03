@@ -132,6 +132,22 @@ const zh: Record<string, string> = {
   'All': '全部',
   'Show {0} more sessions': '展开其余 {0} 个会话',
   'Show less': '收起',
+  'Background tasks': '后台任务',
+  'Background task': '后台任务',
+  'Show {0} more tasks': '展开其余 {0} 个任务',
+  'Error': '出错',
+  'Tool': '工具',
+  'Allow': '允许',
+  'Delegated from “{0}”': '由「{0}」分派',
+  'Delegated by DSH': '由 DSH 智能体分派',
+  'In use on {0}': '正在 {0} 上使用',
+  'Remote Agents is not installed on this machine, or is too old for background tasks': '这台电脑没有安装远程智能体插件，或版本太旧，不支持后台任务',
+  'This session continues in a DSH conversation; open it there': '这个会话在 DSH 对话中继续，请到那里打开',
+  'This agent is still working. Wait for it, or interrupt it to send now.': '这个任务还在运行。请等它完成，或先停止再发送。',
+  'Enter a message': '请输入消息',
+  'Allow for this session': '本会话内允许',
+  'Allow matching requests for this session': '本会话内允许同类请求',
+  'Always allow matching requests in this project': '在此项目中始终允许同类请求',
 }
 
 const language = languageOf(globalThis.navigator?.language)

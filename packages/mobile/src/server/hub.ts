@@ -7,7 +7,7 @@ import { Channel, ChannelError, hubHandshake, type Hello } from '../shared/chann
 import {
   DEFAULT_GRANTS, encodeOffer, OFFER_TTL_MS, pairingCode,
   type ClientMessage, type Command, type Grants, type HubInfo, type HubMessage, type LiveFrame, type LocalAction, type LocalStatus, type Method,
-  type Offer, type PushPreferences, type PushSubscriptionJson, type SessionEntry, type TagState,
+  type Offer, type PushPreferences, type PushSubscriptionJson, type SessionEntry, type TagState, type TaskCommand,
 } from '../shared/protocol.js'
 import { CommandError, Executor } from './bridge/executor.js'
 import { lastAssistantText } from './bridge/events.js'
@@ -15,6 +15,7 @@ import type { HostApi } from './bridge/host.js'
 import { PushGone, sendPush } from './push.js'
 import { parseEndpoint, Relay } from './relay.js'
 import { Store, type PhoneRecord } from './store.js'
+import { taskCommand, taskDetail, taskEntry, tasksFingerprint, usableTasks } from './tasks.js'
 import { nodeX25519 } from './x25519.js'
 
 export class HttpError extends Error {
@@ -32,6 +33,8 @@ export interface HubOptions {
   stateDir: string
   host: HostApi
   tags?: () => WorkspaceTagsService | undefined
+  /** Remote Agents' `remoteAgentsTasks` service, when installed. */
+  tasks?: () => unknown
   version: string
   /** Initial settings for a new state; the settings page changes them later. */
   defaults?: { name?: string; relay?: string; appUrl?: string }
@@ -48,6 +51,8 @@ const IDLE_MS = 70_000
 const MAX_REQUESTS = 64
 const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024
 const FINISHED_GAP_MS = 30_000
+/** How often a connected phone's task list is checked: a task finishing changes nothing Remote Agents saves. */
+const TASKS_CHECK_MS = 5000
 
 export class Hub {
   readonly executor: Executor
@@ -58,6 +63,9 @@ export class Hub {
   private readonly lastFinished = new Map<string, number>()
   private changedTimer?: ReturnType<typeof setTimeout>
   private stops: (() => void)[] = []
+  private tasksTimer?: ReturnType<typeof setTimeout>
+  private tasksDue = 0
+  private tasksSeen?: string
 
   private constructor(private readonly options: HubOptions, readonly store: Store) {
     this.executor = new Executor({
@@ -86,6 +94,7 @@ export class Hub {
     this.stops.push(this.options.host.bridgeApprovals(this.executor.approvalBridge))
     this.stops.push(this.executor.onEntry((entry, previous) => this.observe(entry, previous)))
     this.followTags()
+    this.followTasks()
     this.restartRelay()
   }
 
@@ -121,6 +130,46 @@ export class Hub {
     }
     attach()
     this.stops.push(() => clearTimeout(timer))
+  }
+
+  /**
+   * Tell phones when the task list changes. Remote Agents saves often while a reply streams, so the list is compared
+   * before telling anyone; it is also checked while a phone is connected, as a finished turn saves nothing.
+   */
+  private followTasks(): void {
+    let subscribed: (() => void) | undefined
+    const schedule = (delay: number) => {
+      // A change only brings the next check closer: changes saved while a reply streams must not keep postponing it.
+      const due = Date.now() + delay
+      if (this.tasksTimer && this.tasksDue <= due) return
+      clearTimeout(this.tasksTimer)
+      this.tasksDue = due
+      this.tasksTimer = setTimeout(() => { this.tasksTimer = undefined; void run() }, delay)
+      this.tasksTimer.unref?.()
+    }
+    const run = async () => {
+      const service = usableTasks(this.options.tasks?.())
+      // Remote Agents may load after this plugin, or not be installed.
+      if (!service) { if (this.options.tasks) schedule(10_000); return }
+      subscribed ??= service.subscribe?.(() => schedule(1000))
+      if (this.connections.size === 0) this.tasksSeen = undefined
+      else {
+        try {
+          const seen = tasksFingerprint((await service.list()).map(taskEntry))
+          if (this.tasksSeen !== undefined && seen !== this.tasksSeen) for (const connection of this.connections) connection.tasksChanged()
+          this.tasksSeen = seen
+        } catch { /* checked again next time */ }
+      }
+      schedule(TASKS_CHECK_MS)
+    }
+    schedule(0)
+    this.stops.push(() => { clearTimeout(this.tasksTimer); subscribed?.() })
+  }
+
+  private tasks() {
+    const service = usableTasks(this.options.tasks?.())
+    if (!service) throw new CommandError('Remote Agents is not installed on this machine, or is too old for background tasks', 404)
+    return service
   }
 
   tags(): TagState {
@@ -355,6 +404,21 @@ export class Hub {
       }
       case 'models': return this.options.host.modelChoices()
       case 'tags': return this.tags()
+      case 'tasks.list': {
+        const service = usableTasks(this.options.tasks?.())
+        return service ? { available: true, tasks: (await service.list()).map(taskEntry) } : { available: false, tasks: [] }
+      }
+      case 'task.detail': {
+        const taskId = String(input.taskId ?? '')
+        if (!taskId) throw new CommandError('Choose a task')
+        return taskDetail(this.tasks(), { taskId, ...(typeof input.before === 'number' ? { before: input.before } : {}),
+          ...(typeof input.after === 'number' ? { after: input.after } : {}), ...(typeof input.epoch === 'string' ? { epoch: input.epoch } : {}) })
+      }
+      case 'task.command': {
+        if (!phone.grants.control) throw new CommandError('This phone may only read this machine’s sessions', 403)
+        await taskCommand(this.tasks(), args as TaskCommand)
+        return { ok: true }
+      }
       case 'attachment': {
         const sessionId = String(input.sessionId), attachmentId = String(input.attachmentId)
         const ref = await this.executor.sharesAttachment(sessionId, attachmentId, signal)
@@ -457,6 +521,7 @@ export class Connection {
   }
 
   changed(cursor: string) { if (this.phone?.grants.view) this.send({ n: 'changed', cursor }) }
+  tasksChanged() { if (this.phone?.grants.view) this.send({ n: 'tasks' }) }
   paired() { if (this.phoneKey) this.send({ n: 'paired', info: this.hub.info(this.phoneKey) }) }
   /** Grants changed: streams the phone may no longer read end. */
   updated() {

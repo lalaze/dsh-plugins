@@ -4,7 +4,7 @@
  */
 import { useSyncExternalStore } from 'react'
 import { useEffect, useState } from 'react'
-import { base64url, decodeOffer, fromBase64url, type ModelChoices, type SessionEntry, type TagState, type WorkspaceEntry } from '../../src/shared/protocol.js'
+import { base64url, decodeOffer, fromBase64url, type ModelChoices, type SessionEntry, type TagState, type TaskEntry, type WorkspaceEntry } from '../../src/shared/protocol.js'
 import { HubClient, hubFromOffer, nobleX25519, type Identity, type SavedHub } from './hub-client.js'
 
 const KEY = 'dsh-mobile/v1'
@@ -32,6 +32,10 @@ export class HubState {
   readonly sessions = new Map<string, SessionEntry>()
   workspaces: WorkspaceEntry[] = []
   tags: TagState = { tags: [], assignments: {} }
+  /** Remote CLI sessions with no DSH conversation, from Remote Agents on that machine. */
+  tasks: TaskEntry[] = []
+  private tasksLoading?: Promise<void>
+  private tasksAgain = false
   private cursor?: string
   private refreshing?: Promise<void>
   private again = false
@@ -39,7 +43,11 @@ export class HubState {
 
   constructor(readonly client: HubClient, private readonly changed: () => void, private readonly loadedEntries?: (entries: SessionEntry[]) => void) {
     client.subscribe(() => { if (client.state === 'online' && client.info?.phone) void this.refresh(); changed() })
-    client.onNotice(message => { if ('n' in message && (message.n === 'changed' || message.n === 'paired')) void this.refresh() })
+    client.onNotice(message => {
+      if (!('n' in message)) return
+      if (message.n === 'changed' || message.n === 'paired') void this.refresh()
+      if (message.n === 'tasks') void this.refreshTasks()
+    })
   }
 
   get hub() { return this.client.hub }
@@ -59,6 +67,7 @@ export class HubState {
           this.cursor = changes.cursor
           // Workspace Tags may be missing on that machine; then there are simply no tags.
           this.tags = await this.client.call('tags', undefined).catch(() => this.tags)
+          await this.refreshTasks()
           this.loaded = true
           this.loadedEntries?.(changes.sessions)
           this.changed()
@@ -67,6 +76,32 @@ export class HubState {
       finally { this.refreshing = undefined }
     })()
     return this.refreshing
+  }
+
+  refreshTasks(): Promise<void> {
+    if (this.tasksLoading) { this.tasksAgain = true; return this.tasksLoading }
+    this.tasksLoading = (async () => {
+      try {
+        do {
+          this.tasksAgain = false
+          if (this.client.state !== 'online' || !this.client.info?.phone) return
+          this.tasks = (await this.client.call('tasks.list', undefined)).tasks
+          this.changed()
+        } while (this.tasksAgain)
+      } catch { /* a computer with an older dsh-mobile has no background tasks */ }
+      finally { this.tasksLoading = undefined }
+    })()
+    return this.tasksLoading
+  }
+
+  /** Apply a task the task screen read, ahead of the next list refresh. */
+  updateTask(task: TaskEntry) {
+    const index = this.tasks.findIndex(item => item.id === task.id)
+    if (index < 0) return
+    const current = this.tasks[index]
+    if (current.status === task.status && current.title === task.title && current.updatedAt === task.updatedAt && current.archived === task.archived) return
+    this.tasks = this.tasks.map(item => item.id === task.id ? task : item)
+    this.changed()
   }
 
   /** Apply an entry a live stream reported, ahead of the next list refresh. */
