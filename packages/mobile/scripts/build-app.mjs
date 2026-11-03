@@ -15,11 +15,13 @@ const app = await build({
   define: { 'process.env.NODE_ENV': '"production"', __VERSION__: JSON.stringify(version) }, jsx: 'automatic',
 })
 const css = await build({ ...common, entryPoints: ['app/src/app.css'], outfile: 'lib/app/app.css', write: false })
-const sw = await build({ ...common, entryPoints: ['app/src/sw.ts'], outfile: 'lib/app/sw.js', format: 'iife', platform: 'browser', write: false, define: { __VERSION__: JSON.stringify(`${version}-${Date.now().toString(36)}`) } })
-for (const result of [app, css, sw]) for (const file of result.outputFiles) await writeFile(file.path, file.contents)
+// Content stamps double as cache-busting tokens; deriving them from the built assets, not the build time, keeps the output reproducible.
 const stamp = createHash('sha256').update(app.outputFiles[0].contents).update(css.outputFiles[0].contents).digest('hex').slice(0, 10)
 // Icons keep their names, so their URLs carry a hash: a CDN in front of the app would otherwise serve old ones for hours.
 const iconStamp = createHash('sha256').update(await readFile(resolve(packageDir, 'app/assets/icon-512.png'))).update(await readFile(resolve(packageDir, 'app/assets/favicon.svg'))).digest('hex').slice(0, 10)
+// The service worker's cache name changes with the app and icons, so an installed client refreshes when they change and not on an unchanged rebuild.
+const sw = await build({ ...common, entryPoints: ['app/src/sw.ts'], outfile: 'lib/app/sw.js', format: 'iife', platform: 'browser', write: false, define: { __VERSION__: JSON.stringify(`${version}-${stamp}-${iconStamp}`) } })
+for (const result of [app, css, sw]) for (const file of result.outputFiles) await writeFile(file.path, file.contents)
 
 await writeFile(resolve(out, 'index.html'), `<!doctype html>
 <html lang="en">
