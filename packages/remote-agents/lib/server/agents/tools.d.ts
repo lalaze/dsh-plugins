@@ -1,4 +1,4 @@
-import { type Permission, type PermissionAnswer } from '../core/domain.js';
+import { type DshPermission, type Permission, type PermissionAnswer } from '../core/domain.js';
 import type { RemoteAgentsService } from './service.js';
 import type { ToolCall, ToolDefinition, ToolHost } from '../core/dsh-host.js';
 export interface AgentReport {
@@ -26,4 +26,9 @@ export declare function decidePermission(host: ToolHost, permission: Permission,
  * replies. Permission requests are forwarded to the user as native DSH prompts while a call waits;
  * unanswered requests remain pending and can be shown again by another wait.
  */
-export declare function delegationTools(host: ToolHost, service: RemoteAgentsService): ToolDefinition[];
+/** How the calling agent's conversation may act; see `accessOf` in core/dsh-host.ts. */
+export type CallerAccess = (agent: unknown) => {
+    permission?: DshPermission;
+    unattended: boolean;
+};
+export declare function delegationTools(host: ToolHost, service: RemoteAgentsService, accessOf?: CallerAccess): ToolDefinition[];

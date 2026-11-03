@@ -171,7 +171,10 @@ export declare class Sharing implements LaunchSharing {
     private mcpServers;
     /** The AgentTeams member tools DSH has loaded; captain tools are never shared. */
     private teamTools;
-    /** A CLI working as an AgentTeams member gets the member tools without any sharing setting: the team needs them. */
+    /**
+     * A CLI working as an AgentTeams member gets the member tools without any sharing setting: the team needs them.
+     * Only the member's own CLI: one the member delegates to must not claim or report its tasks for it.
+     */
     private teamOwner;
     private skillList;
     catalog(signal?: AbortSignal): Promise<SharingCatalog>;

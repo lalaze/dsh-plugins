@@ -7,7 +7,7 @@ import { delegationTools } from './agents/tools.js';
 import { remoteUsageRecord } from './agents/usage.js';
 import { installChat, scheduleSessionRepair } from './chat/install.js';
 import { ChatProjects } from './chat/projects.js';
-import { loggerOf } from './core/dsh-host.js';
+import { accessOf, loggerOf } from './core/dsh-host.js';
 import { Store } from './core/store.js';
 import { createHandler } from './http.js';
 import { installSharingHost } from './sharing/install.js';
@@ -44,7 +44,7 @@ export async function apply(ctx, config = {}) {
     // Native conversation routes and settings also work without the delegation tool registry.
     ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {
         const host = scoped;
-        for (const tool of delegationTools(host, service))
+        for (const tool of delegationTools(host, service, agent => accessOf(scoped, agent?.session)))
             host.tools.register(tool);
     });
 }
