@@ -48,9 +48,12 @@ await writeFile(resolve(out, 'index.html'), `<!doctype html>
 </html>
 `)
 
+// Android paints an installed app's navigation bar from these colours (theme_color up to Android 14, the window's
+// background_color behind a transparent bar from Android 15), and a manifest holds only one value. They follow the dark
+// theme the app is mostly used in; the page's own theme-color meta tags still follow the phone's setting.
 await writeFile(resolve(out, 'manifest.webmanifest'), JSON.stringify({
   name: 'DeepSeek Harness', short_name: 'DSH', id: './', start_url: './index.html', scope: './', display: 'standalone',
-  background_color: '#ffffff', theme_color: '#ffffff', description: 'Read and steer your computers’ DeepSeek Harness sessions',
+  background_color: '#18181b', theme_color: '#18181b', description: 'Read and steer your computers’ DeepSeek Harness sessions',
   icons: [192, 512].map(size => ({ src: `./icon-${size}.png?v=${iconStamp}`, sizes: `${size}x${size}`, type: 'image/png', purpose: 'any maskable' })),
 }, null, 2))
 
