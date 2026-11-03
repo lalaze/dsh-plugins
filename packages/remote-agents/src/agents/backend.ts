@@ -58,6 +58,10 @@ export interface Backend {
   sharedWorkspaces?(timeout?: number): Promise<SharedWorkspace[]>;
   /** Called when the host reports its shared workspaces changed; returns the unsubscribe function. */
   onSharedWorkspaces?(listener: () => void): () => void;
+  /** Called with a task whose history another DSH drives, after it was brought up to date here; returns the unsubscribe function. */
+  onSharedHistory?(listener: (taskId: string) => void): () => void;
+  /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
+  sender?(instance: string, label: string): { self: true } | { name: string };
   shareWorkspace?(path: string): Promise<void>;
   setWorkspaceTags?(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
   /** Stop sharing the given sessions started here; other DSH instances forget them. */
@@ -125,6 +129,7 @@ export class SshBackend implements Backend {
   private cleaning?: Promise<void>;
   /** Sessions shared with other DSH instances on the same SSH account; needs relays. */
   private readonly shared?: SharedSessions;
+  private readonly historyListeners = new Set<(taskId: string) => void>();
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport, private readonly sharing: () => LaunchSharing | undefined = () => undefined) {
     // Commands to the host share one SSH connection; its sockets live in this plugin's private state directory.
     this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') });
@@ -138,11 +143,17 @@ export class SshBackend implements Backend {
       adopt: id => { const task = this.store.task(t => t.id === id); if (task && !this.closed) void this.restore(task).catch(() => {}); },
       loaded: id => this.histories.has(id),
       unload: id => { if (!this.sessions.has(id) && !this.restoring.has(id) && !this.starting.has(id)) this.histories.delete(id); },
+      followed: id => { for (const listener of this.historyListeners) { try { listener(id); } catch { /* A listener must not stop the registry. */ } } },
     });
   }
   startSharing(): void { if (!this.closed) this.shared?.start(); }
   sharingError(): string | undefined { return this.shared?.status(); }
   controller(taskId: string): string | undefined { return this.shared?.controller(taskId); }
+  onSharedHistory(listener: (taskId: string) => void): () => void {
+    this.historyListeners.add(listener);
+    return () => { this.historyListeners.delete(listener); };
+  }
+  sender(instance: string, label: string): { self: true } | { name: string } { return this.shared?.sender(instance, label) ?? { name: label }; }
   async sharedWorkspaces(timeout?: number): Promise<SharedWorkspace[]> { if (!this.shared) return []; return this.shared.listWorkspaces(timeout); }
   onSharedWorkspaces(listener: () => void): () => void {
     const shared = this.shared;
@@ -542,7 +553,9 @@ done`}`, 15_000, { login: false });
       let session = await this.attached(this.store.task(t => t.id === task.id) ?? task);
       if (session.busy) { await session.stop(); session = await this.attached(this.store.task(t => t.id === task.id) ?? task); }
       const files = await transferAttachments(this.transport, this.store.directory, task.id, messageId, task.executionCwd ?? task.cwd, attachments, signal);
-      await session.send(attachmentPrompt(text, files), messageId, files);
+      // Other DSH instances name where a message they did not send came from.
+      const sender = this.shared?.identity;
+      await session.send(attachmentPrompt(text, files), messageId, files, sender);
     } finally { release(); }
   }
   async stop(id: string): Promise<void> {

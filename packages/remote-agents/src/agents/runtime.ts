@@ -214,7 +214,8 @@ export class CliSession {
     for (const entry of entries) if (entry.item.type === 'permission_response' && entry.item.reply) this.write(entry.item.reply as WireMessage, inputId('reply', String(entry.item.requestId)));
   }
   private protocol(): NativeProtocol { return this.store.task(t => t.id === this.task.id)!.native!.protocol; }
-  async send(text: string, messageId: string, attachments: readonly NativeAttachment[] = []): Promise<void> {
+  /** `sentBy` names this DSH in a shared history, so the others can tell where the message came from. */
+  async send(text: string, messageId: string, attachments: readonly NativeAttachment[] = [], sentBy?: { instance: string; label: string }): Promise<void> {
     // A failed turn leaves a live process able to take the next message.
     if (this.admitting || !this.alive || (this.agent.status !== 'idle' && this.agent.status !== 'error') || this.agent.activeTurn) throw new Error('Remote CLI is not idle');
     this.admitting = true;
@@ -222,7 +223,7 @@ export class CliSession {
       if (await this.history.hasMessage(messageId)) return; // Durable at-most-once admission.
       const protocol = this.protocol(), images = attachments.filter(a => a.kind === 'image');
       if (images.length && (protocol === 'antigravity' || (protocol === 'acp' && !this.imageInput))) throw new Error('This remote CLI does not support image input');
-      await this.history.append({ type: 'user_message', text, clientMessageId: messageId, delivery: 'pending', ...(attachments.length ? { attachments: attachments.map(({ data, ...file }) => file) } : {}) });
+      await this.history.append({ type: 'user_message', text, clientMessageId: messageId, delivery: 'pending', ...(attachments.length ? { attachments: attachments.map(({ data, ...file }) => file) } : {}), ...(sentBy ? { sentBy } : {}) });
       if (messageId === this.task.id) await this.store.update(state => { state.tasks.find(t => t.id === this.task.id)!.native!.initialSent = true; });
       this.activeMessage = messageId; this.confirmed = false; this.partialText = false; this.agent.lastError = undefined;
       this.agent.status = 'running'; this.agent.activeTurn = { turnId: randomUUID(), startedAt: new Date().toISOString() };

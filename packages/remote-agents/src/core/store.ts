@@ -110,6 +110,8 @@ export class Store {
   chatFast(sessionId: string): boolean { return this.state.chatFast?.includes(sessionId) ?? false; }
   /** The reasoning effort last explicitly selected for a native chat model route, if any. */
   chatEffort(route: string): string | undefined { return Object.hasOwn(this.state.chatEfforts ?? {}, route) ? this.state.chatEfforts![route] : undefined; }
+  /** This DSH's identity for shared hosts, if it was created. */
+  instanceId(): string | undefined { return this.state.instance?.id; }
   /** This DSH's identity for shared hosts, created on first use. */
   async instance(): Promise<Instance> {
     if (!this.state.instance) await this.update(state => { state.instance ??= { id: `dsh-${randomUUID()}`, label: (hostname() || 'DSH').slice(0, 100) }; });

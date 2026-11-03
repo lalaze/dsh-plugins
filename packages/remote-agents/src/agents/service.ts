@@ -33,6 +33,8 @@ export class RemoteAgentsService {
   private readonly connections = new Map<string, Connection>();
   /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
   readonly sharedWorkspaceListeners = new Set<(hostId: string) => void>();
+  /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
+  readonly sharedHistoryListeners = new Set<(taskId: string) => void>();
   private readonly locks = new Map<string, Promise<unknown>>();
   private readonly restoring = new Map<string, Promise<void>>();
   private readonly catalogListeners = new Set<() => void>();
@@ -190,6 +192,7 @@ export class RemoteAgentsService {
       connection = { backend: this.factory(this.host(hostId)), status: 'disconnected' };
       this.connections.set(hostId, connection);
       connection.backend.onSharedWorkspaces?.(() => { for (const listener of this.sharedWorkspaceListeners) listener(hostId); });
+      connection.backend.onSharedHistory?.(taskId => { for (const listener of this.sharedHistoryListeners) listener(taskId); });
     }
     return connection;
   }
@@ -481,6 +484,11 @@ export class RemoteAgentsService {
   async timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage | null> {
     const task = this.task(id);
     return task.agentId ? this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
+  }
+  /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
+  sender(hostId: string, instance: string, label: string): { self: true } | { name: string } {
+    if (instance === this.store.instanceId()) return { self: true };
+    return this.connections.get(hostId)?.backend.sender?.(instance, label) ?? { name: label };
   }
   async reply(id: string): Promise<string> {
     const task = this.task(id);

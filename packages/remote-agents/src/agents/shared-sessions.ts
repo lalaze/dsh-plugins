@@ -85,6 +85,8 @@ export interface SharedOwner {
   loaded(taskId: string): boolean;
   /** Close a history nothing uses, to free its memory. */
   unload(taskId: string): void;
+  /** A history another DSH drives was brought up to date here, or that DSH's live status changed. */
+  followed?(taskId: string): void;
 }
 
 /**
@@ -133,6 +135,12 @@ export class SharedSessions {
     store.changeListeners.add(this.listener);
   }
   private get me(): string { return this.instance?.id ?? ''; }
+  /** Who sent a message recorded in a shared history: this DSH, or another one by name. */
+  sender(instance: string, label: string): { self: true } | { name: string } {
+    return instance === this.me ? { self: true } : { name: this.name(instance, label) };
+  }
+  /** This DSH as the sender of the messages it records, once the registry answered. */
+  get identity(): { instance: string; label: string } | undefined { return this.instance && { instance: this.instance.id, label: this.instance.label }; }
   /** Another DSH's name; one on the same computer as this one is told apart by its ID. */
   private name(instance: string, label: string): string {
     const name = label.slice(0, 80) || 'another DSH';
@@ -285,7 +293,7 @@ export class SharedSessions {
     if (!task || task.hostId !== this.owner.hostId) return;
     if (this.held.has(id)) void this.serial(id, () => this.push(id)).catch(() => {});
     // Histories are copied when read here; one already open, such as a session on screen, follows right away.
-    else if (this.owner.loaded(id)) void this.serial(id, () => this.pull(id)).catch(() => {});
+    else if (this.owner.loaded(id)) void this.serial(id, () => this.pull(id)).then(() => this.owner.followed?.(id)).catch(() => {});
     this.adoptIfOrphaned(id);
   }
   /** A CLI still running on the host whose DSH went away, or never had one, is driven from here. */

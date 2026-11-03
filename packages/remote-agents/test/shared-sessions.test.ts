@@ -212,6 +212,26 @@ test('a session bound to a main chat in one DSH is an ordinary session in anothe
   assert.equal(h.first.store.task(task => task.id === agent.id)?.chat?.sessionId, 'main-chat-1', 'its main chat binding is kept');
 });
 
+test('a message names the DSH that sent it, and the DSH following the session is told when its copy changed', { skip: !supported }, async t => {
+  const { h, second, secondHost } = await twoInstances(t);
+  const changed: string[] = [];
+  h.first.service.sharedHistoryListeners.add(id => changed.push(id));
+  const agent = await h.first.service.create(h.request('codex', 'stream 1'), { chat: { sessionId: 'main-chat-1', route: 'project/codex/fake-model' } });
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'turn');
+  await imported(second.service, agent.id);
+  assert.equal(changed.length, 0, 'nothing to follow while this DSH drives it');
+  await second.service.send(agent.id, message('stream 2'));
+  await waitFor(async () => changed.includes(agent.id), 'the first DSH is told it copied the other DSH\'s turn');
+  await waitFor(async () => (await transcript(h.first.service, agent.id)).text === 'c0🌏 c0🌏 c1🌏 ', 'the turn copied');
+  const sender = await second.store.instance();
+  const [first, next] = (await transcript(h.first.service, agent.id)).entries.filter(e => e.item.type === 'user_message').map(e => e.item.sentBy);
+  assert.equal(first, undefined, 'the first prompt is the one the session started with');
+  assert.deepEqual(next, { instance: sender.id, label: sender.label });
+  // Both DSH instances run on this computer under the same name: the other one is told apart by its ID.
+  assert.deepEqual(h.first.service.sender(h.hostId, sender.id, sender.label), { name: `${sender.label} · ${sender.id.replace(/^dsh-/, '').slice(0, 4)}` });
+  assert.deepEqual(second.service.sender(secondHost, sender.id, sender.label), { self: true });
+});
+
 const sessionsDir = (home: string) => join(home, '.dsh-remote-agents', 'shared-v1', 'sessions');
 /** Replace a file the way the registry does, so watchers notice. */
 async function replace(file: string, value: unknown) { await writeFile(`${file}.tmp`, JSON.stringify(value)); await rename(`${file}.tmp`, file); }

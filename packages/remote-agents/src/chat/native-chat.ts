@@ -10,7 +10,7 @@ import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Curso
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
 import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
-import { transcript } from './transcript.js';
+import { transcript, type TurnSource } from './transcript.js';
 import { decidePermission, unattendedAnswer } from '../agents/tools.js';
 import { isTeamPrompt, teamMemberNote, type TeamMember } from './agent-teams.js';
 import type { ToolHost } from '../core/dsh-host.js';
@@ -35,6 +35,13 @@ export interface SyncAgent {
   readonly session: Pick<Session, 'id' | 'requestHeader'>;
   send(message: ReturnType<typeof createUserMessage>, target: 'next-turn', wakeup: boolean): void;
 }
+/** Wakes a conversation to show what its remote CLI did meanwhile; nothing is sent to the CLI. */
+const notice = (summary: string, shown = 'It is shown below') => createUserMessage({ source: { kind: SYNC_SOURCE, form: 'notice', summary },
+  content: [{ type: 'text', text: `${summary}. ${shown}; no new request was sent to the remote CLI.` }] });
+/** How long a turn without a recorded end must have been quiet before it is shown as ended. */
+const QUIET_MS = 60_000;
+/** Finished turns this conversation did not send, ready to show: one markdown block and the last message among them. */
+interface Elsewhere { text: string; summary: string; lastMessageId: string }
 const CLI_NAMES: Readonly<Record<string, string>> = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
 export const chatProviderId = (cli: string) => `remote-cli-${cli}`;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
@@ -202,12 +209,80 @@ export class RemoteCliAdapter extends LlmAdapter {
    * CLI keeps working; the conversation shows its remaining output with the next response.
    */
   close(): void { this.released = true; for (const controller of this.controllers) controller.abort(RELEASED); }
+  /** The remote task a conversation's model route continues: the same route, or another model of the same CLI. */
+  private bound(sessionId: string, route: string) {
+    const store = this.projects.service.store;
+    return store.task(t => t.chat?.sessionId === sessionId && t.chat.route === route)
+      ?? store.task(t => t.chat?.sessionId === sessionId && route.startsWith(`${t.chat.route.split('/').slice(0, 2).join('/')}/`));
+  }
   /** The conversation's remote task when its last response ended before all its output reached DSH. */
   private unsynced(sessionId: string, route: string) {
-    const service = this.projects.service;
-    const task = service.store.task(t => t.chat?.sessionId === sessionId && t.chat.route === route)
-      ?? service.store.task(t => t.chat?.sessionId === sessionId && route.startsWith(`${t.chat.route.split('/').slice(0, 2).join('/')}/`));
+    const task = this.bound(sessionId, route);
     return task?.agentId && (task.chat?.history || task.chat?.delivered && !task.chat.delivered.done) ? task : undefined;
+  }
+  /**
+   * Finished turns of a conversation's CLI session that the conversation never showed, because another DSH sharing the
+   * host or Open sessions sent them, after the last turn it showed and before `until`, a message it just sent. A turn
+   * still running waits for a later look. Undefined when there are none, or when the turn the conversation showed last
+   * is no longer in the history.
+   */
+  private async elsewhere(taskId: string, signal?: AbortSignal, until?: string): Promise<Elsewhere | undefined> {
+    const service = this.projects.service, task = service.store.task(t => t.id === taskId), after = task?.chat?.delivered?.messageId;
+    if (!task?.chat || task.chat.history || !after || after === until) return;
+    // Read back from the end to the turn the conversation showed last, which is usually close to it.
+    let entries: TimelineEntry[] = [], cursor: Cursor | undefined, found = false, resets = 0;
+    for (let pages = 0; pages < 100 && !found; pages++) {
+      signal?.throwIfAborted();
+      const page = await service.timeline(taskId, cursor, 'before');
+      if (!page) return;
+      // The history was replaced while it was read, as when another DSH took the session over: read it again.
+      if (page.reset && cursor) { if (resets++ >= 3) return; entries = []; cursor = undefined; continue; }
+      const index = page.entries.findLastIndex(e => e.item.type === 'user_message' && e.item.clientMessageId === after);
+      entries = [...page.entries.slice(index + 1), ...entries]; found = index >= 0;
+      if (!page.hasOlder || !page.startCursor) break;
+      cursor = page.startCursor;
+    }
+    const first = entries.findIndex(e => e.item.type === 'user_message');
+    if (!found || first < 0) return;
+    entries = entries.slice(first);
+    const stop = until ? entries.findIndex(e => e.item.type === 'user_message' && e.item.clientMessageId === until) : -1;
+    if (stop === 0) return;
+    if (stop > 0) entries = entries.slice(0, stop);
+    // Turns before `until` or before another message ended. The history says when the last one did: right after another
+    // DSH sent a message its running status may not have arrived yet. One left without an end, as by a CLI that
+    // vanished, counts as ended once it has been quiet.
+    const latest = entries.findLastIndex(e => e.item.type === 'user_message'), latestId = entries[latest]?.item.clientMessageId;
+    const ended = !!until || entries.some(e => e.item.type === 'turn_end' && e.item.clientMessageId === latestId)
+      || Date.now() - Date.parse(entries.at(-1)!.timestamp) > QUIET_MS && !busy(await service.summary(taskId));
+    if (!ended) entries = entries.slice(0, latest);
+    const messages = entries.filter(e => e.item.type === 'user_message'), lastMessageId = messages.at(-1)?.item.clientMessageId;
+    if (typeof lastMessageId !== 'string' || !lastMessageId) return;
+    // Messages name the DSH that sent them since 0.2.75; a mix, or one without, reads as sent elsewhere.
+    const senders = messages.map(e => e.item.sentBy as { instance?: unknown; label?: unknown } | undefined);
+    const [sender] = senders, label = typeof sender?.label === 'string' ? sender.label.replace(/\s+/g, ' ').replace(/[*_`[\]<>\\]/g, '').trim() : '';
+    const from: TurnSource = typeof sender?.instance === 'string' && label && senders.every(s => s?.instance === sender.instance) ? service.sender(task.hostId, sender.instance, label) : undefined;
+    const cli = CLI_NAMES[task.provider] ?? task.provider, turns = messages.length;
+    const summary = `${cli} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}`;
+    return { text: transcript(entries, { cli, elsewhere: { from } }).text, summary, lastMessageId };
+  }
+  /**
+   * Show turns that another DSH sharing the host, or Open sessions, ran in this conversation's CLI session, once they
+   * finished. Like `sync` it wakes the conversation with a notice and sends nothing to the CLI.
+   */
+  async catchUp(agent: SyncAgent): Promise<boolean> {
+    const id = agent.session.id, config = agent.session.requestHeader()?.config;
+    if (this.released || this.active.has(id) || !config || !CHAT_PROVIDERS.includes(config.provider)) return false;
+    const task = this.bound(id, config.model);
+    // A history or a cut-off response to show is `sync`'s; turns sent after it follow it in the same response.
+    if (!task?.agentId || task.chat?.history || !task.chat?.delivered?.done) return false;
+    const service = this.projects.service;
+    // Checked first: while another DSH's turn runs, its history changes many times and is not read each time.
+    if (busy(await service.summary(task.id).catch(() => undefined) ?? { status: 'idle' })) return false;
+    const turns = await this.elsewhere(task.id).catch(() => undefined), key = turns && `${task.id}:elsewhere:${turns.lastMessageId}`;
+    if (!key || this.woken.has(key) || this.released || this.active.has(id)) return false;
+    this.woken.add(key);
+    agent.send(notice(turns.summary, 'They are shown below'), 'next-turn', true);
+    return true;
   }
   /**
    * Wake a conversation whose last remote response was cut off when DSH quit or reloaded the plugin. Its turn
@@ -224,8 +299,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     this.woken.add(`${task.id}:${pending}`);
     const summary = pending === 'history' ? `Saved history of this ${CLI_NAMES[task.provider] ?? task.provider} session${task.shared?.creator ? `, started on ${task.shared.creator}` : ''}`
       : 'Remote CLI output produced while DSH was disconnected';
-    agent.send(createUserMessage({ source: { kind: SYNC_SOURCE, form: 'notice', summary },
-      content: [{ type: 'text', text: `${summary}. It is shown below; no new request was sent to the remote CLI.` }] }), 'next-turn', true);
+    agent.send(notice(summary), 'next-turn', true);
     return true;
   }
   /** A continued session's saved history, read from its start, as one markdown block. */
@@ -440,6 +514,7 @@ export class RemoteCliAdapter extends LlmAdapter {
       if (sync) {
         // A catch-up turn only shows what the remote CLI did meanwhile; it never sends anything.
         const saved = task && service.store.task(t => t.id === task!.id)?.chat, pending = saved?.delivered;
+        let shown = true;
         if (saved?.history) {
           const { text, lastMessageId, end } = await this.history(taskId, signal);
           yield* textChunk('text', text);
@@ -461,7 +536,15 @@ export class RemoteCliAdapter extends LlmAdapter {
           admitted = true;
           yield* follow(pending.messageId, pending.cursor ?? undefined, true);
           settled = true; await delivered(pending.messageId, undefined, true);
-        } else { settled = true; yield* textChunk('text', 'The remote CLI produced no further output.'); }
+        } else { settled = true; shown = false; }
+        // Then the turns another DSH or Open sessions ran since, once they finished. A failed read leaves them for the next message.
+        const turns = task && await this.elsewhere(taskId, signal).catch(() => undefined);
+        signal.throwIfAborted();
+        if (turns) {
+          yield* endBlock(); yield* textChunk('text', `${index ? '\n\n---\n\n' : ''}${turns.text}`); shown = true;
+          await service.store.update(state => { const chat = state.tasks.find(t => t.id === taskId)?.chat; if (chat) chat.delivered = { messageId: turns.lastMessageId, cursor: null, done: true }; });
+        }
+        if (!shown) yield* textChunk('text', 'The remote CLI produced no further output.');
         yield* endBlock(); rows.close(); yield { type: 'finish', reason: { kind: 'stop' } }; return;
       }
       const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => prompted(m) ? [...contentOf(m)] : []);
@@ -507,6 +590,9 @@ export class RemoteCliAdapter extends LlmAdapter {
           admitted = true; await service.send(task.id, { id: messageId, text, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
         } else admitted = true;
       }
+      // Turns another DSH or Open sessions ran since this conversation's last response come first, in the order they ran.
+      const turns = task && await this.elsewhere(taskId, signal, messageId).catch(() => undefined);
+      if (turns) yield* textChunk('text', `${turns.text}\n\n---\n\n`);
       const receipt = await service.messageTimeline(taskId, messageId);
       if (!receipt.hasFollowingMessage) await service.store.update(state => { const saved = state.tasks.find(t => t.id === taskId); if (saved?.chat) saved.chat.lastUserId = userId; });
       const interrupted = yield* follow(messageId, undefined, false);
