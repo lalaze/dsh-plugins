@@ -16,4 +16,10 @@ export declare class WorkspaceFiles {
     git(cwd: string, batch: GitBatch, signal?: AbortSignal): Promise<GitRun[]>;
     /** Stops a running `git` request and the commands it has not started. */
     cancelGit(cwd: string, id: string, signal?: AbortSignal): Promise<void>;
+    /**
+     * A shell command in `cwd` with the login environment and `env`, for as long as it takes, as for a worktree's setup.
+     * Both output streams arrive together as they are written. Resolves the exit code; aborting stops the command and
+     * every process it started, and resolves null.
+     */
+    stream(cwd: string, command: string, env: Record<string, string>, output: (data: Buffer) => void, signal: AbortSignal): Promise<number | null>;
 }

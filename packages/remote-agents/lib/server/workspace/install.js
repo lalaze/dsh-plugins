@@ -10,6 +10,7 @@ import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
+import { WorktreeService } from './worktrees.js';
 /**
  * Remote workspace tools on the saved machines: files, sync, tunnels, the native terminal's Remote workspace shell, the
  * `remote_workspace` tool and its system prompt. The caller closes `features.tunnels`.
@@ -82,7 +83,15 @@ export async function installWorkspaces(ctx, store, machines) {
             host.tools.register(tool);
     });
     installTagSync(ctx, store, machines, access);
-    return { access, placement, workspaces, features: { files, tunnels, terminal } };
+    // New workspaces from a project: a Git worktree here or on a saved machine.
+    const worktrees = new WorktreeService({
+        machines, access, anchors: workspaces,
+        dsh: () => ctx.get('workspaceController'),
+        tags: () => ctx.get('workspaceTags'),
+        stopRemoteSessions: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
+    });
+    ctx.effect(() => () => worktrees.close());
+    return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees } };
 }
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */
 function installTagSync(ctx, store, machines, access) {

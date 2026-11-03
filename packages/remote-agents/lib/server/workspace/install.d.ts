@@ -6,6 +6,7 @@ import { type WorkspaceFeatures } from './http.js';
 import type { GitBatch, GitRun, WorkspaceEntry, WorkspaceTarget } from './domain.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTunnels } from './tunnels.js';
+import { WorktreeService } from './worktrees.js';
 /**
  * What other DSH plugins on this host may do in a conversation's remote workspace, as the service `remoteAgentsWorkspaces`:
  * always on its verified machine and in its verified directory, which every call checks again. dsh-git-view runs Git
@@ -48,6 +49,7 @@ export interface Workspaces {
     workspaces: RemoteWorkspaces;
     features: WorkspaceFeatures & {
         tunnels: WorkspaceTunnels;
+        worktrees: WorktreeService;
     };
 }
 /**

@@ -1,6 +1,6 @@
 import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './core/domain.js';
 import { ChatProjects } from './chat/projects.js';
-import { workspaceAction } from './workspace/http.js';
+import { workspaceAction, worktreeAction } from './workspace/http.js';
 export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
@@ -38,6 +38,18 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     if (!features)
                         throw new RemoteError('Remote workspaces are unavailable', 501);
                     result = await workspaceAction(features, action, input, request.signal);
+                    break;
+                }
+                case 'worktreeProjects':
+                case 'worktreeInspect':
+                case 'createWorktree':
+                case 'worktreeJob':
+                case 'worktreeJobAction':
+                case 'worktreeArchiveCheck':
+                case 'archiveWorktree': {
+                    if (!features?.worktrees)
+                        throw new RemoteError('Worktree workspaces are unavailable', 501);
+                    result = await worktreeAction(features.worktrees, action, input, request.signal);
                     break;
                 }
                 case 'workspaceModels':

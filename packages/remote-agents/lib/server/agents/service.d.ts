@@ -134,6 +134,8 @@ export declare class RemoteAgentsService {
     send(id: string, input: unknown, options?: SendOptions): Promise<AgentSummary>;
     stop(id: string): Promise<void>;
     respond(id: string, requestId: string, input: unknown): Promise<void>;
+    /** Archives every session working in a remote folder or below it, as when a worktree is removed. */
+    archiveSessionsIn(hostId: string, folder: string): Promise<void>;
     /** Soft delete: interrupt, release the CLI process and hide the agent. Output and the native session are kept. */
     archive(id: string, archived?: boolean, options?: {
         onlyIdle?: boolean;
