@@ -5,7 +5,7 @@ import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from '../core/domain.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type HostConfig, type PermissionAnswer, type SharedWorkspace, type Task, type UsageReport } from '../core/domain.js';
+import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type HostConfig, type PermissionAnswer, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
 export interface UsageOptions {
@@ -456,6 +456,11 @@ export class RemoteAgentsService {
     if (live) this.assertAgent(task, live);
     const timeline = task.agentId ? await this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
     return { agent: delegated ? this.observeDelegation(task, live) : this.summarize(task, live), permissions: live?.pendingPermissions ?? [], timeline };
+  }
+  /** Saved output only: nothing is restored or attached, so reading many sessions never connects their relays. */
+  async timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage | null> {
+    const task = this.task(id);
+    return task.agentId ? this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
   }
   async reply(id: string): Promise<string> {
     const task = this.task(id);

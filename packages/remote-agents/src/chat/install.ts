@@ -6,7 +6,9 @@ import { loggerOf, permissionOf, type ToolHost } from '../core/dsh-host.js';
 import type { Store } from '../core/store.js';
 import type { WorkspaceAccess } from '../workspace/access.js';
 import { dshHome } from '../workspace/access.js';
+import type { RemoteWorkspaces } from '../workspace/remote-workspaces.js';
 import type { WorkspaceService } from '../workspace/service.js';
+import { SharedChatAdoption } from './adopt.js';
 import { CHAT_IMAGE_LIMIT } from './images.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter, type SyncAgent } from './native-chat.js';
 import type { ChatProjects } from './projects.js';
@@ -27,8 +29,8 @@ export function scheduleSessionRepair(ctx: Context, store: Store): void {
 }
 
 /** Remote CLI models in DSH's model picker and main conversation. */
-export function installChat(ctx: Context, service: RemoteAgentsService, projects: ChatProjects, workspace: { access: WorkspaceAccess; files: WorkspaceService }): void {
-  const { access, files } = workspace;
+export function installChat(ctx: Context, service: RemoteAgentsService, projects: ChatProjects, workspace: { access: WorkspaceAccess; files: WorkspaceService; workspaces: RemoteWorkspaces }): void {
+  const { access, files, workspaces } = workspace;
   ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { agents: { get(id: string): unknown; list?(): SyncAgent[] } };
     const steps = new Map<string, { session: Session; turn: number; step: number }>();
@@ -67,5 +69,37 @@ export function installChat(ctx: Context, service: RemoteAgentsService, projects
     const wake = (agent: SyncAgent) => { void service.resumeConversation(agent.session.id).then(() => adapter.sync(agent)).catch(() => {}); };
     scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
     for (const agent of host.agents.list?.() ?? []) wake(agent);
+    // Sessions other DSH instances started on shared hosts continue here as conversations in their remote workspaces.
+    const controller = (name: 'sessionController' | 'workspaceController') => {
+      const value = scoped.get(name) as any;
+      if (!value) throw new Error(`DSH ${name === 'sessionController' ? 'sessions are' : 'workspaces are'} not available yet`);
+      return value;
+    };
+    const adoption = new SharedChatAdoption(projects, {
+      anchor: async (hostId, cwd, signal) => (await workspaces.create(hostId, cwd, signal)).path,
+      workspace: async path => String((await controller('workspaceController').create({ path })).workspace.workspaceId),
+      sessions: async () => {
+        const items = ((await controller('sessionController').list({})) as { items?: { sessionId: string; blank?: boolean }[] }).items ?? [];
+        return new Map(items.map(item => [item.sessionId, { blank: item.blank === true }]));
+      },
+      create: async (workspaceId, sessionId) => String((await controller('sessionController').create({ workspaceId, sessionId })).sessionId),
+      select: async (sessionId, selection) => {
+        await controller('sessionController').selectModel({ sessionId, provider: selection.provider, model: selection.model, ...(selection.reasoningEffort ? { reasoningEffort: selection.reasoningEffort } : {}) });
+        // The composer's permission decides the CLI mode of the next message: start from the mode the session has. DSH has
+        // no read-only preset by default; a permission without one takes the closest stricter preset, else the strictest there is.
+        const presets = scoped.get('permissionPresets') as { set?(session: Session, preset: string): void } | undefined, session = scoped.sessions.get(sessionId as Parameters<typeof scoped.sessions.get>[0]);
+        if (!selection.permission || !session || !presets?.set) return;
+        const levels = ['read-only', 'workspace-write', 'auto', 'danger-full-access'], at = levels.indexOf(selection.permission);
+        for (const preset of [...levels.slice(0, at + 1).reverse(), ...levels.slice(at + 1)]) {
+          try { presets.set(session, preset); return; } catch { /* Not a preset of this DSH: try the next one. */ }
+        }
+      },
+      rename: async (sessionId, title) => { await controller('sessionController').rename({ sessionId, title }); },
+      wake: sessionId => { const agent = host.agents.get(sessionId) as SyncAgent | undefined; if (agent) adapter.sync(agent); },
+      // DSH has no logger service by default: its output log keeps the reason a conversation could not be added.
+      warn: message => { const logger = loggerOf(scoped); if (logger?.warn) logger.warn(message); else console.warn(`[dsh-remote-agents] ${message}`); },
+    });
+    adoption.start();
+    scoped.effect(() => () => adoption.close());
   });
 }

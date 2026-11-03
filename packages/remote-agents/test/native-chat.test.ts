@@ -679,3 +679,23 @@ test('durable message pages drain more than 100 events and stop at the next subm
   assert.equal(first.entries.length + second.entries.length + third.entries.length, 240); assert.equal(third.hasNewer, false);
   assert.equal(third.entries.at(-1)?.item.text, '239'); assert.equal((await history.messagePage('missing')).found, false);
 });
+
+test('follow-ups send the CLI only what it has not seen: never its own replies, but other models\' replies and human turns', async t => {
+  const { adapter, options, remote, store, project } = await setup(t);
+  remote.onCreate = agent => { remote.append(agent.id, { type: 'assistant_message', text: 'First reply from the CLI' }); };
+  const first = options('Fix the tests'), route = first.model;
+  await collect(adapter.stream(first));
+  const sent = () => String(remote.entries.get(store.snapshot().tasks[0].agentId!)!.findLast(e => e.item.type === 'user_message')!.item.text);
+  const own = createAssistantMessage({ source: { provider: CODEX_PROVIDER, model: route }, content: [{ type: 'text', text: 'First reply from the CLI' }] });
+  const follow = user('Now run the linter');
+  await collect(adapter.stream({ ...first, messages: [...first.messages, own, follow] }));
+  assert.equal(sent(), 'Now run the linter', 'the CLI\'s own reply is in its session already');
+
+  const detour = [user('Ask DeepSeek instead'), createAssistantMessage({ source: { provider: 'deepseek', model: 'chat' }, content: [{ type: 'text', text: 'DeepSeek answer' }] }),
+    createAssistantMessage({ source: { provider: chatProviderId('claude'), model: `${project.id}/claude/claude-model` }, content: [{ type: 'text', text: 'Claude CLI answer' }] })];
+  const back = user('Back to the CLI');
+  await collect(adapter.stream({ ...first, messages: [...first.messages, own, follow, own, ...detour, back] }));
+  const prompt = sent();
+  assert.match(prompt, /^Conversation context \(already occurred; do not repeat completed actions\):\nuser: Ask DeepSeek instead\n\nassistant: DeepSeek answer\n\nassistant: Claude CLI answer\n\nCurrent user request:\nBack to the CLI$/);
+  assert.doesNotMatch(prompt, /First reply from the CLI|Now run the linter/);
+});
