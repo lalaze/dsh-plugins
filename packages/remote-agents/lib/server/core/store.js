@@ -111,11 +111,16 @@ export class Store {
         }
         if (value.seenWorkspaces !== undefined && !Object.values(record(value.seenWorkspaces)).every(paths => Array.isArray(paths) && paths.every(path => typeof path === 'string')))
             throw new Error('Invalid saved shared workspaces');
+        // Only a sync memory: a record that does not fit is dropped and that workspace syncs as on first contact.
+        const tagSync = value.tagSync === undefined ? undefined : Object.fromEntries(Object.entries(record(value.tagSync)).filter(([, saved]) => {
+            const entry = saved;
+            return Array.isArray(entry?.names) && entry.names.every(name => typeof name === 'string') && (entry.at === undefined || typeof entry.at === 'string');
+        }));
         this.state = { version: 1, hosts: value.hosts, tasks: value.tasks, ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects } : {}),
             ...(value.relayCleanups ? { relayCleanups: value.relayCleanups } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts } : {}),
             ...(value.chatFast ? { chatFast: value.chatFast } : {}), ...(value.sharing ? { sharing: value.sharing } : {}),
             ...(value.instance ? { instance: value.instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces } : {}),
-            ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions } : {}) };
+            ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions } : {}), ...(tagSync ? { tagSync } : {}) };
     }
     snapshot() { return structuredClone(this.state); }
     /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
@@ -133,6 +138,7 @@ export class Store {
             await this.update(state => { state.instance ??= { id: `dsh-${randomUUID()}`, label: (hostname() || 'DSH').slice(0, 100) }; });
         return structuredClone(this.state.instance);
     }
+    tagSync(key) { return structuredClone(this.state.tagSync?.[key]); }
     seenWorkspaces(hostId) { return [...(this.state.seenWorkspaces?.[hostId] ?? [])]; }
     sharedDeletions(hostId) { return (this.state.sharedDeletions ?? []).filter(d => d.hostId === hostId).map(d => d.id); }
     relayCleanups(hostId) { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }

@@ -383,6 +383,14 @@ export interface SharedWorkspace {
     path: string;
     by?: string;
     at?: string;
+    /** Its Workspace Tags, by name, as the DSH that changed them last (`tagsBy`) left them, at `tagsAt` on the host's clock. */
+    tags?: SharedTag[];
+    tagsAt?: string;
+    tagsBy?: string;
+}
+export interface SharedTag {
+    name: string;
+    color: string;
 }
 export declare const busy: (agent: Pick<AgentSummary, "status">) => boolean;
 export declare class RemoteError extends Error {

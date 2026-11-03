@@ -92,8 +92,13 @@ export class SshBackend {
         this.shared?.start(); }
     sharingError() { return this.shared?.status(); }
     controller(taskId) { return this.shared?.controller(taskId); }
-    async sharedWorkspaces() { if (!this.shared)
-        return []; return this.shared.listWorkspaces(); }
+    async sharedWorkspaces(timeout) { if (!this.shared)
+        return []; return this.shared.listWorkspaces(timeout); }
+    async setWorkspaceTags(path, tags) {
+        if (!this.shared)
+            throw new Error('Sessions are not shared on this host');
+        return this.shared.setWorkspaceTags(path, tags);
+    }
     async shareWorkspace(path) { await this.shared?.addWorkspace(path); }
     async sharingReachable(timeout) { return !this.shared || this.shared.reachable(timeout); }
     async withdrawSharing(taskIds) {

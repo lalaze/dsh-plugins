@@ -1,4 +1,4 @@
-import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, SharedWorkspace, Task, TimelinePage } from '../core/domain.js';
+import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, PermissionAnswer, Provider, SharedTag, SharedWorkspace, Task, TimelinePage } from '../core/domain.js';
 import { type SshTransport } from '../core/ssh.js';
 import type { Store } from '../core/store.js';
 import { WorkspaceFiles } from '../workspace/files.js';
@@ -43,8 +43,9 @@ export interface Backend {
     controller?(taskId: string): string | undefined;
     /** Forget a session here only: a shared one stays on the host for other DSH instances, and its CLI keeps running. */
     forgetLocal?(task: Task): Promise<void>;
-    sharedWorkspaces?(): Promise<SharedWorkspace[]>;
+    sharedWorkspaces?(timeout?: number): Promise<SharedWorkspace[]>;
     shareWorkspace?(path: string): Promise<void>;
+    setWorkspaceTags?(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
     /** Stop sharing the given sessions started here; other DSH instances forget them. */
     withdrawSharing?(taskIds: string[]): Promise<void>;
     /** Whether deletions reach the other DSH instances now; true without sharing. */
@@ -110,7 +111,8 @@ export declare class SshBackend implements Backend {
     startSharing(): void;
     sharingError(): string | undefined;
     controller(taskId: string): string | undefined;
-    sharedWorkspaces(): Promise<SharedWorkspace[]>;
+    sharedWorkspaces(timeout?: number): Promise<SharedWorkspace[]>;
+    setWorkspaceTags(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
     shareWorkspace(path: string): Promise<void>;
     sharingReachable(timeout: number): Promise<boolean>;
     withdrawSharing(taskIds: string[]): Promise<void>;

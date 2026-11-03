@@ -1,5 +1,5 @@
 import { type SshTransport } from '../core/ssh.js';
-import { type Agent, type SharedWorkspace } from '../core/domain.js';
+import { type Agent, type SharedTag, type SharedWorkspace } from '../core/domain.js';
 import type { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
 /** `claimed`: this DSH now drives the session; `changed` means its history was replaced by the shared one. */
@@ -138,6 +138,8 @@ export declare class SharedSessions {
     /** Let another DSH drive a session right away. */
     release(id: string): Promise<void>;
     addWorkspace(path: string): Promise<void>;
+    /** Record a workspace's tags for the other DSH instances; added to the shared workspaces when missing. */
+    setWorkspaceTags(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
     /** Workspaces any DSH added on this SSH account. */
     listWorkspaces(timeout?: number): Promise<SharedWorkspace[]>;
     close(): void;

@@ -773,6 +773,16 @@ export class SharedSessions {
             throw new Error(this.unavailable ?? this.error ?? 'The shared session registry is unavailable');
         await this.call('addWorkspace', { path, label: this.instance?.label ?? '' });
     }
+    /** Record a workspace's tags for the other DSH instances; added to the shared workspaces when missing. */
+    async setWorkspaceTags(path, tags) {
+        // The name is known once the registry answered.
+        if (!await this.ready(20_000))
+            throw new Error(this.unavailable ?? this.error ?? 'The shared session registry is unavailable');
+        const { workspace } = await this.call('setWorkspaceTags', { path, tags, label: this.instance?.label ?? '' });
+        // The host reports the change shortly; until then this copy already holds it.
+        this.workspaces = [...this.workspaces.filter(w => w.path !== workspace.path), workspace];
+        return structuredClone(workspace);
+    }
     /** Workspaces any DSH added on this SSH account. */
     async listWorkspaces(timeout = 8000) {
         if (!await this.ready(timeout))

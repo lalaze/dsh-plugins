@@ -3,7 +3,7 @@ import type { LaunchSharing } from '../sharing/sharing.js';
 import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
+import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type SharedTag, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
 export interface UsageOptions {
     /** The conversation's selected route; picks its CLI when the conversation used several. */
     route?: string;
@@ -100,6 +100,10 @@ export declare class RemoteAgentsService {
     sharedWorkspaces(hostId: string): Promise<SharedWorkspace[]>;
     /** Offered to DSH: not offered again, even when removed from the sidebar. */
     seeWorkspaces(hostId: string, paths: string[]): Promise<void>;
+    /** Every workspace shared on this host, with its tags; undefined while its registry cannot be reached. */
+    sharedWorkspaceList(hostId: string, timeout?: number): Promise<SharedWorkspace[] | undefined>;
+    /** Share a workspace's tags with the other DSH instances on this host. */
+    setWorkspaceTags(hostId: string, path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
     /** Record a remote workspace on its host so other DSH instances offer it too. */
     shareWorkspace(hostId: string, path: string): Promise<void>;
     connect(hostId: string): Promise<Dashboard>;

@@ -38,6 +38,12 @@ export interface State {
     instance?: Instance;
     seenWorkspaces?: Record<string, string[]>;
     sharedDeletions?: SharedDeletion[];
+    tagSync?: Record<string, TagSyncRecord>;
+}
+/** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
+export interface TagSyncRecord {
+    names: string[];
+    at?: string;
 }
 /** A deleted shared session whose deletion has not reached its SSH host yet. */
 export interface SharedDeletion {
@@ -70,6 +76,7 @@ export declare class Store {
     chatEffort(route: string): string | undefined;
     /** This DSH's identity for shared hosts, created on first use. */
     instance(): Promise<Instance>;
+    tagSync(key: string): TagSyncRecord | undefined;
     seenWorkspaces(hostId: string): string[];
     sharedDeletions(hostId: string): string[];
     relayCleanups(hostId: string): RelayCleanup[];
