@@ -56,10 +56,17 @@ export class SshBackend {
     probes = new Set();
     identity;
     catalogs = new Map();
+    /** One CLI's probe for the start path, keyed by `cwd\0provider`, so `create` and `open` do not probe twice. */
+    targets = new Map();
     sessions = new Map();
     /** Admitted starts/restores, including work not yet registered in sessions. */
     reservations = new Set();
     histories = new Map();
+    /** When each loaded history was last used, so idle ones (no live session) are freed from memory. */
+    historyUsed = new Map();
+    historySweep;
+    /** How long a history with no live session is kept in memory after its last read, before it is reloaded on demand. */
+    historyTtl = 300_000;
     starting = new Map();
     accounts = new Map();
     /** The plan each CLI's account last showed, for answers that cannot tell it. */
@@ -151,7 +158,8 @@ export class SshBackend {
         throw new Error('SSH agent backend has stopped'); }
     async homeDirectory() {
         this.assertOpen();
-        const path = await this.transport.exec('printf \'%s\' "$HOME"');
+        // $HOME is set by the system, so this never needs the remote login shell, which costs ~0.5s to load.
+        const path = await this.transport.exec('printf \'%s\' "$HOME"', 20_000, { login: false });
         this.assertOpen();
         return remotePath(path);
     }
@@ -179,7 +187,8 @@ done`}`, 15_000, { login: false });
         this.assertOpen();
         if (this.identity && Date.now() - this.identity.at < 15_000)
             return this.identity.id;
-        const [machine, user, unique] = (await this.transport.exec(MACHINE_IDENTITY)).split('\0');
+        // The identity is cat/uname/id only; skip the login shell, which `use()` would otherwise pay on every recheck.
+        const [machine, user, unique] = (await this.transport.exec(MACHINE_IDENTITY, 20_000, { login: false })).split('\0');
         if (!machine || !user || !unique)
             throw new Error('SSH did not report a valid machine identity');
         const id = serverIdOf(machine, user, unique);
@@ -187,14 +196,123 @@ done`}`, 15_000, { login: false });
         return id;
     }
     async history(id) {
+        this.historyUsed.set(id, Date.now());
         let promise = this.histories.get(id);
         if (!promise) {
             const history = new TaskHistory(this.store.directory, id);
             history.onAppend = () => this.shared?.appended(id);
             promise = history.open().then(() => history);
             this.histories.set(id, promise);
+            // Reload-on-demand means a history nothing reads need not stay in memory; a hub opens many over its lifetime.
+            if (!this.historySweep && !this.closed) {
+                this.historySweep = setInterval(() => this.sweepHistories(), 60_000);
+                this.historySweep.unref?.();
+            }
         }
         return promise;
+    }
+    /**
+     * Drop histories no live session uses and nothing has read for a while; a later read reopens them from disk.
+     * A history an attached, restoring or starting session holds is kept: a second instance of the same file would
+     * append or read out of step with the one that session holds.
+     */
+    sweepHistories() {
+        if (this.closed)
+            return;
+        const now = Date.now();
+        for (const id of [...this.histories.keys()]) {
+            if (this.sessions.has(id) || this.restoring.has(id) || this.starting.has(id))
+                continue;
+            if (now - (this.historyUsed.get(id) ?? 0) < this.historyTtl)
+                continue;
+            this.histories.delete(id);
+            this.historyUsed.delete(id);
+        }
+        for (const id of [...this.historyUsed.keys()])
+            if (!this.histories.has(id))
+                this.historyUsed.delete(id);
+    }
+    /** Canonical cwd and the installed path of each probed CLI, in one SSH round trip. */
+    async canonicalize(cwd, definitions) {
+        const output = await this.transport.exec(`cd ${quote(cwd)} && printf '%s\\0' "$(pwd -P)" && ${definitions.map(p => `printf '%s\\0%s\\0' ${quote(p.id)} "$(command -v ${quote(p.command)} 2>/dev/null || true)"`).join(' && ')}`);
+        const [canonical, ...parts] = output.split('\0');
+        this.assertOpen();
+        if (!canonical?.startsWith('/'))
+            throw new Error('Remote project does not exist or is not accessible');
+        const installed = new Map();
+        for (let i = 0; i + 1 < parts.length; i += 2)
+            if (parts[i + 1])
+                installed.set(parts[i], parts[i + 1]);
+        return { canonical, installed };
+    }
+    /** Probe one CLI in its canonical cwd: its models and modes, and the launch profile when it is ready. */
+    async probeDefinition(definition, canonical, path) {
+        const unavailable = { id: definition.id, label: definition.label, status: 'unavailable', models: [], modes: [], ...(definition.id === 'antigravity' ? { notice: ANTIGRAVITY_NOTICE } : {}) };
+        if (!path)
+            return { provider: unavailable };
+        let peer;
+        try {
+            const argv = [path, ...definition.args];
+            if (definition.protocol === 'antigravity') {
+                const version = await this.transport.exec('node --version');
+                if (Number(version.trim().match(/^v(\d+)/)?.[1] ?? 0) < 22)
+                    throw new Error('Antigravity remote control requires Node.js 22 or newer on the SSH host');
+                const models = decodeAntigravityModels(await this.transport.exec(`cd ${quote(canonical)} && ${quote(path)} models`, 40_000));
+                if (!models.length)
+                    throw new Error('Antigravity returned no models. Sign in with agy and check agy models on the remote host.');
+                const provider = { ...unavailable, status: 'ready', models, defaultModeId: 'default', modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }, { id: 'accept-edits', label: 'Accept edits' }, { id: 'auto', label: 'Auto' }] };
+                return { provider, profile: { argv, protocol: definition.protocol, cwd: canonical, provider } };
+            }
+            const launch = definition.protocol === 'claude' ? [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'] : argv;
+            this.assertOpen();
+            peer = new JsonlPeer(this.transport.start(canonical, launch));
+            this.probes.add(peer);
+            peer.onMessage(message => { if (message.method && message.id !== undefined)
+                peer?.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Discovery does not execute tools' } }); });
+            let models = [], modes = [], defaultModeId;
+            if (definition.protocol === 'codex') {
+                await initializeCodex(peer);
+                let cursor;
+                for (let page = 0; page < 20; page++) {
+                    const result = await peer.request('model/list', { limit: 100, ...(cursor ? { cursor } : {}) });
+                    models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']), isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })), serviceTiers: codexServiceTiers(m) })));
+                    cursor = result?.nextCursor;
+                    if (!cursor)
+                        break;
+                }
+                modes = permissionModes('codex', [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'auto-review', label: 'Workspace write · auto review' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]);
+                defaultModeId = 'inherit';
+            }
+            else if (definition.protocol === 'claude') {
+                await peer.control({ subtype: 'initialize' });
+                models = claudeModels(await peer.control({ subtype: 'list_models' }));
+                modes = permissionModes('claude', [{ id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }]);
+                defaultModeId = 'inherit';
+            }
+            else {
+                const capabilities = await initializeAcp(peer);
+                const session = await peer.request('session/new', { cwd: canonical, mcpServers: [] });
+                ({ models, modes, defaultModeId } = await discoverAcpCatalog(peer, session));
+                for (const model of models)
+                    model.inputModalities = capabilities.agentCapabilities?.promptCapabilities?.image === true ? ['text', 'image'] : ['text'];
+                if (capabilities.agentCapabilities?.sessionCapabilities?.close)
+                    await peer.request('session/close', { sessionId: session.sessionId });
+            }
+            models = [...new Map(models.filter(m => m.id && m.id !== 'undefined').map(m => [m.id, m])).values()];
+            if (!models.length)
+                throw new Error('The remote CLI returned no models. Check its login and version.');
+            const provider = { ...unavailable, status: 'ready', models, modes, defaultModeId };
+            return { provider, profile: { argv, protocol: definition.protocol, cwd: canonical, provider } };
+        }
+        catch (error) {
+            return { provider: { ...unavailable, status: 'error', error: error instanceof Error ? error.message : String(error) } };
+        }
+        finally {
+            if (peer) {
+                this.probes.delete(peer);
+                peer.close();
+            }
+        }
     }
     async providers(cwd, refresh) {
         this.assertOpen();
@@ -205,91 +323,34 @@ done`}`, 15_000, { login: false });
         const cached = this.catalogs.get(cwd);
         if (!refresh && cached?.selection === selection && Date.now() - cached.at < 30_000)
             return structuredClone(cached.providers);
-        const output = await this.transport.exec(`cd ${quote(cwd)} && printf '%s\\0' "$(pwd -P)" && ${definitions.map(p => `printf '%s\\0%s\\0' ${quote(p.id)} "$(command -v ${quote(p.command)} 2>/dev/null || true)"`).join(' && ')}`);
-        const [canonical, ...parts] = output.split('\0');
+        const { canonical, installed } = await this.canonicalize(cwd, definitions);
+        const probed = await Promise.all(definitions.map(definition => this.probeDefinition(definition, canonical, installed.get(definition.id))));
+        const providers = probed.map(({ provider }) => provider);
         this.assertOpen();
-        if (!canonical?.startsWith('/'))
-            throw new Error('Remote project does not exist or is not accessible');
-        const installed = new Map();
-        for (let i = 0; i + 1 < parts.length; i += 2)
-            if (parts[i + 1])
-                installed.set(parts[i], parts[i + 1]);
-        const profiles = new Map();
-        const providers = await Promise.all(definitions.map(async (definition) => {
-            const path = installed.get(definition.id);
-            const unavailable = { id: definition.id, label: definition.label, status: 'unavailable', models: [], modes: [], ...(definition.id === 'antigravity' ? { notice: ANTIGRAVITY_NOTICE } : {}) };
-            if (!path)
-                return unavailable;
-            let peer;
-            try {
-                const argv = [path, ...definition.args];
-                if (definition.protocol === 'antigravity') {
-                    const version = await this.transport.exec('node --version');
-                    if (Number(version.trim().match(/^v(\d+)/)?.[1] ?? 0) < 22)
-                        throw new Error('Antigravity remote control requires Node.js 22 or newer on the SSH host');
-                    const models = decodeAntigravityModels(await this.transport.exec(`cd ${quote(canonical)} && ${quote(path)} models`, 40_000));
-                    if (!models.length)
-                        throw new Error('Antigravity returned no models. Sign in with agy and check agy models on the remote host.');
-                    const provider = { ...unavailable, status: 'ready', models, defaultModeId: 'default', modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }, { id: 'accept-edits', label: 'Accept edits' }, { id: 'auto', label: 'Auto' }] };
-                    profiles.set(definition.id, { argv, protocol: definition.protocol, cwd: canonical, provider });
-                    return provider;
-                }
-                const launch = definition.protocol === 'claude' ? [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'] : argv;
-                this.assertOpen();
-                peer = new JsonlPeer(this.transport.start(canonical, launch));
-                this.probes.add(peer);
-                peer.onMessage(message => { if (message.method && message.id !== undefined)
-                    peer?.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Discovery does not execute tools' } }); });
-                let models = [], modes = [], defaultModeId;
-                if (definition.protocol === 'codex') {
-                    await initializeCodex(peer);
-                    let cursor;
-                    for (let page = 0; page < 20; page++) {
-                        const result = await peer.request('model/list', { limit: 100, ...(cursor ? { cursor } : {}) });
-                        models.push(...list(result?.data).filter(m => !m.hidden).map(m => ({ id: String(m.model ?? m.id), label: String(m.displayName ?? m.model ?? m.id), inputModalities: (Array.isArray(m.inputModalities) && !m.inputModalities.includes('image') ? ['text'] : ['text', 'image']), isDefault: m.isDefault === true, defaultThinkingOptionId: m.defaultReasoningEffort, thinkingOptions: list(m.supportedReasoningEfforts).map(e => ({ id: String(e.reasoningEffort), label: String(e.reasoningEffort) })), serviceTiers: codexServiceTiers(m) })));
-                        cursor = result?.nextCursor;
-                        if (!cursor)
-                            break;
-                    }
-                    modes = permissionModes('codex', [{ id: 'workspace-write', label: 'Workspace write · ask on request' }, { id: 'auto-review', label: 'Workspace write · auto review' }, { id: 'read-only', label: 'Read only' }, { id: 'full-access', label: 'Full access' }]);
-                    defaultModeId = 'inherit';
-                }
-                else if (definition.protocol === 'claude') {
-                    await peer.control({ subtype: 'initialize' });
-                    models = claudeModels(await peer.control({ subtype: 'list_models' }));
-                    modes = permissionModes('claude', [{ id: 'default', label: 'Ask before tools' }, { id: 'plan', label: 'Plan' }, { id: 'acceptEdits', label: 'Accept edits' }, { id: 'bypassPermissions', label: 'Full access' }]);
-                    defaultModeId = 'inherit';
-                }
-                else {
-                    const capabilities = await initializeAcp(peer);
-                    const session = await peer.request('session/new', { cwd: canonical, mcpServers: [] });
-                    ({ models, modes, defaultModeId } = await discoverAcpCatalog(peer, session));
-                    for (const model of models)
-                        model.inputModalities = capabilities.agentCapabilities?.promptCapabilities?.image === true ? ['text', 'image'] : ['text'];
-                    if (capabilities.agentCapabilities?.sessionCapabilities?.close)
-                        await peer.request('session/close', { sessionId: session.sessionId });
-                }
-                models = [...new Map(models.filter(m => m.id && m.id !== 'undefined').map(m => [m.id, m])).values()];
-                if (!models.length)
-                    throw new Error('The remote CLI returned no models. Check its login and version.');
-                const provider = { ...unavailable, status: 'ready', models, modes, defaultModeId };
-                profiles.set(definition.id, { argv, protocol: definition.protocol, cwd: canonical, provider });
-                return provider;
-            }
-            catch (error) {
-                return { ...unavailable, status: 'error', error: error instanceof Error ? error.message : String(error) };
-            }
-            finally {
-                if (peer) {
-                    this.probes.delete(peer);
-                    peer.close();
-                }
-            }
-        }));
-        this.assertOpen();
-        this.catalogs.set(cwd, { at: Date.now(), selection, profiles, providers });
+        this.catalogs.set(cwd, { at: Date.now(), selection, providers });
         return structuredClone(providers);
     }
+    /**
+     * Probe only the one CLI a session needs, rather than launching every enabled CLI to list its models.
+     * Cached briefly so a session's validation (`create`) and its launch (`open`) share a single probe.
+     */
+    async resolveTarget(cwd, providerId, refresh = false) {
+        this.assertOpen();
+        const key = `${cwd}\0${providerId}`, cached = this.targets.get(key);
+        if (!refresh && cached && Date.now() - cached.at < 30_000)
+            return { provider: cached.provider, ...(cached.profile ? { profile: cached.profile } : {}) };
+        const enabled = enabledProvidersOf(this.store.hosts().find(h => h.id === this.host.id) ?? this.host);
+        const definition = CLI_PROVIDERS.find(p => p.id === providerId);
+        if (!definition || !enabled.includes(providerId))
+            return { provider: { id: providerId, label: PROVIDER_LABELS[providerId] ?? providerId, status: 'unavailable', models: [], modes: [] } };
+        const { canonical, installed } = await this.canonicalize(cwd, [definition]);
+        const result = await this.probeDefinition(definition, canonical, installed.get(providerId));
+        this.assertOpen();
+        this.targets.set(key, { at: Date.now(), provider: result.provider, profile: result.profile });
+        return result;
+    }
+    /** The one CLI a session targets, probed in its own cwd, for `create` to validate the model, mode and speed. */
+    async target(cwd, providerId) { return structuredClone((await this.resolveTarget(cwd, providerId)).provider); }
     task(id) {
         const task = this.store.task(t => t.agentId === id && t.hostId === this.host.id);
         if (!task)
@@ -514,11 +575,11 @@ done`}`, 15_000, { login: false });
             profile = { protocol: task.native.protocol, argv: task.native.argv, cwd: task.executionCwd ?? task.cwd, provider: { id: task.provider, label: task.provider, status: 'ready', models: [], modes: [] } };
         }
         else {
-            await this.providers(task.cwd, false);
-            const found = this.catalogs.get(task.cwd)?.profiles.get(task.provider);
-            if (!found)
+            // Reuses the probe `create` just ran for this task, so starting a session launches only the one CLI it needs.
+            const resolved = await this.resolveTarget(task.cwd, task.provider);
+            if (!resolved.profile)
                 throw new Error('The selected CLI is not ready on this SSH host');
-            profile = found;
+            profile = resolved.profile;
         }
         let argv = [...profile.argv];
         if (profile.protocol === 'antigravity')
@@ -784,6 +845,8 @@ done`}`, 15_000, { login: false });
     /** Shutdown releases persistent sessions, which keep running and are restored on the next start. */
     async close() {
         this.closed = true;
+        clearInterval(this.historySweep);
+        this.historySweep = undefined;
         // Leases are kept: this DSH reattaches its CLIs when it starts again, unless another took them over.
         this.shared?.close();
         for (const probe of this.probes)

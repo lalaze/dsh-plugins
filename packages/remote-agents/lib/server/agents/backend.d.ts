@@ -15,6 +15,8 @@ export interface Backend {
         entries?: boolean;
     }): Promise<DirectoryListing>;
     providers(cwd: string, refresh: boolean): Promise<Provider[]>;
+    /** Probe just the one CLI a session targets, to validate its model, mode and speed without launching the others. */
+    target(cwd: string, providerId: string): Promise<Provider>;
     create(task: Task, signal?: AbortSignal): Promise<Agent>;
     recover(task: Task, signal?: AbortSignal): Promise<Agent>;
     agent(id: string): Promise<Agent | null>;
@@ -106,10 +108,17 @@ export declare class SshBackend implements Backend {
     private readonly probes;
     private identity?;
     private catalogs;
+    /** One CLI's probe for the start path, keyed by `cwd\0provider`, so `create` and `open` do not probe twice. */
+    private targets;
     private sessions;
     /** Admitted starts/restores, including work not yet registered in sessions. */
     private readonly reservations;
     private histories;
+    /** When each loaded history was last used, so idle ones (no live session) are freed from memory. */
+    private readonly historyUsed;
+    private historySweep?;
+    /** How long a history with no live session is kept in memory after its last read, before it is reloaded on demand. */
+    readonly historyTtl = 300000;
     private starting;
     private accounts;
     /** The plan each CLI's account last showed, for answers that cannot tell it. */
@@ -153,7 +162,24 @@ export declare class SshBackend implements Backend {
     }): Promise<DirectoryListing>;
     connect(): Promise<string>;
     private history;
+    /**
+     * Drop histories no live session uses and nothing has read for a while; a later read reopens them from disk.
+     * A history an attached, restoring or starting session holds is kept: a second instance of the same file would
+     * append or read out of step with the one that session holds.
+     */
+    private sweepHistories;
+    /** Canonical cwd and the installed path of each probed CLI, in one SSH round trip. */
+    private canonicalize;
+    /** Probe one CLI in its canonical cwd: its models and modes, and the launch profile when it is ready. */
+    private probeDefinition;
     providers(cwd: string, refresh: boolean): Promise<Provider[]>;
+    /**
+     * Probe only the one CLI a session needs, rather than launching every enabled CLI to list its models.
+     * Cached briefly so a session's validation (`create`) and its launch (`open`) share a single probe.
+     */
+    private resolveTarget;
+    /** The one CLI a session targets, probed in its own cwd, for `create` to validate the model, mode and speed. */
+    target(cwd: string, providerId: string): Promise<Provider>;
     private task;
     /** Hosts with Node.js 18+ run CLIs under a relay; transports without relay support keep a direct SSH pipe. */
     private relays;

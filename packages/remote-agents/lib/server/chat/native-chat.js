@@ -488,7 +488,8 @@ export class RemoteCliAdapter extends LlmAdapter {
         const delivered = async (id, cursor, done = false, force = false) => {
             if (!done)
                 reached = { id, cursor };
-            if (!done && !force && Date.now() - savedAt < 250)
+            // Progress is re-derivable: a lost second of this cursor only re-shows already-seen output, deduplicated by id.
+            if (!done && !force && Date.now() - savedAt < 1000)
                 return;
             savedAt = Date.now();
             await service.store.update(state => { const saved = state.tasks.find(t => t.id === taskId); if (saved?.chat)
