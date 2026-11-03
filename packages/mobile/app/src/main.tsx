@@ -7,6 +7,7 @@ import { PairScreen } from './pair.js'
 import { SessionView } from './session.js'
 import { SettingsScreen } from './settings.js'
 import { TaskView } from './task.js'
+import { back, go, navDirection } from './nav.js'
 import { store, useStore } from './store.js'
 
 type Route = { name: 'list' } | { name: 'session'; hubId: string; sessionId: string } | { name: 'task'; hubId: string; taskId: string } | { name: 'new'; hubId: string } | { name: 'settings' } | { name: 'pair' }
@@ -21,12 +22,6 @@ function parse(hash: string): Route {
   return { name: 'list' }
 }
 
-export const go = (path: string, replace = false) => {
-  const hash = `#/${path}`
-  if (replace) history.replaceState(null, '', hash); else history.pushState(null, '', hash)
-  dispatchEvent(new HashChangeEvent('hashchange'))
-}
-
 /** A pairing link opened on this phone, also while the app is open: start pairing, then forget the link. */
 function takePairingLink() {
   if (!location.hash.includes('pair=')) return
@@ -37,6 +32,18 @@ takePairingLink()
 
 function App() {
   useStore()
+  const route = useRoute()
+  const key = route.name === 'session' ? `s/${route.hubId}/${route.sessionId}` : route.name === 'task' ? `t/${route.hubId}/${route.taskId}` : route.name === 'new' ? `new/${route.hubId}` : route.name
+  return <RouteView key={key} route={route} />
+}
+
+/** A screen slides in when the phone goes deeper and fades in when it comes back; closing a sheet changes neither. */
+function RouteView({ route }: { route: Route }) {
+  const [direction] = useState(navDirection)
+  return <div className="route" data-nav={direction}><Screen route={route} /></div>
+}
+
+function useRoute(): Route {
   const [route, setRoute] = useState(() => parse(location.hash))
   useEffect(() => {
     const update = () => { takePairingLink(); setRoute(parse(location.hash)) }
@@ -46,8 +53,10 @@ function App() {
     navigator.serviceWorker?.addEventListener('message', message)
     return () => { removeEventListener('hashchange', update); removeEventListener('popstate', update); navigator.serviceWorker?.removeEventListener('message', message) }
   }, [])
-  const back = () => { if (history.length > 1) history.back(); else go('', true) }
+  return route
+}
 
+function Screen({ route }: { route: Route }) {
   // A computer still being paired keeps the pairing screen up until it confirms or the phone cancels.
   const pairing = [...store.hubs.values()].find(state => state.hub.token !== undefined)
   if (store.hubs.size === 0 || route.name === 'pair' || pairing) {

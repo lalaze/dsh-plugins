@@ -1,47 +1,59 @@
 /** A conversation as messages, with consecutive tool calls folded into one row, as Paseo shows them. */
-import React, { memo, useEffect, useState } from 'react'
+import React, { memo, useEffect, useState, type ReactNode } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { SyncedEvent } from '../../src/shared/protocol.js'
+import { CopyButton, icons, useBackClose } from './controls.js'
 import type { HubState } from './store.js'
 import { ui } from './i18n.js'
+import { ToolGroup, type ToolCall } from './tools.js'
 
 type Dict = Record<string, any>
 const asDict = (value: unknown): Dict => (typeof value === 'object' && value !== null ? value as Dict : {})
-const MAX_TOOL_TEXT = 12_000
 
 const blockText = (content: unknown): string => Array.isArray(content)
   ? content.map(block => (asDict(block).type === 'text' ? String(asDict(block).text ?? '') : '')).filter(Boolean).join('\n')
   : typeof content === 'string' ? content : ''
 
-function pretty(raw: unknown): string {
-  if (typeof raw !== 'string') return JSON.stringify(raw, null, 2) ?? ''
-  try { return JSON.stringify(JSON.parse(raw), null, 2) } catch { return raw }
-}
-const clip = (text: string) => (text.length > MAX_TOOL_TEXT ? `${text.slice(0, MAX_TOOL_TEXT)}\n…` : text)
-
-/** A one-line summary of a tool call's arguments: the command, path or query it acts on. */
-function summary(args: unknown): string {
-  let value: Dict = {}
-  try { value = asDict(typeof args === 'string' ? JSON.parse(args) : args) } catch { return '' }
-  for (const key of ['command', 'cmd', 'path', 'file_path', 'file', 'pattern', 'query', 'url', 'description', 'prompt']) {
-    const field = value[key]
-    if (typeof field === 'string' && field.trim()) return field.trim().split('\n')[0].slice(0, 120)
-    if (Array.isArray(field) && field.length) return field.join(' ').slice(0, 120)
-  }
+/** Text of a node tree react-markdown rendered, for copying a code block. */
+const nodeText = (node: ReactNode): string => {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(nodeText).join('')
+  if (React.isValidElement(node)) return nodeText((node.props as { children?: ReactNode }).children)
   return ''
 }
 
 export const Text = memo(function Text({ text }: { text: string }) {
-  return <div className="md"><Markdown remarkPlugins={[remarkGfm]} components={{ a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" /> }}>{text}</Markdown></div>
+  return <div className="md"><Markdown remarkPlugins={[remarkGfm]} components={{
+    a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+    pre: ({ node: _node, children, ...props }) => {
+      const language = /language-([\w-]+)/.exec(String((React.isValidElement(children) ? (children.props as { className?: string }).className : '') ?? ''))?.[1]
+      return <div className="code-block">
+        <div className="code-head"><span>{language ?? ''}</span><CopyButton text={nodeText(children).replace(/\n$/, '')} className="code-copy" label={ui('Copy')} /></div>
+        <pre {...props}>{children}</pre>
+      </div>
+    },
+    table: ({ node: _node, ...props }) => <div className="table-scroll"><table {...props} /></div>,
+  }}>{text}</Markdown></div>
 })
+
+/** An image full screen; a tap or back closes it, pinching zooms. */
+export function Lightbox({ url, name, onClose }: { url: string; name?: string; onClose(): void }) {
+  useBackClose(onClose)
+  return <div className="lightbox" role="dialog" aria-label={name ?? ui('Image')} onClick={onClose}>
+    <img src={url} alt={name ?? ''} />
+    <button type="button" className="lightbox-close" aria-label={ui('Close')} onClick={onClose}>{icons.close}</button>
+  </div>
+}
 
 function Attachment({ state, sessionId, block }: { state: HubState; sessionId: string; block: Dict }) {
   const attachment = asDict(block.attachment)
   const [url, setUrl] = useState<string>()
   const [failed, setFailed] = useState(false)
+  const [zoomed, setZoomed] = useState(false)
   const id = String(attachment.attachmentId ?? '')
   const image = block.type === 'image'
+  const name = String(attachment.name ?? ui('Image'))
   useEffect(() => {
     if (!image || !id) return
     let revoked = false, objectUrl: string | undefined
@@ -53,9 +65,12 @@ function Attachment({ state, sessionId, block }: { state: HubState; sessionId: s
     }, () => setFailed(true))
     return () => { revoked = true; if (objectUrl) URL.revokeObjectURL(objectUrl) }
   }, [id, image, sessionId, state])
-  if (!image) return <div className="chip">{ui('File: {0}', { 0: String(attachment.name ?? id) })}</div>
-  if (url) return <a href={url} target="_blank" rel="noreferrer"><img className="thumb" src={url} alt={String(attachment.name ?? ui('Image'))} /></a>
-  return <div className="thumb placeholder">{failed ? ui('Image') : ''}</div>
+  if (!image) return <div className="chip">{icons.file}<span className="ellipsis">{String(attachment.name ?? id)}</span></div>
+  if (url) return <>
+    <button type="button" className="thumb-button" onClick={() => setZoomed(true)}><img className="thumb" src={url} alt={name} /></button>
+    {zoomed && <Lightbox url={url} name={name} onClose={() => setZoomed(false)} />}
+  </>
+  return <div className="thumb placeholder">{failed ? ui('Image') : <span className="spinner" />}</div>
 }
 
 function Content({ content, state, sessionId }: { content: unknown; state: HubState; sessionId: string }) {
@@ -69,29 +84,29 @@ function Content({ content, state, sessionId }: { content: unknown; state: HubSt
   </>
 }
 
-interface ToolRow { id: string; name: string; args: unknown; result?: Dict }
-
-function Tools({ tools }: { tools: ToolRow[] }) {
-  const running = tools.some(tool => !tool.result)
-  const failed = tools.some(tool => asDict(tool.result?.message).isError === true)
-  const last = tools.at(-1)!
-  const label = tools.length === 1
-    ? `${last.name}${summary(last.args) ? ` · ${summary(last.args)}` : ''}`
-    : `${ui('{0} tool calls', { 0: tools.length })} · ${last.name}${summary(last.args) ? ` ${summary(last.args)}` : ''}`
-  return <details className="tools" data-state={running ? 'running' : failed ? 'failed' : 'done'}>
-    <summary><span className="tool-dot" /><span className="ellipsis">{label}</span></summary>
-    {tools.map(tool => <div key={tool.id} className="tool">
-      <div className="tool-name">{asDict(tool.result?.message).isError === true ? ui('{0} failed', { 0: tool.name }) : tool.result ? tool.name : ui('{0} (running)', { 0: tool.name })}</div>
-      <pre>{clip(pretty(tool.args))}</pre>
-      {tool.result && <pre>{clip(blockText(asDict(tool.result.message).content) || ui('(no output)'))}</pre>}
-    </div>)}
-  </details>
-}
-
 const OUTCOMES: Record<string, string> = { 'allowed-once': 'Allowed once', rejected: 'Denied', cancelled: 'Withdrawn', unavailable: 'Nobody could answer' }
 
 /** Context DSH injected as a user message (instructions, skills, runtime and time snapshots); its view hides it too. */
-const injected = (data: Dict) => typeof asDict(data.source).form === 'string' || /-(context|catalog|instructions)$/.test(String(asDict(data.source).kind ?? ''))
+export const injected = (data: Dict) => typeof asDict(data.source).form === 'string' || /-(context|catalog|instructions)$/.test(String(asDict(data.source).kind ?? ''))
+
+/** The text of a user message event the conversation shows, or undefined for injected context. */
+export function userText(event: SyncedEvent): string | undefined {
+  if (event.type !== 'user/message') return undefined
+  const data = asDict(event.data)
+  if (injected(data)) return undefined
+  return blockText((data.content ? data : asDict(data.message)).content)
+}
+
+/** The arguments of a tool call, as announced in the session, for showing what an approval is about. */
+export function toolArguments(events: SyncedEvent[], callId: string | undefined): unknown {
+  if (!callId) return undefined
+  for (let index = events.length - 1; index >= 0; index--) {
+    const event = events[index], data = asDict(event.data)
+    if (event.type === 'tool/call' && String(data.callId) === callId) return data.arguments
+    if (event.type === 'assistant/message') for (const block of asDict(data.message).content ?? []) if (asDict(block).type === 'tool-call' && String(asDict(block).id) === callId) return asDict(block).arguments
+  }
+  return undefined
+}
 
 function duration(ms: number): string {
   const seconds = Math.max(1, Math.round(ms / 1000))
@@ -101,16 +116,17 @@ function duration(ms: number): string {
 }
 
 function TurnMeta({ ms, text }: { ms?: number; text: string }) {
-  const [copied, setCopied] = useState(false)
   return <div className="turn-meta">
-    {text && <button type="button" aria-label={ui('Copy')} onClick={() => { void navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200) }) }}>
-      {copied
-        ? <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M5 12.5l4.5 4.5L19 7.5" /></svg>
-        : <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2" fill="none" stroke="currentColor" strokeWidth="1.8" /><path fill="none" stroke="currentColor" strokeWidth="1.8" d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2" /></svg>}
-    </button>}
+    {text && <CopyButton text={text} className="meta-button" />}
     {ms !== undefined && <span>{ui('Worked for {0}', { 0: duration(ms) })}</span>}
   </div>
 }
+
+const toolCall = (id: string, name: string, args: unknown, result: Dict | undefined): ToolCall => ({
+  id, name, args,
+  output: result ? blockText(asDict(result.message).content) : undefined,
+  state: !result ? 'running' : asDict(result.message).isError === true ? 'failed' : 'done',
+})
 
 export function Timeline({ events, draft, state, sessionId }: { events: SyncedEvent[]; draft?: { text: string; reasoning: string }; state: HubState; sessionId: string }) {
   const results = new Map<string, Dict>()
@@ -120,9 +136,10 @@ export function Timeline({ events, draft, state, sessionId }: { events: SyncedEv
     if (event.type === 'assistant/message') for (const block of asDict(asDict(event.data).message).content ?? []) if (asDict(block).type === 'tool-call') announced.add(String(asDict(block).id))
   }
   const rows: React.ReactNode[] = []
-  let tools: ToolRow[] = []
+  let tools: ToolCall[] = []
   let turnStart: number | undefined, turnText = ''
-  const flush = (key: string) => { if (tools.length) { rows.push(<Tools key={`tools-${key}`} tools={tools} />); tools = [] } }
+  // Keyed by its first call, so a group stays mounted (with any sheet open) as the agent goes on.
+  const flush = (_at: string) => { if (tools.length) { rows.push(<ToolGroup key={`tools-${tools[0].id}`} tools={tools} />); tools = [] } }
   for (const event of events) {
     const data = asDict(event.data)
     switch (event.type) {
@@ -140,14 +157,14 @@ export function Timeline({ events, draft, state, sessionId }: { events: SyncedEv
         const text = blockText(content)
         if (text) turnText = text
         if (reasoning || text) flush(String(event.seq))
-        if (reasoning) rows.push(<details key={`r${event.seq}`} className="reasoning"><summary>{ui('Thinking')}</summary><Text text={reasoning} /></details>)
+        if (reasoning) rows.push(<details key={`r${event.seq}`} className="reasoning"><summary>{icons.sparkle}<span>{ui('Thinking')}</span>{icons.chevronRight}</summary><Text text={reasoning} /></details>)
         if (text || content.some(block => ['image', 'file'].includes(asDict(block).type))) rows.push(<div key={event.seq} className="msg assistant"><Content content={content.filter(block => asDict(block).type !== 'tool-call' && asDict(block).type !== 'reasoning')} state={state} sessionId={sessionId} /></div>)
-        for (const block of content.map(asDict).filter(block => block.type === 'tool-call')) tools.push({ id: String(block.id), name: String(block.name), args: block.arguments, result: results.get(String(block.id)) })
+        for (const block of content.map(asDict).filter(block => block.type === 'tool-call')) tools.push(toolCall(String(block.id), String(block.name), block.arguments, results.get(String(block.id))))
         if (data.interrupted) { flush(`i${event.seq}`); rows.push(<div key={`i${event.seq}`} className="marker">{ui('Interrupted')}</div>) }
         break
       }
       case 'tool/call':
-        if (!announced.has(String(data.callId))) tools.push({ id: String(data.callId), name: String(data.name), args: data.arguments, result: results.get(String(data.callId)) })
+        if (!announced.has(String(data.callId))) tools.push(toolCall(String(data.callId), String(data.name), data.arguments, results.get(String(data.callId))))
         break
       case 'approval/asked':
         flush(String(event.seq))
@@ -172,7 +189,7 @@ export function Timeline({ events, draft, state, sessionId }: { events: SyncedEv
   flush('end')
   if (draft && (draft.text || draft.reasoning)) {
     rows.push(<div key="draft" className="msg assistant draft" aria-live="polite">
-      {draft.text ? <Text text={draft.text} /> : <div className="reasoning-live">{draft.reasoning.slice(-500)}</div>}
+      {draft.text ? <Text text={draft.text} /> : <div className="reasoning-live">{icons.sparkle}<span>{draft.reasoning.slice(-400)}</span></div>}
     </div>)
   }
   return <>{rows}</>

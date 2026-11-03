@@ -4,12 +4,15 @@
  * workspace's own order, five at a time. Tag chips narrow every section to one tag. Remote Agents' background tasks,
  * which belong to no workspace, follow in a section of their own.
  */
-import React, { useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { SessionEntry, TaskEntry, WorkspaceEntry } from '../../src/shared/protocol.js'
 import { brandOf, brandStyle } from './brands.js'
-import { icons } from './controls.js'
-import { ago, ui } from './i18n.js'
-import { ConnectionBadge, statusOf } from './parts.js'
+import { OfflineBanner, Toast } from './chat.js'
+import { haptic, icons, Sheet, Toggle } from './controls.js'
+import { ago, errorText, ui } from './i18n.js'
+import { memory } from './nav.js'
+import { requestId, statusOf } from './parts.js'
+import { Rename, SessionActions } from './session.js'
 import { store, useStore, type HubState } from './store.js'
 import { busyTask, cliName } from './task.js'
 
@@ -30,6 +33,8 @@ const tagColor = (color: string) => TAG_COLORS[color] ?? color
 
 interface Group { key: string; hub: HubState; workspace?: WorkspaceEntry; title: string; sessions: SessionEntry[] }
 interface Section { kind: SectionKind; groups: Group[]; count: number }
+/** What the list keeps while a session is open: search, tag, expanded groups and where it was scrolled to. */
+interface ListMemory { query: string; searching: boolean; space: string | null; shown: Record<string, number>; top: number }
 
 /** Tasks waiting for an answer first, then running ones, failed ones, and the rest by their latest change. */
 const taskRank = (task: TaskEntry) => task.status === 'attention' ? 0 : busyTask(task) ? 1 : task.status === 'error' ? 2 : 3
@@ -75,18 +80,112 @@ const SectionIcon = ({ kind }: { kind: SectionKind }) => {
     completed: <><circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" strokeWidth="1.7" /><path d="M8.3 12.3l2.6 2.6 4.9-5.2" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" /></>,
     idle: <path d="M19.5 14.6A7.8 7.8 0 019.4 4.5a7.8 7.8 0 1010.1 10.1z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />,
   }
-  return <svg className={`section-icon ${kind}`} viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">{paths[kind]}</svg>
+  return <svg className={`section-icon ${kind}`} viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">{paths[kind]}</svg>
+}
+
+/** Pull the list down from its top to reconnect and reload. */
+function usePullToRefresh(scroller: RefObject<HTMLDivElement | null>, onRefresh: () => Promise<void>) {
+  const [pull, setPull] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const [dragging, setDragging] = useState(false)
+  const latest = useRef(onRefresh)
+  latest.current = onRefresh
+  const busy = useRef(false)
+  useEffect(() => {
+    const element = scroller.current
+    if (!element) return
+    let start: number | undefined, distance = 0, active = false
+    const down = (event: TouchEvent) => { start = element.scrollTop <= 0 && !busy.current ? event.touches[0].clientY : undefined; distance = 0; active = false }
+    const move = (event: TouchEvent) => {
+      if (start === undefined) return
+      const dy = event.touches[0].clientY - start
+      if (dy <= 0 || element.scrollTop > 0) { if (active) { active = false; setDragging(false); setPull(0) } if (dy < 0) start = undefined; return }
+      if (!active) { active = true; setDragging(true) }
+      distance = Math.min(120, dy * 0.45)
+      setPull(distance)
+      if (event.cancelable) event.preventDefault()
+    }
+    const up = () => {
+      start = undefined
+      if (!active) return
+      active = false; setDragging(false)
+      if (distance < 60) { setPull(0); return }
+      busy.current = true; setRefreshing(true); setPull(52); haptic()
+      const minimum = new Promise(resolve => setTimeout(resolve, 700))
+      void Promise.all([latest.current().catch(() => {}), minimum]).finally(() => { busy.current = false; setRefreshing(false); setPull(0) })
+    }
+    element.addEventListener('touchstart', down, { passive: true })
+    element.addEventListener('touchmove', move, { passive: false })
+    element.addEventListener('touchend', up)
+    element.addEventListener('touchcancel', up)
+    return () => {
+      element.removeEventListener('touchstart', down); element.removeEventListener('touchmove', move)
+      element.removeEventListener('touchend', up); element.removeEventListener('touchcancel', up)
+    }
+  }, [scroller])
+  return <div className="pull" data-dragging={dragging} style={{ height: pull }} aria-hidden={!refreshing}>
+    <span className="pull-icon" style={{ transform: refreshing ? undefined : `rotate(${Math.min(1, pull / 60) * 270}deg)`, opacity: Math.min(1, pull / 40) }}>
+      {refreshing ? <span className="spinner" /> : icons.refresh}
+    </span>
+  </div>
+}
+
+/** Swallow the click a finished long press produces, which would otherwise land on the sheet it just opened. */
+function swallowNextClick() {
+  const stop = (event: Event) => { event.preventDefault(); event.stopPropagation(); done() }
+  const done = () => { removeEventListener('click', stop, true); clearTimeout(timer) }
+  const timer = setTimeout(done, 450)
+  addEventListener('click', stop, true)
+}
+
+/** Long-press (or a right click) for a row's actions; the tap that ends a long press does not open the row. */
+function useLongPress(onLong: () => void) {
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const fired = useRef(false)
+  const origin = useRef<{ x: number; y: number }>(undefined)
+  const cancel = () => { clearTimeout(timer.current); timer.current = undefined }
+  return {
+    onTouchStart: (event: React.TouchEvent) => {
+      fired.current = false
+      origin.current = { x: event.touches[0].clientX, y: event.touches[0].clientY }
+      cancel()
+      timer.current = setTimeout(() => { fired.current = true; haptic(); onLong() }, 480)
+    },
+    onTouchMove: (event: React.TouchEvent) => {
+      const start = origin.current, touch = event.touches[0]
+      if (start && Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 10) cancel()
+    },
+    onTouchEnd: () => { cancel(); if (fired.current) swallowNextClick() },
+    onTouchCancel: cancel,
+    onContextMenu: (event: React.MouseEvent) => { event.preventDefault(); if (!fired.current) { fired.current = true; onLong() } },
+    onClickCapture: (event: React.MouseEvent) => { if (fired.current) { event.preventDefault(); event.stopPropagation(); fired.current = false } },
+  }
 }
 
 export function SessionList({ onOpen, onOpenTask, onNew, onSettings }: { onOpen(hubId: string, sessionId: string): void; onOpenTask(hubId: string, taskId: string): void; onNew(hubId: string): void; onSettings(): void }) {
   useStore()
-  const [query, setQuery] = useState('')
-  const [space, setSpace] = useState<string | null>(null)
+  const saved = (memory.get('list') as ListMemory | undefined) ?? { query: '', searching: false, space: null, shown: {}, top: 0 }
+  memory.set('list', saved)
+  const [query, setQuery] = useState(saved.query)
+  const [searching, setSearching] = useState(saved.searching)
+  const [space, setSpace] = useState<string | null>(saved.space)
   const [folds, setFolds] = useState(loadFolds)
-  const [shown, setShown] = useState<Record<string, number>>({})
+  const [shown, setShown] = useState<Record<string, number>>(saved.shown)
+  const [filters, setFilters] = useState(false)
+  const [actions, setActions] = useState<{ hub: HubState; sessionId: string; rename?: boolean }>()
+  const [error, setError] = useState<string>()
+  const scroller = useRef<HTMLDivElement>(null)
   const view = store.view
   const hubs = [...store.hubs.values()]
   const needle = query.trim().toLowerCase()
+
+  // Coming back from a session finds the list as it was left.
+  Object.assign(saved, { query, searching, space, shown })
+  useLayoutEffect(() => { if (scroller.current && saved.top) scroller.current.scrollTop = saved.top }, [])
+
+  const pull = usePullToRefresh(scroller, async () => {
+    await Promise.all(hubs.map(hub => hub.client.state === 'online' ? hub.refresh() : (hub.client.reconnectNow(), Promise.resolve())))
+  })
 
   // Tag chips across computers, by name; a tag on several computers is one chip.
   const tagNames = new Map<string, { name: string; color: string }>()
@@ -130,31 +229,50 @@ export function SessionList({ onOpen, onOpenTask, onNew, onSettings }: { onOpen(
   const folded = (kind: SectionKind) => !needle && (folds[kind] ?? kind === 'idle')
   const loaded = hubs.some(hub => hub.loaded)
   const primary = hubs.find(hub => hub.client.info?.phone?.grants.control)
+  const filtered = view.archived === true || view.subagents === true || view.outside === true
+  const allOnline = hubs.every(hub => hub.client.state === 'online')
+  const target = actions ? actions.hub.sessions.get(actions.sessionId) : undefined
 
-  return <div className="screen">
-    <header className="bar">
-      <div className="bar-title"><div className="title-line big">{ui('Sessions')}</div></div>
-      <button className="icon" aria-label={ui('Settings')} onClick={onSettings}><svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="1.8" d="M12 15a3 3 0 100-6 3 3 0 000 6z" /><path fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" d="M19.4 13a7.6 7.6 0 000-2l2-1.5-2-3.4-2.3.9a7.5 7.5 0 00-1.7-1L15 3.6h-4l-.4 2.4a7.5 7.5 0 00-1.7 1l-2.3-.9-2 3.4 2 1.5a7.6 7.6 0 000 2l-2 1.5 2 3.4 2.3-.9c.5.4 1.1.7 1.7 1l.4 2.4h4l.4-2.4c.6-.3 1.2-.6 1.7-1l2.3.9 2-3.4z" /></svg></button>
-    </header>
-    <div className="list-head">
-      <div>{hubs.map(hub => <ConnectionBadge key={hub.hub.hubId} state={hub.client.state} error={hub.client.error} name={hub.hub.name} />)}</div>
-      <div className="search"><input type="search" placeholder={ui('Search')} value={query} onChange={event => setQuery(event.target.value)} /></div>
-      {chips.length > 0 && <div className="spaces" role="tablist">
-        <button type="button" role="tab" className="space" aria-selected={spaceName === null} onClick={() => setSpace(null)}>{ui('All')}</button>
-        {chips.map(chip => <button key={chip.name} type="button" role="tab" className="space" aria-selected={spaceName === chip.name} onClick={() => setSpace(spaceName === chip.name ? null : chip.name)}>
+  return <div className="screen list-screen">
+    {searching
+      ? <header className="bar search-bar">
+        <div className="search">
+          {icons.search}
+          <input type="search" autoFocus placeholder={ui('Search sessions')} value={query} enterKeyHint="search" autoCapitalize="off" autoCorrect="off"
+            onChange={event => setQuery(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }} />
+          {query && <button type="button" className="clear" aria-label={ui('Clear')} onClick={() => setQuery('')}>{icons.close}</button>}
+        </div>
+        <button type="button" className="text-button" onClick={() => { setQuery(''); setSearching(false) }}>{ui('Cancel')}</button>
+      </header>
+      : <header className="bar list-bar">
+        <div className="bar-title">
+          <div className="title-line big"><span className="ellipsis">DeepSeek Harness</span></div>
+          {allOnline && <div className="hub-line ellipsis">{hubs.map(hub => <span key={hub.hub.hubId} className="hub-name"><span className="dot" data-status="idle-ok" />{hub.hub.name}</span>)}</div>}
+        </div>
+        <button className="icon" aria-label={ui('Search')} onClick={() => setSearching(true)}>{icons.search}</button>
+        <button className="icon" aria-label={ui('Settings')} onClick={onSettings}>{icons.gear}</button>
+      </header>}
+    {hubs.map(hub => <OfflineBanner key={hub.hub.hubId} state={hub.client.state} error={hub.client.error} name={hub.hub.name} onRetry={() => hub.client.reconnectNow()} />)}
+    <div className="chips" role="tablist">
+      {chips.length > 0 && <>
+        <button type="button" role="tab" className="chip-tab" aria-selected={spaceName === null} onClick={() => setSpace(null)}>{ui('All')}</button>
+        {chips.map(chip => <button key={chip.name} type="button" role="tab" className="chip-tab" aria-selected={spaceName === chip.name} onClick={() => setSpace(spaceName === chip.name ? null : chip.name)}>
           <span className="tag-dot" style={{ background: tagColor(chip.color) }} />{chip.name}
         </button>)}
-      </div>}
+      </>}
+      <button type="button" className="chip-tab filter" aria-label={ui('View options')} data-active={filtered} onClick={() => setFilters(true)}>{icons.filter}{chips.length === 0 && <span>{ui('View options')}</span>}{filtered && <span className="filter-dot" />}</button>
     </div>
-    <div className="scroll">
+    <div className="scroll list-scroll" ref={scroller} onScroll={event => { saved.top = event.currentTarget.scrollTop }}>
+      {pull}
+      {!loaded && hubs.some(hub => hub.client.state !== 'offline') && <ListSkeleton />}
       {sections.map(section => {
         const isFolded = folded(section.kind)
         return <section key={section.kind} className="status-section">
           <button type="button" className="section-head" aria-expanded={!isFolded} onClick={() => fold(section.kind, !isFolded)}>
-            <svg className="section-arrow" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path d="M8 5l10 7-10 7z" fill="currentColor" /></svg>
             <SectionIcon kind={section.kind} />
             <span>{ui(LABELS[section.kind])}</span>
             <span className="section-count">{section.count}</span>
+            <span className="section-arrow">{icons.chevronRight}</span>
           </button>
           {!isFolded && section.groups.map(group => {
             const key = `${section.kind}/${group.key}`
@@ -165,10 +283,11 @@ export function SessionList({ onOpen, onOpenTask, onNew, onSettings }: { onOpen(
               <div className="ws-row">
                 {icons.folder}
                 <span className="ellipsis">{group.title}</span>
-                {hubs.length > 1 && <span className="ws-host">{group.hub.hub.name}</span>}
                 <span className="tag-dots">{tags.map(tag => <span key={tag!.id} className="tag-dot" title={tag!.name} style={{ background: tagColor(tag!.color) }} />)}</span>
+                {hubs.length > 1 && <span className="ws-host">{group.hub.hub.name}</span>}
               </div>
-              {rows.map(entry => <SessionRow key={entry.sessionId} hub={group.hub} entry={entry} activity={activityOf(group.hub, entry, running.get(group.hub)!)} onOpen={onOpen} />)}
+              {rows.map(entry => <SessionRow key={entry.sessionId} hub={group.hub} entry={entry} activity={activityOf(group.hub, entry, running.get(group.hub)!)} onOpen={onOpen}
+                onActions={group.hub.client.info?.phone?.grants.control ? () => setActions({ hub: group.hub, sessionId: entry.sessionId }) : undefined} />)}
               {hidden > 0 && <button type="button" className="show-more" onClick={() => setShown(current => ({ ...current, [key]: hidden <= WATERMARK ? Infinity : limit + WATERMARK }))}>{ui('Show {0} more sessions', { 0: hidden })}</button>}
               {!needle && hidden === 0 && group.sessions.length > WATERMARK && <button type="button" className="show-more" onClick={() => setShown(current => ({ ...current, [key]: WATERMARK }))}>{ui('Show less')}</button>}
             </div>
@@ -177,28 +296,41 @@ export function SessionList({ onOpen, onOpenTask, onNew, onSettings }: { onOpen(
       })}
       {tasks.length > 0 && <section className="status-section">
         <button type="button" className="section-head" aria-expanded={!tasksFolded} onClick={() => fold('tasks', !tasksFolded)}>
-          <svg className="section-arrow" viewBox="0 0 24 24" width="10" height="10" aria-hidden="true"><path d="M8 5l10 7-10 7z" fill="currentColor" /></svg>
-          <svg className="section-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M4 7.5h16M4 12h16M4 16.5h10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
+          <svg className="section-icon" viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M4 7.5h16M4 12h16M4 16.5h10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>
           <span>{ui('Background tasks')}</span>
           <span className="section-count">{tasks.length}</span>
+          <span className="section-arrow">{icons.chevronRight}</span>
         </button>
-        {!tasksFolded && <>
+        {!tasksFolded && <div className="task-rows">
           {tasks.slice(0, taskLimit).map(({ hub, task }) => <TaskRow key={`${hub.hub.hubId}/${task.id}`} hub={hub} task={task} showHub={hubs.length > 1} onOpen={onOpenTask} />)}
           {tasks.length > taskLimit && <button type="button" className="show-more" onClick={() => setShown(current => ({ ...current, tasks: tasks.length - taskLimit <= WATERMARK ? Infinity : taskLimit + WATERMARK }))}>{ui('Show {0} more tasks', { 0: tasks.length - taskLimit })}</button>}
           {!needle && taskLimit === Infinity && tasks.length > WATERMARK && <button type="button" className="show-more" onClick={() => setShown(current => ({ ...current, tasks: WATERMARK }))}>{ui('Show less')}</button>}
-        </>}
+        </div>}
       </section>}
-      {loaded && sections.length === 0 && tasks.length === 0 && <div className="empty">{query ? ui('No sessions match.') : ui('No sessions yet.')}</div>}
-      <div className="view-options">
-        <label><input type="checkbox" checked={view.archived === true} onChange={event => store.setView({ archived: event.target.checked })} /> {ui('Show archived')}</label>
-        <label><input type="checkbox" checked={view.subagents === true} onChange={event => store.setView({ subagents: event.target.checked })} /> {ui('Show sub-agents')}</label>
-        <label><input type="checkbox" checked={view.outside === true} onChange={event => store.setView({ outside: event.target.checked })} /> {ui('Show sessions outside workspaces')}</label>
-      </div>
+      {loaded && sections.length === 0 && tasks.length === 0 && <div className="empty-state">
+        {needle ? icons.search : icons.terminal}
+        <div>{needle ? ui('No sessions match.') : ui('No sessions yet.')}</div>
+        {!needle && primary && <button type="button" className="button primary" onClick={() => onNew(primary.hub.hubId)}>{ui('New session')}</button>}
+      </div>}
+      <div className="list-end" />
     </div>
-    {primary && <button className="fab" onClick={() => onNew(primary.hub.hubId)}>
-      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" d="M12 5v14M5 12h14" /></svg>{ui('New')}
-    </button>}
+    {primary && !searching && <button className="fab" onClick={() => onNew(primary.hub.hubId)}>{icons.plus}{ui('New')}</button>}
+    {filters && <Sheet title={ui('View options')} onClose={() => setFilters(false)}>
+      <Toggle label={ui('Show archived')} checked={view.archived === true} onChange={value => store.setView({ archived: value })} />
+      <Toggle label={ui('Show sub-agents')} checked={view.subagents === true} onChange={value => store.setView({ subagents: value })} />
+      <Toggle label={ui('Show sessions outside workspaces')} checked={view.outside === true} onChange={value => store.setView({ outside: value })} />
+    </Sheet>}
+    {actions && target && !actions.rename && <SessionActions entry={target} state={actions.hub} onClose={() => setActions(undefined)} onRename={() => setActions({ ...actions, rename: true })} onError={setError} />}
+    {actions && target && actions.rename && <Rename entry={target} onClose={() => setActions(undefined)} onSave={title => {
+      setActions(undefined)
+      void actions.hub.client.call('command', { kind: 'rename', requestId: requestId(), sessionId: target.sessionId, title }).catch(failure => setError(errorText(failure)))
+    }} />}
+    <Toast message={error} onClose={() => setError(undefined)} />
   </div>
+}
+
+function ListSkeleton() {
+  return <div className="list-skeleton" aria-label={ui('Connecting…')}>{[0, 1, 2, 3, 4].map(index => <div key={index} className="sk-row"><span className="sk sk-dot" /><span className="sk sk-bar" style={{ width: `${70 - index * 9}%` }} /></div>)}</div>
 }
 
 function TaskRow({ hub, task, showHub, onOpen }: { hub: HubState; task: TaskEntry; showHub: boolean; onOpen(hubId: string, taskId: string): void }) {
@@ -209,24 +341,37 @@ function TaskRow({ hub, task, showHub, onOpen }: { hub: HubState; task: TaskEntr
       <span className="brand" style={brandStyle(brand) as React.CSSProperties} />
       {task.status === 'attention' && <span className="brand-badge" data-activity="waiting" />}
     </span>
-    <span className="task-text">
+    <span className="row-text">
       <span className="session-title ellipsis">{task.title || ui('Untitled session')}</span>
-      <span className="task-sub ellipsis">{[cliName(task.provider), `${task.host}:${folder}`, ...(showHub ? [hub.hub.name] : [])].join(' · ')}</span>
+      <span className={`row-sub ellipsis${task.status === 'attention' ? ' waiting' : ''}`}>{task.status === 'attention' ? ui('Needs approval') : [cliName(task.provider), `${task.host}:${folder}`, ...(showHub ? [hub.hub.name] : [])].join(' · ')}</span>
     </span>
-    {busyTask(task) && task.status !== 'attention' ? <span className="spinner" aria-label={ui('Running')} />
+    {busyTask(task) && task.status !== 'attention' ? <span className="spinner small" aria-label={ui('Running')} />
       : task.status === 'error' ? <span className="task-error">{ui('Error')}</span>
       : <span className="session-time">{ago(task.updatedAt)}</span>}
   </button>
 }
 
-function SessionRow({ hub, entry, activity, onOpen }: { hub: HubState; entry: SessionEntry; activity?: Activity; onOpen(hubId: string, sessionId: string): void }) {
+/** What a waiting session asks, for the line under its title. */
+function askOf(entry: SessionEntry): string | undefined {
+  const item = entry.pending[0]
+  if (!item) return undefined
+  if (item.kind === 'approval') return ui('Needs approval · {0}', { 0: item.toolName })
+  return item.questions[0]?.question ?? ui('Asks a question')
+}
+
+function SessionRow({ hub, entry, activity, onOpen, onActions }: { hub: HubState; entry: SessionEntry; activity?: Activity; onOpen(hubId: string, sessionId: string): void; onActions?(): void }) {
   const brand = brandOf(entry.model)
-  return <button type="button" className="session-row" onClick={() => onOpen(hub.hub.hubId, entry.sessionId)}>
+  const press = useLongPress(() => onActions?.())
+  const ask = activity === 'waiting' ? askOf(entry) : undefined
+  return <button type="button" className="session-row" data-activity={activity} onClick={() => onOpen(hub.hub.hubId, entry.sessionId)} {...(onActions ? press : {})}>
     <span className="brand-wrap" role="img" aria-label={entry.model?.model ?? ui('Model')}>
       <span className="brand" style={brandStyle(brand) as React.CSSProperties} />
       {(activity === 'waiting' || activity === 'completed') && <span className="brand-badge" data-activity={activity} />}
     </span>
-    <span className="session-title ellipsis">{entry.title || ui('Untitled session')}</span>
-    {activity === 'running' ? <span className="spinner" aria-label={ui('Running')} /> : <span className="session-time">{ago(entry.updatedAt)}</span>}
+    <span className="row-text">
+      <span className={`session-title ellipsis${activity === 'completed' ? ' unread' : ''}`}>{entry.title || ui('Untitled session')}</span>
+      {ask && <span className="row-sub waiting ellipsis">{ask}</span>}
+    </span>
+    {activity === 'running' ? <span className="spinner small" aria-label={ui('Running')} /> : <span className="session-time">{ago(entry.updatedAt)}</span>}
   </button>
 }

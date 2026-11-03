@@ -2,7 +2,6 @@ import { fill, languageOf, type Params } from '@dsh-plugins/i18n'
 
 /** English source strings and their Simplified Chinese translations. The app follows the phone's language. */
 const zh: Record<string, string> = {
-  'Sessions': '会话',
   'New session': '新建会话',
   'Settings': '设置',
   'Search': '搜索',
@@ -148,6 +147,35 @@ const zh: Record<string, string> = {
   'Allow for this session': '本会话内允许',
   'Allow matching requests for this session': '本会话内允许同类请求',
   'Always allow matching requests in this project': '在此项目中始终允许同类请求',
+  'Run': '运行命令',
+  'Update plan': '更新计划',
+  '{0}/{1} done': '已完成 {0}/{1}',
+  'Read': '读取',
+  'Write': '写入',
+  'Edit': '编辑',
+  'Search the web': '搜索网页',
+  'Open page': '打开网页',
+  'Sub-agent': '子智能体',
+  'Failed': '失败',
+  'Running…': '正在运行…',
+  'Output': '输出',
+  'Command': '命令',
+  'In {0}': '目录：{0}',
+  'Content': '内容',
+  'Lines {0}–{1}': '第 {0}–{1} 行',
+  'Input': '输入',
+  'Close': '关闭',
+  'Jump to latest': '回到最新',
+  'Connecting to {0}…': '正在连接{0}…',
+  'Message — interrupts the current turn': '发送会打断当前回合',
+  'Search sessions': '搜索会话',
+  'Clear': '清除',
+  'View options': '显示选项',
+  'Needs approval': '需要批准',
+  'Needs approval · {0}': '需要批准 · {0}',
+  'Asks a question': '有问题要问你',
+  'Computer': '电脑',
+  'Recent workspaces': '最近的工作区',
 }
 
 const language = languageOf(globalThis.navigator?.language)

@@ -2,13 +2,17 @@
  * A background task from Remote Agents: a remote CLI session with no DSH conversation, such as one DSH's agent
  * delegated. Its history follows while the screen is open; it can be steered, stopped and its approvals answered.
  */
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import type { TaskEntry, TaskItem, TaskPage, TaskPermission } from '../../src/shared/protocol.js'
-import { Composer, type Draft } from './composer.js'
+import { JumpToEnd, LoadEarlier, OfflineBanner, Skeleton, Toast, useChatScroll } from './chat.js'
+import { Composer, useDraft } from './composer.js'
+import { haptic, icons } from './controls.js'
 import { errorText, ui } from './i18n.js'
 import { requestId } from './parts.js'
+import { Approval } from './session.js'
 import type { HubState } from './store.js'
 import { Text } from './timeline.js'
+import { describeTool, jsonArgs, ToolGroup, type ToolCall } from './tools.js'
 
 const CLI_NAMES: Record<string, string> = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' }
 export const cliName = (provider: string) => CLI_NAMES[provider] ?? provider
@@ -31,27 +35,30 @@ export function joinItems(before: TaskItem[], after: TaskItem[]): TaskItem[] {
   return items
 }
 
-function Tools({ tools }: { tools: TaskItem[] }) {
-  const running = tools.some(tool => tool.status === 'running' || tool.status === 'pending')
-  const failed = tools.some(tool => tool.status === 'failed' || tool.status === 'canceled')
-  const last = tools.at(-1)!
-  const label = tools.length === 1 ? last.name ?? ui('Tool') : `${ui('{0} tool calls', { 0: tools.length })} · ${last.name ?? ''}`
-  return <details className="tools" data-state={running ? 'running' : failed ? 'failed' : 'done'}>
-    <summary><span className="tool-dot" /><span className="ellipsis">{label}</span></summary>
-    {tools.map(tool => <div key={tool.callId ?? tool.seq} className="tool">
-      <div className="tool-name">{tool.status === 'failed' ? ui('{0} failed', { 0: tool.name ?? '' }) : tool.status === 'running' || tool.status === 'pending' ? ui('{0} (running)', { 0: tool.name ?? '' }) : tool.name}</div>
-      {tool.text && <pre>{tool.text}</pre>}
-    </div>)}
-  </details>
+const toolOf = (item: TaskItem): ToolCall => {
+  const args = jsonArgs(item.text)
+  return {
+    id: item.callId ?? String(item.seq), name: item.name ?? ui('Tool'), ...(args ? { args } : { output: item.text }),
+    state: item.status === 'running' || item.status === 'pending' ? 'running' : item.status === 'failed' || item.status === 'canceled' ? 'failed' : 'done',
+  }
+}
+
+/** What an approval would run: the command when its detail is a call's arguments, the detail as it is otherwise. */
+function approvalDetail(title: string, detail: string | undefined): string | undefined {
+  const args = jsonArgs(detail)
+  if (!args) return detail
+  const described = describeTool(title, args)
+  if (described.kind === 'command') return Array.isArray(args.command) ? args.command.join(' ') : String(args.command ?? args.cmd ?? '')
+  return described.target || JSON.stringify(args, null, 2)
 }
 
 function Items({ items }: { items: TaskItem[] }) {
   const rows: React.ReactNode[] = []
   let tools: TaskItem[] = []
-  const flush = () => { if (tools.length) { rows.push(<Tools key={`tools-${tools[0].seq}`} tools={tools} />); tools = [] } }
+  const flush = () => { if (tools.length) { rows.push(<ToolGroup key={`tools-${tools[0].seq}`} tools={tools.map(toolOf)} />); tools = [] } }
   for (const item of items) {
     if (item.type === 'tool') { tools.push(item); continue }
-    if (item.type === 'reasoning') { if (item.text?.trim()) { flush(); rows.push(<details key={item.seq} className="reasoning"><summary>{ui('Thinking')}</summary><Text text={item.text} /></details>) } continue }
+    if (item.type === 'reasoning') { if (item.text?.trim()) { flush(); rows.push(<details key={item.seq} className="reasoning"><summary>{icons.sparkle}<span>{ui('Thinking')}</span>{icons.chevronRight}</summary><Text text={item.text} /></details>) } continue }
     flush()
     switch (item.type) {
       case 'user': rows.push(<div key={item.seq} className="msg user"><Text text={item.text ?? ''} /></div>); break
@@ -65,19 +72,10 @@ function Items({ items }: { items: TaskItem[] }) {
   return <>{rows}</>
 }
 
-function Approval({ permission, control, onAnswer }: { permission: TaskPermission; control: boolean; onAnswer(action: TaskPermission['actions'][number]): Promise<void> }) {
+function TaskApproval({ permission, control, onAnswer }: { permission: TaskPermission; control: boolean; onAnswer(action: TaskPermission['actions'][number]): Promise<void> }) {
   const [busy, setBusy] = useState(false)
-  return <div className="card attention">
-    <div className="card-title">{ui('Approve {0}?', { 0: permission.title })}</div>
-    {permission.description && <div className="card-text">{permission.description}</div>}
-    {permission.detail && <pre className="card-pre">{permission.detail}</pre>}
-    {control && permission.actions.length > 0
-      ? <div className={`row-actions${permission.actions.length > 2 ? ' wrap' : ''}`}>
-        {permission.actions.map((action, index) => <button key={`${action.id}-${index}`} className={`button${action.behavior === 'allow' ? ' primary' : ''}`} disabled={busy}
-          onClick={() => { setBusy(true); void onAnswer(action).finally(() => setBusy(false)) }}>{ui(action.label)}</button>)}
-      </div>
-      : <div className="card-text">{ui('Answer this on the computer.')}</div>}
-  </div>
+  return <Approval title={ui('Approve {0}?', { 0: permission.title })} text={permission.description} detail={approvalDetail(permission.title, permission.detail)} busy={busy}
+    actions={control && permission.actions.length > 0 ? permission.actions.map(action => ({ label: ui(action.label), primary: action.behavior === 'allow', onClick: () => { setBusy(true); haptic(); void onAnswer(action).finally(() => setBusy(false)) } })) : undefined} />
 }
 
 export function TaskView({ state, taskId, onBack, onOpenSession }: { state: HubState; taskId: string; onBack(): void; onOpenSession(sessionId: string): void }) {
@@ -88,10 +86,11 @@ export function TaskView({ state, taskId, onBack, onOpenSession }: { state: HubS
   const [page, setPage] = useState<Pick<TaskPage, 'epoch' | 'first' | 'last' | 'hasOlder'>>()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string>()
-  const [draft, setDraft] = useState<Draft>({ text: '', images: [] })
+  const [draft, setDraft] = useDraft(`${state.hub.hubId}/task/${taskId}`)
   const [sending, setSending] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
-  const stick = useRef(true)
+  const content = useRef<HTMLDivElement>(null)
+  const scroll = useChatScroll(scroller, content, items.at(-1)?.seq ?? -1)
   const latest = useRef(page)
   latest.current = page
   const control = state.client.info?.phone?.grants.control === true
@@ -127,19 +126,16 @@ export function TaskView({ state, taskId, onBack, onOpenSession }: { state: HubS
     return () => { live = false; clearTimeout(timer) }
   }, [taskId, online, state])
 
-  useLayoutEffect(() => { const element = scroller.current; if (element && stick.current) element.scrollTop = element.scrollHeight }, [items, permissions])
-
-  const earlier = async () => {
+  const earlier = useCallback(async () => {
     if (!page?.first) return
-    const element = scroller.current, before = element?.scrollHeight ?? 0
     try {
       const result = await state.client.call('task.detail', { taskId, before: page.first, epoch: page.epoch })
       if (result.page.reset) { setPage(undefined); return }
+      scroll.holdPosition()
       setItems(previous => joinItems(result.page.items, previous))
       setPage(previous => previous && { ...previous, first: result.page.first ?? previous.first, hasOlder: result.page.hasOlder })
-      requestAnimationFrame(() => { if (element) element.scrollTop += element.scrollHeight - before })
     } catch (failure) { setError(errorText(failure)) }
-  }
+  }, [page, scroll, state, taskId])
 
   const command = async (run: () => Promise<unknown>) => {
     try { await run(); setError(undefined) } catch (failure) { setError(errorText(failure)) }
@@ -147,7 +143,7 @@ export function TaskView({ state, taskId, onBack, onOpenSession }: { state: HubS
   const send = async () => {
     const text = draft.text.trim()
     if (!text) return
-    setSending(true); stick.current = true
+    setSending(true); scroll.toEnd()
     const sent = draft
     setDraft({ text: '', images: [] })
     try { await state.client.call('task.command', { kind: 'send', taskId, requestId: requestId(), text }) }
@@ -160,30 +156,36 @@ export function TaskView({ state, taskId, onBack, onOpenSession }: { state: HubS
   const subtitle = task ? [`${cliName(task.provider)} · ${task.model}`, `${task.host}:${basename(task.cwd)}`].join(' · ') : state.hub.name
   return <div className="screen session">
     <header className="bar divided">
-      <button className="icon" aria-label={ui('Back')} onClick={onBack}><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M15 5l-7 7 7 7" /></svg></button>
+      <button className="icon" aria-label={ui('Back')} onClick={onBack}>{icons.back}</button>
       <div className="bar-title">
-        <div className="title-line">{task && <span className="dot" data-status={task.status === 'attention' ? 'waiting' : running ? 'running' : task.status === 'error' ? 'offline' : 'idle'} />}<span className="ellipsis">{task?.title ?? ui('Background task')}</span></div>
-        <div className="subtitle ellipsis">{subtitle}</div>
+        <div className="title-line"><span className="ellipsis">{task?.title ?? ui('Background task')}</span></div>
+        <div className="subtitle ellipsis">{task && <span className="dot" data-status={task.status === 'attention' ? 'waiting' : running ? 'running' : task.status === 'error' ? 'offline' : 'idle'} />}{subtitle}</div>
       </div>
     </header>
-    <div className="scroll" ref={scroller} onScroll={event => { const element = event.currentTarget; stick.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80 }}>
-      <div className="timeline">
-        {task?.delegated && <div className="task-origin">
-          {owner ? <button className="link" onClick={() => onOpenSession(owner.sessionId)}>{ui('Delegated from “{0}”', { 0: owner.title || ui('Untitled session') })}</button> : ui('Delegated by DSH')}
-          {task.controller && <span> · {ui('In use on {0}', { 0: task.controller })}</span>}
-        </div>}
-        {page?.hasOlder && <button className="link center" onClick={() => void earlier()}>{ui('Load earlier')}</button>}
-        {loading && <div className="empty">{ui('Connecting…')}</div>}
-        <Items items={items} />
-        {task?.status === 'error' && task.error && <div className="marker error">{task.error}</div>}
-        {running && permissions.length === 0 && <div className="working"><span className="spinner" />{ui('Working…')}</div>}
-        {permissions.map(permission => <Approval key={permission.id} permission={permission} control={control}
-          onAnswer={action => command(() => state.client.call('task.command', { kind: 'respond', taskId, permissionId: permission.id, behavior: action.behavior, ...(action.id ? { actionId: action.id } : {}) }))} />)}
+    <OfflineBanner state={state.client.state} error={state.client.error} name={state.hub.name} onRetry={() => state.client.reconnectNow()} />
+    <div className="chat-body">
+      <div className="scroll chat-scroll" ref={scroller} onScroll={scroll.onScroll}>
+        <div className="timeline" ref={content}>
+          {task?.delegated && <div className="task-origin">
+            {owner ? <button className="link" onClick={() => onOpenSession(owner.sessionId)}>{ui('Delegated from “{0}”', { 0: owner.title || ui('Untitled session') })}</button> : ui('Delegated by DSH')}
+            {task.controller && <span> · {ui('In use on {0}', { 0: task.controller })}</span>}
+          </div>}
+          <LoadEarlier root={scroller} more={page?.hasOlder === true && !loading} onLoad={earlier} />
+          {loading && items.length === 0 && <Skeleton />}
+          <Items items={items} />
+          {task?.status === 'error' && task.error && <div className="marker error">{task.error}</div>}
+          {running && permissions.length === 0 && <div className="working"><span className="spinner" />{ui('Working…')}</div>}
+        </div>
       </div>
+      <JumpToEnd visible={!scroll.atEnd} fresh={scroll.fresh} onClick={() => scroll.toEnd(true)} />
     </div>
-    {error && <div className="error" role="alert">{error}</div>}
+    {permissions.length > 0 && <div className="dock">
+      {permissions.map(permission => <TaskApproval key={permission.id} permission={permission} control={control}
+        onAnswer={action => command(() => state.client.call('task.command', { kind: 'respond', taskId, permissionId: permission.id, behavior: action.behavior, ...(action.id ? { actionId: action.id } : {}) }))} />)}
+    </div>}
+    <Toast message={error} onClose={() => setError(undefined)} />
     {control
-      ? <Composer draft={draft} onDraft={setDraft} onSend={() => void send()} onStop={() => void command(() => state.client.call('task.command', { kind: 'stop', taskId }))}
+      ? <Composer draft={draft} onDraft={setDraft} onSend={() => void send()} onStop={() => { haptic(); void command(() => state.client.call('task.command', { kind: 'stop', taskId })) }}
         running={running} busy={sending} disabled={!online || !task || task.status === 'closed'} images={false} />
       : <div className="readonly">{ui('This phone may only read sessions.')}</div>}
   </div>

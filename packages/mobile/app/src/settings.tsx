@@ -2,6 +2,7 @@
 import React, { useState } from 'react'
 import { fromBase64url, type PushPreferences } from '../../src/shared/protocol.js'
 import { errorText, ui } from './i18n.js'
+import { icons, Toggle } from './controls.js'
 import { ConnectionBadge } from './parts.js'
 import { store, useStore, type HubState } from './store.js'
 
@@ -35,7 +36,7 @@ export function SettingsScreen({ onBack, onPair }: { onBack(): void; onPair(): v
   useStore()
   return <div className="screen">
     <header className="bar">
-      <button className="icon" aria-label={ui('Back')} onClick={onBack}><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M15 5l-7 7 7 7" /></svg></button>
+      <button className="icon" aria-label={ui('Back')} onClick={onBack}>{icons.back}</button>
       <div className="bar-title"><div className="title-line">{ui('Settings')}</div></div>
     </header>
     <div className="scroll form">
@@ -63,8 +64,8 @@ function Computer({ state }: { state: HubState }) {
     {state.client.error && state.client.state !== 'online' && <div className="muted small">{ui(state.client.error)}</div>}
     {grants && <div className="muted small">{grants.control ? ui('Read and steer') : ui('Read only')}</div>}
     <div className="card-label">{ui('Notifications')}</div>
-    <label className="option"><input type="checkbox" checked={preferences.finished} onChange={event => setPreferences({ ...preferences, finished: event.target.checked })} /><span>{ui('When a task finishes')}</span></label>
-    <label className="option"><input type="checkbox" checked={preferences.attention} onChange={event => setPreferences({ ...preferences, attention: event.target.checked })} /><span>{ui('When a session needs you')}</span></label>
+    <Toggle label={ui('When a task finishes')} checked={preferences.finished} onChange={value => setPreferences({ ...preferences, finished: value })} />
+    <Toggle label={ui('When a session needs you')} checked={preferences.attention} onChange={value => setPreferences({ ...preferences, attention: value })} />
     {other && <div className="muted small">{ui('Notifications work for one computer at a time; turning them on here turns them off for {0}.', { 0: other })}</div>}
     {ios() && !standalone() && <div className="muted small">{ui('On iPhone, add this app to the Home Screen first: Share → Add to Home Screen. Then open it from there.')}</div>}
     <div className="row-actions wrap">

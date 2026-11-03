@@ -1,6 +1,7 @@
 /** Pair with a computer: scan the code it shows, or paste its link. */
 import jsQRModule from 'jsqr'
 import React, { useEffect, useRef, useState } from 'react'
+import { icons } from './controls.js'
 import { errorText, ui } from './i18n.js'
 import { store, useStore } from './store.js'
 
@@ -36,7 +37,7 @@ export function PairScreen({ initial, onDone, onCancel }: { initial?: string; on
 
   return <div className="screen">
     <header className="bar">
-      {onCancel && <button className="icon" aria-label={ui('Back')} onClick={onCancel}><svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M15 5l-7 7 7 7" /></svg></button>}
+      {onCancel && <button className="icon" aria-label={ui('Back')} onClick={onCancel}>{icons.back}</button>}
       <div className="bar-title"><div className="title-line big">{ui('Pair with a computer')}</div></div>
     </header>
     <div className="scroll form">
