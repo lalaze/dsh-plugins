@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, RelayUnavailable, SharedWorkspace, Task, TimelinePage } from '../core/domain.js';
+import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, RelayUnavailable, SharedTag, SharedWorkspace, Task, TimelinePage } from '../core/domain.js';
 import { enabledProvidersOf, list, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError, sharesSessions } from '../core/domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from '../core/ssh.js';
 import { MACHINE_IDENTITY, serverIdOf } from '../core/remote-host.js';
@@ -55,8 +55,9 @@ export interface Backend {
   controller?(taskId: string): string | undefined;
   /** Forget a session here only: a shared one stays on the host for other DSH instances, and its CLI keeps running. */
   forgetLocal?(task: Task): Promise<void>;
-  sharedWorkspaces?(): Promise<SharedWorkspace[]>;
+  sharedWorkspaces?(timeout?: number): Promise<SharedWorkspace[]>;
   shareWorkspace?(path: string): Promise<void>;
+  setWorkspaceTags?(path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
   /** Stop sharing the given sessions started here; other DSH instances forget them. */
   withdrawSharing?(taskIds: string[]): Promise<void>;
   /** Whether deletions reach the other DSH instances now; true without sharing. */
@@ -130,7 +131,11 @@ export class SshBackend implements Backend {
   startSharing(): void { if (!this.closed) this.shared?.start(); }
   sharingError(): string | undefined { return this.shared?.status(); }
   controller(taskId: string): string | undefined { return this.shared?.controller(taskId); }
-  async sharedWorkspaces(): Promise<SharedWorkspace[]> { if (!this.shared) return []; return this.shared.listWorkspaces(); }
+  async sharedWorkspaces(timeout?: number): Promise<SharedWorkspace[]> { if (!this.shared) return []; return this.shared.listWorkspaces(timeout); }
+  async setWorkspaceTags(path: string, tags: SharedTag[]): Promise<SharedWorkspace> {
+    if (!this.shared) throw new Error('Sessions are not shared on this host');
+    return this.shared.setWorkspaceTags(path, tags);
+  }
   async shareWorkspace(path: string): Promise<void> { await this.shared?.addWorkspace(path); }
   async sharingReachable(timeout: number): Promise<boolean> { return !this.shared || this.shared.reachable(timeout); }
   async withdrawSharing(taskIds: string[]): Promise<void> {

@@ -159,6 +159,21 @@ test('remote workspaces added in one DSH are offered to the others once', { skip
   assert.deepEqual(await second.service.sharedWorkspaces(secondHost), [], 'not offered again, even if removed from the sidebar');
 });
 
+test('a workspace\'s tags set in one DSH reach the others, the latest change wins, and adding workspaces keeps them', { skip: !supported }, async t => {
+  const { h, second, secondHost } = await twoInstances(t);
+  const set = await h.first.service.setWorkspaceTags(h.hostId, '/srv/app', [{ name: ' Dana ', color: 'lime' }, { name: '', color: 'red' }]);
+  assert.deepEqual(set.tags, [{ name: 'Dana', color: 'lime' }]); assert.ok(set.tagsAt); assert.ok(set.tagsBy);
+  const seen = await waitFor(async () => (await second.service.sharedWorkspaceList(secondHost))?.find(w => w.path === '/srv/app' && w.tags?.length), 'tags reach the other DSH');
+  assert.deepEqual(seen.tags, [{ name: 'Dana', color: 'lime' }]);
+  const cleared = await second.service.setWorkspaceTags(secondHost, '/srv/app', []);
+  assert.ok(Date.parse(cleared.tagsAt!) >= Date.parse(set.tagsAt!), 'stamped by the host');
+  await waitFor(async () => (await h.first.service.sharedWorkspaceList(h.hostId))?.find(w => w.path === '/srv/app')?.tags?.length === 0, 'cleared everywhere');
+  await second.service.setWorkspaceTags(secondHost, '/srv/app', [{ name: 'Work', color: 'blue' }]);
+  await h.first.service.shareWorkspace(h.hostId, '/srv/other');
+  const list = await waitFor(async () => { const all = await h.first.service.sharedWorkspaceList(h.hostId); return all?.some(w => w.path === '/srv/other') ? all : undefined; }, 'workspace added');
+  assert.deepEqual(list.find(w => w.path === '/srv/app')?.tags, [{ name: 'Work', color: 'blue' }], 'adding another workspace keeps existing tags');
+});
+
 test('after a network outage, the DSH that drove a session does not take it back from the one that took over', { skip: !supported }, async t => {
   const { h, second } = await twoInstances(t);
   const agent = await h.first.service.create(h.request('codex', 'stream 2'));

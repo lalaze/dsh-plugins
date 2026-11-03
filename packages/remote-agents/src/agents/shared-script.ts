@@ -209,6 +209,21 @@ const methods = {
     writeJson(workspaceFile, [...list, { path, by: String(label ?? '').slice(0, 100), at: new Date().toISOString() }]);
     return { added: true };
   }),
+  /** A workspace's tags, by name. Stamped with this host's clock: the latest change wins, whichever DSH made it. */
+  setWorkspaceTags: ({ path, tags, label }) => locked('workspaces', () => {
+    if (typeof path !== 'string' || !path.startsWith('/') || path.includes('\n') || path.length > 4096) throw new Error('Invalid workspace path');
+    if (!Array.isArray(tags) || tags.length > 50) throw new Error('Invalid workspace tags');
+    const clean = tags.map(tag => ({ name: [...String(tag?.name ?? '').trim()].slice(0, 40).join(''), color: String(tag?.color ?? '').slice(0, 20) })).filter(tag => tag.name);
+    const list = workspaces(), by = String(label ?? '').slice(0, 100), at = new Date().toISOString();
+    let entry = list.find(w => w.path === path);
+    if (!entry) {
+      if (list.length >= WORKSPACES) throw new Error('The shared workspace list is full');
+      entry = { path, by, at }; list.push(entry);
+    }
+    Object.assign(entry, { tags: clean, tagsAt: at, tagsBy: by });
+    writeJson(workspaceFile, list);
+    return { workspace: entry };
+  }),
 };
 
 /**

@@ -1,4 +1,4 @@
-import type { DirectoryListing, Host, SharedWorkspace } from '../core/domain.js';
+import type { DirectoryListing, Host, SharedTag, SharedWorkspace } from '../core/domain.js';
 import type { Store } from '../core/store.js';
 import type { WorkspaceFiles } from './files.js';
 
@@ -18,4 +18,7 @@ export interface WorkspaceHosts {
   sharedWorkspaces(hostId: string): Promise<SharedWorkspace[]>;
   seeWorkspaces(hostId: string, paths: string[]): Promise<void>;
   shareWorkspace(hostId: string, path: string): Promise<void>;
+  /** Every shared workspace with its tags, undefined while the machine's registry cannot be reached; and setting them. */
+  sharedWorkspaceList(hostId: string, timeout?: number): Promise<SharedWorkspace[] | undefined>;
+  setWorkspaceTags(hostId: string, path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
 }

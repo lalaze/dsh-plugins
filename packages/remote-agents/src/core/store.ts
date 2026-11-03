@@ -21,7 +21,9 @@ export interface Instance { id: string; label: string }
  * `instance` identifies this DSH to others sharing a host's sessions; `seenWorkspaces` lists, per host, the
  * shared remote workspaces already offered to DSH, so one removed from the sidebar is not added again.
  */
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[] }
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord> }
+/** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
+export interface TagSyncRecord { names: string[]; at?: string }
 /** A deleted shared session whose deletion has not reached its SSH host yet. */
 export interface SharedDeletion { hostId: string; id: string }
 export class Store {
@@ -87,11 +89,16 @@ export class Store {
       for (const raw of value.sharedDeletions) { const deletion = record(raw); identifier(deletion.hostId); identifier(deletion.id); }
     }
     if (value.seenWorkspaces !== undefined && !Object.values(record(value.seenWorkspaces)).every(paths => Array.isArray(paths) && paths.every(path => typeof path === 'string'))) throw new Error('Invalid saved shared workspaces');
+    // Only a sync memory: a record that does not fit is dropped and that workspace syncs as on first contact.
+    const tagSync = value.tagSync === undefined ? undefined : Object.fromEntries(Object.entries(record(value.tagSync)).filter(([, saved]) => {
+      const entry = saved as Partial<TagSyncRecord> | null;
+      return Array.isArray(entry?.names) && entry.names.every(name => typeof name === 'string') && (entry.at === undefined || typeof entry.at === 'string');
+    })) as Record<string, TagSyncRecord>;
     this.state = { version: 1, hosts: value.hosts as HostConfig[], tasks: value.tasks as Task[], ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects as ChatProject[] } : {}),
       ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
       ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}),
       ...(value.instance ? { instance: value.instance as Instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces as Record<string, string[]> } : {}),
-      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}) };
+      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
@@ -108,6 +115,7 @@ export class Store {
     if (!this.state.instance) await this.update(state => { state.instance ??= { id: `dsh-${randomUUID()}`, label: (hostname() || 'DSH').slice(0, 100) }; });
     return structuredClone(this.state.instance!);
   }
+  tagSync(key: string): TagSyncRecord | undefined { return structuredClone(this.state.tagSync?.[key]); }
   seenWorkspaces(hostId: string): string[] { return [...(this.state.seenWorkspaces?.[hostId] ?? [])]; }
   sharedDeletions(hostId: string): string[] { return (this.state.sharedDeletions ?? []).filter(d => d.hostId === hostId).map(d => d.id); }
   relayCleanups(hostId: string): RelayCleanup[] { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }

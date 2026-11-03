@@ -262,7 +262,12 @@ export interface DirectoryListing { path: string; home: string; entries: { name:
 /** A remote directory adopted as a DSH workspace through its local anchor folder. */
 export interface RemoteWorkspace { hostId: string; path: string; remotePath: string }
 /** A remote workspace a DSH added on a machine whose sessions are shared, by that DSH's name. */
-export interface SharedWorkspace { path: string; by?: string; at?: string }
+export interface SharedWorkspace {
+  path: string; by?: string; at?: string;
+  /** Its Workspace Tags, by name, as the DSH that changed them last (`tagsBy`) left them, at `tagsAt` on the host's clock. */
+  tags?: SharedTag[]; tagsAt?: string; tagsBy?: string;
+}
+export interface SharedTag { name: string; color: string }
 export const busy =(agent: Pick<AgentSummary, 'status'>) => agent.status === 'starting' || agent.status === 'running' || agent.status === 'attention';
 
 export class RemoteError extends Error {

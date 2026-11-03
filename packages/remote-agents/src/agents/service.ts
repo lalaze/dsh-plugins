@@ -5,7 +5,7 @@ import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from '../core/domain.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type HostConfig, type PermissionAnswer, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
+import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type HostConfig, type PermissionAnswer, type SharedTag, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
 export interface UsageOptions {
@@ -359,6 +359,21 @@ export class RemoteAgentsService {
       for (const path of paths) seen.add(path);
       (state.seenWorkspaces ??= {})[hostId] = [...seen].slice(-2000);
     });
+  }
+  /** Every workspace shared on this host, with its tags; undefined while its registry cannot be reached. */
+  async sharedWorkspaceList(hostId: string, timeout = 3000): Promise<SharedWorkspace[] | undefined> {
+    const host = this.store.hosts().find(h => h.id === hostId);
+    if (!host || !sharesSessions(host) || this.closed) return undefined;
+    const backend = this.connection(hostId).backend;
+    backend.startSharing?.();
+    return backend.sharedWorkspaces?.(timeout).catch(() => undefined);
+  }
+  /** Share a workspace's tags with the other DSH instances on this host. */
+  async setWorkspaceTags(hostId: string, path: string, tags: SharedTag[]): Promise<SharedWorkspace> {
+    if (!sharesSessions(this.host(hostId))) throw new RemoteError('Sessions are not shared on this host', 409);
+    const backend = this.connection(hostId).backend;
+    if (!backend.setWorkspaceTags) throw new RemoteError('This host cannot share workspace tags', 409);
+    return backend.setWorkspaceTags(path, tags);
   }
   /** Record a remote workspace on its host so other DSH instances offer it too. */
   async shareWorkspace(hostId: string, path: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { JsonlPeer, type SshTransport } from '../core/ssh.js';
 import { SHARED_SCRIPT, SHARED_VERSION } from './shared-script.js';
-import { attachmentInput, identifier, PROVIDER_LABELS, type Agent, type SharedWorkspace, type Task } from '../core/domain.js';
+import { attachmentInput, identifier, PROVIDER_LABELS, type Agent, type SharedTag, type SharedWorkspace, type Task } from '../core/domain.js';
 import type { TaskHistory } from './history.js';
 import type { Instance, Store } from '../core/store.js';
 import { REMOTE_HOME, remoteScript } from '../core/remote-host.js';
@@ -574,6 +574,15 @@ export class SharedSessions {
     // The name is known once the registry answered.
     if (!await this.ready(20_000)) throw new Error(this.unavailable ?? this.error ?? 'The shared session registry is unavailable');
     await this.call('addWorkspace', { path, label: this.instance?.label ?? '' });
+  }
+  /** Record a workspace's tags for the other DSH instances; added to the shared workspaces when missing. */
+  async setWorkspaceTags(path: string, tags: SharedTag[]): Promise<SharedWorkspace> {
+    // The name is known once the registry answered.
+    if (!await this.ready(20_000)) throw new Error(this.unavailable ?? this.error ?? 'The shared session registry is unavailable');
+    const { workspace } = await this.call('setWorkspaceTags', { path, tags, label: this.instance?.label ?? '' });
+    // The host reports the change shortly; until then this copy already holds it.
+    this.workspaces = [...this.workspaces.filter(w => w.path !== workspace.path), workspace];
+    return structuredClone(workspace);
   }
   /** Workspaces any DSH added on this SSH account. */
   async listWorkspaces(timeout = 8000): Promise<SharedWorkspace[]> {
