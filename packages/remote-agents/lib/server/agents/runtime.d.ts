@@ -44,6 +44,8 @@ export declare class CliSession {
     private imageInput;
     /** Items produced by the output line being processed, saved together with its relay offset. */
     private batch?;
+    /** Images in that line's tool results, saved before its items so a chat reading them finds the files. */
+    private viewed?;
     private permissions;
     private tools;
     private stopWaiters;
@@ -60,6 +62,16 @@ export declare class CliSession {
     private position;
     /** Process one output line; its history items are saved in one write with the offset after it. */
     private frame;
+    /**
+     * Queue an image's base64 bytes to be saved with this output line, and return its copy's name; undefined when the chat
+     * cannot show it. The bytes stay out of the history, which other DSHs copy: it records only the name.
+     */
+    private keepImage;
+    /**
+     * The images in a tool's output, as Claude (`source`) or MCP (`data`, `mimeType`) image blocks, such as a screenshot
+     * it read. `path` is the remote file the tool read, when it names one, for a DSH without the copy.
+     */
+    private toolImages;
     private write;
     /** `mcpServers` are DSH's shared servers in ACP's stdio form; other protocols receive them as launch options. */
     initialize(protocol: NativeProtocol, argv: string[], resume?: boolean, mcpServers?: {

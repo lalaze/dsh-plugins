@@ -19,6 +19,11 @@ export declare class WorkspaceService {
     target(sessionId: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget>;
     operate(sessionId: string, raw: unknown, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown>;
     download(sessionId: string, path: string, rev: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<Buffer>;
+    /**
+     * A file a remote CLI of this conversation named by absolute path, such as an image Codex viewed, read on the
+     * conversation's verified machine. It may be outside the workspace: the CLI there already read it.
+     */
+    readViewed(sessionId: string, path: string, limit: number, signal: AbortSignal): Promise<Buffer | undefined>;
     upload(sessionId: string, path: string, rev: string | null, size: number, input: AsyncIterable<Uint8Array>, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown>;
     /** Git commands in the conversation's verified remote directory, for other plugins; never offered to models. */
     git(sessionId: string, batch: GitBatch, signal: AbortSignal, expected?: WorkspaceTarget): Promise<GitRun[]>;

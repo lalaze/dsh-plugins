@@ -152,6 +152,13 @@ Paste or upload images and files in DSH’s normal composer. An attachment-only 
 
 Files are streamed without buffering the entire upload in memory. Images use DSH’s normalized request versions (up to a 1568-pixel edge and a 4 MiB target); each must fit the CLI’s 5 MB limit, with at most 20 images and 32 MiB of image data per request. A failed upload does not start a CLI turn, and retrying an already recorded message does not upload or send it again.
 
+### Images in replies
+
+The DSH chat shows only files on the DSH computer, so images from the remote machine are copied into `chat-images/` beside the plugin's state, one file per distinct image.
+
+- **Images the CLI looks at or makes.** Images Claude or Codex uses with a tool appear in the reply where it used them, each once per reply: screenshots and pictures Claude opens with Read, images Codex looks at with `view_image` or generates, and images an MCP tool returns. When the CLI's output holds the image, as for Claude, MCP tools and generated images, the copy comes from there, so it is the image the CLI saw even if the file changed later or lies outside the workspace; image bytes are not written to the shared history. Codex's `view_image` names only a file, which the chat fetches from the remote machine (any image file up to 20 MB that the SSH account can read) when it shows the reply. Another DSH following a shared session has no copies of its own: it fetches the images that name a file the same way, and images known only from the CLI's output, such as MCP screenshots, show only on the DSH that drove the turn. ACP CLIs are not covered yet.
+- **Images the CLI links.** A Markdown image in a reply that names a file in the remote workspace, such as `![Shot](shots/a.png)`, is downloaded and shown. Paths outside the workspace and images over 20 MB stay as alt text.
+
 ## Install and upgrade
 
 Requires Node.js ≥22.15.0 and DSH ≥0.2.1-rc.2, <0.3.0. Build and install the archive into a DSH profile:

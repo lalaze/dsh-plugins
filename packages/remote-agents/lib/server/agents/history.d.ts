@@ -17,11 +17,12 @@ export declare class TaskHistory {
     /**
      * One write for everything a CLI output line produced. Every entry records the relay byte
      * offset after that line, so a restarted DSH resumes there without repeating or losing output.
+     * `before` runs in write order ahead of it, for files its entries name.
      */
     appendBatch(items: {
         item: TimelineEntry['item'];
         turnId?: string;
-    }[], relay?: RelayPosition): Promise<void>;
+    }[], relay?: RelayPosition, before?: () => Promise<void>): Promise<void>;
     /** Number of saved entries, once queued writes finished. */
     length(): Promise<number>;
     /** Entries `from`…`to` (1-based, inclusive) as saved lines. */

@@ -56,6 +56,8 @@ export interface ChatHost extends Partial<ToolHost> {
     permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
     /** A file from the conversation's verified remote workspace, or undefined when it is too large to show. */
     image?(sessionId: NonNullable<GenerateOptions['sessionId']>, path: string, signal: AbortSignal): Promise<Uint8Array | undefined>;
+    /** A file the CLI looked at by absolute path on the conversation's verified machine, inside the workspace or not; undefined when too large. */
+    viewedImage?(sessionId: NonNullable<GenerateOptions['sessionId']>, path: string, signal: AbortSignal): Promise<Uint8Array | undefined>;
     attachments?: AttachmentAccess;
 }
 /** A speed tier (Codex Fast) is a separate picker row: DSH model selections carry only a model and a reasoning effort. */

@@ -1,8 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { CHAT_IMAGE_LIMIT, CHAT_IMAGES, chatImageName, imageExtensionOf, viewedImageExtension, viewedImagePath, writeChatImage } from '../chat/images.js';
 import { list, questionsOf } from '../core/domain.js';
 import { RelayExit, RelayReleased } from './relay.js';
 import { configureAcpSession } from './acp.js';
 import { acpTurnUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTurnUsage, contextUsage } from './usage.js';
+/** The file name an image is shown with, from the remote path it was read from. */
+const imageName = (path) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
 const contentText = (content) => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
 export async function initializeCodex(peer) {
     await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.1.0' }, capabilities: {} });
@@ -50,6 +54,8 @@ export class CliSession {
     imageInput = false;
     /** Items produced by the output line being processed, saved together with its relay offset. */
     batch;
+    /** Images in that line's tool results, saved before its items so a chat reading them finds the files. */
+    viewed;
     permissions = new Map();
     tools = new Map();
     stopWaiters = new Set();
@@ -116,6 +122,7 @@ export class CliSession {
     /** Process one output line; its history items are saved in one write with the offset after it. */
     frame(message, frame) {
         this.batch = [];
+        this.viewed = [];
         try {
             this.message(message);
         }
@@ -123,11 +130,45 @@ export class CliSession {
             this.fail(error);
         }
         finally {
-            const items = this.batch;
+            const items = this.batch, images = this.viewed;
             this.batch = undefined;
+            this.viewed = undefined;
+            // An image that cannot be saved is not shown; the history is still written.
+            const save = images.length ? async () => { for (const { file, data } of images)
+                await writeChatImage(join(this.store.directory, CHAT_IMAGES), file, data).catch(() => { }); } : undefined;
             if (items.length && !this.diskFailed)
-                void this.history.appendBatch(items, this.position(frame.end)).catch(error => this.diskFailure(error));
+                void this.history.appendBatch(items, this.position(frame.end), save).catch(error => this.diskFailure(error));
         }
+    }
+    /**
+     * Queue an image's base64 bytes to be saved with this output line, and return its copy's name; undefined when the chat
+     * cannot show it. The bytes stay out of the history, which other DSHs copy: it records only the name.
+     */
+    keepImage(encoded, mediaType) {
+        if (!this.viewed || typeof encoded !== 'string' || !encoded || encoded.length * 0.75 > CHAT_IMAGE_LIMIT)
+            return;
+        const data = Buffer.from(encoded, 'base64'), extension = viewedImageExtension(mediaType) ?? imageExtensionOf(data);
+        if (!data.length || !extension)
+            return;
+        const file = chatImageName(data, extension);
+        if (!this.viewed.some(v => v.file === file))
+            this.viewed.push({ file, data });
+        return file;
+    }
+    /**
+     * The images in a tool's output, as Claude (`source`) or MCP (`data`, `mimeType`) image blocks, such as a screenshot
+     * it read. `path` is the remote file the tool read, when it names one, for a DSH without the copy.
+     */
+    toolImages(content, path, name = imageName(path)) {
+        const images = [];
+        for (const block of list(content)) {
+            if (block?.type !== 'image')
+                continue;
+            const file = block.source ? (block.source.type === 'base64' ? this.keepImage(block.source.data, block.source.media_type) : undefined) : this.keepImage(block.data, block.mimeType);
+            if (file)
+                images.push({ file, ...(viewedImagePath(path) ? { path } : {}), name });
+        }
+        return images;
     }
     write(message, id) { this.peer.send(message, this.relay ? id : undefined); }
     /** `mcpServers` are DSH's shared servers in ACP's stdio form; other protocols receive them as launch options. */
@@ -343,8 +384,8 @@ export class CliSession {
         this.agent.lastError = message;
         this.append({ type: 'error', message });
     }
-    tool(id, name, status, detail) {
-        const item = { type: 'tool_call', callId: id, name, status, detail };
+    tool(id, name, status, detail, images = []) {
+        const item = { type: 'tool_call', callId: id, name, status, detail, ...(images.length ? { images } : {}) };
         this.tools.set(id, item);
         this.append(item);
     }
@@ -439,9 +480,23 @@ export class CliSession {
         if (m.method?.startsWith('item/reasoning/') && m.method.endsWith('Delta'))
             this.append({ type: 'reasoning', text: String(p.delta ?? '') });
         if (m.method === 'item/started' || m.method === 'item/completed') {
-            const item = p.item;
-            if (item?.type === 'commandExecution' || item?.type === 'fileChange' || item?.type === 'mcpToolCall')
-                this.tool(String(item.id), item.type === 'commandExecution' ? 'Bash' : item.type === 'fileChange' ? 'Edit' : String(item.tool ?? 'MCP'), m.method === 'item/started' ? 'running' : item.status === 'failed' ? 'failed' : item.status === 'declined' ? 'canceled' : 'completed', item);
+            const item = p.item, done = m.method === 'item/completed';
+            const status = !done ? 'running' : item?.status === 'failed' || item?.failure ? 'failed' : item?.status === 'declined' ? 'canceled' : 'completed';
+            if (item?.type === 'commandExecution' || item?.type === 'fileChange')
+                this.tool(String(item.id), item.type === 'commandExecution' ? 'Bash' : 'Edit', status, item);
+            if (item?.type === 'mcpToolCall') {
+                // Screenshots and other images an MCP tool returns are shown; their bytes are kept out of the saved detail.
+                const content = list(item.result?.content), images = status === 'completed' ? this.toolImages(content, undefined, String(item.tool ?? '')) : [];
+                const detail = content.some(b => b?.type === 'image') ? { ...item, result: { ...item.result, content: content.map(b => b?.type === 'image' ? { type: 'image', mimeType: b.mimeType } : b) } } : item;
+                this.tool(String(item.id), String(item.tool ?? 'MCP'), status, detail, images);
+            }
+            // view_image reports only the path; the chat fetches the image from the remote machine.
+            if (item?.type === 'imageView')
+                this.tool(String(item.id), 'view_image', status, item, done && viewedImagePath(item.path) ? [{ path: item.path, name: imageName(item.path) }] : []);
+            if (item?.type === 'imageGeneration') {
+                const { result, ...detail } = item, file = status === 'completed' ? this.keepImage(result) : undefined, path = viewedImagePath(item.savedPath) ? item.savedPath : undefined;
+                this.tool(String(item.id), 'image_generation', status, detail, status === 'completed' && (file || path) ? [{ ...(file ? { file } : {}), ...(path ? { path } : {}), name: imageName(path) || 'Generated image' }] : []);
+            }
         }
         if (m.method === 'error')
             this.append({ type: 'error', message: String(p.error?.message ?? p.message ?? 'Remote CLI error') });
@@ -492,8 +547,10 @@ export class CliSession {
         }
         if (m.type === 'user')
             for (const block of list(m.message?.content))
-                if (block.type === 'tool_result')
-                    this.tool(String(block.tool_use_id), String(this.tools.get(String(block.tool_use_id))?.name ?? 'Tool'), block.is_error ? 'failed' : 'completed', contentText(block.content));
+                if (block.type === 'tool_result') {
+                    const call = this.tools.get(String(block.tool_use_id)), input = call?.detail;
+                    this.tool(String(block.tool_use_id), String(call?.name ?? 'Tool'), block.is_error ? 'failed' : 'completed', contentText(block.content), block.is_error ? [] : this.toolImages(block.content, input?.file_path ?? input?.path));
+                }
         if (m.type === 'result') {
             this.confirm();
             this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success');

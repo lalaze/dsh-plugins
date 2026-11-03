@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { createToolResultMessage, createUserMessage, LlmAdapter, LlmError, MessageId, ReasoningEffortId, ToolCallId, } from '@deepseek-ai/dsh-llm';
 import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath } from '../core/domain.js';
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles } from '../agents/attachments.js';
-import { ChatImageLinks, saveChatImage } from './images.js';
+import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { transcript } from './transcript.js';
 import { decidePermission } from '../agents/tools.js';
 export const CHAT_PROVIDER = 'remote-cli';
@@ -360,10 +360,32 @@ export class RemoteCliAdapter extends LlmAdapter {
             yield type === 'text' ? { type: 'text-delta', index: open.index, text } : { type: 'reasoning-delta', index: open.index, text };
         };
         // Remote CLIs name images by workspace path; the DSH chat can only show files on the DSH host.
+        const imageDirectory = join(service.store.directory, CHAT_IMAGES);
         const images = new ChatImageLinks(async (path) => {
             const data = await this.host.image?.(sessionId, path, signal);
-            return data && saveChatImage(join(service.store.directory, 'chat-images'), path, data);
+            return data && saveChatImage(imageDirectory, path, data);
         });
+        // Images the CLI looked at with its tools, such as screenshots it read, appear in the reply where it read them, once each.
+        // Codex's view_image names only a path; a DSH without the copy fetches it, each path once per reply.
+        const shownImages = new Set(), fetched = new Map();
+        const fetchImage = (path) => {
+            let local = fetched.get(path);
+            if (!local) {
+                local = (async () => {
+                    const data = await this.host.viewedImage?.(sessionId, path, signal), extension = data && imageExtensionOf(data);
+                    return extension ? writeChatImage(imageDirectory, chatImageName(data, extension), data) : undefined;
+                })().catch(() => undefined);
+                fetched.set(path, local);
+            }
+            return local;
+        };
+        const viewed = async function* (item) {
+            const markdown = await viewedImageMarkdown(imageDirectory, item.images, shownImages, fetchImage);
+            if (markdown) {
+                yield* textChunk('text', markdown);
+                yield* endBlock();
+            }
+        };
         // Record what reached this conversation, so output produced while DSH was away is shown later.
         let savedAt = 0, reached;
         const delivered = async (id, cursor, done = false, force = false) => {
@@ -407,6 +429,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                         yield* endBlock();
                         if (!rows.write(entry))
                             yield* textChunk('reasoning', `${entry.item.name ?? 'Tool'} · ${entry.item.status ?? ''}\n${typeof entry.item.detail === 'string' ? entry.item.detail : JSON.stringify(entry.item.detail ?? {})}\n`);
+                        yield* viewed(entry.item);
                     }
                     if (entry.item.type === 'error') {
                         if (recovered)

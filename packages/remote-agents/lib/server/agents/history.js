@@ -49,14 +49,16 @@ export class TaskHistory {
     /**
      * One write for everything a CLI output line produced. Every entry records the relay byte
      * offset after that line, so a restarted DSH resumes there without repeating or losing output.
+     * `before` runs in write order ahead of it, for files its entries name.
      */
-    appendBatch(items, relay) {
+    appendBatch(items, relay, before) {
         const saved = structuredClone(items), position = relay && structuredClone(relay);
         const next = this.queue.then(async () => {
             if (this.failure)
                 throw this.failure;
             if (!saved.length)
                 return;
+            await before?.();
             const timestamp = new Date().toISOString();
             const entries = saved.map(({ item, turnId }, index) => ({ seqStart: this.entries.length + index + 1, seqEnd: this.entries.length + index + 1, timestamp, item, ...(turnId ? { turnId } : {}), ...(position ? { relay: position } : {}) }));
             await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });

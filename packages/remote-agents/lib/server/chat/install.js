@@ -53,6 +53,7 @@ export function installChat(ctx, service, projects, workspace) {
                 const file = await files.operate(id, { op: 'stat', path }, signal);
                 return file.size <= CHAT_IMAGE_LIMIT ? files.download(id, path, file.revision, signal) : undefined;
             },
+            viewedImage: (id, path, signal) => files.readViewed(id, path, CHAT_IMAGE_LIMIT, signal),
             workspace: (cwd, signal) => access.resolve(cwd, signal) });
         const registration = scoped.llm.registerAdapter(CHAT_PROVIDERS, adapter);
         scoped.effect(() => projects.onChange(() => registration.replace(CHAT_PROVIDERS)));
