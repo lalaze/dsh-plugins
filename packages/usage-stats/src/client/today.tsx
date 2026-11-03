@@ -19,7 +19,7 @@ const CSS = `.us-today{display:inline-flex;align-items:center;gap:6px;flex:none;
  * `details`, the full dashboard, in a modal window. The Settings switch hides it and stops its refreshes.
  */
 export function TodayBadge({ details }: { details?: ComponentType }) {
-  useLocale();
+  const language = useLocale();
   const { headerBadge } = usePreferences();
   const [totals, setTotals] = useState<Totals | null>(null);
   const [stale, setStale] = useState(false);
@@ -42,8 +42,8 @@ export function TodayBadge({ details }: { details?: ComponentType }) {
     return () => { alive = false; clearInterval(timer); };
   }, [headerBadge]);
   if (!headerBadge || !totals) return null;
-  // K/M/B like the dashboard, such as 13M or 9.8M, in every language (Chinese compact notation would show 1304万); the tooltip has the exact count.
-  const value = compact(totals.totalTokens);
+  // As on the dashboard: 13M or 9.8M, and in Chinese 1.13亿 from 1亿 up; the tooltip has the exact count.
+  const value = compact(totals.totalTokens, language);
   const missing = totals.requests - totals.withUsage;
   const title = [ui("Today: {0} tokens in {1} requests", { 0: totals.totalTokens.toLocaleString(formatLocale()), 1: totals.requests.toLocaleString(formatLocale()) }),
     missing > 0 ? ui("* {0} requests returned no usage", { 0: missing.toLocaleString(formatLocale()) }) : '', stale ? ui("Could not refresh; showing the last value") : ''].filter(Boolean).join('\n');

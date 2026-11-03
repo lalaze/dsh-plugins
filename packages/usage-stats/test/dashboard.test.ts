@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dateRange, localDay, localOffset, trendBuckets } from '../src/client/metrics.js';
+import { compact, dateRange, localDay, localOffset, trendBuckets } from '../src/client/metrics.js';
 import { report, type UsageRecord } from '../src/domain.js';
 
 const record = (date: string, provider = 'deepseek', tokens = 10): UsageRecord => ({ id: date, startedAt: `${date}T12:00:00.000Z`, provider, model: 'chat', durationMs: 1, purpose: 'conversation', status: 'completed', usage: { inputTokens: tokens, outputTokens: 0 } });
@@ -39,4 +39,16 @@ test('快捷日期使用本地时区并包含今天，正确跨越月份和闰�
   assert.deepEqual(dateRange('7d', now), { from: '2024-02-24', to: '2024-03-01' });
   assert.deepEqual(dateRange('30d', now), { from: '2024-02-01', to: '2024-03-01' });
   assert.deepEqual(dateRange('all', now), { from: '', to: '' });
+});
+test('中文界面从 1 亿起以“亿”显示 Token 数，保留两位小数且不进位，以下仍为 K/M', () => {
+  assert.equal(compact(113_600_000, 'zh'), '1.13亿');
+  assert.equal(compact(119_999_999, 'zh'), '1.19亿');
+  assert.equal(compact(100_000_000, 'zh'), '1亿');
+  assert.equal(compact(1_234_500_000_000, 'zh'), '12,345亿');
+  assert.equal(compact(13_040_000, 'zh'), '13M', '不出现 1304万');
+  assert.equal(compact(113_600_000, 'en'), '113.6M');
+  assert.equal(compact(113_600_000), '113.6M');
+  // 图表纵轴按最大值的单位显示，避免同一轴上混用“亿”和 M。
+  assert.equal(compact(60_000_000, 'zh', 120_000_000), '0.6亿');
+  assert.equal(compact(60_000_000, 'en', 120_000_000), '60M');
 });

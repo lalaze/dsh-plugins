@@ -27,4 +27,14 @@ export function trendBuckets(series: UsageGroup[], from?: string, to?: string): 
   }
   return buckets;
 }
-export const compact = (value: number) => new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+const ENGLISH = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
+const CHINESE = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 });
+const YI = 100_000_000;
+/**
+ * A token count in short form: K/M/B, such as 13M or 9.8M. In Chinese, counts from 1亿 up read in 亿 with two decimals,
+ * cut rather than rounded so they never read higher than the count: 113,600,000 is 1.13亿. Below 1亿 they stay K/M, as
+ * Chinese compact notation keeps every digit there (1304万). `scale`, the largest value of a chart axis, puts all of the
+ * axis's labels in its unit.
+ */
+export const compact = (value: number, language = 'en', scale = value) =>
+  language === 'zh' && scale >= YI ? `${CHINESE.format(Math.floor(value / 1_000_000) / 100)}亿` : ENGLISH.format(value);

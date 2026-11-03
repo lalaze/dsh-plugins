@@ -1,5 +1,5 @@
 import type { LocaleContext } from '@dsh-plugins/i18n';
-import { ui, installLocale, useLocale, formatLocale } from './i18n.js';
+import { ui, installLocale, useLocale, formatLocale, activeLocale } from './i18n.js';
 import React, { useEffect, useRef, useState } from 'react';
 import type { Dimension, UsageReport, Totals } from '../domain.js';
 import { compact, dateRange, localOffset, trendBuckets } from './metrics.js';
@@ -12,6 +12,8 @@ interface Client extends LocaleContext {
   slots: { inject(name: string, factory: () => unknown): unknown; register(spec: Record<string, unknown>, component: React.FC): unknown };
 }
 const number = (value: number) => value.toLocaleString(formatLocale());
+/** Short token counts in the active language, such as 9.8M or 1.13亿; the root component re-renders on a language change. */
+const short = (value: number, scale?: number) => compact(value, activeLocale(), scale);
 const percent = (value: number, total: number) => total ? `${(value / total * 100).toFixed(1)}%` : '—';
 const shortDate = (value: string) => value.slice(5).replace('-', '/');
 /** The viewer's IANA zone, the one the date presets and the API's `tz` follow. */
@@ -40,7 +42,7 @@ function Trend({ data }: { data: UsageReport }) {
     <div className="us-panel-head"><div><h3>{ui("Usage trend")}</h3><p className="us-subtitle">{buckets[0].from !== buckets[0].to ? ui("Grouped by time period") : ui("Daily usage")} · {ui("Local time")}</p></div><div className="us-segment" role="group" aria-label={ui("Trend metric")}>{(['tokens', 'requests'] as const).map(value => <button key={value} aria-pressed={metric === value} onClick={() => { setMetric(value); setHovered(undefined); }}>{value === 'tokens' ? 'Token' : ui("Requests")}</button>)}</div></div>
     <div className="us-chart">
       <div className="us-chart-readout" aria-live="polite"><span>{selected ? `${selected.from}${selected.to !== selected.from ? ` → ${selected.to}` : ''}` : ui("Selected period")}</span><span className="us-number">{number(selected ? selected[metric] : total)} {metric === 'tokens' ? 'Token' : ui("requests")}</span></div>
-      <div className="us-chart-body"><div className="us-y-axis" aria-hidden="true"><span>{compact(max)}</span><span>{compact(max / 2)}</span><span>0</span></div><div className="us-plot"><div className="us-grid" aria-hidden="true"><span /><span /><span /></div><div className="us-bars" role="group" aria-label={ui("Daily usage trend")}>{buckets.map((b, i) => <button key={b.from} className="us-bar-hit" aria-label={`${b.from}${b.from !== b.to ? ui(" to {0}", { 0: b.to }) : ''}: ${number(b[metric])} ${metric === 'tokens' ? 'Token' : ui("requests")}`} aria-pressed={hovered === i} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(undefined)} onFocus={() => setHovered(i)} onBlur={() => setHovered(undefined)} onClick={() => setHovered(i)}><span className="us-bar" style={{ height: `${b[metric] ? Math.max(1.5, b[metric] / max * 100) : 0}%` }} /></button>)}</div></div></div>
+      <div className="us-chart-body"><div className="us-y-axis" aria-hidden="true"><span>{short(max)}</span><span>{short(max / 2, max)}</span><span>0</span></div><div className="us-plot"><div className="us-grid" aria-hidden="true"><span /><span /><span /></div><div className="us-bars" role="group" aria-label={ui("Daily usage trend")}>{buckets.map((b, i) => <button key={b.from} className="us-bar-hit" aria-label={`${b.from}${b.from !== b.to ? ui(" to {0}", { 0: b.to }) : ''}: ${number(b[metric])} ${metric === 'tokens' ? 'Token' : ui("requests")}`} aria-pressed={hovered === i} onMouseEnter={() => setHovered(i)} onMouseLeave={() => setHovered(undefined)} onFocus={() => setHovered(i)} onBlur={() => setHovered(undefined)} onClick={() => setHovered(i)}><span className="us-bar" style={{ height: `${b[metric] ? Math.max(1.5, b[metric] / max * 100) : 0}%` }} /></button>)}</div></div></div>
       <div className="us-x-axis" aria-hidden="true"><span>{shortDate(buckets[0].from)}</span>{buckets.length > 3 && <span>{shortDate(buckets[Math.floor(buckets.length / 2)].from)}</span>}<span>{shortDate(buckets.at(-1)!.to)}</span></div>
     </div>
   </section>;
@@ -60,11 +62,11 @@ function Headline({ data, onPartial }: { data: UsageReport; onPartial: () => voi
   const input = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens;
   return <article className="us-hero" aria-label={ui("Recorded usage")}>
     <div className="us-hero-head"><span>{ui("Recorded usage")}</span>{notes.length > 0 && <button type="button" className="us-partial" title={notes.join('\n')} onClick={onPartial}>{ui("Partial records")}</button>}</div>
-    <div className="us-hero-total"><strong className="us-number" title={number(t.totalTokens)}>{compact(t.totalTokens)}</strong><span>{ui("tokens")}</span></div>
+    <div className="us-hero-total"><strong className="us-number" title={number(t.totalTokens)}>{short(t.totalTokens)}</strong><span>{ui("tokens")}</span></div>
     <p className="us-hero-exact us-number">{ui("{0} requests", { 0: number(t.requests) })}</p>
     <div className="us-hero-split">
-      <div><span>{ui("Input · incl. cache")}</span><b className="us-number" title={number(input)}>{compact(input)}</b><small>{ui("Cache reads {0} · {1} of input", { 0: compact(t.cacheReadTokens), 1: t.withUsage ? percent(t.cacheReadTokens, input) : '—' })}</small></div>
-      <div><span>{ui("Output · incl. reasoning")}</span><b className="us-number" title={number(t.outputTokens)}>{compact(t.outputTokens)}</b>{t.reasoningTokens > 0 && <small>{ui("Reasoning {0}", { 0: compact(t.reasoningTokens) })}</small>}</div>
+      <div><span>{ui("Input · incl. cache")}</span><b className="us-number" title={number(input)}>{short(input)}</b><small>{ui("Cache reads {0} · {1} of input", { 0: short(t.cacheReadTokens), 1: t.withUsage ? percent(t.cacheReadTokens, input) : '—' })}</small></div>
+      <div><span>{ui("Output · incl. reasoning")}</span><b className="us-number" title={number(t.outputTokens)}>{short(t.outputTokens)}</b>{t.reasoningTokens > 0 && <small>{ui("Reasoning {0}", { 0: short(t.reasoningTokens) })}</small>}</div>
     </div>
   </article>;
 }
@@ -95,7 +97,7 @@ function Breakdown({ data, by }: { data: UsageReport; by: Dimension }) {
     <ol>{(all ? rows : rows.slice(0, BREAKDOWN_ROWS)).map(g => {
       const { name, title } = groupName(g, by), expanded = open.has(g.key), t = g.totals;
       return <li key={g.key}>
-        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={title}>{name}</span><b className="us-number" title={number(t.totalTokens)}>{compact(t.totalTokens)}</b><span className="us-row-share us-number">{percent(t.totalTokens, total)}</span><Chevron open={expanded} />
+        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={title}>{name}</span><b className="us-number" title={number(t.totalTokens)}>{short(t.totalTokens)}</b><span className="us-row-share us-number">{percent(t.totalTokens, total)}</span><Chevron open={expanded} />
           <span className="us-meter" aria-hidden="true"><span style={{ width: `${total ? t.totalTokens / total * 100 : 0}%` }} /></span></button>
         {expanded && <dl className="us-row-detail">
           <div><dt>{ui("Requests")}</dt><dd>{number(t.requests)}<small>{ui("Usage reported {0}/{1}", { 0: number(t.withUsage), 1: number(t.requests) })}</small></dd></div>
@@ -116,7 +118,7 @@ function Sources({ data, open, onToggle, anchor }: { data: UsageReport; open: bo
   return <section ref={anchor} className="us-sources" aria-label={ui("Data sources")}>
     <button type="button" className="us-sources-head" aria-expanded={open} onClick={onToggle}><span className="us-sources-title">{ui("Data sources")}</span>
       <span className="us-sources-status">{notes.length ? <><i className="us-dot us-warn" />{ui("{0} need attention", { 0: notes.length })}</> : ui("Measurement and scope")}</span><Chevron open={open} /></button>
-    <ul className="us-source-list">{data.sources.map(s => <li key={s.key}><div><span>{ui(s.label)}</span><small>{ui("{0} requests", { 0: number(s.totals.requests) })} · {ui("Usage reported {0}/{1}", { 0: number(s.totals.withUsage), 1: number(s.totals.requests) })}</small></div><b className="us-number" title={number(s.totals.totalTokens)}>{compact(s.totals.totalTokens)}</b></li>)}</ul>
+    <ul className="us-source-list">{data.sources.map(s => <li key={s.key}><div><span>{ui(s.label)}</span><small>{ui("{0} requests", { 0: number(s.totals.requests) })} · {ui("Usage reported {0}/{1}", { 0: number(s.totals.withUsage), 1: number(s.totals.requests) })}</small></div><b className="us-number" title={number(s.totals.totalTokens)}>{short(s.totals.totalTokens)}</b></li>)}</ul>
     {open && <div className="us-sources-detail">
       {notes.map(note => <p key={note} className="us-notice us-warning">{note}</p>)}
       <p>{ui("Completion rate")} {percent(t.completed, t.requests)} · {ui("Failed {0} · Cancelled {1}", { 0: number(t.errors), 1: number(t.cancelled) })}</p>
