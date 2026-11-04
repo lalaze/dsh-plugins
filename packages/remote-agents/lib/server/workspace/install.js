@@ -98,6 +98,12 @@ export async function installWorkspaces(ctx, store, machines) {
         session: id => ctx.get('sessions')?.get?.(id),
         list: async () => (await sessionController()?.list({}))?.items ?? [],
         rename: async (sessionId, title) => { await sessionController()?.rename({ sessionId, title }); },
+        selectModel: async (selection) => {
+            const controller = sessionController();
+            if (!controller)
+                throw new Error('DSH sessions are not available yet');
+            await controller.selectModel(selection);
+        },
         titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
     });
     return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };

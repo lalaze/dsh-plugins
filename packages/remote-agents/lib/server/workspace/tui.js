@@ -6,6 +6,8 @@ const FIRST_TITLE = 'Claude Code', MAX_TITLE = 120, MAX_PROMPT_TITLE = 80;
 const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
 /** Model and effort reach the remote command line inside double quotes. */
 const COMMAND_VALUE = /^[\w.:[\]-]+$/;
+/** The chat provider of the remote Claude Code. */
+const CLAUDE_PROVIDER = 'remote-cli-claude';
 /** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
 export function tuiClaudeSession(sessionId) {
     const hash = createHash('sha256').update(`dsh-tui:${sessionId}`).digest('hex');
@@ -62,9 +64,23 @@ export class TuiSessions {
         this.dsh = dsh;
     }
     list() { return this.store.snapshot().tuiSessions ?? []; }
+    /**
+     * Tell DSH the conversation's model, once. A session shows its model in the workspace list only if a selection or a
+     * request recorded it: a TUI conversation sends no requests, and the composer may only be showing a remembered default.
+     * The icon is all that depends on this, so a failure is retried by the next title check rather than reported.
+     * @param route - the composer's model route; a conversation started by an earlier version has none, so its is rebuilt.
+     */
+    async recordModel(sessionId, hostId, route) {
+        const details = this.store.snapshot().tuiDetails?.[sessionId];
+        if (details?.modelRecorded)
+            return;
+        await this.dsh.selectModel({ sessionId, provider: CLAUDE_PROVIDER, model: route ?? `${hostId}/claude/${encodeURIComponent(details?.model ?? 'default')}`,
+            ...(details?.effort ? { reasoningEffort: details.effort } : {}) });
+        await this.store.update(state => { state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...state.tuiDetails?.[sessionId], modelRecorded: true } }; });
+    }
     /** @param selection - the composer's model route and effort, which the first launch of Claude Code uses. */
     async start(sessionId, selection, signal) {
-        await this.dsh.verify(sessionId, signal);
+        const target = await this.dsh.verify(sessionId, signal);
         if (this.list().includes(sessionId))
             return;
         const session = this.dsh.session(sessionId);
@@ -80,6 +96,7 @@ export class TuiSessions {
             state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title: FIRST_TITLE,
                     ...(model && COMMAND_VALUE.test(model) ? { model } : {}), ...(typeof effort === 'string' && COMMAND_VALUE.test(effort) ? { effort } : {}) } };
         });
+        await this.recordModel(sessionId, target.hostId, model ? selection.model : undefined).catch(() => { });
         session.append('turn/start', { turn: 1 });
         session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
         await this.dsh.rename(sessionId, FIRST_TITLE);
@@ -93,9 +110,13 @@ export class TuiSessions {
         if (!this.list().includes(sessionId))
             return;
         const shown = typeof current === 'string' ? current : undefined, saved = this.store.snapshot().tuiDetails?.[sessionId];
-        if (shown !== undefined && shown !== saved?.title && !OLD_TITLE.test(shown))
+        const renamed = shown !== undefined && shown !== saved?.title && !OLD_TITLE.test(shown);
+        if (renamed && saved?.modelRecorded)
             return;
-        await this.dsh.verify(sessionId, signal);
+        const target = await this.dsh.verify(sessionId, signal);
+        await this.recordModel(sessionId, target.hostId).catch(() => { });
+        if (renamed)
+            return;
         const title = claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(sessionId), signal));
         if (!title || title === shown)
             return;

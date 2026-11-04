@@ -44,11 +44,15 @@ export interface State {
     tuiSessions?: string[];
     tuiDetails?: Record<string, TuiDetails>;
 }
-/** A TUI conversation's first launch of Claude Code, and the title the plugin last gave it. */
+/**
+ * A TUI conversation's first launch of Claude Code, the title the plugin last gave it, and whether DSH has been told the
+ * conversation's model.
+ */
 export interface TuiDetails {
     model?: string;
     effort?: string;
     title?: string;
+    modelRecorded?: boolean;
 }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord {

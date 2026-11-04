@@ -25,14 +25,29 @@ export declare class TuiSessions {
     private readonly dsh;
     constructor(store: Store, dsh: {
         /** Rejects a conversation that is not a verified remote workspace. */
-        verify(sessionId: string, signal: AbortSignal): Promise<unknown>;
+        verify(sessionId: string, signal: AbortSignal): Promise<{
+            hostId: string;
+        }>;
         session(sessionId: string): TuiSession | undefined;
         list(): Promise<readonly SessionRow[]>;
         rename(sessionId: string, title: string): Promise<void>;
+        selectModel(selection: {
+            sessionId: string;
+            provider: string;
+            model: string;
+            reasoningEffort?: string;
+        }): Promise<void>;
         /** The title records of a Claude session on the conversation's machine. */
         titleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string>;
     });
     list(): string[];
+    /**
+     * Tell DSH the conversation's model, once. A session shows its model in the workspace list only if a selection or a
+     * request recorded it: a TUI conversation sends no requests, and the composer may only be showing a remembered default.
+     * The icon is all that depends on this, so a failure is retried by the next title check rather than reported.
+     * @param route - the composer's model route; a conversation started by an earlier version has none, so its is rebuilt.
+     */
+    private recordModel;
     /** @param selection - the composer's model route and effort, which the first launch of Claude Code uses. */
     start(sessionId: string, selection: {
         model?: unknown;
