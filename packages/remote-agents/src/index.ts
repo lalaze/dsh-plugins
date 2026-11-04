@@ -16,6 +16,7 @@ import { Store } from './core/store.js';
 import { createHandler } from './http.js';
 import { installSharingHost } from './sharing/install.js';
 import { Sharing } from './sharing/sharing.js';
+import { installTeamCommand } from './teams/command.js';
 import { installWorkspaces } from './workspace/install.js';
 
 declare module '@deepseek-ai/cordis' {
@@ -56,6 +57,9 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   ctx.provide('remoteAgentsTasks', remoteTasks(service));
   installChat(ctx, service, projects, { access: workspace.access, files: workspace.features.files, workspaces: workspace.workspaces });
   installSharingHost(ctx, sharing);
+  // `/team`: one line starts an AgentTeams team whose members are remote CLIs of the conversation's workspace machine.
+  installTeamCommand(ctx, { presets: () => store.teamPresets(), placement: (cwd, signal) => workspace.access.resolve(cwd, signal),
+    catalogs: hostIds => projects.hosts().filter(project => hostIds.includes(project.hostId)).map(project => ({ projectId: project.id, hostLabel: project.label, providers: project.providers })) });
   // Native conversation routes and settings also work without the delegation tool registry.
   ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { tools: { register(tool: ToolDefinition): unknown } };

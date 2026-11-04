@@ -140,6 +140,21 @@ With NanmiCoder's [`dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-te
 - **To make a CLI the member itself, set the member's model to that CLI.** Before confirming the team's plan, check each member's model: a coder meant to be Codex should have this machine's model from the Codex group. A member that is still a DSH model may hand its work to a remote CLI with `remote_agent_create`. That CLI gets no team tools and only works for the member; it runs with the member's permission and asks no one either (without a mode, it gets the mode of the member's sandbox, not the remote CLI's own settings, which may be read-only). A mode beyond the member's permission, such as Full access for a member with Workspace write, still needs approval and is rejected in a member's session.
 - Members' CLI sessions also appear in **Open sessions**, where you can see what they did.
 
+### Start a team with one line
+
+In a conversation of a remote workspace, one line starts a team and runs it at once: no planning turn by the captain, no plan to approve.
+
+```text
+/team [preset] [member=cli[/model][@thinking] …] [--plan] [--name <team>] <goal>
+/team pair coder=codex reviewer=claude/opus fix the login timeout
+```
+
+- **Members run on the workspace's machine.** `coder=codex` uses that machine's Codex with its default model; `claude/opus` finds the model by id or name (it must match exactly one); `@high` picks the thinking level; `coder=captain` keeps the captain's DSH model for that member. The captain is this conversation.
+- **Presets supply the roster and the tasks.** Built in: `solo` (one coder does the goal) and `pair` (coder implements, reviewer reviews and fixes after it). Without a preset name, the first preset whose members match the assignments is used, your saved presets first. Save your own under **Settings → Remote agents → Team presets**: member names, roles, CLIs, models and thinking levels, and task templates (`{goal}` in a subject or instructions becomes the goal you typed; a task can wait for other tasks). Presets name CLIs and models, not machines, so they work in every remote workspace.
+- **How it starts.** The plugin calls dsh-agent-teams' `agent_teams_create` for the conversation with `approval: automatic`: the scheduler assigns the ready tasks as soon as the team exists (the member session existed 0.2 s after Enter in our test), and the captain is woken only by the members' reports, as for any team. `--plan` stages the plan in the team panel for review instead.
+- The team opens from **View team** in the chat title; as no model tool call created it, the conversation shows no team card. A conversation leads one team at a time: while the previous one is still active the command says so, so let the captain archive it or use another conversation.
+- Needs dsh-agent-teams 0.1.28 or later; the command says so when it is missing.
+
 ## Supported CLIs
 
 | CLI | Direct protocol |
