@@ -23,6 +23,8 @@ export const CHAT_PROVIDERS = [CHAT_PROVIDER, ...Object.keys(CLI_NAMES).map(chat
 const hash = (...parts) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 /** DSH aborts streams with a cancel cause; disposal is a shutdown, not a user's Stop. */
 const disposal = (reason) => !!reason && typeof reason === 'object' && ['disposed', 'released'].includes(String(reason.kind));
+/** Whether a response shows this history entry. The rest, as usage, turn ends and empty reasoning, only keep its records. */
+const showsOutput = ({ item }) => item.type === 'assistant_message' || item.type === 'reasoning' ? !!item.text : item.type === 'tool_call' || item.type === 'error' || item.type === 'model_switch';
 const RELEASED = { kind: 'released' };
 /** What the CLI is asked to do: human messages and AgentTeams assignments, never context DSH injects. */
 const prompted = (m) => m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source));
@@ -487,7 +489,7 @@ export class RemoteCliAdapter extends LlmAdapter {
             }
         };
         // Record what reached this conversation, so output produced while DSH was away is shown later.
-        let savedAt = 0, reached;
+        let savedAt = 0, reached, followed = false;
         const delivered = async (id, cursor, done = false, force = false) => {
             if (!done)
                 reached = { id, cursor };
@@ -519,6 +521,8 @@ export class RemoteCliAdapter extends LlmAdapter {
                 if (!page.found)
                     throw new LlmError('Remote message delivery was not recorded. Retry without changing the message.', 'REMOTE_DELIVERY_UNKNOWN');
                 for (const entry of page.entries) {
+                    if (showsOutput(entry))
+                        followed = true;
                     if (entry.item.type === 'assistant_message') {
                         yield* textChunk('text', await images.push(String(entry.item.text ?? '')));
                         continue;
@@ -638,6 +642,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                     yield* follow(pending.messageId, pending.cursor ?? undefined, true);
                     settled = true;
                     await delivered(pending.messageId, undefined, true);
+                    shown = followed;
                 }
                 else {
                     settled = true;
@@ -689,7 +694,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                     const previous = service.store.task(t => t.id === task.id)?.chat?.delivered;
                     if (previous && !previous.done && previous.messageId !== messageId) {
                         const rest = await service.messageTimeline(task.id, previous.messageId, previous.cursor ?? undefined).catch(() => undefined);
-                        if (rest?.found && (rest.entries.length || busy(await service.summary(task.id)))) {
+                        if (rest?.found && (rest.hasNewer || rest.entries.some(showsOutput) || busy(await service.summary(task.id)))) {
                             admitted = true;
                             yield* textChunk('text', 'Output from the previous response, completed while DSH was disconnected:\n\n');
                             yield* follow(previous.messageId, previous.cursor ?? undefined, true);
@@ -719,6 +724,8 @@ export class RemoteCliAdapter extends LlmAdapter {
                 else
                     admitted = true;
             }
+            // A Stop or shutdown from here on concerns this message, even before any of its output is read.
+            reached = { id: messageId, cursor: undefined };
             // Turns another DSH or Open sessions ran since this conversation's last response come first, in the order they ran.
             const turns = task && await this.elsewhere(taskId, signal, messageId).catch(() => undefined);
             if (turns)
@@ -754,8 +761,14 @@ export class RemoteCliAdapter extends LlmAdapter {
             try {
                 if (reached && !settled)
                     await delivered(reached.id, reached.cursor, false, true);
-                if (admitted && !settled && !shutdown && service.store.task(t => t.id === taskId))
+                if (admitted && !settled && !shutdown && service.store.task(t => t.id === taskId)) {
                     await service.stop(taskId);
+                    // The CLI took the Stop, so this turn goes no further and nothing is left to catch up on. A CLI out of reach
+                    // never hears it and may still be running: what it writes then appears later, as after a disconnect.
+                    const agent = reached && await service.summary(taskId).catch(() => undefined);
+                    if (reached && agent?.attached && !busy(agent))
+                        await delivered(reached.id, reached.cursor, true);
+                }
             }
             finally {
                 try {
