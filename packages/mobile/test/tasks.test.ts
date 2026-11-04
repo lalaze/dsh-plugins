@@ -78,6 +78,18 @@ test('history entries become phone items: one item per streamed reply, a tool ca
   assert.deepEqual(taskPermission({ id: 'q', name: 'Question', kind: 'question' }).actions, [], 'questions are answered on the computer')
 })
 
+test('a model switch is its own item, so the replies around it stay apart', () => {
+  const items = taskItems([
+    entry(1, { type: 'assistant_message', text: 'Looking' }),
+    entry(2, { type: 'model_switch', from: 'claude-fable-5-1', to: 'claude-opus-4-8', category: 'cyber' }),
+    entry(3, { type: 'assistant_message', text: 'Retried' }),
+    entry(4, { type: 'model_switch', from: 'claude-opus-4-8', to: 'claude-sonnet-5-5' }),
+  ])
+  assert.deepEqual(items.map(item => [item.seq, item.type, item.text]), [[1, 'assistant', 'Looking'], [2, 'model_switch', undefined], [3, 'assistant', 'Retried'], [4, 'model_switch', undefined]])
+  assert.deepEqual([items[1].from, items[1].to, items[1].category], ['claude-fable-5-1', 'claude-opus-4-8', 'cyber'])
+  assert.deepEqual([items[3].from, items[3].to, 'category' in items[3]], ['claude-opus-4-8', 'claude-sonnet-5-5', false])
+})
+
 test('a phone lists background tasks, reads their history in pages, steers them, and hears when the list changes', async t => {
   const service = fakeTasks(), client = await phone(t, () => service)
   const { available, tasks } = await client.call('tasks.list', undefined)

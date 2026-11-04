@@ -44,6 +44,7 @@ const zh: Record<string, string> = {
   '{0} tool calls': '{0} 次工具调用',
   '(no output)': '（无输出）',
   'Interrupted': '已中断',
+  "{from}'s safeguards stopped this request{category}, so {to} retried it. Later turns in this session stay on {to}.": '{from} 的安全机制拦截了这条消息{category}，这一轮改由 {to} 重试。这段会话后面的轮次也继续用 {to}。',
   'Turn ended: {0}': '回合结束：{0}',
   'Forked here': '从此处分支',
   'Image': '图片',

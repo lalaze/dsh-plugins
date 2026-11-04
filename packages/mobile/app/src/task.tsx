@@ -65,6 +65,7 @@ function Items({ items }: { items: TaskItem[] }) {
       case 'assistant': if (item.text?.trim()) rows.push(<div key={item.seq} className="msg assistant"><Text text={item.text} /></div>); break
       case 'error': rows.push(<div key={item.seq} className="marker error">{ui('Failed: {0}', { 0: item.text ?? '' })}</div>); break
       case 'interrupted': rows.push(<div key={item.seq} className="marker">{ui('Interrupted')}</div>); break
+      case 'model_switch': rows.push(<div key={item.seq} className="marker notice">{ui("{from}'s safeguards stopped this request{category}, so {to} retried it. Later turns in this session stay on {to}.", { from: item.from ?? '', to: item.to ?? '', category: item.category ? ` (${item.category})` : '' })}</div>); break
       case 'end': if (item.status === 'canceled') rows.push(<div key={item.seq} className="marker">{ui('Stopped')}</div>); break
     }
   }
