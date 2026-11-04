@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawn, execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile, chmod, realpath } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { transform } from 'esbuild';
@@ -57,6 +57,12 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await launch(anchor);
   const args: string[] = JSON.parse(await readFile(capture, 'utf8'));
   assert.ok(args.includes('-tt')); assert.ok(args.includes('builder@build-box')); assert.equal(args.at(-1), 'cd \'/srv/app\' && exec "${SHELL:-/bin/sh}" -l');
+  // Remote Claude starts Claude Code in the same place and leaves a shell behind when it exits.
+  const claude = controller.config.shellCandidates[2]!; assert.equal(basename(claude), 'Remote Claude');
+  const launchClaude = (cwd: string) => promisify(execFile)(claude, [], { cwd, env, timeout: 5000 });
+  await launchClaude(anchor);
+  assert.equal(JSON.parse(await readFile(capture, 'utf8')).at(-1), 'cd \'/srv/app\' && exec "${SHELL:-/bin/sh}" -lic \'claude; exec "${SHELL:-/bin/sh}" -l\'');
+  await launch(anchor);
   await writeFile(join(anchor, '.dsh-remote-meta.json'), '{}');
   await assert.rejects(launch(anchor), /valid remote workspace binding/);
   const placeholder = join(omc, 'remote-workspaces', 'removed'); await mkdir(placeholder, { recursive: true });
@@ -66,6 +72,8 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   const local = join(directory, 'project'); await mkdir(local);
   const { stderr } = await launch(local);
   assert.match(stderr, /Not a remote workspace/);
+  assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
+  assert.match((await launchClaude(local)).stderr, /Not a remote workspace/, 'Remote Claude never starts Claude on the DSH machine');
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
   cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);
 });
