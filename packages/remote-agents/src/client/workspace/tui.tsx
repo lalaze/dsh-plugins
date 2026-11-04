@@ -12,18 +12,27 @@ const REMOTE_ANCHOR = /(?:^|[/\\])remote-workspaces[/\\]/;
 /** The chat provider of the remote Claude Code; only its models offer the TUI. */
 const CLAUDE_PROVIDER = 'remote-cli-claude';
 const TITLE_INTERVAL = 15_000;
-/** Terminals beside a conversation stay small; this one is the conversation, so it reads at about the chat's size. */
-const TUI_FONT_SIZE = 14;
 /**
- * The terminal as the conversation area: a column as wide as the chat's, over whatever wallpaper the window has, up to
+ * A terminal cell is about 0.6em wide, so a Chinese glyph (1em) leaves a gap in its two cells (1.2em) and the text reads
+ * spaced out. The usual fix is a font drawn 2:1, which every machine would have to install. This scales the system's
+ * own CJK font to nearly fill the cells instead, for these characters only.
+ */
+const CJK_FONT = 'RA TUI CJK', CJK_SCALE = '112%';
+const CJK_RANGE = 'U+2E80-2FDF,U+3000-30FF,U+3100-312F,U+31A0-31BF,U+3400-4DBF,U+4E00-9FFF,U+AC00-D7AF,U+F900-FAFF,U+FE30-FE4F,U+FF00-FFEF,U+20000-2FFFF';
+const cjkFace = (weight: number, faces: string[]) => `@font-face{font-family:"${CJK_FONT}";font-weight:${weight};size-adjust:${CJK_SCALE};unicode-range:${CJK_RANGE};src:${faces.map(face => `local("${face}")`).join(',')}}`;
+/**
+ * The terminal as the conversation area: a centered column over a faint trace of whatever wallpaper the window has (more
+ * than this and a busy image turns the background muddy), up to
  * the window's edge rather than the chat's scrollbar gutter, as it scrolls by itself. Each
  * background is a literal rgba(): DSH hands the computed color to xterm, whose parser rejects other translucent forms,
  * and xterm drops the alpha to get the opaque color it checks text contrast against.
  */
-const viewStyles = `div:has(>[data-slot="conversation.session"] [data-remote-agents-tui]){scrollbar-gutter:auto;margin-right:0}
+const viewStyles = `${cjkFace(400, ['PingFang SC', 'PingFang SC Regular', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Hiragino Sans GB'])}
+${cjkFace(700, ['PingFang SC Semibold', 'Microsoft YaHei Bold', 'Noto Sans CJK SC Bold', 'Hiragino Sans GB W6'])}
+div:has(>[data-slot="conversation.session"] [data-remote-agents-tui]){scrollbar-gutter:auto;margin-right:0}
 [data-remote-agents-tui] [data-sidebar-terminal]{padding-top:0}
-[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(255,255,255,.62)!important;-webkit-backdrop-filter:blur(18px) saturate(1.15);backdrop-filter:blur(18px) saturate(1.15);padding:18px max(24px,calc((100% - 1040px)/2))!important}
-body[data-ds-dark-theme] [data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(21,21,23,.62)!important}
+[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(255,255,255,.92)!important;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);padding:18px max(24px,calc((100% - 900px)/2))!important}
+body[data-ds-dark-theme] [data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(21,21,23,.92)!important}
 [data-remote-agents-tui] .xterm-scrollable-element,[data-remote-agents-tui] .xterm-viewport,[data-remote-agents-tui] .xterm-screen{background:transparent!important}`;
 const startStyles = `.ra-tui-start{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;cursor:pointer}
 .ra-tui-start:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
@@ -88,14 +97,17 @@ export function closeArchived(archived: readonly string[], isTui: (id: string) =
   for (const id of archived) if (isTui(id) && !closed.has(id)) { closed.add(id); close(id); }
 }
 
-type TerminalTheme = { fontSizes?: { terminal?: number } };
-const enlarged = new WeakMap<object, unknown>();
-/** The theme DSH's terminal reads its font from, at no less than the TUI's size. The same theme gives the same object, as the terminal compares them. */
+type TerminalTheme = { fontFamilies?: { terminal?: string } };
+const withCjk = new WeakMap<object, unknown>();
+/** The theme DSH's terminal reads its fonts from, with the scaled CJK font ahead of DSH's own stack. The same theme gives the same object, as the terminal compares them. */
 export function tuiTheme(theme: unknown): unknown {
-  const sizes = (theme as TerminalTheme | null)?.fontSizes;
-  if (!sizes || typeof sizes.terminal !== 'number' || sizes.terminal >= TUI_FONT_SIZE) return theme;
-  let result = enlarged.get(theme as object);
-  if (!result) { result = { ...(theme as object), fontSizes: { ...sizes, terminal: TUI_FONT_SIZE } }; enlarged.set(theme as object, result); }
+  const families = (theme as TerminalTheme | null)?.fontFamilies;
+  if (!families) return theme;
+  let result = withCjk.get(theme as object);
+  if (!result) {
+    result = { ...(theme as object), fontFamilies: { ...families, terminal: [families.terminal, `"${CJK_FONT}"`].filter(Boolean).join(', ') } };
+    withCjk.set(theme as object, result);
+  }
   return result;
 }
 
@@ -158,6 +170,16 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     return () => cancelAnimationFrame(frame);
   }, [sessionId, generation]);
   const [shell, setShell] = useState<string>(), [error, setError] = useState('');
+  // xterm measures each character once, so the font has to be there before the terminal opens. A machine without any of
+  // the faces just uses its usual fallback.
+  const [fontReady, setFontReady] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    const ready = () => { if (alive) setFontReady(true); };
+    const timer = setTimeout(ready, 1000);
+    void Promise.all(['400', '700'].map(weight => document.fonts?.load(`${weight} 13px "${CJK_FONT}"`, '中'))).then(ready, ready);
+    return () => { alive = false; clearTimeout(timer); };
+  }, []);
   useEffect(() => {
     const controller = new AbortController();
     services.terminals.launchShells(sessionId, controller.signal).then(({ shells }) => {
@@ -168,7 +190,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   }, [services, sessionId]);
   return <div ref={root} data-remote-agents-tui="" style={{ flex: '1 1 0', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <style>{viewStyles}</style>
-    {shell ? <TuiTerminal key={generation} sessionId={sessionId} services={services} shell={shell} generation={generation} restart={restart} />
+    {shell && fontReady ? <TuiTerminal key={generation} sessionId={sessionId} services={services} shell={shell} generation={generation} restart={restart} />
       : <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting Claude Code…')}</div>}
   </div>;
 }

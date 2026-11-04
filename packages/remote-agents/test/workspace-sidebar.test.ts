@@ -125,13 +125,12 @@ test('archiving a TUI conversation closes its terminal once, and only a TUI one'
   sync(['chat']); sync(['chat', 'tui']); assert.deepEqual(ended, ['tui', 'tui']);
 });
 
-test('a TUI reads at 14px at least, without changing the theme of other terminals', () => {
-  const small = { fontSizes: { terminal: 13, ui: 12 }, fontFamilies: { terminal: 'mono' } };
-  const shown = tuiTheme(small) as typeof small;
-  assert.deepEqual(shown, { fontSizes: { terminal: 14, ui: 12 }, fontFamilies: { terminal: 'mono' } });
-  assert.equal(small.fontSizes.terminal, 13);
-  assert.equal(tuiTheme(small), shown, 'the same theme gives the same object, as the terminal compares them');
-  const large = { fontSizes: { terminal: 16 } };
-  assert.equal(tuiTheme(large), large, 'a larger size the user chose stays');
+test('a TUI puts the scaled CJK font ahead of DSH\'s terminal fonts, without changing other terminals', () => {
+  const plain = { fontFamilies: { terminal: '', ui: 'sans' }, fontSizes: { terminal: 13 } };
+  const shown = tuiTheme(plain) as typeof plain;
+  assert.deepEqual(shown, { fontFamilies: { terminal: '"RA TUI CJK"', ui: 'sans' }, fontSizes: { terminal: 13 } });
+  assert.equal(plain.fontFamilies.terminal, '');
+  assert.equal(tuiTheme(plain), shown, 'the same theme gives the same object, as the terminal compares them');
+  assert.equal((tuiTheme({ fontFamilies: { terminal: 'Sarasa Mono SC' } }) as typeof plain).fontFamilies.terminal, 'Sarasa Mono SC, "RA TUI CJK"', 'a font the user chose comes first');
   assert.equal(tuiTheme(undefined), undefined);
 });
