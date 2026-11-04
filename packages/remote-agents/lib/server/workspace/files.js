@@ -55,6 +55,12 @@ export class WorkspaceFiles {
     constructor(transport) {
         this.transport = transport;
     }
+    /** Claude Code's title records in one of its session files on this machine, if it has saved that session. */
+    claudeTitleRecords(claudeSession) {
+        return this.transport.exec(`dsh_file=$(find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${quote(`${claudeSession}.jsonl`)} 2>/dev/null | head -n 1)
+[ -z "$dsh_file" ] || { grep -a '"type":"ai-title"' "$dsh_file" | tail -n 1; grep -a '"type":"custom-title"' "$dsh_file" | tail -n 1; }
+true`, 20_000);
+    }
     /** Runs one shell operation and returns its data; the program reports handled failures with their status. */
     async run(op, cwd, at, values, options) {
         if (!this.transport.transfer)

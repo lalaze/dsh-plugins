@@ -4,6 +4,8 @@
 
 按版本从新到旧列出变化及升级后需要做的事。
 
+**从 0.2.81 升级：** TUI 对话更顺手。启动按钮换成 Claude 吉祥物图标，只有选了远程 Claude 模型才显示；点开后用你选的模型和思考强度启动。标题不再固定为 `Claude TUI 时:分`：先显示 `Claude Code`，之后跟随 Claude Code 给对话起的标题（在 TUI 里用 `/rename` 改的名字优先），已有的 TUI 对话选中后也会更新；在 DSH 里手动改过名就不再覆盖。
+
 **从 0.2.80 升级：** 新增 TUI 对话：在远程工作区新建对话，点输入框左下角的 **用 TUI 开始**，「对话」标签页就变成交互式 Claude Code，左侧列表多一行，选中哪行就显示哪个 TUI。切走时 Claude 继续运行；重启 DSH 后再选中会接回同一个 Claude 会话，但正在跑的那一轮会中断；归档这一行会结束它的 Claude。对话内容只在远程的 Claude Code 里，DSH 的对话记录和手机端看不到。另外修复了 `DSH_HOME` 不是默认目录时，Remote workspace 和 Remote Claude 终端找不到远程工作区、退回本地 shell 的问题。
 
 **从 0.2.79 升级：** 原生终端的 Shell 菜单新增 **Remote Claude**：选它会在当前远程工作区直接启动交互式 `claude`，拿到完整的 Claude Code 终端界面，退出后留在远程 shell。这个会话不会显示在 DSH 对话里，也用不到 DSH 共享的 MCP 服务和技能，之后在远程目录运行 `claude --resume` 继续。

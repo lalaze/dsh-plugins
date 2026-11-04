@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.81:** TUI conversations are easier to use. The start button is now the Claude mascot and shows only while a remote Claude model is selected; Claude Code starts with the model and effort you selected. Titles are no longer fixed at `Claude TUI HH:MM`: a conversation shows `Claude Code`, then follows the title Claude Code gives it (a `/rename` in the TUI wins). Existing TUI conversations update when selected, and a name you set in DSH is kept.
+
 **Upgrading from 0.2.80:** New TUI conversations. In a new conversation of a remote workspace, click **Start in TUI** at the bottom left of the composer: the Chat tab becomes the interactive Claude Code, the conversation gets a row in the workspace list, and selecting a row shows its TUI. Claude keeps running while you are elsewhere. After a DSH restart, selecting it again resumes the same Claude session, but a turn that was running stops. Archiving the row ends its Claude. The conversation lives only in the remote Claude Code, so DSH's history and phone app do not see it. Also fixes the Remote workspace and Remote Claude terminals falling back to a local shell when `DSH_HOME` is not the default directory.
 
 **Upgrading from 0.2.79:** The native terminal's shell menu has a new **Remote Claude** item. It starts the interactive `claude` directly in the current remote workspace, with the full Claude Code terminal interface, and leaves you in the remote shell when it exits. The session does not appear in a DSH conversation and does not get DSH's shared MCP servers and skills. Run `claude --resume` in the remote directory to continue it.

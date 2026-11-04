@@ -98,6 +98,7 @@ export async function installWorkspaces(ctx, store, machines) {
         session: id => ctx.get('sessions')?.get?.(id),
         list: async () => (await sessionController()?.list({}))?.items ?? [],
         rename: async (sessionId, title) => { await sessionController()?.rename({ sessionId, title }); },
+        titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
     });
     return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };
 }

@@ -7,6 +7,10 @@ interface SessionRow {
     sessionId: string;
     blank?: boolean;
 }
+/** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
+export declare function tuiClaudeSession(sessionId: string): string;
+/** A title Claude Code recorded in its session file; one the user set with /rename wins over its own. */
+export declare function claudeTitle(records: string): string | undefined;
 /**
  * Conversations whose main view is the interactive Claude Code instead of DSH's chat. Each stays a real DSH session, so
  * it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one records
@@ -21,8 +25,20 @@ export declare class TuiSessions {
         session(sessionId: string): TuiSession | undefined;
         list(): Promise<readonly SessionRow[]>;
         rename(sessionId: string, title: string): Promise<void>;
+        /** The title records of a Claude session on the conversation's machine. */
+        titleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string>;
     });
     list(): string[];
-    start(sessionId: string, signal: AbortSignal): Promise<void>;
+    /** @param selection - the composer's model route and effort, which the first launch of Claude Code uses. */
+    start(sessionId: string, selection: {
+        model?: unknown;
+        effort?: unknown;
+    }, signal: AbortSignal): Promise<void>;
+    /**
+     * Follow Claude Code's title, until the conversation is renamed in DSH.
+     * @param current - the conversation's title in DSH.
+     * @returns the new title, if it changed.
+     */
+    syncTitle(sessionId: string, current: unknown, signal: AbortSignal): Promise<string | undefined>;
 }
 export {};

@@ -42,6 +42,13 @@ export interface State {
     tagSync?: Record<string, TagSyncRecord>;
     teamPresets?: TeamPreset[];
     tuiSessions?: string[];
+    tuiDetails?: Record<string, TuiDetails>;
+}
+/** A TUI conversation's first launch of Claude Code, and the title the plugin last gave it. */
+export interface TuiDetails {
+    model?: string;
+    effort?: string;
+    title?: string;
 }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord {

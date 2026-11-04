@@ -89,6 +89,11 @@ export class WorkspaceService {
         const target = await this.target(sessionId, signal);
         return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
     }
+    /** The title records of a Claude Code session on the conversation's verified machine. */
+    async claudeTitleRecords(sessionId, claudeSession, signal) {
+        const target = await this.target(sessionId, signal);
+        return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.claudeTitleRecords(claudeSession));
+    }
     async upload(sessionId, path, rev, size, input, signal, expected) {
         revision(rev);
         const target = await this.target(sessionId, signal, expected);

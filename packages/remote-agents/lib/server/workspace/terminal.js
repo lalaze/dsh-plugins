@@ -20,12 +20,12 @@ export async function installWorkspaceTerminal(controller, directory, stateFile,
     const script = join(directory, 'remote-workspace.mjs'), launcherPath = (name) => join(directory, process.platform === 'win32' ? `${name}.cmd` : name);
     const launcher = launcherPath(TERMINAL_LAUNCHER), claudeLauncher = launcherPath(CLAUDE_LAUNCHER);
     const source = `import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Store } from ${JSON.stringify(new URL('core/store.js', modules).href)};
 import { WorkspaceAccess, omcStateDir, under } from ${JSON.stringify(new URL('workspace/access.js', modules).href)};
 import { connectionInput, quote } from ${JSON.stringify(new URL('core/ssh.js', modules).href)};
+import { tuiClaudeSession } from ${JSON.stringify(new URL('workspace/tui.js', modules).href)};
 const run = (file, args, env) => {
   const child = spawn(file, args, { stdio: 'inherit', env });
   child.on('error', e => { process.stderr.write(e.message + '\\n'); process.exitCode = 1; });
@@ -52,10 +52,13 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const target = (url.username ? decodeURIComponent(url.username) + '@' : '') + url.hostname;
   const shell = '"\${SHELL:-/bin/sh}"';
   const dshSession = process.env.DSH_SESSION_ID;
-  const hash = dshSession && store.snapshot().tuiSessions?.includes(dshSession) ? createHash('sha256').update('dsh-tui:' + dshSession).digest('hex') : undefined;
-  const claudeSession = hash && [hash.slice(0, 8), hash.slice(8, 12), '4' + hash.slice(13, 16), '8' + hash.slice(17, 20), hash.slice(20, 32)].join('-');
+  const saved = store.snapshot();
+  const claudeSession = dshSession && saved.tuiSessions?.includes(dshSession) ? tuiClaudeSession(dshSession) : undefined;
+  const details = (dshSession && saved.tuiDetails?.[dshSession]) || {};
+  const choice = (details.model ? ' --model "' + details.model + '"' : '') + (details.effort ? ' --effort "' + details.effort + '"' : '');
   // Claude Code saves a session only once it has a message, so the first launches of a new one have nothing to resume.
-  const claude = claudeSession ? 'if find "\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/projects" -maxdepth 2 -name ' + claudeSession + '.jsonl 2>/dev/null | grep -q .; then claude --resume ' + claudeSession + '; else claude --session-id ' + claudeSession + '; fi' : 'claude';
+  // Those use the model chosen in the composer; a resumed session keeps whatever /model chose since.
+  const claude = claudeSession ? 'if find "\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/projects" -maxdepth 2 -name ' + claudeSession + '.jsonl 2>/dev/null | grep -q .; then claude --resume ' + claudeSession + '; else claude --session-id ' + claudeSession + choice + '; fi' : 'claude';
   // The same process stays in charge of the terminal throughout; a shell run beside it could be left without the TTY.
   const start = process.argv[2] === 'claude' ? shell + " -lic '" + claude + "; exec " + shell + " -l'" : shell + ' -l';
   const command = 'cd ' + quote(placement.cwd) + ' && exec ' + start;

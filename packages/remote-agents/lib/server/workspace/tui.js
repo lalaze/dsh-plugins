@@ -1,4 +1,44 @@
+import { createHash } from 'node:crypto';
 import { RemoteError } from '../core/domain.js';
+/** What a conversation shows until Claude Code has titled it. */
+const FIRST_TITLE = 'Claude Code', MAX_TITLE = 120;
+/** The title 0.2.81 gave every TUI conversation, which is replaced like the plugin's own. */
+const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
+/** Model and effort reach the remote command line inside double quotes. */
+const COMMAND_VALUE = /^[\w.:[\]-]+$/;
+/** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
+export function tuiClaudeSession(sessionId) {
+    const hash = createHash('sha256').update(`dsh-tui:${sessionId}`).digest('hex');
+    return [hash.slice(0, 8), hash.slice(8, 12), `4${hash.slice(13, 16)}`, `8${hash.slice(17, 20)}`, hash.slice(20, 32)].join('-');
+}
+/** A title Claude Code recorded in its session file; one the user set with /rename wins over its own. */
+export function claudeTitle(records) {
+    let custom, own;
+    for (const line of records.split('\n')) {
+        try {
+            const record = JSON.parse(line);
+            if (record.type === 'custom-title')
+                custom = record.customTitle;
+            if (record.type === 'ai-title')
+                own = record.aiTitle;
+        }
+        catch { /* not a whole record */ }
+    }
+    const title = typeof custom === 'string' && custom.trim() ? custom : own;
+    return typeof title === 'string' ? title.trim().slice(0, MAX_TITLE) || undefined : undefined;
+}
+/** The Claude model of a chat model route, `<project>/<cli>/<model>`. */
+function claudeModel(route) {
+    if (typeof route !== 'string')
+        return;
+    const [, cli, model] = route.split('/');
+    try {
+        return cli === 'claude' && model ? decodeURIComponent(model) : undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
 /**
  * Conversations whose main view is the interactive Claude Code instead of DSH's chat. Each stays a real DSH session, so
  * it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one records
@@ -12,7 +52,8 @@ export class TuiSessions {
         this.dsh = dsh;
     }
     list() { return this.store.snapshot().tuiSessions ?? []; }
-    async start(sessionId, signal) {
+    /** @param selection - the composer's model route and effort, which the first launch of Claude Code uses. */
+    async start(sessionId, selection, signal) {
         await this.dsh.verify(sessionId, signal);
         if (this.list().includes(sessionId))
             return;
@@ -23,10 +64,33 @@ export class TuiSessions {
         if ((await this.dsh.list()).find(row => row.sessionId === sessionId)?.blank === false)
             throw new RemoteError('Only a new conversation can start in the TUI', 409);
         signal.throwIfAborted();
-        await this.store.update(state => { state.tuiSessions = [...state.tuiSessions ?? [], sessionId]; });
+        const model = claudeModel(selection.model), effort = selection.effort;
+        await this.store.update(state => {
+            state.tuiSessions = [...state.tuiSessions ?? [], sessionId];
+            state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title: FIRST_TITLE,
+                    ...(model && COMMAND_VALUE.test(model) ? { model } : {}), ...(typeof effort === 'string' && COMMAND_VALUE.test(effort) ? { effort } : {}) } };
+        });
         session.append('turn/start', { turn: 1 });
         session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
-        const now = new Date();
-        await this.dsh.rename(sessionId, `Claude TUI ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`);
+        await this.dsh.rename(sessionId, FIRST_TITLE);
+    }
+    /**
+     * Follow Claude Code's title, until the conversation is renamed in DSH.
+     * @param current - the conversation's title in DSH.
+     * @returns the new title, if it changed.
+     */
+    async syncTitle(sessionId, current, signal) {
+        if (!this.list().includes(sessionId))
+            return;
+        const shown = typeof current === 'string' ? current : undefined, saved = this.store.snapshot().tuiDetails?.[sessionId];
+        if (shown !== undefined && shown !== saved?.title && !OLD_TITLE.test(shown))
+            return;
+        await this.dsh.verify(sessionId, signal);
+        const title = claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(sessionId), signal));
+        if (!title || title === shown)
+            return;
+        await this.dsh.rename(sessionId, title);
+        await this.store.update(state => { state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...state.tuiDetails?.[sessionId], title } }; });
+        return title;
     }
 }
