@@ -14,6 +14,12 @@ export declare class WorkspaceFiles {
     /** A file by absolute path, read from its own directory, or undefined when it is larger than `limit` bytes. */
     readAbsolute(path: string, limit: number, signal?: AbortSignal): Promise<Buffer | undefined>;
     upload(cwd: string, path: string, revision: string | null, size: number, input: AsyncIterable<Uint8Array>, signal?: AbortSignal): Promise<unknown>;
+    /**
+     * A file kept for a conversation rather than part of the project: private, atomic and checked against its digest.
+     * @param path - relative to `cwd`, under `.dsh-remote-agents/attachments/`.
+     * @returns the file's absolute path.
+     */
+    attach(cwd: string, path: string, input: AsyncIterable<Uint8Array>, size: number, sha256: string, signal?: AbortSignal): Promise<string>;
     /** Runs Git commands in one round trip. The SSH host passes the whole program as one argument, so arguments stay small. */
     git(cwd: string, batch: GitBatch, signal?: AbortSignal): Promise<GitRun[]>;
     /** Stops a running `git` request and the commands it has not started. */

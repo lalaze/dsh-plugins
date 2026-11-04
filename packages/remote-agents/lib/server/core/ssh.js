@@ -230,6 +230,8 @@ for dsh_upload_dir in ${dirs.map(quote).join(' ')}; do
   mkdir -p -- "$dsh_upload_dir"
   chmod 700 "$dsh_upload_dir"
 done
+# Keeps what is uploaded out of the project's status and of any \`git add -A\`.
+[ -e .dsh-remote-agents/.gitignore ] || [ -L .dsh-remote-agents/.gitignore ] || printf '*\\n' > .dsh-remote-agents/.gitignore || :
 [ ! -L ${quote(relativePath)} ] && { [ ! -e ${quote(relativePath)} ] || [ -f ${quote(relativePath)} ]; } || { printf '%s\\n' 'Invalid attachment destination' >&2; exit 1; }
 dsh_upload_tmp="$(mktemp ${quote(`${dirs.at(-1)}/.upload.XXXXXXXXXX`)})"
 trap 'rm -f -- "$dsh_upload_tmp"' 0

@@ -3,11 +3,12 @@ import { accessOf } from '../core/dsh-host.js';
 import { sharesSessions } from '../core/domain.js';
 import { dshHome, under, WorkspaceAccess } from './access.js';
 import { editorHandler } from './editor-route.js';
-import { workspaceTransferHandler } from './http.js';
+import { tuiFilesHandler, workspaceTransferHandler } from './http.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
+import { TuiFiles } from './tui-files.js';
 import { TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
@@ -106,6 +107,8 @@ export async function installWorkspaces(ctx, store, machines) {
         },
         titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
     });
+    ctx.connection.fetch.register({ path: '/api/remote-agents/tui-files', methods: ['POST'], requestBody: 'streaming',
+        fetch: tuiFilesHandler(new TuiFiles({ isTui: id => tui.list().includes(id), directory: store.directory, attach: (...file) => files.attach(...file) })) });
     return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };
 }
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */

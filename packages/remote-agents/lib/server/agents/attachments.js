@@ -15,7 +15,7 @@ export function restoreFiles(content, original) {
     return content.map((block, index) => original[index].type === 'file' ? original[index] : block);
 }
 /** Stream one source into private staging; `describe` may reject the bytes before they are published. */
-async function stage(dir, source, describe, signal) {
+export async function stage(dir, source, describe, signal) {
     const temp = join(dir, `${randomUUID()}.tmp`), hash = createHash('sha256');
     let bytes = 0;
     try {

@@ -27,6 +27,8 @@ export declare class WorkspaceService {
     /** The title records of a Claude Code session on the conversation's verified machine. */
     claudeTitleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string>;
     upload(sessionId: string, path: string, rev: string | null, size: number, input: AsyncIterable<Uint8Array>, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown>;
+    /** A file kept for this conversation on its verified machine; see WorkspaceFiles.attach. */
+    attach(sessionId: string, path: string, input: AsyncIterable<Uint8Array>, size: number, sha256: string, signal: AbortSignal): Promise<string>;
     /** Git commands in the conversation's verified remote directory, for other plugins; never offered to models. */
     git(sessionId: string, batch: GitBatch, signal: AbortSignal, expected?: WorkspaceTarget): Promise<GitRun[]>;
     cancelGit(sessionId: string, id: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<void>;

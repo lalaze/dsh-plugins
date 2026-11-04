@@ -11,6 +11,8 @@ export interface AttachmentAccess {
 export declare const attachmentDirectory: (directory: string, taskId: string, messageId: string) => string;
 /** The LLM runtime projects files to text; recover only the session's authorized file blocks. */
 export declare function restoreFiles(content: readonly ContentBlock[], original?: readonly ContentBlock[]): readonly ContentBlock[];
+/** Stream one source into private staging; `describe` may reject the bytes before they are published. */
+export declare function stage(dir: string, source: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, describe: (sha256: string, bytes: number) => Attachment, signal?: AbortSignal): Promise<Attachment>;
 /** Stream files to private local staging; only bounded request-image versions are buffered. */
 export declare function stageAttachments(directory: string, taskId: string, messageId: string, blocks: readonly ContentBlock[], access?: AttachmentAccess, signal?: AbortSignal): Promise<Attachment[]>;
 /**
