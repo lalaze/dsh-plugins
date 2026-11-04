@@ -16,6 +16,12 @@ const notice = (summary, shown = 'It is shown below') => createUserMessage({ sou
     content: [{ type: 'text', text: `${summary}. ${shown}; no new request was sent to the remote CLI.` }] });
 /** How long a turn without a recorded end must have been quiet before it is shown as ended. */
 const QUIET_MS = 60_000;
+/**
+ * How long a turn shown as it goes outlasts the running status of the DSH driving it. When that DSH goes away, nothing
+ * is recorded until its lease expires, another DSH takes the CLI over within a quarter of the lease (45 s by default),
+ * and the relay replays what it missed.
+ */
+const LAPSE_MS = 120_000;
 const CLI_NAMES = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
 export const chatProviderId = (cli) => `remote-cli-${cli}`;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
@@ -126,16 +132,18 @@ export class RemoteCliAdapter extends LlmAdapter {
     projects;
     host;
     pollMs;
+    lapseMs;
     active = new Set();
     controllers = new Set();
     released = false;
     auxiliaryDirectories = new Map();
     woken = new Set();
-    constructor(projects, host, pollMs = 150) {
+    constructor(projects, host, pollMs = 150, lapseMs = LAPSE_MS) {
         super();
         this.projects = projects;
         this.host = host;
         this.pollMs = pollMs;
+        this.lapseMs = lapseMs;
     }
     providerInfo(provider) {
         const cli = Object.keys(CLI_NAMES).find(id => chatProviderId(id) === provider);
@@ -488,7 +496,7 @@ export class RemoteCliAdapter extends LlmAdapter {
             }
         };
         // Record what reached this conversation, so output produced while DSH was away is shown later.
-        let savedAt = 0, reached, followed = false;
+        let savedAt = 0, reached, followed = false, unfinished = false;
         const delivered = async (id, cursor, done = false, force = false) => {
             if (!done)
                 reached = { id, cursor };
@@ -501,7 +509,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         };
         /**
          * Stream one message's output until its turn ends. A recovered turn reports failures as text. `patient`: a turn another
-         * DSH drives, whose running status can lapse for a moment, as while its lease is renewed late.
+         * DSH drives, whose running status can lapse while that DSH goes away and another takes over; see {@link LAPSE_MS}.
          */
         const follow = async function* (id, from, recovered, patient = false) {
             const interrupted = yield* timeline(id, from, recovered, patient);
@@ -509,7 +517,7 @@ export class RemoteCliAdapter extends LlmAdapter {
             return interrupted;
         };
         const timeline = async function* (id, from, recovered, patient) {
-            let cursor = from, interrupted = false, heard = Date.now();
+            let cursor = from, interrupted = false, lapsed;
             while (true) {
                 signal.throwIfAborted();
                 if (permissionFailure)
@@ -523,7 +531,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                 if (!page.found)
                     throw new LlmError('Remote message delivery was not recorded. Retry without changing the message.', 'REMOTE_DELIVERY_UNKNOWN');
                 if (page.entries.length)
-                    heard = Date.now();
+                    lapsed = undefined;
                 for (const entry of page.entries) {
                     if (showsOutput(entry))
                         followed = true;
@@ -592,10 +600,14 @@ export class RemoteCliAdapter extends LlmAdapter {
                 if (page.hasNewer)
                     continue;
                 if (!busy(state.agent) || page.hasFollowingMessage || page.terminalStatus) {
-                    // Ended by its record, or, as `elsewhere` judges one without, after a quiet minute.
-                    if (patient && !page.hasFollowingMessage && !page.terminalStatus && Date.now() - heard <= QUIET_MS) {
-                        await pause(this.pollMs, undefined, { signal });
-                        continue;
+                    // A followed turn ends by its record. Without one, nothing says it ended, however long it stays silent.
+                    if (patient && !page.hasFollowingMessage && !page.terminalStatus) {
+                        lapsed ??= Date.now();
+                        if (Date.now() - lapsed <= this.lapseMs) {
+                            await pause(this.pollMs, undefined, { signal });
+                            continue;
+                        }
+                        unfinished = true;
                     }
                     if (recovered)
                         return interrupted || page.terminalStatus === 'canceled';
@@ -613,6 +625,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                     }
                     return interrupted;
                 }
+                lapsed = undefined;
                 await pause(this.pollMs, undefined, { signal });
             }
         }.bind(this);
@@ -673,8 +686,14 @@ export class RemoteCliAdapter extends LlmAdapter {
                         yield* follow(turns.lastMessageId, turns.running, true, true);
                         settled = true;
                     }
-                    await service.store.update(state => { const chat = state.tasks.find(t => t.id === taskId)?.chat; if (chat)
-                        chat.delivered = { messageId: turns.lastMessageId, cursor: null, done: true }; });
+                    // What a followed turn writes after this one gave up on it still shows here, through `sync` or ahead of the next reply.
+                    if (unfinished) {
+                        yield* textChunk('text', '\n\nThe DSH running this turn went away. Any further output appears here later.');
+                        await delivered(reached.id, reached.cursor, false, true);
+                    }
+                    else
+                        await service.store.update(state => { const chat = state.tasks.find(t => t.id === taskId)?.chat; if (chat)
+                            chat.delivered = { messageId: turns.lastMessageId, cursor: null, done: true }; });
                 }
                 if (!shown)
                     yield* textChunk('text', 'The remote CLI produced no further output.');

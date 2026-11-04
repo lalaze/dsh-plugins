@@ -71,12 +71,13 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     readonly projects: ChatProjects;
     private readonly host;
     private readonly pollMs;
+    private readonly lapseMs;
     private active;
     private controllers;
     private released;
     private auxiliaryDirectories;
     private woken;
-    constructor(projects: ChatProjects, host: ChatHost, pollMs?: number);
+    constructor(projects: ChatProjects, host: ChatHost, pollMs?: number, lapseMs?: number);
     providerInfo(provider: string): {
         id: string;
         name: string;
