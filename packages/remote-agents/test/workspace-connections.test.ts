@@ -42,7 +42,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
   // Every launcher invocation has a finite fallback, never the developer's interactive shell.
   await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
-  for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access', 'teams/presets']) {
+  for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access', 'workspace/tui', 'teams/presets']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
     await mkdir(dirname(join(modules, name)), { recursive: true });
     await writeFile(join(modules, `${name}.js`), (await transform(source, { loader: 'ts', format: 'esm', target: 'node22' })).code);
@@ -64,13 +64,16 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   assert.equal(JSON.parse(await readFile(capture, 'utf8')).at(-1), 'cd \'/srv/app\' && exec "${SHELL:-/bin/sh}" -lic \'claude; exec "${SHELL:-/bin/sh}" -l\'');
   // In a TUI conversation it is the same Claude session every time, resumed once Claude Code has saved it.
   const state = JSON.parse(await readFile(f.path, 'utf8'));
-  await writeFile(f.path, JSON.stringify({ ...state, tuiSessions: ['session-tui'] }));
+  await writeFile(f.path, JSON.stringify({ ...state, tuiSessions: ['session-tui', 'session-opus'], tuiDetails: { 'session-opus': { model: 'opus[1m]', effort: 'high', title: 'Claude Code' } } }));
   const launchTui = async (session: string) => { await promisify(execFile)(claude, [], { cwd: anchor, env: { ...env, DSH_SESSION_ID: session }, timeout: 5000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
   const tui = await launchTui('session-tui'), id = /--resume ([0-9a-f-]{36});/.exec(tui)?.[1];
   assert.match(id ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(tui, `cd '/srv/app' && exec "\${SHELL:-/bin/sh}" -lic 'if find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${id}.jsonl 2>/dev/null | grep -q .; then claude --resume ${id}; else claude --session-id ${id}; fi; exec "\${SHELL:-/bin/sh}" -l'`);
   assert.equal(await launchTui('session-tui'), tui, 'stable across launches');
   assert.doesNotMatch(await launchTui('session-chat'), /--resume/, 'another conversation runs a plain claude');
+  // The composer's model applies to the first launch; a resumed session keeps what /model chose since.
+  const opus = await launchTui('session-opus'), opusId = /--resume ([0-9a-f-]{36});/.exec(opus)?.[1];
+  assert.ok(opus.includes(`then claude --resume ${opusId}; else claude --session-id ${opusId} --model "opus[1m]" --effort "high"; fi`), opus);
   await launch(anchor);
   await writeFile(join(anchor, '.dsh-remote-meta.json'), '{}');
   await assert.rejects(launch(anchor), /valid remote workspace binding/);

@@ -49,6 +49,12 @@ const BASIC_PATH = 'PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PAT
 
 export class WorkspaceFiles {
   constructor(private readonly transport: SshTransport) {}
+  /** Claude Code's title records in one of its session files on this machine, if it has saved that session. */
+  claudeTitleRecords(claudeSession: string): Promise<string> {
+    return this.transport.exec(`dsh_file=$(find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${quote(`${claudeSession}.jsonl`)} 2>/dev/null | head -n 1)
+[ -z "$dsh_file" ] || { grep -a '"type":"ai-title"' "$dsh_file" | tail -n 1; grep -a '"type":"custom-title"' "$dsh_file" | tail -n 1; }
+true`, 20_000);
+  }
   /** Runs one shell operation and returns its data; the program reports handled failures with their status. */
   private async run(op: string, cwd: string, at: Location, values: Record<string, string>, options: { input?: AsyncIterable<Uint8Array>; maxBytes: number; signal?: AbortSignal; login?: boolean }): Promise<Buffer> {
     if (!this.transport.transfer) throw new RemoteError('File transfers are unavailable on this host', 501);

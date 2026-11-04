@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { CLAUDE_LAUNCHER } from '../../workspace/domain.js';
 import { api } from '../api.js';
+import { useCurrentModel } from '../composer/usage.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 import type { Client } from '../index.js';
 
@@ -8,6 +9,14 @@ import type { Client } from '../index.js';
 const TERMINAL_TAB = '@deepseek-ai/dsh-client-ui-sidebar-terminal', SHELL_KEY = 'dsh.terminal.shell';
 const CACHE_KEY = 'remote-agents.tui.sessions', GENERATION_KEY = 'remote-agents.tui.generation';
 const REMOTE_ANCHOR = /(?:^|[/\\])remote-workspaces[/\\]/;
+/** The chat provider of the remote Claude Code; only its models offer the TUI. */
+const CLAUDE_PROVIDER = 'remote-cli-claude';
+const TITLE_INTERVAL = 15_000;
+const startStyles = `.ra-tui-start{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;cursor:pointer}
+.ra-tui-start:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
+.ra-tui-start:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe))}
+.ra-tui-start:disabled{cursor:default;opacity:.5}
+.ra-tui-start[data-failed]{box-shadow:0 0 0 1px var(--dsw-alias-state-danger,#d64545)}`;
 
 interface SlotEntry { component: unknown; options: { id?: string; key?: string } }
 interface Slots {
@@ -24,10 +33,10 @@ interface Terminals {
   close(sessionId: string, key: string, contentId: string): void;
 }
 interface Services {
-  slots: Slots; terminals: Terminals; t: unknown;
+  slots: Slots; terminals: Terminals; t: unknown; title(sessionId: string): string | undefined;
   theme: { getSnapshot(): unknown; subscribe(listener: () => void): () => void };
 }
-type SessionList = { getSnapshot(): { byId?: Record<string, { cwd?: string; blank?: boolean }> }; subscribe(listener: () => void): () => void };
+type SessionList = { getSnapshot(): { byId?: Record<string, { cwd?: string; blank?: boolean; title?: string }> }; subscribe(listener: () => void): () => void };
 
 const read = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const write = (key: string, value: string | null) => {
@@ -102,6 +111,17 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   useLocale();
   const [generation, restart] = useGeneration(sessionId);
   const root = useRef<HTMLDivElement>(null);
+  // Claude Code titles the conversation after its first exchange, and may again later.
+  useEffect(() => {
+    const controller = new AbortController();
+    const sync = () => {
+      if (document.visibilityState === 'hidden') return;
+      void api('tuiTitle', { sessionId, current: services.title(sessionId) }, controller.signal).catch(() => {});
+    };
+    sync();
+    const timer = setInterval(sync, TITLE_INTERVAL);
+    return () => { clearInterval(timer); controller.abort(); };
+  }, [services, sessionId]);
   // Selecting the conversation is what starts typing in it. The terminal's own chunk loads late, so wait for its input.
   useEffect(() => {
     let frame = 0;
@@ -128,21 +148,30 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   </div>;
 }
 
-/** Offered in a new conversation of a remote workspace; DSH lists it once started. */
+/** Claude Code's mascot, as its terminal banner draws it: each column is one half of a character cell, each row half its height. */
+function ClaudeMascot() {
+  return <svg viewBox="0 0 16 10" width="24" height="15" aria-hidden="true" shapeRendering="crispEdges">
+    <path fill="#D97757" d="M2 0h12v2H2zM2 2h2v2H2zM5 2h6v2H5zM12 2h2v2h-2zM0 4h16v2H0zM2 6h12v2H2zM3 8h1v2H3zM5 8h1v2H5zM10 8h1v2h-1zM12 8h1v2h-1z" />
+    <path fill="#000" d="M4 2h1v2H4zM11 2h1v2h-1z" />
+  </svg>;
+}
+
+/** Offered in a new conversation of a remote workspace while a remote Claude model is selected; DSH lists it once started. */
 function StartButton({ sessionId, sessions, store }: { sessionId?: string; sessions: SessionList; store: TuiStore }) {
   useLocale();
   const session = useSyncExternalStore(sessions.subscribe, () => (sessionId === undefined ? undefined : sessions.getSnapshot()?.byId?.[sessionId]));
+  const selection = useCurrentModel(sessionId);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
-  if (sessionId === undefined || !session?.blank || !session.cwd || !REMOTE_ANCHOR.test(session.cwd) || store.has(sessionId)) return null;
+  if (sessionId === undefined || !session?.blank || !session.cwd || !REMOTE_ANCHOR.test(session.cwd) || store.has(sessionId) || selection?.provider !== CLAUDE_PROVIDER) return null;
   const start = () => {
     setBusy(true); setError('');
-    api('tuiStart', { sessionId }).then(() => store.add(sessionId), cause => setError(localizeError(cause instanceof Error ? cause.message : String(cause)))).finally(() => setBusy(false));
+    api('tuiStart', { sessionId, model: selection.model, effort: selection.reasoningEffort }).then(() => store.add(sessionId), cause => setError(localizeError(cause instanceof Error ? cause.message : String(cause)))).finally(() => setBusy(false));
   };
-  return <button type="button" data-remote-agents-tui-start="" disabled={busy} onClick={start}
-    title={error ? `${ui('Could not start the TUI')}: ${error}` : ui('Start this conversation in the Claude Code terminal interface')}
-    style={{ font: 'inherit', fontSize: 12, height: 28, padding: '0 10px', borderRadius: 14, border: `1px solid ${error ? 'var(--ds-color-danger, #d64545)' : 'currentColor'}`, background: 'transparent', color: 'inherit', opacity: busy ? 0.5 : 0.8, cursor: busy ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
-    {ui('Start in TUI')}
-  </button>;
+  return <><style>{startStyles}</style>
+    <button type="button" className="ra-tui-start" data-remote-agents-tui-start="" data-failed={error ? '' : undefined} disabled={busy} onClick={start}
+      aria-label={ui('Start in TUI')} title={error ? `${ui('Could not start the TUI')}: ${error}` : ui('Start this conversation in the Claude Code terminal interface')}>
+      <ClaudeMascot />
+    </button></>;
 }
 
 /**
@@ -160,7 +189,7 @@ export function installTuiSessions(ctx: Client): void {
     const on = (scoped as unknown as { on(event: string, listener: () => void): () => void }).on;
     if (!terminals || !sessions || !themes || typeof slots.entries !== 'function' || typeof slots.subscribe !== 'function') return;
     const store = new TuiStore();
-    const services: Services = { slots, terminals,
+    const services: Services = { slots, terminals, title: id => sessions.getSnapshot()?.byId?.[id]?.title,
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
       theme: { getSnapshot: () => themes.getTheme(), subscribe: listener => on.call(scoped, 'theme/change', listener) } };
     scoped.effect(() => {

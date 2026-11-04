@@ -41,9 +41,10 @@ export async function workspaceAction(features: WorkspaceFeatures, action: strin
   const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
   if (action === 'tuiStart') {
     if (!features.tui) throw new RemoteError('The TUI is unavailable', 501);
-    await features.tui.start(sessionId, signal);
+    await features.tui.start(sessionId, { model: input.model, effort: input.effort }, signal);
     return { sessionId };
   }
+  if (action === 'tuiTitle') return { title: await features.tui?.syncTitle(sessionId, input.current, signal) };
   if (action === 'workspaceTarget') {
     const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
     return shell ? { ...target, terminalShell: shell } : target;
