@@ -3,7 +3,7 @@ import { type SshTransport } from '../core/ssh.js';
 export declare class WorkspaceFiles {
     private readonly transport;
     constructor(transport: SshTransport);
-    /** Claude Code's title records in one of its session files on this machine, if it has saved that session. */
+    /** The records that can title a Claude Code session, from its file on this machine if it has saved that session. */
     claudeTitleRecords(claudeSession: string): Promise<string>;
     /** Runs one shell operation and returns its data; the program reports handled failures with their status. */
     private run;

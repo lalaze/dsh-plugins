@@ -9,7 +9,11 @@ interface SessionRow {
 }
 /** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
 export declare function tuiClaudeSession(sessionId: string): string;
-/** A title Claude Code recorded in its session file; one the user set with /rename wins over its own. */
+/**
+ * A conversation's title from Claude Code's session file: the user's /rename, then Claude's own title, then the first
+ * prompt. Claude often writes no title, for a short greeting especially, and DSH titles its other conversations by their
+ * first prompt too. The first `last-prompt` record holds the first prompt; a later one may have no text.
+ */
 export declare function claudeTitle(records: string): string | undefined;
 /**
  * Conversations whose main view is the interactive Claude Code instead of DSH's chat. Each stays a real DSH session, so
