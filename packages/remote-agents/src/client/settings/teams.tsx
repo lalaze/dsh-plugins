@@ -3,6 +3,7 @@ import { PROVIDER_LABELS, type Choice } from '../../core/domain.js';
 import type { PresetMember, PresetTask, TeamPreset } from '../../teams/presets.js';
 import { api } from '../api.js';
 import { localizeError, ui } from '../i18n.js';
+import { Chevron } from './menu.js';
 
 interface HostModels { id: string; label: string; providers: { id: string; label: string; models: { id: string; label: string; isDefault?: boolean; thinkingOptions?: Choice[] }[] }[] }
 interface Presets { presets: TeamPreset[]; builtin: TeamPreset[]; hosts: HostModels[] }
@@ -19,35 +20,51 @@ function modelsOf(hosts: HostModels[], cli: string | undefined) {
   if (cli) for (const host of hosts) for (const provider of host.providers) if (provider.id === cli) for (const model of provider.models) if (!models.has(model.id)) models.set(model.id, model);
   return [...models.values()];
 }
-function MemberRow({ member, hosts, members, change, remove, disabled }: { member: PresetMember; hosts: HostModels[]; members: PresetMember[]; change(next: PresetMember): void; remove(): void; disabled: boolean }) {
+function MemberRow({ member, hosts, members, change, remove, disabled, defaultOpen }: { member: PresetMember; hosts: HostModels[]; members: PresetMember[]; change(next: PresetMember): void; remove(): void; disabled: boolean; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const list = useId(), models = modelsOf(hosts, member.cli), known = models.find(model => model.id === member.model), levels = known?.thinkingOptions ?? [];
   const set = (patch: Partial<PresetMember>) => change(Object.fromEntries(Object.entries({ ...member, ...patch }).filter(([, value]) => value !== undefined && value !== '')) as unknown as PresetMember);
-  return <div className="ra-team-row ra-team-member">
-    <label className="ra-field">{ui('Member')}<input required maxLength={40} value={member.name ?? ''} onChange={event => set({ name: event.target.value.trim() })} placeholder="coder" /></label>
-    <label className="ra-field">{ui('Role')}<input maxLength={100} value={member.role ?? ''} onChange={event => set({ role: event.target.value })} placeholder={ui('implement')} /></label>
-    <label className="ra-field">{ui('CLI')}<select value={member.cli ?? CAPTAIN} onChange={event => set({ cli: event.target.value || undefined, model: undefined, effort: undefined })}>
-      <option value={CAPTAIN}>{ui('Captain’s model')}</option>{Object.entries(PROVIDER_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
-    <label className="ra-field">{ui('Model')}<input list={list} maxLength={200} disabled={!member.cli} value={member.model ?? ''} onChange={event => set({ model: event.target.value, effort: undefined })} placeholder={member.cli ? ui('default model') : ''} />
-      <datalist id={list}>{models.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}</datalist></label>
-    <label className="ra-field">{ui('Thinking')}{levels.length ? <select value={member.effort ?? ''} onChange={event => set({ effort: event.target.value || undefined })}><option value="">{ui('default')}</option>{levels.map(level => <option key={level.id} value={level.id}>{level.label}</option>)}</select>
-      : <input maxLength={50} disabled={!member.cli} value={member.effort ?? ''} onChange={event => set({ effort: event.target.value })} placeholder={ui('default')} />}</label>
-    <button type="button" className="ra-danger" disabled={disabled || members.length <= 1} onClick={remove} aria-label={ui('Remove member')}>×</button>
-  </div>;
+  const summary = member.cli ? `${PROVIDER_LABELS[member.cli] ?? member.cli} ${member.model || ui('default model')}${member.effort ? ` (${member.effort})` : ''}` : ui('Captain’s model');
+  return <article className="ra-team-card ra-team-card-member" data-open={open}>
+    <div className="ra-team-card-head">
+      <button type="button" className="ra-team-card-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}><Chevron open={open} /><strong>{member.name || ui('New member')}</strong><span className="ra-muted">{summary}</span></button>
+      <button type="button" className="ra-danger ra-team-card-remove" disabled={disabled || members.length <= 1} onClick={remove} aria-label={ui('Remove member')}>×</button>
+    </div>
+    {open && <div className="ra-team-fields ra-team-member-fields">
+      <label className="ra-field">{ui('Member')}<input required maxLength={40} value={member.name ?? ''} onChange={event => set({ name: event.target.value.trim() })} placeholder="coder" /></label>
+      <label className="ra-field">{ui('Role')}<input maxLength={100} value={member.role ?? ''} onChange={event => set({ role: event.target.value })} placeholder={ui('implement')} /></label>
+      <label className="ra-field">{ui('CLI')}<select value={member.cli ?? CAPTAIN} onChange={event => set({ cli: event.target.value || undefined, model: undefined, effort: undefined })}>
+        <option value={CAPTAIN}>{ui('Captain’s model')}</option>{Object.entries(PROVIDER_LABELS).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+      <label className="ra-field">{ui('Model')}<input list={list} maxLength={200} disabled={!member.cli} value={member.model ?? ''} onChange={event => set({ model: event.target.value, effort: undefined })} placeholder={member.cli ? ui('default model') : ''} />
+        <datalist id={list}>{models.map(model => <option key={model.id} value={model.id}>{model.label}</option>)}</datalist></label>
+      <label className="ra-field">{ui('Thinking')}{levels.length ? <select value={member.effort ?? ''} onChange={event => set({ effort: event.target.value || undefined })}><option value="">{ui('default')}</option>{levels.map(level => <option key={level.id} value={level.id}>{level.label}</option>)}</select>
+        : <input maxLength={50} disabled={!member.cli} value={member.effort ?? ''} onChange={event => set({ effort: event.target.value })} placeholder={ui('default')} />}</label>
+    </div>}
+  </article>;
 }
-function TaskRow({ task, tasks, members, change, remove, disabled }: { task: PresetTask; tasks: PresetTask[]; members: PresetMember[]; change(next: PresetTask): void; remove(): void; disabled: boolean }) {
+function TaskRow({ task, tasks, members, change, remove, disabled, defaultOpen }: { task: PresetTask; tasks: PresetTask[]; members: PresetMember[]; change(next: PresetTask): void; remove(): void; disabled: boolean; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const others = tasks.filter(other => other.id !== task.id && other.id), dependencies = task.dependencies ?? [];
   const set = (patch: Partial<PresetTask>) => change(Object.fromEntries(Object.entries({ ...task, ...patch }).filter(([, value]) => value !== undefined && value !== '' && !(Array.isArray(value) && !value.length))) as unknown as PresetTask);
-  return <div className="ra-team-row ra-team-task">
-    <label className="ra-field">{ui('Task id')}<input required maxLength={32} value={task.id ?? ''} onChange={event => set({ id: event.target.value.trim() })} placeholder="work" /></label>
-    <label className="ra-field ra-team-subject">{ui('Subject')}<input required maxLength={500} value={task.subject ?? ''} onChange={event => set({ subject: event.target.value })} placeholder="{goal}" /></label>
-    <label className="ra-field">{ui('Assignee')}<select value={task.assignee ?? ''} onChange={event => set({ assignee: event.target.value || undefined })}><option value="">{ui('any idle member')}</option>{members.filter(member => member.name).map(member => <option key={member.name} value={member.name}>{member.name}</option>)}</select></label>
-    <label className="ra-field ra-team-description">{ui('Instructions')}<textarea rows={2} maxLength={4000} value={task.description ?? ''} onChange={event => set({ description: event.target.value })} placeholder={ui('What the member does; {goal} stands for the goal typed after /team.')} /></label>
-    <fieldset className="ra-team-deps" disabled={disabled}><legend>{ui('After')}</legend>{others.length ? others.map(other => <label key={other.id}><input type="checkbox" checked={dependencies.includes(other.id)} onChange={event => set({ dependencies: event.target.checked ? [...dependencies, other.id] : dependencies.filter(id => id !== other.id) })} />{other.id}</label>) : <span className="ra-muted">{ui('No other tasks')}</span>}</fieldset>
-    <button type="button" className="ra-danger" disabled={disabled} onClick={remove} aria-label={ui('Remove task')}>×</button>
-  </div>;
+  const summary = `${task.assignee ? ui('{task} → {member}', { task: task.id || ui('New task'), member: task.assignee }) : ui('{task} → any idle member', { task: task.id || ui('New task') })}`;
+  return <article className="ra-team-card ra-team-card-task" data-open={open}>
+    <div className="ra-team-card-head">
+      <button type="button" className="ra-team-card-toggle" aria-expanded={open} onClick={() => setOpen(value => !value)}><Chevron open={open} /><strong>{task.id || ui('New task')}</strong><span className="ra-muted">{summary}</span></button>
+      <button type="button" className="ra-danger ra-team-card-remove" disabled={disabled} onClick={remove} aria-label={ui('Remove task')}>×</button>
+    </div>
+    {open && <div className="ra-team-fields ra-team-task-fields">
+      <label className="ra-field">{ui('Task id')}<input required maxLength={32} value={task.id ?? ''} onChange={event => set({ id: event.target.value.trim() })} placeholder="work" /></label>
+      <label className="ra-field ra-team-subject">{ui('Subject')}<input required maxLength={500} value={task.subject ?? ''} onChange={event => set({ subject: event.target.value })} placeholder="{goal}" /></label>
+      <label className="ra-field">{ui('Assignee')}<select value={task.assignee ?? ''} onChange={event => set({ assignee: event.target.value || undefined })}><option value="">{ui('any idle member')}</option>{members.filter(member => member.name).map(member => <option key={member.name} value={member.name}>{member.name}</option>)}</select></label>
+      <label className="ra-field ra-team-description">{ui('Instructions')}<textarea rows={2} maxLength={4000} value={task.description ?? ''} onChange={event => set({ description: event.target.value })} placeholder={ui('What the member does; {goal} stands for the goal typed after /team.')} /></label>
+      <fieldset className="ra-team-deps" disabled={disabled}><legend>{ui('After')}</legend>{others.length ? others.map(other => <label key={other.id}><input type="checkbox" checked={dependencies.includes(other.id)} onChange={event => set({ dependencies: event.target.checked ? [...dependencies, other.id] : dependencies.filter(id => id !== other.id) })} />{other.id}</label>) : <span className="ra-muted">{ui('No other tasks')}</span>}</fieldset>
+    </div>}
+  </article>;
 }
 function PresetEditor({ initial, saved, hosts, cancel, save, busy }: { initial: TeamPreset; saved: boolean; hosts: HostModels[]; cancel(): void; save(preset: TeamPreset): void; busy: boolean }) {
   const [preset, setPreset] = useState(initial);
+  // A saved preset opens with every row collapsed; a new preset or a just-added row opens expanded.
+  const [openMember, setOpenMember] = useState(-1), [openTask, setOpenTask] = useState(-1);
   const members = preset.members, tasks = preset.tasks;
   const update = (patch: Partial<TeamPreset>) => setPreset(current => ({ ...current, ...patch }));
   // A member rename or removal follows through to the tasks assigned to that member, so the roster and the DAG never disagree.
@@ -68,14 +85,14 @@ function PresetEditor({ initial, saved, hosts, cancel, save, busy }: { initial: 
     </div>
     <h4>{ui('Members')}</h4>
     <p className="ra-muted">{ui('A member’s CLI runs on the machine of the conversation’s remote workspace; the model is found there by id or name, the default model when empty. The line can still override a member: coder=claude/opus.')}</p>
-    {members.map((member, index) => <MemberRow key={index} member={member} hosts={hosts} members={members} disabled={busy}
+    {members.map((member, index) => <MemberRow key={index} member={member} hosts={hosts} members={members} disabled={busy} defaultOpen={!saved || index === openMember}
       change={next => changeMember(index, next)} remove={() => removeMember(index)} />)}
-    <div className="ra-actions"><button type="button" disabled={busy || members.length >= 8} onClick={() => update({ members: [...members, { name: '' }] })}>{ui('Add member')}</button></div>
+    <div className="ra-actions"><button type="button" disabled={busy || members.length >= 8} onClick={() => { setOpenMember(members.length); update({ members: [...members, { name: '' }] }); }}>{ui('Add member')}</button></div>
     <h4>{ui('Tasks')}</h4>
     <p className="ra-muted">{ui('Tasks start as soon as the team does; a task waits for the tasks it comes after. Every member reads the goal, so a task can simply say what its member contributes.')}</p>
-    {tasks.map((task, index) => <TaskRow key={index} task={task} tasks={tasks} members={members} disabled={busy}
+    {tasks.map((task, index) => <TaskRow key={index} task={task} tasks={tasks} members={members} disabled={busy} defaultOpen={!saved || index === openTask}
       change={next => update({ tasks: tasks.map((current, at) => at === index ? next : current) })} remove={() => update({ tasks: tasks.filter((_, at) => at !== index) })} />)}
-    <div className="ra-actions"><button type="button" disabled={busy || tasks.length >= 32} onClick={() => update({ tasks: [...tasks, { id: `t${tasks.length + 1}`, subject: '{goal}', assignee: members[0]?.name }] })}>{ui('Add task')}</button></div>
+    <div className="ra-actions"><button type="button" disabled={busy || tasks.length >= 32} onClick={() => { setOpenTask(tasks.length); update({ tasks: [...tasks, { id: `t${tasks.length + 1}`, subject: '{goal}', assignee: members[0]?.name }] }); }}>{ui('Add task')}</button></div>
     <div className="ra-actions ra-team-save"><button type="button" disabled={busy} onClick={cancel}>{ui('Cancel')}</button><button className="ra-primary" disabled={busy || !preset.id || !tasks.length}>{ui(busy ? 'Saving…' : 'Save preset')}</button></div>
   </form>;
 }

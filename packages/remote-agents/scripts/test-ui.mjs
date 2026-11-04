@@ -181,7 +181,8 @@ try {
 
   wait('document.querySelector(".ra-hosts .ra-host-row strong")?.textContent === "build-box"');
   wait('document.querySelector(".ra-hosts .ra-host-row")?.textContent.includes("DSH 模型选择器中有 1 个模型")');
-  browser('click', 'button:text-is("刷新模型")');
+  browser('click', '.ra-host-row button[aria-label="机器操作"]'); wait('document.querySelector(".ra-host-row .ra-menu-panel")');
+  browser('click', '.ra-host-row .ra-menu-panel button:text-is("刷新模型")');
   wait('document.querySelector(".ra-hosts .ra-badge")?.textContent === "已连接"');
   console.log('PASS: settings-only session entry, SSH alias keyboard selection, config refresh, host creation and connection');
 
@@ -256,6 +257,8 @@ try {
   const machine = state().state.hosts[0];
   if (groups.some(g => g.models.some(m => !m.id.startsWith(machine.id + '/') || !m.name.includes('build-box')))) throw new Error('Models were not scoped and labelled by machine');
   if (state().tasks.length) throw new Error('Model discovery launched an agent');
+  // A machine is collapsed by default; open it to toggle its CLIs.
+  browser('click', '.ra-host-row .ra-host-expand'); wait('document.querySelector(".ra-host-row .ra-cli-options")');
   browser('check', '.ra-host-row .ra-cli-options input[value="codebuddy"]');
   browser('click', '.ra-host-row button:text-is("应用选择")');
   wait('document.querySelector(".ra-host-row").textContent.includes("DSH 模型选择器中有 2 个模型")');
@@ -279,13 +282,20 @@ try {
   browser('open', `${base}?reloaded`);
   wait('document.querySelector(".ra-host-row")?.textContent.includes("DSH 模型选择器中有 1 个模型")');
   expect('!document.querySelector(".ra-chat-projects,[aria-label=项目名称],[aria-label=远程项目路径]")');
+  // A machine is collapsed by default: its enabled CLIs show as a summary, the checkboxes behind the disclosure.
+  expect('document.querySelector(".ra-host-row").textContent.includes("CLI：Codex") && !document.querySelector(".ra-host-row .ra-cli-options")');
+  browser('click', '.ra-host-row .ra-host-expand'); wait('document.querySelector(".ra-host-row .ra-cli-options")');
   expect('document.querySelectorAll(".ra-host-row .ra-cli-options input:checked").length === 1 && document.querySelector(".ra-host-row .ra-cli-options input[value=codex]").checked');
+  // The add form is tucked away once a machine exists; a button opens it.
+  expect('!document.querySelector("[aria-label=机器名称]")');
+  browser('click', 'button:text-is("添加机器")'); wait('document.querySelector("[aria-label=机器名称]")');
   browser('fill', '[aria-label="机器名称"]', 'Duplicate');
   browser('fill', '[aria-label="连接地址"]', 'ssh://build-box');
   browser('click', 'button:text-is("保存机器")');
   wait('document.querySelector(".ra-hosts [role=alert]")');
   if (state().state.hosts.length !== 1) throw new Error('A duplicate host was saved');
-  browser('click', '.ra-hosts .ra-host-row button.ra-danger');
+  browser('click', '.ra-host-row button[aria-label="机器操作"]'); wait('document.querySelector(".ra-host-row .ra-menu-panel")');
+  browser('click', '.ra-host-row .ra-menu-panel button.ra-danger');
   wait('!document.querySelector(".ra-hosts .ra-host-row")');
   if (state().modelGroups.length) throw new Error('Removing a host left its models in the picker');
   console.log('PASS: selected-CLI discovery, enable/disable, persistence, refresh, duplicate rejection and removal; no project registration; locales and responsive themes');
@@ -385,10 +395,12 @@ try {
   fixture({ connectionError: 'ssh: Could not resolve hostname ubuntu-claude-103: nodename nor servname provided, or not known' });
   browser('open', `${base}?offline-removal`);
   wait('document.querySelector(".ra-host-row")');
-  browser('click', '.ra-host-row button:text-is("刷新模型")');
+  browser('click', '.ra-host-row button[aria-label="机器操作"]'); wait('document.querySelector(".ra-host-row .ra-menu-panel")');
+  browser('click', '.ra-host-row .ra-menu-panel button:text-is("刷新模型")');
   wait('document.querySelector(".ra-host-error")?.textContent.includes("Could not resolve hostname")');
-  expect('!document.querySelector(".ra-host-top button.ra-danger").disabled');
-  browser('click', '.ra-host-top button.ra-danger');
+  browser('click', '.ra-host-row button[aria-label="机器操作"]'); wait('document.querySelector(".ra-host-row .ra-menu-panel")');
+  expect('!document.querySelector(".ra-host-row .ra-menu-panel button.ra-danger").disabled');
+  browser('click', '.ra-host-row .ra-menu-panel button.ra-danger');
   wait('document.querySelector(".ra-remove-confirm")');
   expect(`document.querySelector('.ra-remove-confirm').textContent.includes('${saved.length} 个已保存会话') && document.querySelector('.ra-remove-confirm').textContent.includes('包括已归档会话')`);
   if (state().state.agents.length !== saved.length) throw new Error('Opening removal confirmation deleted sessions');
@@ -397,7 +409,8 @@ try {
   browser('click', '.ra-remove-confirm button:text-is("取消")');
   wait('!document.querySelector(".ra-remove-confirm")');
   if (state().state.agents.length !== saved.length) throw new Error('Cancelling removal deleted sessions');
-  browser('click', '.ra-host-top button.ra-danger');
+  browser('click', '.ra-host-row button[aria-label="机器操作"]'); wait('document.querySelector(".ra-host-row .ra-menu-panel")');
+  browser('click', '.ra-host-row .ra-menu-panel button.ra-danger');
   browser('click', '.ra-remove-confirm button:text-is("移除机器并删除会话")');
   wait('!document.querySelector(".ra-host-row")');
   const removed = state();

@@ -639,5 +639,15 @@ export const zh: Record<string, string> = {
   "{count} tasks: {tasks}": "{count} 项任务：{tasks}",
   "Edit": "编辑",
   "Customize": "自定义",
-  "Make default": "设为默认"
+  "Make default": "设为默认",
+  "Show machine settings": "展开机器设置",
+  "Hide machine settings": "收起机器设置",
+  "Shared": "已共享",
+  "CLIs: {list}": "CLI：{list}",
+  "No CLIs enabled": "未启用 CLI",
+  "Machine actions": "机器操作",
+  "Add a machine": "添加机器",
+  "New member": "新成员",
+  "New task": "新任务",
+  "{task} → any idle member": "{task} → 任一空闲成员",
 };
