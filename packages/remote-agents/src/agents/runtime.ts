@@ -7,7 +7,7 @@ import { RelayExit, RelayReleased, type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
 import { configureAcpSession } from './acp.js';
-import { acpTurnUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTurnUsage, contextUsage } from './usage.js';
+import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTurnUsage, contextUsage } from './usage.js';
 
 /** The file name an image is shown with, from the remote path it was read from. */
 const imageName = (path: unknown) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
@@ -267,10 +267,10 @@ export class CliSession {
   }
   private setContext(context: ContextUsage | undefined): void { if (context) this.agent.context = context; }
   /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
-  private turnUsage(usage: TurnUsage | undefined, failed = false): void {
+  private turnUsage(usage: TurnUsage | undefined, failed = false, models?: FinishedTurn['models']): void {
     if (!usage || !this.activeMessage) return;
     this.append({ type: 'usage', usage });
-    this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed, ...(this.turnModel ? { model: this.turnModel } : {}) });
+    this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed, ...(this.turnModel ? { model: this.turnModel } : {}), ...(models ? { models } : {}) });
   }
   private setTokenUsage(usage: TokenUsage | undefined): void { this.agent.tokenUsage = usage; this.saveUsage(); }
   /** Save request snapshots as they arrive, including during long tool loops and resume. */
@@ -337,6 +337,12 @@ export class CliSession {
     if (m.type === 'system' && m.subtype === 'task_notification' && !this.activeMessage && typeof m.summary === 'string' && m.summary) {
       const notice = `${m.summary}${typeof m.status === 'string' && m.status && m.status !== 'completed' ? ` (${m.status})` : ''}`;
       if (!this.notices.includes(notice)) this.notices.push(notice);
+    }
+    // Claude's safeguards refused a request: the CLI retries it on another model and stays there, while the picker keeps
+    // showing the selection, so the switch is shown where it happened. A subagent's fallback (`local`) changes nothing else.
+    if (m.type === 'system' && m.subtype === 'model_refusal_fallback' && m.direction === 'retry' && m.scope !== 'local' && typeof m.original_model === 'string' && typeof m.fallback_model === 'string') {
+      this.continueUnprompted();
+      this.append({ type: 'model_switch', from: m.original_model, to: m.fallback_model, ...(typeof m.api_refusal_category === 'string' && m.api_refusal_category ? { category: m.api_refusal_category } : {}) });
     }
     if (m.event === 'step_update') {
       const step = m.step_update ?? {}; this.confirm();
@@ -408,7 +414,7 @@ export class CliSession {
       const call = this.tools.get(String(block.tool_use_id)), input = call?.detail as Record<string, unknown> | undefined;
       this.tool(String(block.tool_use_id), String(call?.name ?? 'Tool'), block.is_error ? 'failed' : 'completed', contentText(block.content), block.is_error ? [] : this.toolImages(block.content, input?.file_path ?? input?.path));
     }
-    if (m.type === 'result') { this.confirm(); this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success'); if (m.is_error || m.subtype !== 'success') this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed')); else this.complete(); void this.claudeContext(); }
+    if (m.type === 'result') { this.confirm(); this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success', claudeModelUsage(m.model_usage_since_last_result)); if (m.is_error || m.subtype !== 'success') this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed')); else this.complete(); void this.claudeContext(); }
   }
   /** Codex `turn/start` and ACP `session/prompt` responses for the active message. */
   private promptResponse(m: WireMessage): void {

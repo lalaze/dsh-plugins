@@ -10,7 +10,7 @@ import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Curso
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
 import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
-import { transcript, type TurnSource } from './transcript.js';
+import { modelSwitchNote, transcript, type TurnSource } from './transcript.js';
 import { decidePermission, unattendedAnswer } from '../agents/tools.js';
 import { isTeamPrompt, teamMemberNote, type TeamMember } from './agent-teams.js';
 import type { ToolHost } from '../core/dsh-host.js';
@@ -473,6 +473,7 @@ export class RemoteCliAdapter extends LlmAdapter {
             yield* viewed(entry.item);
           }
           if (entry.item.type === 'error') { if (recovered) yield* textChunk('text', `\n\n${String(entry.item.message)}\n`); else throw new LlmError(String(entry.item.message), 'REMOTE_CLI_FAILED'); }
+          if (entry.item.type === 'model_switch') yield* textChunk('text', `\n\n> ${modelSwitchNote(entry.item, currentPrompt)}\n\n`);
           if (entry.item.type === 'interrupted') interrupted = true;
         }
         cursor = page.endCursor ?? cursor;

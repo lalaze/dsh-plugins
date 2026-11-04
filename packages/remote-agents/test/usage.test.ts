@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTurnUsage, remoteUsageRecord } from '../src/agents/usage.js';
+import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTurnUsage, remoteUsageRecord, remoteUsageRecords } from '../src/agents/usage.js';
 import type { HostConfig, Task } from '../src/core/domain.js';
 import { CacheSection, formatReset, formatTokens } from '../src/client/composer/usage.js';
 import { fixture } from './fakes.js';
@@ -155,4 +155,30 @@ test('usage records name the CLI, host and remote directory, and tell conversati
   assert.equal(remoteUsageRecord({ ...chat, chat: undefined } as unknown as Task, hosts, usage, { startedAt: null, failed: false }).purpose, 'remote-session');
   // Claude's `opus` alias is recorded as the model that ran.
   assert.equal(remoteUsageRecord({ ...chat, provider: 'claude', model: 'opus' } as unknown as Task, hosts, usage, { startedAt: null, failed: false, model: 'claude-opus-5-5' }).model, 'claude-opus-5-5');
+});
+
+test('a Claude turn is recorded once per model that ran it, or once when the CLI does not say', () => {
+  // The shape a real CLI sends, including what a turn's models did not use.
+  const models = claudeModelUsage({
+    'claude-fable-5-1': { inputTokens: 1644, outputTokens: 143360, cacheReadInputTokens: 13080307, cacheCreationInputTokens: 408995, webSearchRequests: 0, costUSD: 1.5, contextWindow: 1000000, canonicalModel: 'claude-fable-5-1' },
+    'claude-opus-4-8': { inputTokens: 206, outputTokens: 119239, cacheReadInputTokens: 0, cacheCreationInputTokens: 854987 },
+    'claude-haiku-5-5': { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    '<synthetic>': { inputTokens: 3, outputTokens: 1 },
+    damaged: null,
+  });
+  assert.deepEqual(models, [
+    { model: 'claude-fable-5-1', usage: { inputTokens: 1644, outputTokens: 143360, cacheReadTokens: 13080307, cacheWriteTokens: 408995 } },
+    { model: 'claude-opus-4-8', usage: { inputTokens: 206, outputTokens: 119239, cacheWriteTokens: 854987 } },
+  ]);
+  for (const nothing of [undefined, null, 'claude', {}, { 'claude-opus-5-5': { inputTokens: 0, outputTokens: 0 } }]) assert.equal(claudeModelUsage(nothing), undefined);
+  const hosts = [{ id: 'h1', label: 'Build box', connection: 'me@build' }] as HostConfig[];
+  const task = { id: 't1', hostId: 'h1', cwd: '/srv/app', provider: 'claude', model: 'opus', chat: { sessionId: 'dsh-1' } } as unknown as Task;
+  const total = { inputTokens: 1, outputTokens: 2 }, startedAt = '2026-11-04T02:00:00.000Z', now = Date.parse('2026-11-04T02:00:05.000Z');
+  const records = remoteUsageRecords(task, hosts, total, { startedAt, failed: true, model: 'claude-opus-4-8', models }, now);
+  assert.deepEqual(records.map(r => [r.model, r.usage]), models!.map(m => [m.model, m.usage]), 'the last model does not take the whole turn');
+  assert.equal(new Set(records.map(r => r.id)).size, 2);
+  for (const record of records) assert.deepEqual({ ...record, id: '', model: '', usage: total }, { ...remoteUsageRecord(task, hosts, total, { startedAt, failed: true }, now), id: '', model: '' });
+  // Older CLIs report no shares, so the turn's total goes to the model it ended on, as before.
+  assert.deepEqual(remoteUsageRecords(task, hosts, total, { startedAt, failed: false, model: 'claude-opus-4-8' }, now).map(r => [r.model, r.usage]), [['claude-opus-4-8', total]]);
+  assert.deepEqual(remoteUsageRecords(task, hosts, total, { startedAt, failed: false }, now).map(r => [r.model, r.usage]), [['opus', total]]);
 });

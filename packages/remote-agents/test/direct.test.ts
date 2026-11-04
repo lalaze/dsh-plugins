@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { SshBackend, CLI_PROVIDERS } from '../src/agents/backend.js';
 import { JsonlPeer, quote, type Child, type SshTransport, type WireMessage } from '../src/core/ssh.js';
 import { Store } from '../src/core/store.js';
+import type { FinishedTurn } from '../src/core/domain.js';
 import { TaskHistory } from '../src/agents/history.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { decodeAntigravityModels } from '../src/agents/antigravity.js';
@@ -270,6 +271,40 @@ test('finished turns record their token usage in the timeline and report it once
       assert.equal(reports[1].model, undefined);
     }
   }
+});
+
+test('a turn Claude moved to another model says so where it happened, and each model keeps what it used', async t => {
+  const { service, ssh, request, store } = await fixture(t, 'claude');
+  const reports: FinishedTurn[] = [];
+  store.usageListeners.add((_task, _usage, turn) => reports.push(turn));
+  const agent = await service.create(request); await tick();
+  const live = ssh.live;
+  // As a real CLI sends it.
+  const fallback = { type: 'system', subtype: 'model_refusal_fallback', trigger: 'refusal', direction: 'retry', scope: 'session', original_model: 'claude-fable-5-1', fallback_model: 'claude-opus-4-8', request_id: 'req_1', api_refusal_category: 'cyber', retracted_message_uuids: ['u1'], content: "Fable 5.1's safeguards flagged this message.", uuid: 'u2', session_id: 's1' };
+  const switches = async () => (await service.detail(agent.id)).timeline!.entries.filter(e => e.item.type === 'model_switch').map(e => e.item);
+  live.emit({ type: 'assistant', parent_tool_use_id: null, message: { model: 'claude-fable-5-1', content: [{ type: 'text', text: 'Looking' }] } });
+  // A subagent's fallback leaves the session on its model, and an older CLI's other directions are not a new switch.
+  live.emit({ ...fallback, scope: 'local' }); live.emit({ ...fallback, direction: 'sticky' }); await tick();
+  assert.deepEqual(await switches(), []);
+  live.emit(fallback);
+  live.emit({ type: 'assistant', parent_tool_use_id: null, message: { model: 'claude-opus-4-8', content: [{ type: 'text', text: 'Retried' }] } });
+  live.emit({ type: 'result', subtype: 'success', usage: { input_tokens: 7, output_tokens: 90 }, model_usage_since_last_result: {
+    'claude-fable-5-1': { inputTokens: 5, outputTokens: 20, cacheReadInputTokens: 100, cacheCreationInputTokens: 0, costUSD: 0.1 },
+    'claude-opus-4-8': { inputTokens: 2, outputTokens: 70, cacheReadInputTokens: 300, cacheCreationInputTokens: 40, costUSD: 0.2 },
+  } }); await tick();
+  assert.deepEqual(await switches(), [{ type: 'model_switch', from: 'claude-fable-5-1', to: 'claude-opus-4-8', category: 'cyber' }]);
+  const order = (await service.detail(agent.id)).timeline!.entries.map(e => e.item.text ?? e.item.type);
+  assert.ok(order.indexOf('Looking') < order.indexOf('model_switch') && order.indexOf('model_switch') < order.indexOf('Retried'), 'the switch shows between the replies');
+  assert.equal(reports.length, 1, 'one turn, one report');
+  assert.deepEqual(reports[0].models, [
+    { model: 'claude-fable-5-1', usage: { inputTokens: 5, outputTokens: 20, cacheReadTokens: 100 } },
+    { model: 'claude-opus-4-8', usage: { inputTokens: 2, outputTokens: 70, cacheReadTokens: 300, cacheWriteTokens: 40 } },
+  ]);
+  // The same refusal on a turn Claude started itself opens that turn, so the switch is not left after the previous one.
+  live.emit({ ...fallback, api_refusal_category: null }); await tick();
+  const entries = (await service.detail(agent.id)).timeline!.entries, last = entries.at(-1)!, before = entries.at(-2)!;
+  assert.deepEqual(last.item, { type: 'model_switch', from: 'claude-fable-5-1', to: 'claude-opus-4-8' });
+  assert.equal(before.item.type, 'user_message'); assert.equal(before.item.unprompted, true); assert.ok(last.turnId, 'the switch belongs to the turn it opened');
 });
 
 test('Codex context and cache snapshots survive detach, restart and resume without double counting', async t => {

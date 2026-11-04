@@ -104,6 +104,21 @@ test('the Cordis plugin mounts its native model route with standard DSH services
   await mounted.dispose(); assert.equal(ctx.llm.listProviders().some(p => p.id === CODEX_PROVIDER), false);
 });
 
+test('the reply says where Claude moved to another model, in the language of the message', async t => {
+  for (const [prompt, expected] of [
+    ['Fix the login', /Looking\n\n> \*\*Model switched\.\*\* claude-fable-5-1's safeguards stopped this request \(cyber\), so claude-opus-4-8 retried it\. .*pick a different one.*\n\nRetried$/],
+    ['修复登录', /Looking\n\n> \*\*模型已切换。\*\* claude-fable-5-1 的安全机制拦截了这条消息 \(cyber\)，这一轮改由 claude-opus-4-8 重试。.*选另一个模型.*\n\nRetried$/],
+  ] as const) {
+    const { adapter, options, remote } = await setup(t);
+    remote.onCreate = agent => {
+      remote.append(agent.id, { type: 'assistant_message', text: 'Looking' });
+      remote.append(agent.id, { type: 'model_switch', from: 'claude-fable-5-1', to: 'claude-opus-4-8', category: 'cyber' });
+      remote.append(agent.id, { type: 'assistant_message', text: 'Retried' });
+    };
+    assert.match(text(await collect(adapter.stream(options(prompt)))), expected);
+  }
+});
+
 test('streaming, retry and follow-ups reuse the bound CLI without repeating a prompt or old output', async t => {
   const { adapter, options, remote, store } = await setup(t);
   remote.onCreate = agent => {

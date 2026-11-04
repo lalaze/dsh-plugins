@@ -14,6 +14,8 @@ const LABELS = {
     own: (cli: string, turns: number) => `**${cli} continued on its own: ${turns} ${turns === 1 ? 'turn' : 'turns'}** without a new message, as after a background task it ran finished.`,
     omitted: (turns: number) => `_${turns} earlier ${turns === 1 ? 'turn is' : 'turns are'} not shown. The full record is in Settings → Remote agents → Open sessions._`,
     you: 'You', continued: 'Continued on its own', tools: 'Tools', interrupted: 'Interrupted', attachments: (n: number) => `${n} ${n === 1 ? 'attachment' : 'attachments'}`,
+    switched: (from: string, to: string) => `Switched from ${from} to ${to}`,
+    switchNote: (from: string, to: string, category: string) => `**Model switched.** ${from}'s safeguards stopped this request${category}, so ${to} retried it. Later turns in this session stay on ${to}, and the model picker does not change to show it. To use another model, pick a different one; it applies to your next message.`,
   },
   zh: {
     title: (cli: string, creator: string | undefined, turns: number) => `**这段 ${cli} 会话的历史记录**${creator ? `（在 ${creator} 上开始）` : ''}，共 ${turns} 轮。在这里发消息会接着同一个会话继续。`,
@@ -21,11 +23,19 @@ const LABELS = {
     own: (cli: string, turns: number) => `**${cli} 自行继续了 ${turns} 轮**，没有新消息，例如它跑的后台任务完成后接着做。`,
     omitted: (turns: number) => `_前面还有 ${turns} 轮没有显示，完整记录在「设置 → 远程智能体 → 打开会话」里。_`,
     you: '你', continued: '自行继续', tools: '工具', interrupted: '已中断', attachments: (n: number) => `${n} 个附件`,
+    switched: (from: string, to: string) => `从 ${from} 切换到 ${to}`,
+    switchNote: (from: string, to: string, category: string) => `**模型已切换。** ${from} 的安全机制拦截了这条消息${category}，这一轮改由 ${to} 重试。这段会话后面的轮次也继续用 ${to}，模型选择器不会跟着变。要换模型，选另一个模型，发下一条消息时生效。`,
   },
 };
 
+/** What the chat says at a `model_switch` item, in the language of what the user wrote. */
+export function modelSwitchNote(item: TimelineEntry['item'], userText: string): string {
+  const labels = /[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en;
+  return labels.switchNote(String(item.from), String(item.to), item.category ? ` (${String(item.category)})` : '');
+}
+
 /** `unprompted`: the CLI started the turn itself; `user` then holds the task notices it got, if any. */
-interface Turn { user?: string; at?: string; unprompted?: true; attachments: number; replies: string[]; tools: Map<string, number>; errors: string[]; interrupted: boolean }
+interface Turn { user?: string; at?: string; unprompted?: true; attachments: number; replies: string[]; tools: Map<string, number>; errors: string[]; switches: [string, string][]; interrupted: boolean }
 
 /** A cut keeps code fences balanced, so the rest of the transcript does not render as code. */
 const fences = (text: string) => (text.match(/^\s*```/gm) ?? []).length;
@@ -55,7 +65,7 @@ function stamp(value: string | undefined): string {
 export function transcript(entries: readonly TimelineEntry[], options: { cli: string; creator?: string; elsewhere?: { from: TurnSource } }): { text: string; lastMessageId?: string } {
   const turns: Turn[] = [];
   let turn: Turn | undefined, replying = false, lastMessageId: string | undefined;
-  const current = () => turn ??= (turns.push({ attachments: 0, replies: [], tools: new Map(), errors: [], interrupted: false }), turns.at(-1)!);
+  const current = () => turn ??= (turns.push({ attachments: 0, replies: [], tools: new Map(), errors: [], switches: [], interrupted: false }), turns.at(-1)!);
   const seenTools = new Set<string>();
   for (const entry of entries) {
     const item = entry.item;
@@ -84,6 +94,7 @@ export function transcript(entries: readonly TimelineEntry[], options: { cli: st
       const name = typeof item.name === 'string' && item.name ? item.name : 'Tool';
       target.tools.set(name, (target.tools.get(name) ?? 0) + 1);
     } else if (item.type === 'error') target.errors.push(String(item.message ?? ''));
+    else if (item.type === 'model_switch') target.switches.push([String(item.from), String(item.to)]);
     else if (item.type === 'interrupted' || item.type === 'turn_end' && item.status === 'canceled') target.interrupted = true;
   }
   // The user's language decides; a turn the CLI started itself has no user text, so its replies stand in.
@@ -98,6 +109,7 @@ export function transcript(entries: readonly TimelineEntry[], options: { cli: st
     const reply = t.replies.map(r => r.trim()).filter(Boolean).join('\n\n');
     const notes = [
       ...(t.tools.size ? [`${labels.tools}: ${[...t.tools].map(([name, count]) => count > 1 ? `${name} ×${count}` : name).join(' · ')}`] : []),
+      ...t.switches.map(([from, to]) => labels.switched(from, to)),
       ...t.errors.filter(Boolean).map(error => head(error.replace(/\s+/g, ' '), 300)),
       ...(t.interrupted ? [labels.interrupted] : []),
     ];

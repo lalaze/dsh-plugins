@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { RemoteAgentsService } from './agents/service.js';
 import { remoteTasks } from './agents/tasks.js';
 import { delegationTools } from './agents/tools.js';
-import { remoteUsageRecord, type RemoteUsageRecord } from './agents/usage.js';
+import { remoteUsageRecords, type RemoteUsageRecord } from './agents/usage.js';
 import { installChat, scheduleSessionRepair } from './chat/install.js';
 import { ChatProjects } from './chat/projects.js';
 import type { SyncAgent } from './chat/native-chat.js';
@@ -21,7 +21,7 @@ import { installWorkspaces } from './workspace/install.js';
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
-    /** Every finished remote CLI turn: main-chat replies, delegated agents and turns sent from the sessions panel. */
+    /** Every finished remote CLI turn, once per model it used: main-chat replies, delegated agents and turns sent from the sessions panel. */
     'remote-agents/usage'(record: RemoteUsageRecord): void;
     /** Emitted by DSH's agent registry for each new or resumed conversation agent. */
     'agent/created'(payload: { agent: SyncAgent }): undefined | Promise<undefined>;
@@ -49,7 +49,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   // spans many model calls and would misstate the conversation's context size.
   store.usageListeners.add((taskId, usage, turn) => {
     const task = store.task(t => t.id === taskId);
-    if (task) ctx.emit('remote-agents/usage', remoteUsageRecord(task, store.hosts(), usage, turn));
+    if (task) for (const record of remoteUsageRecords(task, store.hosts(), usage, turn)) ctx.emit('remote-agents/usage', record);
   });
   ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered',
     fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing) });

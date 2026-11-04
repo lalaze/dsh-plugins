@@ -44,3 +44,15 @@ test('a turn the CLI started itself is headed by the notice it got, even an empt
   ]);
   assert.deepEqual(rows.map(r => [r.kind, r.text]), [['user_message', 'Build it'], ['assistant_message', 'Done'], ['unprompted', 'Background command "Run Codex" completed (exit code 0)'], ['assistant_message', 'Checking'], ['unprompted', ''], ['assistant_message', 'Again']]);
 });
+
+test('a model switch is its own row between the replies around it', () => {
+  const rows = timelineRows([
+    entry(1, { type: 'assistant_message', text: 'Looking' }),
+    entry(2, { type: 'model_switch', from: 'claude-fable-5-1', to: 'claude-opus-4-8', category: 'cyber' }),
+    entry(3, { type: 'assistant_message', text: 'Retried' }),
+    entry(4, { type: 'model_switch', from: 'claude-opus-4-8', to: 'claude-sonnet-5-5' }),
+  ]);
+  assert.deepEqual(rows.map(r => r.kind), ['assistant_message', 'model_switch', 'assistant_message', 'model_switch']);
+  assert.deepEqual(rows[1].switched, { from: 'claude-fable-5-1', to: 'claude-opus-4-8', category: 'cyber' });
+  assert.deepEqual(rows[3].switched, { from: 'claude-opus-4-8', to: 'claude-sonnet-5-5' });
+});

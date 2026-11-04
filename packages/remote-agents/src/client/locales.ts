@@ -234,6 +234,7 @@ export const zh: Record<string, string> = {
   "Session history": "会话历史",
   "This turn was stopped.": "本轮任务已停止。",
   "{provider} continued on its own.": "{provider} 自行继续。",
+  "{from}'s safeguards stopped this request{category}, so {to} retried it. Later turns in this session stay on {to}, and the model picker does not change to show it. To use another model, pick a different one; it applies to your next message.": "{from} 的安全机制拦截了这条消息{category}，这一轮改由 {to} 重试。这段会话后面的轮次也继续用 {to}，模型选择器不会跟着变。要换模型，选另一个模型，发下一条消息时生效。",
   "Continue in the main chat. Pending approvals can also be answered here.": "在主对话中继续交流，也可以在这里处理待审批请求。",
   "Delivery is unconfirmed. Check the same message before sending another.": "消息送达情况未确认，请先检查原消息再发送下一条。",
   "Message the agent": "给智能体发消息",

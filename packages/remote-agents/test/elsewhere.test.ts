@@ -161,6 +161,14 @@ test('turns from elsewhere read in the conversation\'s language, with what was a
     `**1 turn on Mac mini**, in the same Claude session.\n\n---\n\n**You** · ${stamp(entries[0].timestamp)}\n\nShip it\n\n**Claude**\n\nShipped.\n\n_Tools: Bash_`);
   assert.match(transcript(entries, { cli: 'Claude', elsewhere: { from: undefined } }).text, /^\*\*1 turn sent elsewhere\*\*/);
 });
+test('a turn from elsewhere that changed model says so, in the conversation\'s language', () => {
+  const entries = (text: string) => [
+    entry(1, { type: 'user_message', text, clientMessageId: 'm1' }), entry(2, { type: 'assistant_message', text: 'OK' }),
+    entry(3, { type: 'model_switch', from: 'claude-fable-5-1', to: 'claude-opus-4-8', category: 'cyber' }),
+  ];
+  assert.match(transcript(entries('Ship it'), { cli: 'Claude' }).text, /_Switched from claude-fable-5-1 to claude-opus-4-8_/);
+  assert.match(transcript(entries('发布吧'), { cli: 'Claude' }).text, /_从 claude-fable-5-1 切换到 claude-opus-4-8_/);
+});
 function stamp(value: string) {
   const date = new Date(value), two = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;

@@ -125,6 +125,7 @@ export const styles = `
 .dsh-ra .ra-message-time{text-align:right;margin-top:6px}
 .dsh-ra .ra-message[data-kind=error]{color:var(--ra-bad)}
 .dsh-ra .ra-message[data-kind=interrupted],.dsh-ra .ra-message[data-kind=unprompted]{color:var(--ra-muted);font-size:13px}
+.dsh-ra .ra-message[data-kind=model_switch]{color:var(--ra-warn);font-size:13px}
 .dsh-ra .ra-markdown{font-size:16px;line-height:1.8}.dsh-ra .ra-markdown>p{max-width:650px}
 .dsh-ra .ra-markdown :is(p,ul,ol,blockquote,pre){margin:0 0 14px}
 .dsh-ra .ra-markdown>:last-child{margin-bottom:0}

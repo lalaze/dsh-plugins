@@ -11,7 +11,7 @@ export function mergeTimeline(previous: TimelineState, page: TimelinePage, older
     endCursor: reset ? page.endCursor : older ? previous.endCursor : page.endCursor ?? previous.endCursor,
     hasOlder: reset || older ? page.hasOlder : previous.hasOlder, hasNewer: !reset && older ? previous.hasNewer : page.hasNewer };
 }
-export interface TimelineRow { key: number; kind: string; text: string; detail?: string; status?: string; timestamp?: string }
+export interface TimelineRow { key: number; kind: string; text: string; detail?: string; status?: string; timestamp?: string; switched?: { from: string; to: string; category?: string } }
 export function timelineRows(entries: TimelineEntry[]): TimelineRow[] {
   const rows: TimelineRow[] = [], tools = new Map<string, TimelineRow>();
   const confirmed = new Set(entries.filter(e => e.item.type === 'delivery').map(e => e.item.clientMessageId));
@@ -28,6 +28,11 @@ export function timelineRows(entries: TimelineEntry[]): TimelineRow[] {
       const detail = typeof item.detail === 'string' ? item.detail : JSON.stringify(item.detail ?? {}, null, 2);
       const value = { key: existing?.key ?? entry.seqStart, kind: item.type, timestamp: entry.timestamp, text: String(item.name ?? 'Tool'), detail, status: String(item.status ?? '') };
       if (existing) Object.assign(existing, value); else { tools.set(id, value); rows.push(value); }
+      continue;
+    }
+    if (item.type === 'model_switch') {
+      textRow = undefined;
+      rows.push({ key: entry.seqStart, kind: item.type, text: '', timestamp: entry.timestamp, switched: { from: String(item.from), to: String(item.to), ...(typeof item.category === 'string' ? { category: item.category } : {}) } });
       continue;
     }
     const text = typeof item.text === 'string' ? item.text : typeof item.message === 'string' ? item.message : '';
