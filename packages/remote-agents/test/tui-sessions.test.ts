@@ -69,6 +69,16 @@ test('Claude Code\'s title is read from its records, and /rename wins', () => {
   assert.equal(claudeTitle(record('ai-title', 'aiTitle', 'x'.repeat(200)))?.length, 120);
 });
 
+test('without a title from Claude Code, the first prompt titles the conversation, as in DSH\'s other conversations', () => {
+  const prompt = (text: string | null) => JSON.stringify({ type: 'last-prompt', lastPrompt: text, sessionId: 'x' });
+  assert.equal(claudeTitle(`${prompt('hello')}\n${prompt('你在什么目录？')}`), 'hello', 'the first one, not the latest');
+  assert.equal(claudeTitle(`${prompt(null)}\n${prompt('  fix\n the   login ')}`), 'fix the login', 'a record without text is skipped');
+  assert.equal(claudeTitle(`${prompt('/model')}\n${prompt('hello')}`), 'hello', 'a slash command says nothing about the conversation');
+  assert.equal(claudeTitle(prompt('x'.repeat(200)))?.length, 80);
+  assert.equal(claudeTitle(`${prompt('hello')}\n${record('ai-title', 'aiTitle', 'Greeting')}`), 'Greeting', 'Claude\'s own title wins once it writes one');
+  assert.equal(claudeTitle(`${prompt('hello')}\n${record('ai-title', 'aiTitle', 'Greeting')}\n${record('custom-title', 'customTitle', 'Mine')}`), 'Mine');
+});
+
 test('a conversation follows Claude Code\'s title until it is renamed in DSH', async t => {
   const { tui, titles, remote } = await setup(t);
   await tui.start('remote', {}, signal); titles.length = 0;
@@ -84,6 +94,17 @@ test('a conversation follows Claude Code\'s title until it is renamed in DSH', a
   assert.equal(await tui.syncTitle('remote', 'My name', signal), undefined, 'renamed in DSH');
   assert.equal(remote.reads.length, reads, 'and nothing is read from the machine');
   assert.equal(await tui.syncTitle('unknown', undefined, signal), undefined, 'not a TUI conversation');
+});
+
+test('a prompt title gives way to Claude Code\'s own when it arrives', async t => {
+  const { tui, titles, remote } = await setup(t);
+  await tui.start('remote', {}, signal); titles.length = 0;
+  const prompt = JSON.stringify({ type: 'last-prompt', lastPrompt: 'hello', sessionId: 'x' });
+  remote.records = prompt;
+  assert.equal(await tui.syncTitle('remote', 'Claude Code', signal), 'hello');
+  remote.records = `${prompt}\n${record('ai-title', 'aiTitle', 'Greeting')}`;
+  assert.equal(await tui.syncTitle('remote', 'hello', signal), 'Greeting');
+  assert.deepEqual(titles, ['hello', 'Greeting']);
 });
 
 test('the title 0.2.81 gave a conversation is replaced', async t => {

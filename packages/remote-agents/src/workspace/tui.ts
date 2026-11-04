@@ -7,7 +7,7 @@ interface TuiSession { append(type: string, data: unknown): unknown }
 interface SessionRow { sessionId: string; blank?: boolean }
 
 /** What a conversation shows until Claude Code has titled it. */
-const FIRST_TITLE = 'Claude Code', MAX_TITLE = 120;
+const FIRST_TITLE = 'Claude Code', MAX_TITLE = 120, MAX_PROMPT_TITLE = 80;
 /** The title 0.2.81 gave every TUI conversation, which is replaced like the plugin's own. */
 const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
 /** Model and effort reach the remote command line inside double quotes. */
@@ -19,18 +19,27 @@ export function tuiClaudeSession(sessionId: string): string {
   return [hash.slice(0, 8), hash.slice(8, 12), `4${hash.slice(13, 16)}`, `8${hash.slice(17, 20)}`, hash.slice(20, 32)].join('-');
 }
 
-/** A title Claude Code recorded in its session file; one the user set with /rename wins over its own. */
+/**
+ * A conversation's title from Claude Code's session file: the user's /rename, then Claude's own title, then the first
+ * prompt. Claude often writes no title, for a short greeting especially, and DSH titles its other conversations by their
+ * first prompt too. The first `last-prompt` record holds the first prompt; a later one may have no text.
+ */
 export function claudeTitle(records: string): string | undefined {
-  let custom: unknown, own: unknown;
+  let custom: unknown, own: unknown, prompt: string | undefined;
   for (const line of records.split('\n')) {
     try {
-      const record = JSON.parse(line) as { type?: string; customTitle?: unknown; aiTitle?: unknown };
+      const record = JSON.parse(line) as { type?: string; customTitle?: unknown; aiTitle?: unknown; lastPrompt?: unknown };
       if (record.type === 'custom-title') custom = record.customTitle;
       if (record.type === 'ai-title') own = record.aiTitle;
+      if (record.type === 'last-prompt' && prompt === undefined && typeof record.lastPrompt === 'string') {
+        const text = record.lastPrompt.replace(/\s+/g, ' ').trim();
+        // A slash command says nothing about the conversation.
+        if (text && !text.startsWith('/')) prompt = text.slice(0, MAX_PROMPT_TITLE);
+      }
     } catch { /* not a whole record */ }
   }
-  const title = typeof custom === 'string' && custom.trim() ? custom : own;
-  return typeof title === 'string' ? title.trim().slice(0, MAX_TITLE) || undefined : undefined;
+  const title = [custom, own].find(value => typeof value === 'string' && value.trim()) as string | undefined;
+  return title?.trim().slice(0, MAX_TITLE) ?? prompt;
 }
 
 /** The Claude model of a chat model route, `<project>/<cli>/<model>`. */
