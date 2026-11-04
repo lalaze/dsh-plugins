@@ -286,6 +286,7 @@ export class RemoteAgentsService {
             ...(task.serviceTier ? { serviceTier: task.serviceTier } : {}),
             modes: permissionModes(task.provider, task.modes ?? []), title: task.title, createdAt: task.createdAt, updatedAt: task.updatedAt ?? task.createdAt,
             archived: task.archived === true, delegated: task.origin === 'dsh', started: !!task.agentId, attached: !!live && live.status !== 'closed', status, pendingPermissions: pending,
+            ...(status === 'running' && live?.activeTurn?.unprompted ? { unprompted: true } : {}),
             ...(error ? { error } : {}), ...(resumable !== undefined ? { resumable } : {}), ...(task.native?.sessionId ? { nativeSessionId: task.native.sessionId } : {}),
             ...(live?.persistent ? { persistent: true } : {}), ...(live?.reconnecting && live.status !== 'closed' ? { reconnecting: true } : {}),
             ...(task.shared?.imported && task.shared.creator ? { creator: task.shared.creator } : {}), ...(controller ? { controller } : {}),

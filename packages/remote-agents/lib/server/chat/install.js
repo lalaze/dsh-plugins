@@ -71,8 +71,8 @@ export function installChat(ctx, service, projects, workspace) {
         scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
         for (const agent of host.agents.list?.() ?? [])
             wake(agent);
-        // A conversation in use here shows a turn another DSH ran in its CLI session once that turn ends. The history
-        // changes many times during the turn: look once it has been quiet for a moment.
+        // A conversation in use here shows a turn another DSH ran in its CLI session, or one the CLI ran by itself, once
+        // that turn ends. The history changes many times during the turn: look once it has been quiet for a moment.
         const followed = new Map();
         const historyChanged = (taskId) => {
             const sessionId = service.store.task(t => t.id === taskId)?.chat?.sessionId;

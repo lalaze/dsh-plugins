@@ -5,14 +5,16 @@ const LABELS = {
     en: {
         title: (cli, creator, turns) => `**History of this ${cli} session**${creator ? ` (started on ${creator})` : ''}, ${turns} ${turns === 1 ? 'turn' : 'turns'}. Messages sent here continue the same session.`,
         elsewhere: (cli, from, turns) => `**${turns} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}**, in the same ${cli} session.`,
+        own: (cli, turns) => `**${cli} continued on its own: ${turns} ${turns === 1 ? 'turn' : 'turns'}** without a new message, as after a background task it ran finished.`,
         omitted: (turns) => `_${turns} earlier ${turns === 1 ? 'turn is' : 'turns are'} not shown. The full record is in Settings → Remote agents → Open sessions._`,
-        you: 'You', tools: 'Tools', interrupted: 'Interrupted', attachments: (n) => `${n} ${n === 1 ? 'attachment' : 'attachments'}`,
+        you: 'You', continued: 'Continued on its own', tools: 'Tools', interrupted: 'Interrupted', attachments: (n) => `${n} ${n === 1 ? 'attachment' : 'attachments'}`,
     },
     zh: {
         title: (cli, creator, turns) => `**这段 ${cli} 会话的历史记录**${creator ? `（在 ${creator} 上开始）` : ''}，共 ${turns} 轮。在这里发消息会接着同一个会话继续。`,
         elsewhere: (cli, from, turns) => `**${from && 'name' in from ? `在 ${from.name} 上` : from ? '在「打开会话」里' : '在别处'}进行的 ${turns} 轮**，同一个 ${cli} 会话。`,
+        own: (cli, turns) => `**${cli} 自行继续了 ${turns} 轮**，没有新消息，例如它跑的后台任务完成后接着做。`,
         omitted: (turns) => `_前面还有 ${turns} 轮没有显示，完整记录在「设置 → 远程智能体 → 打开会话」里。_`,
-        you: '你', tools: '工具', interrupted: '已中断', attachments: (n) => `${n} 个附件`,
+        you: '你', continued: '自行继续', tools: '工具', interrupted: '已中断', attachments: (n) => `${n} 个附件`,
     },
 };
 /** A cut keeps code fences balanced, so the rest of the transcript does not render as code. */
@@ -56,6 +58,8 @@ export function transcript(entries, options) {
             next.user = String(item.text ?? '').replace(CONTEXT, '').trim();
             next.at = entry.timestamp;
             next.attachments = Array.isArray(item.attachments) ? item.attachments.length : 0;
+            if (item.unprompted === true)
+                next.unprompted = true;
             if (typeof item.clientMessageId === 'string')
                 lastMessageId = item.clientMessageId;
             continue;
@@ -88,10 +92,13 @@ export function transcript(entries, options) {
         else if (item.type === 'interrupted' || item.type === 'turn_end' && item.status === 'canceled')
             target.interrupted = true;
     }
-    const labels = /[㐀-鿿]/.test(turns.map(t => t.user ?? '').join('')) ? LABELS.zh : LABELS.en;
+    // The user's language decides; a turn the CLI started itself has no user text, so its replies stand in.
+    const labels = /[㐀-鿿]/.test(turns.map(t => t.unprompted ? t.replies.join('') : t.user ?? '').join('')) ? LABELS.zh : LABELS.en;
     const blocks = turns.map(t => {
         const parts = [];
-        if (t.user !== undefined) {
+        if (t.unprompted)
+            parts.push(`**${labels.continued}**${stamp(t.at)}${t.user ? `\n\n${closed(head(t.user, USER_LIMIT))}` : ''}`);
+        else if (t.user !== undefined) {
             const extra = t.attachments ? ` (${labels.attachments(t.attachments)})` : '';
             parts.push(`**${labels.you}**${stamp(t.at)}${extra}\n\n${closed(head(t.user || '…', USER_LIMIT))}`);
         }
@@ -115,7 +122,8 @@ export function transcript(entries, options) {
         size += blocks[i].length;
     }
     const omitted = blocks.length - shown.length;
-    const title = options.elsewhere ? labels.elsewhere(options.cli, options.elsewhere.from, turns.length) : labels.title(options.cli, options.creator, turns.length);
+    const title = !options.elsewhere ? labels.title(options.cli, options.creator, turns.length)
+        : turns.length && turns.every(t => t.unprompted) ? labels.own(options.cli, turns.length) : labels.elsewhere(options.cli, options.elsewhere.from, turns.length);
     const text = [title, ...(omitted ? [labels.omitted(omitted)] : []), ...shown].join('\n\n---\n\n');
     return { text, ...(lastMessageId ? { lastMessageId } : {}) };
 }

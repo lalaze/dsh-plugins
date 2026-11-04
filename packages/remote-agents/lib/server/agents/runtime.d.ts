@@ -6,7 +6,10 @@ import type { Store } from '../core/store.js';
 export declare function initializeCodex(peer: JsonlPeer): Promise<void>;
 export declare function initializeAcp(peer: JsonlPeer): Promise<any>;
 export interface SessionHooks {
-    turnEnded?(): void;
+    /** A turn ended; `unprompted` when the CLI started it itself rather than for a message (see `continueUnprompted`). */
+    turnEnded?(turn: {
+        unprompted: boolean;
+    }): void;
     /** Tokens a finished turn used, with when it started, whether it succeeded and the model that ran. */
     usage?(usage: TurnUsage, turn: FinishedTurn): void;
     /** The CLI process ended or was terminated; a relay's remote files can be removed. */
@@ -42,6 +45,8 @@ export declare class CliSession {
     private endedSent;
     private restoring;
     private imageInput;
+    /** Background tasks Claude reported finished while idle; they head the turn it starts for them. */
+    private notices;
     /** Items produced by the output line being processed, saved together with its relay offset. */
     private batch?;
     /** Images in that line's tool results, saved before its items so a chat reading them finds the files. */
@@ -96,6 +101,13 @@ export declare class CliSession {
     }): Promise<void>;
     private confirm;
     private complete;
+    /**
+     * Claude goes on without a message from DSH when a background task it ran finishes, or at a wake-up it scheduled.
+     * Its output would otherwise land after the previous turn's end, unseen, with the session reading as idle. Such
+     * output opens a turn of the CLI's own, headed by the task notices it got, saved and shown like any other turn.
+     * Only Claude's own output counts: a subagent it left running in the background may still stream while it is idle.
+     */
+    private continueUnprompted;
     private setContext;
     /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
     private turnUsage;

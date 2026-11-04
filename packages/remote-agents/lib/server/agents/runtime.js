@@ -52,6 +52,8 @@ export class CliSession {
     endedSent = false;
     restoring = false;
     imageInput = false;
+    /** Background tasks Claude reported finished while idle; they head the turn it starts for them. */
+    notices = [];
     /** Items produced by the output line being processed, saved together with its relay offset. */
     batch;
     /** Images in that line's tool results, saved before its items so a chat reading them finds the files. */
@@ -257,7 +259,7 @@ export class CliSession {
         this.activeMessage = id;
         this.agent.status = 'running';
         this.confirmed = message.item.delivery !== 'pending' || entries.some(e => e.item.type === 'delivery' && e.item.clientMessageId === id);
-        this.agent.activeTurn = { turnId: entries.findLast(e => e.turnId)?.turnId ?? randomUUID(), startedAt: message.timestamp };
+        this.agent.activeTurn = { turnId: entries.findLast(e => e.turnId)?.turnId ?? randomUUID(), startedAt: message.timestamp, ...(message.item.unprompted === true ? { unprompted: true } : {}) };
         for (const entry of entries)
             if (entry.item.type === 'tool_call')
                 this.tools.set(String(entry.item.callId), entry.item);
@@ -292,7 +294,9 @@ export class CliSession {
             await this.history.append({ type: 'user_message', text, clientMessageId: messageId, delivery: 'pending', ...(attachments.length ? { attachments: attachments.map(({ data, ...file }) => file) } : {}), ...(sentBy ? { sentBy } : {}) });
             if (messageId === this.task.id)
                 await this.store.update(state => { state.tasks.find(t => t.id === this.task.id).native.initialSent = true; });
+            // Claude hands the notices of its finished background tasks to this message; they head no turn of its own now.
             this.activeMessage = messageId;
+            this.notices = [];
             this.confirmed = false;
             this.partialText = false;
             this.agent.lastError = undefined;
@@ -320,8 +324,8 @@ export class CliSession {
         this.append({ type: 'delivery', clientMessageId: this.activeMessage });
     }
     complete(toolStatus = 'completed') {
+        const unprompted = this.agent.activeTurn?.unprompted === true;
         this.saveUsage();
-        this.hooks.turnEnded?.();
         this.turnModel = undefined;
         this.agent.status = 'idle';
         this.agent.activeTurn = null;
@@ -337,6 +341,26 @@ export class CliSession {
             done();
         this.stopWaiters.clear();
         this.activeMessage = undefined;
+        this.hooks.turnEnded?.({ unprompted });
+    }
+    /**
+     * Claude goes on without a message from DSH when a background task it ran finishes, or at a wake-up it scheduled.
+     * Its output would otherwise land after the previous turn's end, unseen, with the session reading as idle. Such
+     * output opens a turn of the CLI's own, headed by the task notices it got, saved and shown like any other turn.
+     * Only Claude's own output counts: a subagent it left running in the background may still stream while it is idle.
+     */
+    continueUnprompted(subagent = false) {
+        if (subagent || this.activeMessage || this.admitting || this.restoring || this.stopping || this.interrupting)
+            return;
+        const id = `cli-${randomUUID()}`;
+        this.append({ type: 'user_message', text: this.notices.join('\n'), clientMessageId: id, unprompted: true });
+        this.notices = [];
+        this.activeMessage = id;
+        this.confirmed = true;
+        this.partialText = false;
+        this.agent.lastError = undefined;
+        this.agent.status = 'running';
+        this.agent.activeTurn = { turnId: randomUUID(), startedAt: new Date().toISOString(), unprompted: true };
     }
     setContext(context) { if (context)
         this.agent.context = context; }
@@ -436,6 +460,13 @@ export class CliSession {
         }
         if (this.suspended)
             return; // A resume can replay native history already present in our log.
+        // Claude reports a background task it ran as finished. Mid-turn the notice is the turn's own business; while idle it
+        // heads the turn Claude starts for it (see `continueUnprompted`). A notice that starts no turn is kept for the next.
+        if (m.type === 'system' && m.subtype === 'task_notification' && !this.activeMessage && typeof m.summary === 'string' && m.summary) {
+            const notice = `${m.summary}${typeof m.status === 'string' && m.status && m.status !== 'completed' ? ` (${m.status})` : ''}`;
+            if (!this.notices.includes(notice))
+                this.notices.push(notice);
+        }
         if (m.event === 'step_update') {
             const step = m.step_update ?? {};
             this.confirm();
@@ -521,6 +552,8 @@ export class CliSession {
             this.claudeRequest(m);
         if (m.type === 'stream_event') {
             const event = m.event ?? {};
+            if (event.type === 'content_block_delta' && ['text_delta', 'thinking_delta'].includes(event.delta?.type))
+                this.continueUnprompted(!!m.parent_tool_use_id);
             if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
                 this.confirm();
                 this.partialText = true;
@@ -530,6 +563,7 @@ export class CliSession {
                 this.append({ type: 'reasoning', text: String(event.delta.thinking ?? '') });
         }
         if (m.type === 'assistant') {
+            this.continueUnprompted(!!m.parent_tool_use_id);
             this.confirm();
             // Subagent messages run in their own context window.
             const used = m.parent_tool_use_id ? undefined : claudeMessageTokens(m.message?.usage);
@@ -623,6 +657,7 @@ export class CliSession {
                 this.write(reply({}), inputId('auto', `claude-${m.request_id}`));
             return;
         }
+        this.continueUnprompted();
         const name = String(request.tool_name ?? 'Tool');
         // Only echo native allow-rule suggestions, and only after the user selects their scope.
         // Keep updates in this closure: the client supplies an action ID, never arbitrary rules.

@@ -48,7 +48,10 @@ export interface Backend {
     sharedWorkspaces?(timeout?: number): Promise<SharedWorkspace[]>;
     /** Called when the host reports its shared workspaces changed; returns the unsubscribe function. */
     onSharedWorkspaces?(listener: () => void): () => void;
-    /** Called with a task whose history another DSH drives, after it was brought up to date here; returns the unsubscribe function. */
+    /**
+     * Called with a task whose history grew without a message from this DSH: one another DSH drives, after it was brought
+     * up to date here, or one whose CLI ran a turn by itself; returns the unsubscribe function.
+     */
     onSharedHistory?(listener: (taskId: string) => void): () => void;
     /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
     sender?(instance: string, label: string): {

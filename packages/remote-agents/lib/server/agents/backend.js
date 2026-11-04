@@ -429,7 +429,17 @@ done`}`, 15_000, { login: false });
     }
     session(task, peer, history, relay) {
         // A finished turn changed the account's usage; read it again when it is next shown.
-        return new CliSession(peer, task, history, this.store, { turnEnded: () => this.accounts.delete(task.provider),
+        return new CliSession(peer, task, history, this.store, { turnEnded: ({ unprompted }) => {
+                this.accounts.delete(task.provider);
+                // A turn the CLI ran by itself grew the history without a message from here: told like one another DSH ran.
+                if (unprompted)
+                    for (const listener of this.historyListeners) {
+                        try {
+                            listener(task.id);
+                        }
+                        catch { /* A listener must not stop the session. */ }
+                    }
+            },
             usage: (usage, turn) => { for (const listener of this.store.usageListeners) {
                 try {
                     listener(task.id, usage, turn);
