@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.88:** Fixes a turn shown as it goes stopping early when the DSH running it goes away, such as a laptop going to sleep. The conversation used to end the turn after about a minute and never show the rest. It now waits until another DSH takes the CLI over and shows the turn to its end. If nobody takes over within two minutes of that DSH's status lapsing, the reply says so, and later output still appears. No action is needed.
+
 **Upgrading from 0.2.87:** A turn another DSH is running in a conversation's CLI session now shows in that conversation as it goes, instead of all at once when it ends. The conversation reads as running, and Stop there stops the turn. This also works for a conversation unused for a while or with no agent since DSH restarted. Tool rows still appear when the turn ends. On a phone, install `dsh-mobile` 0.3.4 on the DSH it connects to. No action is needed otherwise.
 
 **Upgrading from 0.2.86:** TUI conversations look calmer. The font is back to DSH's default of 13px, and a size you set in DSH's settings still applies. The column narrows to about 900px. The background goes from 0.62 to 0.92 opacity, leaving a faint trace of the wallpaper, so a busy image no longer turns it muddy. Chinese text no longer reads spaced out: with no font to install, the system's CJK font is scaled 12% to fill its two cells.

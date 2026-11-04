@@ -86,7 +86,7 @@ export function installChat(ctx: Context, service: RemoteAgentsService, projects
       const timer = setTimeout(() => {
         followed.delete(taskId);
         const agent = host.agents.get(sessionId) as SyncAgent | undefined;
-        void (agent ? adapter.catchUp(agent) : service.summary(taskId).then(summary => { if (busy(summary) && !summary.archived) return controller('sessionController').resolveAgent(sessionId); })).catch(() => {});
+        void (agent ? Promise.resolve().then(() => adapter.sync(agent) || adapter.catchUp(agent)) : service.summary(taskId).then(summary => { if (busy(summary) && !summary.archived) return controller('sessionController').resolveAgent(sessionId); })).catch(() => {});
       }, 1000);
       timer.unref?.(); followed.set(taskId, timer);
     };

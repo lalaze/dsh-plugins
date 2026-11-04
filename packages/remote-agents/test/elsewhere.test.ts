@@ -17,12 +17,12 @@ const entry = (seq: number, item: TimelineEntry['item']): TimelineEntry => ({ se
 const MAC_MINI = { instance: 'dsh-mac-mini', label: 'Mac mini' };
 
 /** A conversation on this DSH that ran one turn in a CLI session another DSH also drives. */
-async function setup(t: TestContext, first = '修复登录问题') {
+async function setup(t: TestContext, first = '修复登录问题', lapseMs?: number) {
   const base = await fixture(t), projects = new ChatProjects(base.service);
   await base.service.discoverHost(base.hostId); const [project] = projects.hosts();
   const adapter = new RemoteCliAdapter(projects, { agent: () => ({ id: 'dsh-agent' }), step: () => undefined, cwd: () => '/srv/project',
     workspace: async cwd => ({ hostIds: base.store.hosts().map(h => h.id), cwd }),
-    approval: { request: async () => 'allowed-once' }, userQuestions: { ask: async () => ({ answers: [] }) } }, 5);
+    approval: { request: async () => 'allowed-once' }, userQuestions: { ask: async () => ({ answers: [] }) } }, 5, lapseMs);
   t.after(() => adapter.close());
   const route = chatModelId(project.id, 'codex', 'remote-model'), sessionId = 'macbook-conversation';
   base.remote.onCreate = agent => { base.remote.append(agent.id, { type: 'assistant_message', text: '找到问题了。' }); };
@@ -117,6 +117,45 @@ test('a running turn shown here outlasts a moment when the other DSH reports not
     remote.append(agentId, { type: 'turn_end', clientMessageId: 'phone-1', status: 'completed' });
   }, 80);
   assert.match(await answer(sent[0]), /正在构建。[\s\S]*已发布 0\.2\.1。$/);
+});
+
+test('a running turn shown here lasts through silence and the lapse after it, as when the DSH running it goes away', async t => {
+  const { adapter, remote, task, agentId, elsewhere, agent, sent, answer } = await setup(t, undefined, 200);
+  const live = remote.live(task().id);
+  live.status = 'running';
+  elsewhere('phone-1', '提交发布', '正在构建。', MAC_MINI, false);
+  assert.equal(await adapter.catchUp(agent), true);
+  // Its status holds until its lease expires, here after longer than the limit, with nothing recorded meanwhile.
+  setTimeout(() => { live.status = 'idle'; }, 300);
+  // Then another DSH takes the CLI over and the relay replays what it missed.
+  setTimeout(() => {
+    remote.append(agentId, { type: 'assistant_message', text: '已发布 0.2.1。' });
+    remote.append(agentId, { type: 'turn_end', clientMessageId: 'phone-1', status: 'completed' });
+  }, 380);
+  assert.match(await answer(sent[0]), /正在构建。[\s\S]*已发布 0\.2\.1。$/);
+  assert.deepEqual(task().chat?.delivered, { messageId: 'phone-1', cursor: null, done: true });
+});
+
+test('a running turn nobody takes over ends here without being marked shown, and what follows still appears', async t => {
+  const { adapter, remote, task, agentId, elsewhere, agent, sent, answer } = await setup(t, undefined, 40);
+  const live = remote.live(task().id);
+  live.status = 'running';
+  elsewhere('phone-1', '提交发布', '正在构建。', MAC_MINI, false);
+  assert.equal(await adapter.catchUp(agent), true);
+  setTimeout(() => { live.status = 'idle'; }, 30);
+  assert.match(await answer(sent[0]), /正在构建。\n\n_工具: Bash_[\s\S]*The DSH running this turn went away\. Any further output appears here later\.$/);
+  const delivered = task().chat?.delivered;
+  assert.equal(delivered?.messageId, 'phone-1');
+  assert.ok(!delivered?.done, 'the turn has not ended');
+  assert.equal(await adapter.catchUp(agent), false, 'the rest is sync\'s to show');
+
+  remote.append(agentId, { type: 'assistant_message', text: '已发布 0.2.1。' });
+  remote.append(agentId, { type: 'turn_end', clientMessageId: 'phone-1', status: 'completed' });
+  assert.equal(adapter.sync(agent), true);
+  const rest = await answer(sent.at(-1)!);
+  assert.match(rest, /已发布 0\.2\.1。$/);
+  assert.doesNotMatch(rest, /正在构建/, 'output already shown is not repeated');
+  assert.equal(task().chat?.delivered?.done, true);
 });
 
 test('Stop here stops a turn another DSH is running that this conversation shows', async t => {

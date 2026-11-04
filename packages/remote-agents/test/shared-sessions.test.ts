@@ -5,7 +5,11 @@ import { appendFile, mkdir, readdir, readFile, rename, rm, writeFile } from 'nod
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { LocalTransport, relayHarness, transcript, waitFor } from './relay-harness.js';
+import type { Message } from '@deepseek-ai/dsh-llm';
+import { SessionId } from '@deepseek-ai/dsh-session';
 import { SshBackend } from '../src/agents/backend.js';
+import { chatModelId, chatProviderId, RemoteCliAdapter, type SyncAgent } from '../src/chat/native-chat.js';
+import { ChatProjects } from '../src/chat/projects.js';
 import type { SharedSessions } from '../src/agents/shared-sessions.js';
 import { RemoteWorkspaces } from '../src/workspace/remote-workspaces.js';
 import { WorkspaceAccess } from '../src/workspace/access.js';
@@ -251,6 +255,37 @@ test('a conversation is told when another DSH runs a turn in it, even with its h
 const sessionsDir = (home: string) => join(home, '.dsh-remote-agents', 'shared-v1', 'sessions');
 /** Replace a file the way the registry does, so watchers notice. */
 async function replace(file: string, value: unknown) { await writeFile(`${file}.tmp`, JSON.stringify(value)); await rename(`${file}.tmp`, file); }
+
+test('a conversation showing another DSH\'s turn shows it to the end when that DSH quits and this one takes the CLI over', { skip: !supported }, async t => {
+  const { h, second, secondHost } = await twoInstances(t);
+  await second.service.discoverHost(secondHost);
+  const agent = await h.first.service.create(h.request('claude', 'stream 1'));
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'first turn');
+  await imported(second.service, agent.id);
+  const shownAlready = (await transcript(second.service, agent.id)).entries.find(e => e.item.type === 'user_message')!.item.clientMessageId as string;
+  const route = chatModelId(secondHost, 'claude', 'fake-model'), provider = chatProviderId('claude'), sessionId = SessionId('main-chat-2');
+  await second.store.update(state => { state.tasks.find(task => task.id === agent.id)!.chat = { sessionId, route, delivered: { messageId: shownAlready, cursor: null, done: true } }; });
+  const adapter = new RemoteCliAdapter(new ChatProjects(second.service), { agent: () => ({ id: 'dsh-agent' }), step: () => undefined, cwd: () => h.cwd,
+    workspace: async cwd => ({ hostIds: [secondHost], cwd }), approval: { request: async () => 'allowed-once' }, userQuestions: { ask: async () => ({ answers: [] }) } }, 10);
+  t.after(() => adapter.close());
+  const sent: Message[] = [];
+  const conversation: SyncAgent = { session: { id: sessionId, requestHeader: () => ({ config: { provider, model: route } }) as never }, send: notice => { sent.push(notice); } };
+
+  await h.first.service.send(agent.id, message('gate'));
+  await waitFor(async () => (await second.service.summary(agent.id)).status === 'running' && (await transcript(second.service, agent.id)).text.includes('waiting'), 'the turn running on the first DSH');
+  assert.equal(await adapter.catchUp(conversation), true);
+  const stream = adapter.stream({ provider, model: route, sessionId, messages: sent });
+  let shown = '';
+  while (!shown.includes('waiting')) { const { value, done } = await stream.next(); assert.ok(!done, 'the reply goes on'); if (value.type === 'text-delta') shown += value.text; }
+
+  await h.first.service.close();
+  await h.gate();
+  for await (const chunk of stream) if (chunk.type === 'text-delta') shown += chunk.text;
+  assert.match(shown, /after-gate 你好$/, 'the rest comes from the CLI after the second DSH takes it over');
+  assert.equal(shown.match(/waiting/g)?.length, 1, 'output already shown is not repeated');
+  assert.equal(second.store.task(task => task.id === agent.id)?.chat?.delivered?.done, true);
+  assert.equal((await second.service.summary(agent.id)).controller, undefined, 'the second DSH drives it now');
+});
 
 test('another DSH copies a session’s history only when it is read', { skip: !supported }, async t => {
   const { h, second } = await twoInstances(t);
