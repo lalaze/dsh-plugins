@@ -32,6 +32,8 @@ export class FakeRemote {
   created?: Task;
   onCreate?: (agent: Agent, task: Task) => void;
   onSend?: (agent: Agent, text: string) => void;
+  /** Like a session whose SSH pipe is gone: Stop cannot reach the CLI, which keeps running. */
+  unreachable = false;
   append(id: string, item: TimelineEntry['item']): void {
     const entries = this.entries.get(id) ?? []; const seq = entries.length + 1;
     entries.push({ seqStart: seq, seqEnd: seq, timestamp: new Date().toISOString(), item }); this.entries.set(id, entries);
@@ -107,6 +109,7 @@ export class FakeRemote {
     },
     stop: async id => {
       const agent = this.agents.get(id)!;
+      if (this.unreachable) return;
       if (agent.status !== 'running' && !agent.pendingPermissions.length) return;
       this.stops++; this.interrupt(id);
     },

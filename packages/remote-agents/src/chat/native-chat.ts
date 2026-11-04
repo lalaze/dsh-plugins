@@ -67,6 +67,8 @@ export interface ChatHost extends Partial<ToolHost> {
 const hash = (...parts: string[]) => createHash('sha256').update(JSON.stringify(parts)).digest('hex');
 /** DSH aborts streams with a cancel cause; disposal is a shutdown, not a user's Stop. */
 const disposal = (reason: unknown) => !!reason && typeof reason === 'object' && ['disposed', 'released'].includes(String((reason as { kind?: unknown }).kind));
+/** Whether a response shows this history entry. The rest, as usage, turn ends and empty reasoning, only keep its records. */
+const showsOutput = ({ item }: TimelineEntry) => item.type === 'assistant_message' || item.type === 'reasoning' ? !!item.text : item.type === 'tool_call' || item.type === 'error' || item.type === 'model_switch';
 const RELEASED = { kind: 'released' } as const;
 /** What the CLI is asked to do: human messages and AgentTeams assignments, never context DSH injects. */
 const prompted = (m: GenerateOptions['messages'][number]) => m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source));
@@ -439,7 +441,7 @@ export class RemoteCliAdapter extends LlmAdapter {
       if (markdown) { yield* textChunk('text', markdown); yield* endBlock(); }
     };
     // Record what reached this conversation, so output produced while DSH was away is shown later.
-    let savedAt = 0, reached: { id: string; cursor: Cursor | undefined } | undefined;
+    let savedAt = 0, reached: { id: string; cursor: Cursor | undefined } | undefined, followed = false;
     const delivered = async (id: string, cursor: Cursor | undefined, done = false, force = false) => {
       if (!done) reached = { id, cursor };
       // Progress is re-derivable: a lost second of this cursor only re-shows already-seen output, deduplicated by id.
@@ -465,6 +467,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         const state = await service.state(taskId), page = await service.messageTimeline(taskId, id, cursor);
         if (!page.found) throw new LlmError('Remote message delivery was not recorded. Retry without changing the message.', 'REMOTE_DELIVERY_UNKNOWN');
         for (const entry of page.entries) {
+          if (showsOutput(entry)) followed = true;
           if (entry.item.type === 'assistant_message') { yield* textChunk('text', await images.push(String(entry.item.text ?? ''))); continue; }
           yield* textChunk('text', images.flush());
           if (entry.item.type === 'reasoning') yield* textChunk('reasoning', String(entry.item.text ?? ''));
@@ -541,6 +544,7 @@ export class RemoteCliAdapter extends LlmAdapter {
           admitted = true;
           yield* follow(pending.messageId, pending.cursor ?? undefined, true);
           settled = true; await delivered(pending.messageId, undefined, true);
+          shown = followed;
         } else { settled = true; shown = false; }
         // Then the turns another DSH or Open sessions ran since, once they finished. A failed read leaves them for the next message.
         const turns = task && await this.elsewhere(taskId, signal).catch(() => undefined);
@@ -579,7 +583,7 @@ export class RemoteCliAdapter extends LlmAdapter {
           const previous = service.store.task(t => t.id === task.id)?.chat?.delivered;
           if (previous && !previous.done && previous.messageId !== messageId) {
             const rest = await service.messageTimeline(task.id, previous.messageId, previous.cursor ?? undefined).catch(() => undefined);
-            if (rest?.found && (rest.entries.length || busy(await service.summary(task.id)))) {
+            if (rest?.found && (rest.hasNewer || rest.entries.some(showsOutput) || busy(await service.summary(task.id)))) {
               admitted = true;
               yield* textChunk('text', 'Output from the previous response, completed while DSH was disconnected:\n\n');
               yield* follow(previous.messageId, previous.cursor ?? undefined, true);
@@ -601,6 +605,8 @@ export class RemoteCliAdapter extends LlmAdapter {
           admitted = true; await service.send(task.id, { id: messageId, text, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
         } else admitted = true;
       }
+      // A Stop or shutdown from here on concerns this message, even before any of its output is read.
+      reached = { id: messageId, cursor: undefined };
       // Turns another DSH or Open sessions ran since this conversation's last response come first, in the order they ran.
       const turns = task && await this.elsewhere(taskId, signal, messageId).catch(() => undefined);
       if (turns) yield* textChunk('text', `${turns.text}\n\n---\n\n`);
@@ -622,7 +628,13 @@ export class RemoteCliAdapter extends LlmAdapter {
       const shutdown = this.released || service.stopped || disposal(controller.signal.reason) || disposal(options.signal?.reason);
       try {
         if (reached && !settled) await delivered(reached.id, reached.cursor, false, true);
-        if (admitted && !settled && !shutdown && service.store.task(t => t.id === taskId)) await service.stop(taskId);
+        if (admitted && !settled && !shutdown && service.store.task(t => t.id === taskId)) {
+          await service.stop(taskId);
+          // The CLI took the Stop, so this turn goes no further and nothing is left to catch up on. A CLI out of reach
+          // never hears it and may still be running: what it writes then appears later, as after a disconnect.
+          const agent = reached && await service.summary(taskId).catch(() => undefined);
+          if (reached && agent?.attached && !busy(agent)) await delivered(reached.id, reached.cursor, true);
+        }
       }
       finally { try { rows.close(); } finally { this.active.delete(sessionId); this.controllers.delete(controller); } }
     }

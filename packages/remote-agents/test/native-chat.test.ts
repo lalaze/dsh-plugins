@@ -327,6 +327,94 @@ test('DSH Stop cancels remote work and releases the conversation for a later fol
   await collect(adapter.stream(options('Continue safely'))); assert.equal(remote.sends, 1);
 });
 
+const MISSED = 'Output from the previous response, completed while DSH was disconnected:';
+const syncAgent = (input: GenerateOptions, send: (message: ReturnType<typeof createUserMessage>) => void = () => {}) => ({ session: { id: input.sessionId!, requestHeader: () => ({ config: { provider: input.provider, model: input.model } }) as ReturnType<Session['requestHeader']> }, send });
+
+test('DSH Stop before any output leaves nothing to catch up on', async t => {
+  const { adapter, options, remote, store } = await setup(t);
+  remote.onCreate = agent => { agent.status = 'running'; };
+  const controller = new AbortController(), input = options('Work', { signal: controller.signal });
+  const stopped = assert.rejects(collect(adapter.stream(input)), /abort/i);
+  while (!store.snapshot().tasks[0]?.chat?.delivered) await pause(1);
+  controller.abort(); await stopped;
+  assert.equal(adapter.sync(syncAgent(input)), false, 'reopening the conversation shows no catch-up');
+  assert.equal(text(await collect(adapter.stream(options('Next')))), 'Follow-up completed.');
+});
+
+test('DSH Stop drops what the CLI wrote after the last read instead of showing it as missed', async t => {
+  const { adapter, options, remote } = await setup(t);
+  remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
+  const controller = new AbortController(), input = options('Work', { signal: controller.signal }), iterator = adapter.stream(input);
+  await iterator.next();
+  remote.append([...remote.agents.keys()][0], { type: 'assistant_message', text: 'Late' }); controller.abort();
+  await assert.rejects(collect(iterator), /abort/i);
+  assert.equal(adapter.sync(syncAgent(input)), false);
+  assert.equal(text(await collect(adapter.stream(options('Next')))), 'Follow-up completed.');
+});
+
+test('DSH Stop right after sending does not show the stopped turn as sent elsewhere', async t => {
+  const { adapter, options, remote } = await setup(t);
+  await collect(adapter.stream(options('First')));
+  const controller = new AbortController();
+  remote.onSend = agent => { agent.status = 'running'; controller.abort(); };
+  await assert.rejects(collect(adapter.stream(options('Stopped', { signal: controller.signal }))), /abort/i);
+  remote.onSend = undefined;
+  assert.equal(text(await collect(adapter.stream(options('Next')))), 'Follow-up completed.');
+});
+
+test('DSH Stop that cannot reach the CLI still catches up on what it went on to write', async t => {
+  const { adapter, options, remote } = await setup(t);
+  remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
+  const controller = new AbortController(), iterator = adapter.stream(options('Work', { signal: controller.signal }));
+  await iterator.next();
+  remote.unreachable = true; controller.abort();
+  await assert.rejects(collect(iterator), /abort/i);
+  const [id, agent] = [...remote.agents.entries()][0];
+  assert.equal(agent.status, 'running', 'the CLI never heard the Stop');
+  remote.append(id, { type: 'assistant_message', text: 'Finished offline' }); agent.status = 'idle'; remote.unreachable = false;
+  assert.equal(text(await collect(adapter.stream(options('Next')))), `${MISSED}\n\nFinished offline\n\n---\n\nFollow-up completed.`);
+});
+
+test('a CLI failure already shown is not repeated as output missed while DSH was disconnected', async t => {
+  const { adapter, options, remote } = await setup(t);
+  remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
+  const iterator = adapter.stream(options('Work'));
+  const seen: StreamChunk[] = [(await iterator.next()).value as StreamChunk, (await iterator.next()).value as StreamChunk];
+  assert.equal(text(seen), 'Working');
+  const [id, agent] = [...remote.agents.entries()][0];
+  remote.append(id, { type: 'error', message: 'Boom' }); agent.status = 'idle';
+  await assert.rejects(collect(iterator), /Boom/);
+  assert.equal(text(await collect(adapter.stream(options('Next')))), 'Follow-up completed.');
+});
+
+for (const [name, tail] of [
+  ['usage and a turn end', [{ type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } }, { type: 'turn_end', status: 'completed' }]],
+  ['empty reasoning', [{ type: 'reasoning', text: '' }, { type: 'turn_end', status: 'completed' }]],
+] as const) test(`a disconnect that missed only ${name} shows no catch-up heading`, async t => {
+  const { adapter, options, remote } = await setup(t);
+  remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
+  const shutdown = new AbortController(), first = options('Work', { signal: shutdown.signal }), iterator = adapter.stream(first);
+  await iterator.next(); shutdown.abort({ kind: 'disposed' });
+  await assert.rejects(collect(iterator));
+  const [id, agent] = [...remote.agents.entries()][0];
+  for (const item of tail) remote.append(id, { ...item }); agent.status = 'idle';
+  // Reopening the conversation wakes it, as it cannot know what is left without reading: the reply says there was nothing.
+  let notice: ReturnType<typeof createUserMessage> | undefined;
+  assert.equal(adapter.sync(syncAgent(first, message => { notice = message; })), true);
+  assert.equal(text(await collect(adapter.stream({ ...first, signal: undefined, messages: [...first.messages, notice!] }))), 'The remote CLI produced no further output.');
+});
+
+test('a disconnect that missed only bookkeeping leaves the next message without a heading', async t => {
+  const { adapter, options, remote } = await setup(t);
+  remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };
+  const shutdown = new AbortController(), iterator = adapter.stream(options('Work', { signal: shutdown.signal }));
+  await iterator.next(); shutdown.abort({ kind: 'disposed' });
+  await assert.rejects(collect(iterator));
+  const [id, agent] = [...remote.agents.entries()][0];
+  remote.append(id, { type: 'usage', usage: { inputTokens: 1, outputTokens: 1 } }); remote.append(id, { type: 'turn_end', status: 'completed' }); agent.status = 'idle';
+  assert.equal(text(await collect(adapter.stream(options('Next')))), 'Follow-up completed.');
+});
+
 test('closing a stream early stops remote work; disposing the adapter or DSH shutdown leaves it running', async t => {
   const { adapter, options, remote } = await setup(t);
   remote.onCreate = agent => { agent.status = 'running'; remote.append(agent.id, { type: 'assistant_message', text: 'Working' }); };

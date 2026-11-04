@@ -256,6 +256,31 @@ test('native DSH conversations: shutdown leaves the turn running; it catches up 
   assert.equal(prompts.length, 4, 'nothing was resent or interrupted');
 });
 
+for (const [provider, label] of PROTOCOLS) test(`${label}: stopping a native DSH conversation leaves nothing to catch up on`, async t => {
+  const { ChatProjects } = await import('../src/chat/projects.js');
+  const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/chat/native-chat.js');
+  const { createUserMessage } = await import('@deepseek-ai/dsh-llm');
+  const { SessionId } = await import('@deepseek-ai/dsh-session');
+  const h = await relayHarness(t);
+  await h.first.service.discoverHost(h.hostId);
+  const adapter = new RemoteCliAdapter(new ChatProjects(h.first.service), { agent: () => ({ id: 'dsh-agent' }), step: () => undefined, cwd: () => h.cwd,
+    workspace: async cwd => ({ hostIds: [h.hostId], cwd }), approval: { request: async () => 'allowed-once' }, userQuestions: { ask: async () => ({ answers: [] }) } }, 10);
+  t.after(() => adapter.close());
+  const user = (text: string) => createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text }] });
+  const options = (messages: ReturnType<typeof user>[], signal?: AbortSignal) => ({ provider: chatProviderId(provider), model: chatModelId(h.hostId, provider, 'fake-model'), sessionId: SessionId('stopped'), messages, ...(signal ? { signal } : {}) });
+  const first = user('gate'), controller = new AbortController(), stream = adapter.stream(options([first], controller.signal));
+  for (let seen = ''; !seen.includes('waiting');) { const { value, done } = await stream.next(); assert.ok(!done, 'stream ended early'); if (value.type === 'text-delta') seen += value.text; }
+  controller.abort();
+  await assert.rejects((async () => { for await (const _ of stream); })(), /abort/i);
+  const [task] = h.first.store.snapshot().tasks;
+  assert.equal((await transcript(h.first.service, task.id)).entries.at(-1)?.item.type, 'interrupted');
+  assert.equal(task.chat?.delivered?.done, true, 'the turn has ended, so reopening the conversation shows no catch-up');
+  let text = '';
+  for await (const chunk of adapter.stream(options([first, user('after stop')]))) if (chunk.type === 'text-delta') text += chunk.text;
+  assert.doesNotMatch(text, /disconnected/);
+  assert.doesNotMatch(text, /---/);
+});
+
 test('relay links deliver large payloads once, drop partial frames and keep exact UTF-8 byte offsets', async t => {
   const { RelayLink } = await import('../src/agents/relay.js');
   const { JsonlPeer } = await import('../src/core/ssh.js');
