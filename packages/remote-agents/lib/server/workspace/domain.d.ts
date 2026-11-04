@@ -1,6 +1,8 @@
 /** Shared, browser-safe workspace contracts. Paths are relative to a verified workspace. */
 /** The launcher's file name, which DSH's terminal shell menu shows as the item label. */
 export declare const TERMINAL_LAUNCHER = "Remote workspace";
+/** Beside it in the same directory: the same terminal, starting Claude Code. */
+export declare const CLAUDE_LAUNCHER = "Remote Claude";
 /** `terminalShell` is the Remote workspace launcher path, as listed in DSH's terminal shell menu. */
 export interface WorkspaceTarget {
     hostId: string;
