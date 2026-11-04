@@ -232,6 +232,22 @@ test('a message names the DSH that sent it, and the DSH following the session is
   assert.deepEqual(second.service.sender(secondHost, sender.id, sender.label), { self: true });
 });
 
+test('a conversation is told when another DSH runs a turn in it, even with its history closed; other sessions are not', { skip: !supported }, async t => {
+  const { h, second } = await twoInstances(t);
+  const agent = await h.first.service.create(h.request('codex', 'stream 1')), other = await h.first.service.create(h.request('codex', 'stream 1'));
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle' && (await h.first.service.summary(other.id)).status === 'idle', 'first turns');
+  await imported(second.service, agent.id); await imported(second.service, other.id);
+  await second.store.update(state => { state.tasks.find(task => task.id === agent.id)!.chat = { sessionId: 'main-chat-2', route: 'project/codex/fake-model' }; });
+  const changed: string[] = [];
+  second.service.sharedHistoryListeners.add(id => changed.push(id));
+  await h.first.service.send(agent.id, message('gate')); await h.first.service.send(other.id, message('gate'));
+  await waitFor(() => changed.includes(agent.id), 'the conversation is told while the turn runs');
+  assert.equal((await second.service.summary(agent.id)).status, 'running');
+  assert.equal(existsSync(join(h.root, 'state-second', 'events', `${other.id}.jsonl`)), false, 'a session without a conversation is still copied only when read');
+  assert.equal(changed.includes(other.id), false);
+  await h.gate();
+});
+
 const sessionsDir = (home: string) => join(home, '.dsh-remote-agents', 'shared-v1', 'sessions');
 /** Replace a file the way the registry does, so watchers notice. */
 async function replace(file: string, value: unknown) { await writeFile(`${file}.tmp`, JSON.stringify(value)); await rename(`${file}.tmp`, file); }

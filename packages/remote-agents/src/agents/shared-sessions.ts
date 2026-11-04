@@ -292,8 +292,9 @@ export class SharedSessions {
     const task = local();
     if (!task || task.hostId !== this.owner.hostId) return;
     if (this.held.has(id)) void this.serial(id, () => this.push(id)).catch(() => {});
-    // Histories are copied when read here; one already open, such as a session on screen, follows right away.
-    else if (this.owner.loaded(id)) void this.serial(id, () => this.pull(id)).then(() => this.owner.followed?.(id)).catch(() => {});
+    // Histories are copied when read here; one already open, such as a session on screen, follows right away. So does a
+    // conversation's while another DSH runs a turn in it, however long it was unused: the conversation shows that turn live.
+    else if (this.owner.loaded(id) || task.chat && this.remoteBusy(id)) void this.serial(id, () => this.pull(id)).then(() => this.owner.followed?.(id)).catch(() => {});
     this.adoptIfOrphaned(id);
   }
   /** A CLI still running on the host whose DSH went away, or never had one, is driven from here. */
@@ -537,6 +538,11 @@ export class SharedSessions {
     const { instance: _instance, ...live } = session.live as Partial<Agent> & { instance?: string; at?: string };
     delete (live as { at?: string }).at;
     return structuredClone(live);
+  }
+  /** Whether the other DSH driving a session reports a turn in it. */
+  private remoteBusy(id: string): boolean {
+    const live = this.remoteLive(id);
+    return !!live && (live.status === 'running' || live.status === 'initializing' || !!live.activeTurn || !!live.pendingPermissions?.length);
   }
   /** The other DSH driving a session, by name. */
   controller(id: string): string | undefined {
