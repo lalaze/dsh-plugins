@@ -24,12 +24,35 @@ export function remoteUsageRecord(task, hosts, usage, turn, now = Date.now()) {
         ...(host ? { host: host.label } : {}), workspace: task.executionCwd ?? task.cwd,
     };
 }
-/** Claude's `result.usage`: the whole turn, across every model call it made. */
+/**
+ * A turn's records: one per model when the CLI reported each model's share, so a turn that changed model, or whose
+ * subagents ran another one, is not all counted as its last model. Otherwise one record of the turn's own total.
+ */
+export function remoteUsageRecords(task, hosts, usage, turn, now = Date.now()) {
+    if (!turn.models?.length)
+        return [remoteUsageRecord(task, hosts, usage, turn, now)];
+    return turn.models.map(share => remoteUsageRecord(task, hosts, share.usage, { ...turn, model: share.model }, now));
+}
+/** Claude's `result.usage`: the main thread's model calls this turn. Subagents are only in `claudeModelUsage`. */
 export function claudeTurnUsage(usage) {
     const input = count(usage?.input_tokens), output = count(usage?.output_tokens);
     if (input === undefined || output === undefined)
         return undefined;
     return { inputTokens: input, outputTokens: output, ...optional('cacheReadTokens', count(usage?.cache_read_input_tokens)), ...optional('cacheWriteTokens', count(usage?.cache_creation_input_tokens)) };
+}
+/**
+ * Claude's `result.model_usage_since_last_result`: what each model used since the previous result, including subagents
+ * and a refused request retried on another model. Newer CLIs send it; older ones leave this undefined.
+ */
+export function claudeModelUsage(models) {
+    if (!models || typeof models !== 'object')
+        return undefined;
+    const shares = Object.entries(models).flatMap(([model, used]) => {
+        const usage = claudeTurnUsage({ input_tokens: used?.inputTokens, output_tokens: used?.outputTokens, cache_read_input_tokens: used?.cacheReadInputTokens, cache_creation_input_tokens: used?.cacheCreationInputTokens });
+        // Claude's own notices, such as API errors, are `<synthetic>` and use nothing.
+        return usage && model && !model.startsWith('<') && usage.inputTokens + usage.outputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) > 0 ? [{ model, usage }] : [];
+    });
+    return shares.length ? shares : undefined;
 }
 /** Codex counters, whose input includes cached input. */
 function codexCounters(value) {

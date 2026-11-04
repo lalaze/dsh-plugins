@@ -279,12 +279,16 @@ export interface TaskEntry {
 export interface TaskItem {
     seq: number;
     time: number;
-    type: 'user' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'interrupted' | 'end';
+    type: 'user' | 'assistant' | 'reasoning' | 'tool' | 'error' | 'interrupted' | 'model_switch' | 'end';
     text?: string;
     /** Tool calls: name, status and what they did. */
     name?: string;
     status?: string;
     callId?: string;
+    /** A model switch: the model the CLI left, the one it moved to and why, when it said. */
+    from?: string;
+    to?: string;
+    category?: string;
 }
 export interface TaskPermission {
     id: string;

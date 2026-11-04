@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { RemoteAgentsService } from './agents/service.js';
 import { remoteTasks } from './agents/tasks.js';
 import { delegationTools } from './agents/tools.js';
-import { remoteUsageRecord } from './agents/usage.js';
+import { remoteUsageRecords } from './agents/usage.js';
 import { installChat, scheduleSessionRepair } from './chat/install.js';
 import { ChatProjects } from './chat/projects.js';
 import { accessOf, loggerOf } from './core/dsh-host.js';
@@ -34,7 +34,8 @@ export async function apply(ctx, config = {}) {
     store.usageListeners.add((taskId, usage, turn) => {
         const task = store.task(t => t.id === taskId);
         if (task)
-            ctx.emit('remote-agents/usage', remoteUsageRecord(task, store.hosts(), usage, turn));
+            for (const record of remoteUsageRecords(task, store.hosts(), usage, turn))
+                ctx.emit('remote-agents/usage', record);
     });
     ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered',
         fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing) });

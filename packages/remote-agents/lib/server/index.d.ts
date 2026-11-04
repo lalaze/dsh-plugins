@@ -4,7 +4,7 @@ import { type RemoteUsageRecord } from './agents/usage.js';
 import type { SyncAgent } from './chat/native-chat.js';
 declare module '@deepseek-ai/cordis' {
     interface Events {
-        /** Every finished remote CLI turn: main-chat replies, delegated agents and turns sent from the sessions panel. */
+        /** Every finished remote CLI turn, once per model it used: main-chat replies, delegated agents and turns sent from the sessions panel. */
         'remote-agents/usage'(record: RemoteUsageRecord): void;
         /** Emitted by DSH's agent registry for each new or resumed conversation agent. */
         'agent/created'(payload: {

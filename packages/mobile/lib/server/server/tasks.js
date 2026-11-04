@@ -54,6 +54,9 @@ export function taskItems(entries) {
             case 'interrupted':
                 items.push({ seq: entry.seqStart, time: at, type: 'interrupted' });
                 break;
+            case 'model_switch':
+                items.push({ seq: entry.seqStart, time: at, type: 'model_switch', from: String(item.from ?? ''), to: String(item.to ?? ''), ...(typeof item.category === 'string' ? { category: item.category } : {}) });
+                break;
             case 'turn_end':
                 items.push({ seq: entry.seqStart, time: at, type: 'end', ...(typeof item.status === 'string' ? { status: item.status } : {}) });
                 break;

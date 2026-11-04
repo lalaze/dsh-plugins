@@ -23,8 +23,18 @@ export interface RemoteUsageRecord {
  * The model is the one the CLI reported running, or the task's selection when it named none.
  */
 export declare function remoteUsageRecord(task: Task, hosts: readonly HostConfig[], usage: TurnUsage, turn: FinishedTurn, now?: number): RemoteUsageRecord;
-/** Claude's `result.usage`: the whole turn, across every model call it made. */
+/**
+ * A turn's records: one per model when the CLI reported each model's share, so a turn that changed model, or whose
+ * subagents ran another one, is not all counted as its last model. Otherwise one record of the turn's own total.
+ */
+export declare function remoteUsageRecords(task: Task, hosts: readonly HostConfig[], usage: TurnUsage, turn: FinishedTurn, now?: number): RemoteUsageRecord[];
+/** Claude's `result.usage`: the main thread's model calls this turn. Subagents are only in `claudeModelUsage`. */
 export declare function claudeTurnUsage(usage: any): TurnUsage | undefined;
+/**
+ * Claude's `result.model_usage_since_last_result`: what each model used since the previous result, including subagents
+ * and a refused request retried on another model. Newer CLIs send it; older ones leave this undefined.
+ */
+export declare function claudeModelUsage(models: unknown): FinishedTurn['models'];
 /** Codex reports running thread totals; a turn used the difference since the previous turn ended. */
 export declare function codexTurnUsage(total: any, before: any): TurnUsage | undefined;
 /** ACP's optional `PromptResponse.usage` for one prompt turn. */

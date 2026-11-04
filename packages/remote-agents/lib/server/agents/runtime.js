@@ -4,7 +4,7 @@ import { CHAT_IMAGE_LIMIT, CHAT_IMAGES, chatImageName, imageExtensionOf, viewedI
 import { list, questionsOf } from '../core/domain.js';
 import { RelayExit, RelayReleased } from './relay.js';
 import { configureAcpSession } from './acp.js';
-import { acpTurnUsage, claudeMessageTokens, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTurnUsage, contextUsage } from './usage.js';
+import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTurnUsage, contextUsage } from './usage.js';
 /** The file name an image is shown with, from the remote path it was read from. */
 const imageName = (path) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
 const contentText = (content) => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
@@ -365,11 +365,11 @@ export class CliSession {
     setContext(context) { if (context)
         this.agent.context = context; }
     /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
-    turnUsage(usage, failed = false) {
+    turnUsage(usage, failed = false, models) {
         if (!usage || !this.activeMessage)
             return;
         this.append({ type: 'usage', usage });
-        this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed, ...(this.turnModel ? { model: this.turnModel } : {}) });
+        this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed, ...(this.turnModel ? { model: this.turnModel } : {}), ...(models ? { models } : {}) });
     }
     setTokenUsage(usage) { this.agent.tokenUsage = usage; this.saveUsage(); }
     /** Save request snapshots as they arrive, including during long tool loops and resume. */
@@ -466,6 +466,12 @@ export class CliSession {
             const notice = `${m.summary}${typeof m.status === 'string' && m.status && m.status !== 'completed' ? ` (${m.status})` : ''}`;
             if (!this.notices.includes(notice))
                 this.notices.push(notice);
+        }
+        // Claude's safeguards refused a request: the CLI retries it on another model and stays there, while the picker keeps
+        // showing the selection, so the switch is shown where it happened. A subagent's fallback (`local`) changes nothing else.
+        if (m.type === 'system' && m.subtype === 'model_refusal_fallback' && m.direction === 'retry' && m.scope !== 'local' && typeof m.original_model === 'string' && typeof m.fallback_model === 'string') {
+            this.continueUnprompted();
+            this.append({ type: 'model_switch', from: m.original_model, to: m.fallback_model, ...(typeof m.api_refusal_category === 'string' && m.api_refusal_category ? { category: m.api_refusal_category } : {}) });
         }
         if (m.event === 'step_update') {
             const step = m.step_update ?? {};
@@ -590,7 +596,7 @@ export class CliSession {
                 }
         if (m.type === 'result') {
             this.confirm();
-            this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success');
+            this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success', claudeModelUsage(m.model_usage_since_last_result));
             if (m.is_error || m.subtype !== 'success')
                 this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed'));
             else

@@ -5,7 +5,7 @@ import { createToolResultMessage, createUserMessage, LlmAdapter, LlmError, Messa
 import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath } from '../core/domain.js';
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles } from '../agents/attachments.js';
 import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
-import { transcript } from './transcript.js';
+import { modelSwitchNote, transcript } from './transcript.js';
 import { decidePermission, unattendedAnswer } from '../agents/tools.js';
 import { isTeamPrompt, teamMemberNote } from './agent-teams.js';
 export const CHAT_PROVIDER = 'remote-cli';
@@ -538,6 +538,8 @@ export class RemoteCliAdapter extends LlmAdapter {
                         else
                             throw new LlmError(String(entry.item.message), 'REMOTE_CLI_FAILED');
                     }
+                    if (entry.item.type === 'model_switch')
+                        yield* textChunk('text', `\n\n> ${modelSwitchNote(entry.item, currentPrompt)}\n\n`);
                     if (entry.item.type === 'interrupted')
                         interrupted = true;
                 }
