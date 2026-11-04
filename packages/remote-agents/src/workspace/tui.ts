@@ -12,6 +12,8 @@ const FIRST_TITLE = 'Claude Code', MAX_TITLE = 120, MAX_PROMPT_TITLE = 80;
 const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
 /** Model and effort reach the remote command line inside double quotes. */
 const COMMAND_VALUE = /^[\w.:[\]-]+$/;
+/** The chat provider of the remote Claude Code. */
+const CLAUDE_PROVIDER = 'remote-cli-claude';
 
 /** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
 export function tuiClaudeSession(sessionId: string): string {
@@ -57,17 +59,31 @@ function claudeModel(route: unknown): string | undefined {
 export class TuiSessions {
   constructor(private readonly store: Store, private readonly dsh: {
     /** Rejects a conversation that is not a verified remote workspace. */
-    verify(sessionId: string, signal: AbortSignal): Promise<unknown>;
+    verify(sessionId: string, signal: AbortSignal): Promise<{ hostId: string }>;
     session(sessionId: string): TuiSession | undefined;
     list(): Promise<readonly SessionRow[]>;
     rename(sessionId: string, title: string): Promise<void>;
+    selectModel(selection: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<void>;
     /** The title records of a Claude session on the conversation's machine. */
     titleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string>;
   }) {}
   list(): string[] { return this.store.snapshot().tuiSessions ?? []; }
+  /**
+   * Tell DSH the conversation's model, once. A session shows its model in the workspace list only if a selection or a
+   * request recorded it: a TUI conversation sends no requests, and the composer may only be showing a remembered default.
+   * The icon is all that depends on this, so a failure is retried by the next title check rather than reported.
+   * @param route - the composer's model route; a conversation started by an earlier version has none, so its is rebuilt.
+   */
+  private async recordModel(sessionId: string, hostId: string, route?: string): Promise<void> {
+    const details = this.store.snapshot().tuiDetails?.[sessionId];
+    if (details?.modelRecorded) return;
+    await this.dsh.selectModel({ sessionId, provider: CLAUDE_PROVIDER, model: route ?? `${hostId}/claude/${encodeURIComponent(details?.model ?? 'default')}`,
+      ...(details?.effort ? { reasoningEffort: details.effort } : {}) });
+    await this.store.update(state => { state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...state.tuiDetails?.[sessionId], modelRecorded: true } }; });
+  }
   /** @param selection - the composer's model route and effort, which the first launch of Claude Code uses. */
   async start(sessionId: string, selection: { model?: unknown; effort?: unknown }, signal: AbortSignal): Promise<void> {
-    await this.dsh.verify(sessionId, signal);
+    const target = await this.dsh.verify(sessionId, signal);
     if (this.list().includes(sessionId)) return;
     const session = this.dsh.session(sessionId);
     if (!session) throw new RemoteError('This conversation is not open', 409);
@@ -80,6 +96,7 @@ export class TuiSessions {
       state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title: FIRST_TITLE,
         ...(model && COMMAND_VALUE.test(model) ? { model } : {}), ...(typeof effort === 'string' && COMMAND_VALUE.test(effort) ? { effort } : {}) } };
     });
+    await this.recordModel(sessionId, target.hostId, model ? selection.model as string : undefined).catch(() => {});
     session.append('turn/start', { turn: 1 });
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
     await this.dsh.rename(sessionId, FIRST_TITLE);
@@ -92,8 +109,11 @@ export class TuiSessions {
   async syncTitle(sessionId: string, current: unknown, signal: AbortSignal): Promise<string | undefined> {
     if (!this.list().includes(sessionId)) return;
     const shown = typeof current === 'string' ? current : undefined, saved = this.store.snapshot().tuiDetails?.[sessionId];
-    if (shown !== undefined && shown !== saved?.title && !OLD_TITLE.test(shown)) return;
-    await this.dsh.verify(sessionId, signal);
+    const renamed = shown !== undefined && shown !== saved?.title && !OLD_TITLE.test(shown);
+    if (renamed && saved?.modelRecorded) return;
+    const target = await this.dsh.verify(sessionId, signal);
+    await this.recordModel(sessionId, target.hostId).catch(() => {});
+    if (renamed) return;
     const title = claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(sessionId), signal));
     if (!title || title === shown) return;
     await this.dsh.rename(sessionId, title);

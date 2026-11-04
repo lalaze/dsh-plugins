@@ -122,12 +122,17 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     stopRemoteSessions: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
   });
   ctx.effect(() => () => worktrees.close());
-  const sessionController = () => ctx.get('sessionController') as { list(input: object): Promise<{ items?: { sessionId: string; blank?: boolean }[] }>; rename(input: { sessionId: string; title: string }): Promise<unknown> } | undefined;
+  const sessionController = () => ctx.get('sessionController') as { list(input: object): Promise<{ items?: { sessionId: string; blank?: boolean }[] }>; rename(input: { sessionId: string; title: string }): Promise<unknown>; selectModel(input: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown> } | undefined;
   const tui = new TuiSessions(store, {
     verify: (id, signal) => files.target(id, signal),
     session: id => (ctx.get('sessions') as { get?(id: string): { append(type: string, data: unknown): unknown } | undefined } | undefined)?.get?.(id),
     list: async () => (await sessionController()?.list({}))?.items ?? [],
     rename: async (sessionId, title) => { await sessionController()?.rename({ sessionId, title }); },
+    selectModel: async selection => {
+      const controller = sessionController();
+      if (!controller) throw new Error('DSH sessions are not available yet');
+      await controller.selectModel(selection);
+    },
     titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
   });
   return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };

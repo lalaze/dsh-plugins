@@ -61,7 +61,8 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const claude = claudeSession ? 'if find "\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/projects" -maxdepth 2 -name ' + claudeSession + '.jsonl 2>/dev/null | grep -q .; then claude --resume ' + claudeSession + '; else claude --session-id ' + claudeSession + choice + '; fi' : 'claude';
   // The same process stays in charge of the terminal throughout; a shell run beside it could be left without the TTY.
   const start = process.argv[2] === 'claude' ? shell + " -lic '" + claude + "; exec " + shell + " -l'" : shell + ' -l';
-  const command = 'cd ' + quote(placement.cwd) + ' && exec ' + start;
+  // SSH does not carry COLORTERM. Without it Claude Code falls back to 256 colors, which turns its orange pink.
+  const command = 'cd ' + quote(placement.cwd) + (process.argv[2] === 'claude' ? ' && export COLORTERM=truecolor' : '') + ' && exec ' + start;
   run('ssh', ['-tt', '-o', 'StrictHostKeyChecking=yes', ...(url.port ? ['-p', url.port] : []), '--', target, command], process.env);
 }
 `;

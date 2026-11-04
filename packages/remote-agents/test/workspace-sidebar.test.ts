@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import { installWorkspaceSidebar, workspaceFileAddress } from '../src/client/workspace/sidebar.js';
 import { preferTerminalShell } from '../src/client/workspace/terminal-preference.js';
-import { closeArchived } from '../src/client/workspace/tui.js';
+import { closeArchived, tuiTheme } from '../src/client/workspace/tui.js';
 import type { Client } from '../src/client/index.js';
 
 test('native file addresses preserve remote relative and absolute paths and reject other scopes', () => {
@@ -123,4 +123,15 @@ test('archiving a TUI conversation closes its terminal once, and only a TUI one'
   sync(['chat', 'tui']); sync(['chat', 'tui']); assert.deepEqual(ended, ['tui']);
   // Unarchived, it runs again in a new terminal, which archiving it again ends too.
   sync(['chat']); sync(['chat', 'tui']); assert.deepEqual(ended, ['tui', 'tui']);
+});
+
+test('a TUI reads at 14px at least, without changing the theme of other terminals', () => {
+  const small = { fontSizes: { terminal: 13, ui: 12 }, fontFamilies: { terminal: 'mono' } };
+  const shown = tuiTheme(small) as typeof small;
+  assert.deepEqual(shown, { fontSizes: { terminal: 14, ui: 12 }, fontFamilies: { terminal: 'mono' } });
+  assert.equal(small.fontSizes.terminal, 13);
+  assert.equal(tuiTheme(small), shown, 'the same theme gives the same object, as the terminal compares them');
+  const large = { fontSizes: { terminal: 16 } };
+  assert.equal(tuiTheme(large), large, 'a larger size the user chose stays');
+  assert.equal(tuiTheme(undefined), undefined);
 });

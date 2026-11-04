@@ -61,14 +61,14 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   const claude = controller.config.shellCandidates[2]!; assert.equal(basename(claude), 'Remote Claude');
   const launchClaude = (cwd: string) => promisify(execFile)(claude, [], { cwd, env, timeout: 5000 });
   await launchClaude(anchor);
-  assert.equal(JSON.parse(await readFile(capture, 'utf8')).at(-1), 'cd \'/srv/app\' && exec "${SHELL:-/bin/sh}" -lic \'claude; exec "${SHELL:-/bin/sh}" -l\'');
+  assert.equal(JSON.parse(await readFile(capture, 'utf8')).at(-1), 'cd \'/srv/app\' && export COLORTERM=truecolor && exec "${SHELL:-/bin/sh}" -lic \'claude; exec "${SHELL:-/bin/sh}" -l\'');
   // In a TUI conversation it is the same Claude session every time, resumed once Claude Code has saved it.
   const state = JSON.parse(await readFile(f.path, 'utf8'));
   await writeFile(f.path, JSON.stringify({ ...state, tuiSessions: ['session-tui', 'session-opus'], tuiDetails: { 'session-opus': { model: 'opus[1m]', effort: 'high', title: 'Claude Code' } } }));
   const launchTui = async (session: string) => { await promisify(execFile)(claude, [], { cwd: anchor, env: { ...env, DSH_SESSION_ID: session }, timeout: 5000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
   const tui = await launchTui('session-tui'), id = /--resume ([0-9a-f-]{36});/.exec(tui)?.[1];
   assert.match(id ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
-  assert.equal(tui, `cd '/srv/app' && exec "\${SHELL:-/bin/sh}" -lic 'if find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${id}.jsonl 2>/dev/null | grep -q .; then claude --resume ${id}; else claude --session-id ${id}; fi; exec "\${SHELL:-/bin/sh}" -l'`);
+  assert.equal(tui, `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic 'if find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${id}.jsonl 2>/dev/null | grep -q .; then claude --resume ${id}; else claude --session-id ${id}; fi; exec "\${SHELL:-/bin/sh}" -l'`);
   assert.equal(await launchTui('session-tui'), tui, 'stable across launches');
   assert.doesNotMatch(await launchTui('session-chat'), /--resume/, 'another conversation runs a plain claude');
   // The composer's model applies to the first launch; a resumed session keeps what /model chose since.

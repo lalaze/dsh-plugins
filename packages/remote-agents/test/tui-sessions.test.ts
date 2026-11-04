@@ -6,12 +6,13 @@ import { fixture } from './fakes.js';
 
 const signal = new AbortController().signal, record = (type: string, field: string, value: string) => JSON.stringify({ type, [field]: value, sessionId: 'x' });
 async function setup(t: Parameters<typeof fixture>[0], blank: boolean | undefined = true) {
-  const f = await fixture(t), events: [string, unknown][] = [], titles: string[] = [], remote = { records: '', reads: [] as string[] };
+  const f = await fixture(t), events: [string, unknown][] = [], titles: string[] = [], remote = { records: '', reads: [] as string[], selections: [] as Record<string, unknown>[], selectFails: false };
   const tui = new TuiSessions(f.store, {
-    verify: async id => { if (id === 'local') throw new RemoteError('Not a remote workspace', 409); },
+    verify: async id => { if (id === 'local') throw new RemoteError('Not a remote workspace', 409); return { hostId: 'host-1' }; },
     session: id => (id === 'closed' ? undefined : { append: (type, data) => { events.push([type, data]); } }),
     list: async () => (blank === undefined ? [] : [{ sessionId: 'remote', blank }]),
     rename: async (_id, title) => { titles.push(title); },
+    selectModel: async selection => { if (remote.selectFails) throw new Error('catalog not ready'); remote.selections.push(selection); },
     titleRecords: async (_id, claudeSession) => { remote.reads.push(claudeSession); return remote.records; },
   });
   return { f, tui, events, titles, remote };
@@ -30,16 +31,52 @@ test('starting a TUI records it and gives DSH the turn it needs to show the conv
 test('a TUI remembers the Claude model and effort chosen in the composer', async t => {
   const { f, tui } = await setup(t);
   await tui.start('remote', { model: 'project-1/claude/opus%5B1m%5D', effort: 'high' }, signal);
-  assert.deepEqual(f.store.snapshot().tuiDetails?.remote, { title: 'Claude Code', model: 'opus[1m]', effort: 'high' });
+  assert.deepEqual(f.store.snapshot().tuiDetails?.remote, { title: 'Claude Code', model: 'opus[1m]', effort: 'high', modelRecorded: true });
+});
+
+test('starting a TUI tells DSH its model, which is what the workspace list shows an icon from', async t => {
+  const { tui, events, remote } = await setup(t);
+  await tui.start('remote', { model: 'project-1/claude/haiku', effort: 'high' }, signal);
+  assert.deepEqual(remote.selections, [{ sessionId: 'remote', provider: 'remote-cli-claude', model: 'project-1/claude/haiku', reasoningEffort: 'high' }]);
+  assert.equal(events.length, 2);
+  await tui.syncTitle('remote', 'Claude Code', signal);
+  assert.equal(remote.selections.length, 1, 'once');
+});
+
+test('a TUI starts even if DSH will not take the model yet, and the next title check tries again', async t => {
+  const { tui, events, remote } = await setup(t);
+  remote.selectFails = true;
+  await tui.start('remote', { model: 'project-1/claude/haiku' }, signal);
+  assert.equal(events.length, 2, 'started');
+  await tui.syncTitle('remote', 'Claude Code', signal);
+  assert.deepEqual(remote.selections, []);
+  remote.selectFails = false;
+  await tui.syncTitle('remote', 'Claude Code', signal);
+  assert.deepEqual(remote.selections, [{ sessionId: 'remote', provider: 'remote-cli-claude', model: 'host-1/claude/haiku' }]);
+});
+
+test('a conversation started by an earlier version gets its model when it is next in view, even if renamed', async t => {
+  const { f, tui, remote } = await setup(t);
+  await f.store.update(state => { state.tuiSessions = ['old', 'renamed']; state.tuiDetails = { renamed: { title: 'Claude Code', model: 'opus[1m]', effort: 'xhigh' } }; });
+  await tui.syncTitle('old', 'Claude TUI 03:04', signal);
+  await tui.syncTitle('renamed', 'My name', signal);
+  assert.deepEqual(remote.selections, [
+    { sessionId: 'old', provider: 'remote-cli-claude', model: 'host-1/claude/default' },
+    { sessionId: 'renamed', provider: 'remote-cli-claude', model: 'host-1/claude/opus%5B1m%5D', reasoningEffort: 'xhigh' },
+  ]);
+  assert.deepEqual(remote.reads.includes(tuiClaudeSession('renamed')), false, 'a renamed conversation\'s title is still left alone');
+  const reads = remote.reads.length;
+  await tui.syncTitle('renamed', 'My name', signal);
+  assert.equal(remote.selections.length, 2); assert.equal(remote.reads.length, reads);
 });
 
 test('a value that could break out of the remote command line, or another CLI\'s model, is left out', async t => {
   const { f, tui } = await setup(t);
   await tui.start('remote', { model: 'project-1/claude/a%22%3Brm', effort: 'high; rm' }, signal);
-  assert.deepEqual(f.store.snapshot().tuiDetails?.remote, { title: 'Claude Code' });
+  assert.deepEqual(f.store.snapshot().tuiDetails?.remote, { title: 'Claude Code', modelRecorded: true });
   const other = await setup(t, undefined);
   await other.tui.start('remote', { model: 'project-1/codex/gpt-5', effort: 'high' }, signal);
-  assert.deepEqual(other.f.store.snapshot().tuiDetails?.remote, { title: 'Claude Code', effort: 'high' });
+  assert.deepEqual(other.f.store.snapshot().tuiDetails?.remote, { title: 'Claude Code', effort: 'high', modelRecorded: true });
 });
 
 test('a new DSH session not listed yet can start too', async t => {
