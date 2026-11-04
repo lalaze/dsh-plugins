@@ -189,7 +189,8 @@ export function Timeline({ events, draft, state, sessionId }: { events: SyncedEv
   flush('end')
   if (draft && (draft.text || draft.reasoning)) {
     rows.push(<div key="draft" className="msg assistant draft" aria-live="polite">
-      {draft.text ? <Text text={draft.text} /> : <div className="reasoning-live">{icons.sparkle}<span>{draft.reasoning.slice(-400)}</span></div>}
+      {draft.text && <Text text={draft.text} />}
+      {draft.reasoning && <div className="reasoning-live">{icons.sparkle}<span>{draft.reasoning.slice(-400)}</span></div>}
     </div>)
   }
   return <>{rows}</>

@@ -81,9 +81,10 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
       else if (frame.type === 'status' || (frame.type === 'open' && frame.entry)) {
         const next = (frame as { entry: SessionEntry }).entry
         state.update(next)
+        if (next.state === 'idle') setLive(undefined)
         if (next.lastSeq > held.current && held.current >= 0) void catchUp().catch(() => {})
       } else if (frame.type === 'error') setError(ui(frame.message))
-    }, () => { void catchUp().catch(() => {}) })
+    }, () => { setLive(undefined); void catchUp().catch(() => {}) })
     return () => { cancelled = true; handle.close() }
   }, [catchUp, merge, sessionId, state])
 
@@ -171,7 +172,7 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
             {outbox.text && <div className="md"><p>{outbox.text}</p></div>}
             <div className="sending-note">{ui('Sending…')}</div>
           </div>}
-          {running && !live && pending.length === 0 && <div className="working"><span className="spinner" />{ui('Working…')}</div>}
+          {running && pending.length === 0 && <div className="working"><span className="spinner" />{ui('Working…')}</div>}
         </div>
       </div>
       <JumpToEnd visible={!scroll.atEnd} fresh={scroll.fresh} onClick={() => scroll.toEnd(true)} />

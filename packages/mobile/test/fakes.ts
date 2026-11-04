@@ -24,6 +24,8 @@ export class FakeHost implements HostApi {
   readonly images = new Map<string, Uint8Array>()
   bridge?: ApprovalBridge
   autoReply = true
+  /** The reply being written in a session, as DSH reports it to a follower that joins during it. */
+  readonly activeAttempts = new Map<string, { attemptId: string; stream: unknown[] }>()
   private readonly changes = new Set<(id: string) => void>()
   private readonly follows = new Map<string, Set<AsyncQueue<HostFollowFrame>>>()
   private readonly workspaceFollowers = new Set<AsyncQueue<HostWorkspaceState>>()
@@ -83,7 +85,8 @@ export class FakeHost implements HostApi {
   follow(id: string, signal: AbortSignal): AsyncIterable<HostFollowFrame> {
     const queue = new AsyncQueue<HostFollowFrame>()
     const session = this.sessions.get(id)!
-    queue.push({ type: 'snapshot', cursor: session.events.at(-1)?.seq ?? -1, records: [] })
+    const activeAttempt = this.activeAttempts.get(id)
+    queue.push({ type: 'snapshot', cursor: session.events.at(-1)?.seq ?? -1, records: [], ...(activeAttempt ? { assistantStream: { activeAttempt } } : {}) })
     const set = this.follows.get(id) ?? new Set()
     set.add(queue); this.follows.set(id, set)
     signal.addEventListener('abort', () => { set.delete(queue); queue.close() }, { once: true })

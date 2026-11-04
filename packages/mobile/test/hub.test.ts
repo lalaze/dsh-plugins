@@ -97,6 +97,55 @@ test('a phone reads a conversation from its end, sends a message, follows it liv
   assert.deepEqual(setup.host.cancels, ['s1'])
 })
 
+test('a phone that opens during a reply gets what was written so far, then follows it', async t => {
+  const setup = await startHub(t)
+  setup.host.addWorkspace('w1', 'project')
+  setup.host.addSession('s1', 'w1', 'Chat')
+  const { client } = await pairedPhone(t, setup)
+  await waitFor(async () => (await client.call('sessions.changes', {})).sessions.some(s => s.sessionId === 's1'), 5000, 'listed')
+  // The compact form DSH keeps of a reply in progress: two blocks of text, with thinking after them.
+  setup.host.activeAttempts.set('s1', { attemptId: 'a1', stream: [
+    { type: 'chunk', time: 1, chunk: { type: 'block-start', index: 0, blockType: 'text' } },
+    { type: 'text-chunks', time0: 1, index: 0, dt: [1], texts: ['First ', 'part.'] },
+    { type: 'chunk', time: 3, chunk: { type: 'block-end', index: 0, block: { type: 'text', text: 'First part.' } } },
+    { type: 'chunk', time: 4, chunk: { type: 'block-start', index: 1, blockType: 'text' } },
+    { type: 'text-chunks', time0: 4, index: 1, dt: [], texts: ['Second.'] },
+    { type: 'chunk', time: 5, chunk: { type: 'block-start', index: 2, blockType: 'reasoning' } },
+    { type: 'reasoning-chunks', time0: 5, index: 2, dt: [], texts: ['Checking the build.'] },
+  ] })
+  const frames: LiveFrame[] = []
+  const live = client.follow('session.live', { sessionId: 's1' }, frame => frames.push(frame as LiveFrame))
+  t.after(() => live.close())
+  const drafts = () => frames.filter((frame): frame is Extract<LiveFrame, { type: 'draft' }> => frame.type === 'draft')
+  await waitFor(() => drafts().length > 0, 5000, 'the reply so far')
+  assert.equal(drafts()[0].text, 'First part.\n\nSecond.')
+  assert.equal(drafts()[0].reasoning, 'Checking the build.')
+
+  // Text after thinking ends what the phone shows of that thinking.
+  setup.host.stream('s1', { type: 'chunk', attemptId: 'a1', chunk: { type: 'text-delta', index: 3, text: ' Third.' } })
+  await waitFor(() => drafts().at(-1)!.text.endsWith('Third.'), 5000, 'the next words')
+  assert.equal(drafts().at(-1)!.reasoning, '')
+  setup.host.stream('s1', { type: 'end', attemptId: 'a1' })
+  await waitFor(() => drafts().at(-1)!.done === true, 5000, 'the end of the reply')
+})
+
+test('a reply with nothing to read yet sends the phone nothing', async t => {
+  const setup = await startHub(t)
+  setup.host.addWorkspace('w1', 'project')
+  setup.host.addSession('s1', 'w1', 'Chat')
+  const { client } = await pairedPhone(t, setup)
+  await waitFor(async () => (await client.call('sessions.changes', {})).sessions.some(s => s.sessionId === 's1'), 5000, 'listed')
+  const frames: LiveFrame[] = []
+  const live = client.follow('session.live', { sessionId: 's1' }, frame => frames.push(frame as LiveFrame))
+  t.after(() => live.close())
+  await waitFor(() => frames.some(frame => frame.type === 'open'), 5000, 'live open')
+  setup.host.stream('s1', { type: 'start', attemptId: 'a1' })
+  setup.host.stream('s1', { type: 'chunk', attemptId: 'a1', chunk: { type: 'block-start', index: 0, blockType: 'text' } })
+  setup.host.stream('s1', { type: 'chunk', attemptId: 'a1', chunk: { type: 'text-delta', index: 0, text: 'Hello' } })
+  await waitFor(() => frames.some(frame => frame.type === 'draft'), 5000, 'the first words')
+  assert.deepEqual(frames.filter(frame => frame.type === 'draft').map(frame => (frame as { text: string }).text), ['Hello'])
+})
+
 test('a phone starts a session with a model and permission, renames and archives it', async t => {
   const setup = await startHub(t)
   setup.host.addWorkspace('w1', 'project')

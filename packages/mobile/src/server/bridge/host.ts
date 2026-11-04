@@ -22,7 +22,7 @@ export interface HostInspection { meta: { id: string; createdAt: number; cwd?: s
 export interface HostWorkspace { workspaceId: string; path: string; title: string; sessionIds: readonly string[] }
 export interface HostWorkspaceState { items: HostWorkspace[]; archivedSessionIds: string[] }
 export type HostFollowFrame =
-  | { type: 'snapshot'; cursor: number; records: readonly { type: 'event'; event: HostEvent }[] }
+  | { type: 'snapshot'; cursor: number; records: readonly { type: 'event'; event: HostEvent }[]; assistantStream?: { activeAttempt?: { attemptId: string; stream: readonly unknown[] } } }
   | { type: 'event'; event: HostEvent }
   | { type: 'assistant-stream'; frame: { type: 'start' | 'chunk' | 'end'; attemptId: string; chunk?: unknown; outcome?: { kind: string } } }
 export type HostPromptPart = { type: 'text'; text: string } | { type: 'image'; mediaType: string; data: string; name?: string }

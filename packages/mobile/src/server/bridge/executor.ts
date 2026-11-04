@@ -4,7 +4,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import type { Command, CommandResult, LiveFrame, ModelSelection, PendingInteraction, PromptPart, SessionEntry, SyncedEvent, WorkspaceEntry } from '../../shared/protocol.js'
-import { attachmentRefs, chunkText, firstPrompt, modelOf, openApprovals, openQuestions, shareEvent, titleOf } from './events.js'
+import { addToDraft, attachmentRefs, firstPrompt, modelOf, openApprovals, openQuestions, shareEvent, titleOf } from './events.js'
 import type { ApprovalAsk, HostApi, HostAttachmentRef, HostInspection, HostSessionSummary, HostWorkspaceState } from './host.js'
 import { AsyncQueue, sleep } from './queue.js'
 
@@ -342,14 +342,28 @@ export class Executor {
       const flush = (attemptId: string, done = false) => {
         const draft = drafts.get(attemptId)
         if (!draft) return
-        clearTimeout(draft.timer); draft.timer = undefined; draft.sent = Date.now()
+        clearTimeout(draft.timer); draft.timer = undefined
+        // A reply with nothing to read yet, as at a block's start, leaves the phone's "working" line alone.
+        if (!done && !draft.text && !draft.reasoning) return
+        draft.sent = Date.now()
         // The latest 64 KB is enough to watch a long answer being written.
         queue.push({ type: 'draft', attemptId, text: draft.text.slice(-65_536), reasoning: draft.reasoning.slice(-16_384), ...(done ? { done: true } : {}) })
         if (done) drafts.delete(attemptId)
       }
       try {
         for await (const frame of this.host.follow(sessionId, signal)) {
-          if (frame.type === 'snapshot') { previous = frame.cursor; continue }
+          if (frame.type === 'snapshot') {
+            previous = frame.cursor
+            // A phone that opens or reconnects during a reply gets what was written of it so far.
+            const active = frame.assistantStream?.activeAttempt
+            if (active) {
+              const draft = { text: '', reasoning: '', sent: 0 }
+              for (const record of active.stream) addToDraft(draft, record)
+              drafts.set(active.attemptId, draft)
+              flush(active.attemptId)
+            }
+            continue
+          }
           if (frame.type === 'event') {
             const after = previous ?? frame.event.seq - 1
             previous = frame.event.seq
@@ -363,9 +377,7 @@ export class Executor {
           else if (stream.type === 'chunk') {
             const draft = drafts.get(stream.attemptId) ?? { text: '', reasoning: '', sent: 0 }
             drafts.set(stream.attemptId, draft)
-            const { text, reasoning } = chunkText(stream.chunk)
-            if (text) draft.text += text
-            if (reasoning) draft.reasoning += reasoning
+            addToDraft(draft, stream.chunk)
             if (Date.now() - draft.sent > 200) flush(stream.attemptId)
             else draft.timer ??= setTimeout(() => flush(stream.attemptId), 200)
           } else if (stream.type === 'end') flush(stream.attemptId, true)

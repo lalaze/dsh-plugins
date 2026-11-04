@@ -143,9 +143,22 @@ export function openQuestions(active: unknown, now = Date.now()): PendingInterac
   return result
 }
 
-/** Text of an assistant stream chunk, by kind. */
-export function chunkText(chunk: unknown): { text?: string; reasoning?: string } {
+/** What a phone shows of a reply being written. `reasoning` is what the model thought since its latest text. */
+export interface ReplyDraft { text: string; reasoning: string }
+
+/** Add one chunk of a reply being written, or one record of the compact form DSH keeps of it, to its draft. */
+export function addToDraft(draft: ReplyDraft, chunk: unknown): void {
   const value = asDict(chunk)
+  if (value.type === 'chunk') return addToDraft(draft, value.chunk)
+  // A CLI's narration between tool calls comes as separate blocks, which read as paragraphs once the reply is saved.
+  if (value.type === 'block-start' && value.blockType === 'text' && draft.text) { draft.text += '\n\n'; return }
+  const { text, reasoning } = chunkText(value)
+  if (text) { draft.text += text; draft.reasoning = '' }
+  if (reasoning) draft.reasoning += reasoning
+}
+
+/** Text of an assistant stream chunk, by kind. */
+function chunkText(value: Dict): { text?: string; reasoning?: string } {
   if (value.type === 'text-delta' && typeof value.text === 'string') return { text: value.text }
   if (value.type === 'reasoning-delta' && typeof value.text === 'string') return { reasoning: value.text }
   if (value.type === 'text-chunks' && Array.isArray(value.texts)) return { text: value.texts.join('') }
