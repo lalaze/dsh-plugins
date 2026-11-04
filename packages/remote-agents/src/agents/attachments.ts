@@ -22,7 +22,7 @@ export function restoreFiles(content: readonly ContentBlock[], original?: readon
 }
 
 /** Stream one source into private staging; `describe` may reject the bytes before they are published. */
-async function stage(dir: string, source: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, describe: (sha256: string, bytes: number) => Attachment, signal?: AbortSignal): Promise<Attachment> {
+export async function stage(dir: string, source: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, describe: (sha256: string, bytes: number) => Attachment, signal?: AbortSignal): Promise<Attachment> {
   const temp = join(dir, `${randomUUID()}.tmp`), hash = createHash('sha256'); let bytes = 0;
   try {
     await pipeline(Readable.from(source), new Transform({ transform(chunk: Buffer, _encoding, callback) { bytes += chunk.length; hash.update(chunk); callback(null, chunk); } }), createWriteStream(temp, { flags: 'wx', mode: 0o600 }), { signal });

@@ -4,6 +4,7 @@ import { api } from '../api.js';
 import { useCurrentModel } from '../composer/usage.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 import type { Client } from '../index.js';
+import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
 const TERMINAL_TAB = '@deepseek-ai/dsh-client-ui-sidebar-terminal', SHELL_KEY = 'dsh.terminal.shell';
@@ -47,7 +48,7 @@ interface Slots {
   entries(name: string): readonly SlotEntry[];
   subscribe(name: string, listener: () => void): () => void;
 }
-interface TerminalState { issue?: string; phase: string }
+interface TerminalState { issue?: string; phase: string; writable?: boolean }
 interface TerminalModel { state: { getSnapshot(): TerminalState; subscribe(listener: () => void): () => void } }
 interface Terminals {
   view(sessionId: string, key: string, contentId: string, terminalId?: string, shellPath?: string): TerminalModel;
@@ -55,7 +56,7 @@ interface Terminals {
   close(sessionId: string, key: string, contentId: string): void;
 }
 interface Services {
-  slots: Slots; terminals: Terminals; t: unknown; title(sessionId: string): string | undefined;
+  slots: Slots; terminals: Terminals; uploads: TuiUploads; t: unknown; title(sessionId: string): string | undefined;
   theme: { getSnapshot(): unknown; subscribe(listener: () => void): () => void };
 }
 type SessionList = { getSnapshot(): { byId?: Record<string, { cwd?: string; blank?: boolean; title?: string }> }; subscribe(listener: () => void): () => void };
@@ -118,7 +119,7 @@ function useGeneration(sessionId: string): [number, () => void] {
   return [generation, () => setGeneration(value => { write(key, String(value + 1)); return value + 1; })];
 }
 
-function TuiTerminal({ sessionId, services, shell, generation, restart }: { sessionId: string; services: Services; shell: string; generation: number; restart: () => void }) {
+function TuiTerminal({ root, sessionId, services, shell, generation, restart }: { root: React.RefObject<HTMLElement | null>; sessionId: string; services: Services; shell: string; generation: number; restart: () => void }) {
   const { slots, terminals, theme, t } = services;
   const key = terminalKey(generation);
   const model = useMemo(() => terminals.view(sessionId, key, terminalContent(sessionId, generation), undefined, shell), [terminals, sessionId, key, generation, shell]);
@@ -134,6 +135,7 @@ function TuiTerminal({ sessionId, services, shell, generation, restart }: { sess
   }, [model]);
   // After DSH restarted the terminal is gone; a new one resumes the same Claude session.
   useEffect(() => { if (state.issue === 'missingTerminal') restart(); }, [state.issue]);
+  useUploadedPaths(root, sessionId, services.uploads, model.state);
   const Body = slots.entries('sidebar.right.pane.tab').find(entry => entry.options.key === TERMINAL_TAB)?.component as React.FC<any> | undefined;
   if (!Body) return <div className="ra-empty" role="alert">{ui("DSH's terminal is not available")}</div>;
   return <Body view={() => model} t={t}
@@ -147,6 +149,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   useLocale();
   const [generation, restart] = useGeneration(sessionId);
   const root = useRef<HTMLDivElement>(null);
+  useFilePaste(root, picked => services.uploads.add(sessionId, picked));
   // Claude Code titles the conversation after its first exchange, and may again later.
   useEffect(() => {
     const controller = new AbortController();
@@ -188,16 +191,17 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     }, cause => { if (!controller.signal.aborted) setError(localizeError(cause instanceof Error ? cause.message : String(cause))); });
     return () => controller.abort();
   }, [services, sessionId]);
-  return <div ref={root} data-remote-agents-tui="" style={{ flex: '1 1 0', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-    <style>{viewStyles}</style>
-    {shell && fontReady ? <TuiTerminal key={generation} sessionId={sessionId} services={services} shell={shell} generation={generation} restart={restart} />
+  return <div ref={root} data-remote-agents-tui="" style={{ position: 'relative', flex: '1 1 0', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <style>{viewStyles}{fileStyles}</style>
+    {shell && fontReady ? <TuiTerminal key={generation} root={root} sessionId={sessionId} services={services} shell={shell} generation={generation} restart={restart} />
       : <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting Claude Code…')}</div>}
+    <TuiFileStatus sessionId={sessionId} uploads={services.uploads} />
   </div>;
 }
 
 /** Claude Code's mascot, as its terminal banner draws it: each column is one half of a character cell, each row half its height. */
-function ClaudeMascot() {
-  return <svg viewBox="0 0 16 10" width="24" height="15" aria-hidden="true" shapeRendering="crispEdges">
+function ClaudeMascot({ width = 24 }: { width?: number }) {
+  return <svg viewBox="0 0 16 10" width={width} height={width * 10 / 16} aria-hidden="true" shapeRendering="crispEdges">
     <path fill="#D97757" d="M2 0h12v2H2zM2 2h2v2H2zM5 2h6v2H5zM12 2h2v2h-2zM0 4h16v2H0zM2 6h12v2H2zM3 8h1v2H3zM5 8h1v2H5zM10 8h1v2h-1zM12 8h1v2h-1z" />
     <path fill="#000" d="M4 2h1v2H4zM11 2h1v2h-1z" />
   </svg>;
@@ -236,7 +240,7 @@ export function installTuiSessions(ctx: Client): void {
     const on = (scoped as unknown as { on(event: string, listener: () => void): () => void }).on;
     if (!terminals || !sessions || !themes || typeof slots.entries !== 'function' || typeof slots.subscribe !== 'function') return;
     const store = new TuiStore();
-    const services: Services = { slots, terminals, title: id => sessions.getSnapshot()?.byId?.[id]?.title,
+    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), title: id => sessions.getSnapshot()?.byId?.[id]?.title,
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
       theme: { getSnapshot: () => themes.getTheme(), subscribe: listener => on.call(scoped, 'theme/change', listener) } };
     scoped.effect(() => {
@@ -277,7 +281,8 @@ export function installTuiSessions(ctx: Client): void {
       return () => { offWorkspaces(); offStore(); };
     });
     // DSH elects the composer when its slot changes, so registering again makes it look at the current TUI list.
-    const hideComposer = () => slots.inject('conversation.composer', () => slots.register({ name: 'conversation.composer', select: ({ sessionId }: { sessionId?: string }) => (store.has(sessionId) ? true : null) }, () => null)) as (() => void) | undefined;
+    const NoComposer = ({ sessionId }: { sessionId: string }) => <TuiDropTarget sessionId={sessionId} uploads={services.uploads} icon={<ClaudeMascot width={96} />} />;
+    const hideComposer = () => slots.inject('conversation.composer', () => slots.register({ name: 'conversation.composer', select: ({ sessionId }: { sessionId?: string }) => (store.has(sessionId) ? true : null) }, NoComposer)) as (() => void) | undefined;
     scoped.effect(() => {
       let release = hideComposer();
       const off = store.subscribe(() => { release?.(); release = hideComposer(); });

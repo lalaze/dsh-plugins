@@ -181,6 +181,15 @@ node -e ${quote(REMOTE_DSH_RUNNER)} ${request}`;
     const [written, bytes] = (await this.run('upload', cwd, at, { revision: revision ?? '', size: String(size) }, { input, maxBytes: 200, signal })).toString('utf8').trim().split(' ');
     return { path: at.path, revision: written, size: Number(bytes) };
   }
+  /**
+   * A file kept for a conversation rather than part of the project: private, atomic and checked against its digest.
+   * @param path - relative to `cwd`, under `.dsh-remote-agents/attachments/`.
+   * @returns the file's absolute path.
+   */
+  attach(cwd: string, path: string, input: AsyncIterable<Uint8Array>, size: number, sha256: string, signal?: AbortSignal): Promise<string> {
+    if (!this.transport.upload) throw new RemoteError('File transfers are unavailable on this host', 501);
+    return this.transport.upload(cwd, path, input, size, sha256, signal);
+  }
   /** Runs Git commands in one round trip. The SSH host passes the whole program as one argument, so arguments stay small. */
   async git(cwd: string, batch: GitBatch, signal?: AbortSignal): Promise<GitRun[]> {
     const { commands } = batch, values: Record<string, string> = {};

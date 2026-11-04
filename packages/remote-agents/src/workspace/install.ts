@@ -7,12 +7,13 @@ import type { Store } from '../core/store.js';
 import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type WorkspaceRuntime } from './access.js';
 import { editorHandler } from './editor-route.js';
 import type { WorkspaceHosts } from './hosts.js';
-import { workspaceTransferHandler, type WorkspaceFeatures } from './http.js';
+import { tuiFilesHandler, workspaceTransferHandler, type WorkspaceFeatures } from './http.js';
 import type { GitBatch, GitRun, WorkspaceEntry, WorkspaceTarget } from './domain.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync, type WorkspaceTagsService } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
+import { TuiFiles } from './tui-files.js';
 import { TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
@@ -135,6 +136,8 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     },
     titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
   });
+  ctx.connection.fetch.register({ path: '/api/remote-agents/tui-files', methods: ['POST'], requestBody: 'streaming',
+    fetch: tuiFilesHandler(new TuiFiles({ isTui: id => tui.list().includes(id), directory: store.directory, attach: (...file) => files.attach(...file) })) });
   return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };
 }
 

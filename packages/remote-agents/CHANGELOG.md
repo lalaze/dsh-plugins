@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.89:** TUI conversations now take files. Drag files onto the window or paste them (Cmd+V, or Ctrl+V for an image): they are uploaded to `.dsh-remote-agents/attachments/tui/` in the remote project and their paths go into Claude Code's prompt, where an image shows as `[Image #1]`. Each file can be up to 50 MB, folders are not supported, and uploaded files are not cleaned up. A file dropped on a TUI conversation used to go into a hidden composer, and Claude Code never received it. Attachments uploaded to a remote project, a chat's included, are also kept out of Git now, by a `.gitignore` in `.dsh-remote-agents/`. No action is needed.
+
 **Upgrading from 0.2.88:** Fixes a turn shown as it goes stopping early when the DSH running it goes away, such as a laptop going to sleep. The conversation used to end the turn after about a minute and never show the rest. It now waits until another DSH takes the CLI over and shows the turn to its end. If nobody takes over within two minutes of that DSH's status lapsing, the reply says so, and later output still appears. No action is needed.
 
 **Upgrading from 0.2.87:** A turn another DSH is running in a conversation's CLI session now shows in that conversation as it goes, instead of all at once when it ends. The conversation reads as running, and Stop there stops the turn. This also works for a conversation unused for a while or with no agent since DSH restarted. Tool rows still appear when the turn ends. On a phone, install `dsh-mobile` 0.3.4 on the DSH it connects to. No action is needed otherwise.

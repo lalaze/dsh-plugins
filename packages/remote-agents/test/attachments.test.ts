@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
+import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { setTimeout as pause } from 'node:timers/promises';
+import { promisify } from 'node:util';
 import { Context } from '@deepseek-ai/cordis';
 import LlmRuntime, { createUserMessage, type ContentBlock, type FileBlock, type GenerateOptions, type ImageBlock, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import { SessionId } from '@deepseek-ai/dsh-session';
@@ -173,6 +175,19 @@ async function localSsh(t: TestContext) {
   const cwd = join(root, "workspace ' 中文 $(ignored)"); await mkdir(cwd);
   return { root, cwd, transport: new OpenSshTransport('ssh://upload-fixture', ssh) };
 }
+test('what the real SSH upload command saves stays out of the project\'s Git status', async t => {
+  const { cwd, transport } = await localSsh(t), git = promisify(execFile), data = Buffer.from('secret screenshot');
+  await git('git', ['init', '-q', cwd]);
+  const source = async function* () { yield data; }, relative = '.dsh-remote-agents/attachments/tui/abcd/shot.png';
+  assert.ok((await transport.upload(cwd, relative, source(), data.length, digest(data))).endsWith(relative));
+  assert.equal((await git('git', ['-C', cwd, 'status', '--porcelain'])).stdout, '', 'a new directory shows nothing');
+  await git('git', ['-C', cwd, 'add', '-A']);
+  assert.equal((await git('git', ['-C', cwd, 'diff', '--cached', '--name-only'])).stdout, '', 'and git add -A takes nothing');
+  await writeFile(join(cwd, '.dsh-remote-agents/.gitignore'), 'mine\n');
+  await transport.upload(cwd, relative, source(), data.length, digest(data));
+  assert.equal(await readFile(join(cwd, '.dsh-remote-agents/.gitignore'), 'utf8'), 'mine\n', 'an existing file is left alone');
+  assert.equal((await stat(join(cwd, relative))).mode & 0o777, 0o400, 'giving the same file again replaces its read-only copy');
+});
 test('the real SSH upload command streams exact binary bytes into a private atomic copy', async t => {
   const { cwd, transport } = await localSsh(t);
   const data = Buffer.concat([file, Buffer.alloc(1024 * 1024, 0x90)]);

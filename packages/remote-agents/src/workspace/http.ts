@@ -3,6 +3,7 @@ import { FILE_LIMIT, type WorkspaceTarget } from './domain.js';
 import type { WorkspaceService } from './service.js';
 import { revision, workspacePath } from './service.js';
 import type { WorkspaceTunnels } from './tunnels.js';
+import type { TuiFiles } from './tui-files.js';
 import type { TuiSessions } from './tui.js';
 import type { JobAction, WorktreeService } from './worktrees.js';
 
@@ -70,10 +71,28 @@ export async function workspaceAction(features: WorkspaceFeatures, action: strin
   if (action === 'removeWorkspaceTunnel') { await features.tunnels.remove(id, target.hostId); return { ok: true }; }
   throw new RemoteError('Unknown workspace action');
 }
+const requireClient = (request: Request) => { if (request.headers.get('X-DSH-Remote-Agents') !== '1') throw new RemoteError('Use the remote agents client to submit requests', 403); };
+const transferFailure = (error: unknown) => Response.json({ error: error instanceof Error ? error.message : 'File transfer failed' }, { status: error instanceof RemoteError ? error.status : 502 });
+/** The size an upload declares. */
+function transferSize(request: Request): number {
+  const size = Number(request.headers.get('X-File-Size'));
+  if (!request.headers.has('X-File-Size') || !Number.isSafeInteger(size) || size < 0 || size > FILE_LIMIT) throw new RemoteError('File exceeds the 50 MB transfer limit', 413);
+  return size;
+}
+/** An upload's body as it arrives, held to exactly the size it declared. */
+async function* transferBody(request: Request, size: number): AsyncGenerator<Uint8Array> {
+  const reader = request.body?.getReader();
+  let bytes = 0;
+  if (reader) {
+    try { while (true) { const { done, value } = await reader.read(); if (done) break; bytes += value.length; if (bytes > size) throw new RemoteError('Upload byte count mismatch', 413); yield value; } }
+    finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+  }
+  if (bytes !== size) throw new RemoteError('Upload byte count mismatch');
+}
 export function workspaceTransferHandler(files: WorkspaceService) {
   return async (request: Request): Promise<Response> => {
     try {
-      if (request.headers.get('X-DSH-Remote-Agents') !== '1') throw new RemoteError('Use the remote agents client to submit requests', 403);
+      requireClient(request);
       const q = new URL(request.url).searchParams;
       const sessionId = field(q.get('sessionId'), 'session ID', 256), path = workspacePath(q.get('path'), 'file path');
       const target = expectedTarget({ hostId: q.get('hostId'), cwd: q.get('cwd') });
@@ -83,17 +102,19 @@ export function workspaceTransferHandler(files: WorkspaceService) {
         return new Response(new Uint8Array(data), { headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store', 'Content-Length': String(data.length), 'X-Content-Type-Options': 'nosniff' } });
       }
       if (request.method !== 'POST') return new Response(null, { status: 405 });
-      const size = Number(request.headers.get('X-File-Size'));
-      if (!request.headers.has('X-File-Size') || !Number.isSafeInteger(size) || size < 0 || size > FILE_LIMIT) throw new RemoteError('File exceeds the 50 MB transfer limit', 413);
+      const size = transferSize(request);
       const rev = revision(request.headers.get('X-File-Revision') === 'new' ? null : request.headers.get('X-File-Revision'));
-      async function* input() {
-        const reader = request.body?.getReader(); if (!reader) return;
-        let bytes = 0;
-        try { while (true) { const { done, value } = await reader.read(); if (done) break; bytes += value.length; if (bytes > size) throw new RemoteError('Upload byte count mismatch', 413); yield value; } }
-        finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-        if (bytes !== size) throw new RemoteError('Upload byte count mismatch');
-      }
-      return Response.json(await files.upload(sessionId, path, rev, size, input(), request.signal, target), { headers: { 'Cache-Control': 'no-store' } });
-    } catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'File transfer failed' }, { status: error instanceof RemoteError ? error.status : 502 }); }
+      return Response.json(await files.upload(sessionId, path, rev, size, transferBody(request, size), request.signal, target), { headers: { 'Cache-Control': 'no-store' } });
+    } catch (error) { return transferFailure(error); }
+  };
+}
+/** A file dropped or pasted into a TUI conversation, which comes back as its absolute path on the conversation's machine. */
+export function tuiFilesHandler(files: TuiFiles) {
+  return async (request: Request): Promise<Response> => {
+    try {
+      requireClient(request);
+      const q = new URL(request.url).searchParams, sessionId = field(q.get('sessionId'), 'session ID', 256), size = transferSize(request);
+      return Response.json({ path: await files.upload(sessionId, q.get('name'), transferBody(request, size), request.signal) }, { headers: { 'Cache-Control': 'no-store' } });
+    } catch (error) { return transferFailure(error); }
   };
 }

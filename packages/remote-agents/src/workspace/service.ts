@@ -80,6 +80,11 @@ export class WorkspaceService {
     revision(rev); const target = await this.target(sessionId, signal, expected);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.upload(target.cwd, path, rev, size, input, signal));
   }
+  /** A file kept for this conversation on its verified machine; see WorkspaceFiles.attach. */
+  async attach(sessionId: string, path: string, input: AsyncIterable<Uint8Array>, size: number, sha256: string, signal: AbortSignal): Promise<string> {
+    const target = await this.target(sessionId, signal);
+    return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.attach(target.cwd, path, input, size, sha256, signal));
+  }
   /** Git commands in the conversation's verified remote directory, for other plugins; never offered to models. */
   async git(sessionId: string, batch: GitBatch, signal: AbortSignal, expected?: WorkspaceTarget): Promise<GitRun[]> {
     const key = JSON.stringify([sessionId, batch.id]);

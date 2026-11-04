@@ -25,6 +25,7 @@ test('every route survives DSH’s request bridge: file downloads and the editor
     'GET /api/remote-agents/editor.js buffered',
     'GET/POST /api/remote-agents buffered',
     'POST /api/remote-agents/files streaming',
+    'POST /api/remote-agents/tui-files streaming',
   ]);
   for (const route of routes) for (const method of route.methods) assert.doesNotThrow(() => bridged(route, method), `${method} ${route.path}`);
   // A download reaches the handler, which answers with a JSON error rather than an empty body.

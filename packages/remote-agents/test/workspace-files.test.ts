@@ -236,6 +236,19 @@ test('file routes use the verified session binding and never accept another mach
   assert.equal((await handler(new Request(`http://dsh.test/api/remote-agents/files?${q}`, { headers: { 'X-DSH-Remote-Agents': '1' } }))).status, 409);
   await assert.rejects(workspace.operate('session', { op: 'list', path: '.' }, new AbortController().signal, { ...target, hostId: 'other-host' }), /verified remote workspace/);
 });
+test('a conversation\'s own file goes to its verified machine and directory, outside what sync and the project see', async t => {
+  const f = await fixture(t), d = await directory(t); await f.service.close();
+  const agents = new RemoteAgentsService(f.store, host => ({ ...f.remote.backend(host), workspaceFiles: d.files })); t.after(() => agents.close());
+  let cwd = d.remote;
+  const workspace = new WorkspaceService(agents, async () => ({ hostIds: [f.hostId], cwd }), async () => d.local), signal = new AbortController().signal;
+  const data = Buffer.from([0, 1, 255]), path = '.dsh-remote-agents/attachments/tui/abcd/a.bin', content = async function* () { yield data; };
+  const saved = await workspace.attach('session', path, content(), data.length, hash(data), signal);
+  assert.equal(saved, join(await realpath(d.remote), path));
+  assert.deepEqual(await readFile(saved), data);
+  await assert.rejects(workspace.attach('session', '../outside.bin', content(), data.length, hash(data), signal), /Invalid attachment destination/);
+  cwd = '';
+  await assert.rejects(workspace.attach('session', path, content(), data.length, hash(data), signal), /verified remote workspace/);
+});
 test('sync never deletes a synced path that became a symbolic link on either side, nor anything below it', async t => {
   const f = await fixture(t), d = await directory(t); await f.service.close();
   const agents = new RemoteAgentsService(f.store, host => ({ ...f.remote.backend(host), workspaceFiles: d.files })); t.after(() => agents.close());
