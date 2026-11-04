@@ -41,6 +41,7 @@ export interface State {
     sharedDeletions?: SharedDeletion[];
     tagSync?: Record<string, TagSyncRecord>;
     teamPresets?: TeamPreset[];
+    tuiSessions?: string[];
 }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord {

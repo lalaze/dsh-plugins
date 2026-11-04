@@ -34,7 +34,15 @@ export function expectedTarget(value) {
     return { hostId: identifier(v.hostId), cwd: workspacePath(v.cwd, 'remote workspace'), label: '' };
 }
 export async function workspaceAction(features, action, input, signal) {
+    if (action === 'tuiSessions')
+        return { sessions: features.tui?.list() ?? [] };
     const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
+    if (action === 'tuiStart') {
+        if (!features.tui)
+            throw new RemoteError('The TUI is unavailable', 501);
+        await features.tui.start(sessionId, signal);
+        return { sessionId };
+    }
     if (action === 'workspaceTarget') {
         const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
         return shell ? { ...target, terminalShell: shell } : target;

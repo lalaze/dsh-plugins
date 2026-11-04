@@ -8,6 +8,7 @@ import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
+import { TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
 import { WorktreeService } from './worktrees.js';
@@ -91,7 +92,14 @@ export async function installWorkspaces(ctx, store, machines) {
         stopRemoteSessions: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
     });
     ctx.effect(() => () => worktrees.close());
-    return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees } };
+    const sessionController = () => ctx.get('sessionController');
+    const tui = new TuiSessions(store, {
+        verify: (id, signal) => files.target(id, signal),
+        session: id => ctx.get('sessions')?.get?.(id),
+        list: async () => (await sessionController()?.list({}))?.items ?? [],
+        rename: async (sessionId, title) => { await sessionController()?.rename({ sessionId, title }); },
+    });
+    return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };
 }
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */
 function installTagSync(ctx, store, machines, access) {
