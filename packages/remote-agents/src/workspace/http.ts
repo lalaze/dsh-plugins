@@ -3,10 +3,11 @@ import { FILE_LIMIT, type WorkspaceTarget } from './domain.js';
 import type { WorkspaceService } from './service.js';
 import { revision, workspacePath } from './service.js';
 import type { WorkspaceTunnels } from './tunnels.js';
+import type { TuiSessions } from './tui.js';
 import type { JobAction, WorktreeService } from './worktrees.js';
 
 /** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
-export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string }; worktrees?: WorktreeService }
+export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string }; worktrees?: WorktreeService; tui?: TuiSessions }
 const JOB_ACTIONS: readonly JobAction[] = ['cancel', 'retry', 'skip', 'discard'];
 /** Worktree workspaces: a project's DSH workspace path, a worktree's path on its machine, and operation IDs. */
 export async function worktreeAction(worktrees: WorktreeService, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
@@ -36,7 +37,13 @@ export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   return { hostId: identifier(v.hostId), cwd: workspacePath(v.cwd, 'remote workspace'), label: '' };
 }
 export async function workspaceAction(features: WorkspaceFeatures, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+  if (action === 'tuiSessions') return { sessions: features.tui?.list() ?? [] };
   const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
+  if (action === 'tuiStart') {
+    if (!features.tui) throw new RemoteError('The TUI is unavailable', 501);
+    await features.tui.start(sessionId, signal);
+    return { sessionId };
+  }
   if (action === 'workspaceTarget') {
     const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
     return shell ? { ...target, terminalShell: shell } : target;

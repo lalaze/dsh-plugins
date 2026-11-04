@@ -22,7 +22,7 @@ export interface Instance { id: string; label: string }
  * `instance` identifies this DSH to others sharing a host's sessions; `seenWorkspaces` lists, per host, the
  * shared remote workspaces already offered to DSH, so one removed from the sidebar is not added again.
  */
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord>; teamPresets?: TeamPreset[] }
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord>; teamPresets?: TeamPreset[]; tuiSessions?: string[] }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord { names: string[]; at?: string }
 /** A deleted shared session whose deletion has not reached its SSH host yet. */
@@ -101,7 +101,7 @@ export class Store {
       ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
       ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}),
       ...(value.instance ? { instance: value.instance as Instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces as Record<string, string[]> } : {}),
-      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}), ...(teamPresets ? { teamPresets } : {}) };
+      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}), ...(teamPresets ? { teamPresets } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import { installWorkspaceSidebar, workspaceFileAddress } from '../src/client/workspace/sidebar.js';
 import { preferTerminalShell } from '../src/client/workspace/terminal-preference.js';
+import { closeArchived } from '../src/client/workspace/tui.js';
 import type { Client } from '../src/client/index.js';
 
 test('native file addresses preserve remote relative and absolute paths and reject other scopes', () => {
@@ -113,4 +114,13 @@ test('Remote Claude counts as a remote launcher when remembering the user\'s she
     preferTerminalShell(workspace); assert.equal(shell(), workspace);
     preferTerminalShell(undefined); assert.equal(shell(), '/bin/zsh');
   }
+});
+
+test('archiving a TUI conversation closes its terminal once, and only a TUI one', () => {
+  const closed = new Set<string>(), ended: string[] = [], isTui = (id: string) => id !== 'chat';
+  const sync = (archived: string[]) => closeArchived(archived, isTui, id => ended.push(id), closed);
+  sync(['chat']); assert.deepEqual(ended, []);
+  sync(['chat', 'tui']); sync(['chat', 'tui']); assert.deepEqual(ended, ['tui']);
+  // Unarchived, it runs again in a new terminal, which archiving it again ends too.
+  sync(['chat']); sync(['chat', 'tui']); assert.deepEqual(ended, ['tui', 'tui']);
 });

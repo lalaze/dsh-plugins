@@ -13,6 +13,7 @@ import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync, type WorkspaceTagsService } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
+import { TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
 import { WorktreeService, type DshWorkspaceController } from './worktrees.js';
@@ -121,7 +122,14 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     stopRemoteSessions: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
   });
   ctx.effect(() => () => worktrees.close());
-  return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees } };
+  const sessionController = () => ctx.get('sessionController') as { list(input: object): Promise<{ items?: { sessionId: string; blank?: boolean }[] }>; rename(input: { sessionId: string; title: string }): Promise<unknown> } | undefined;
+  const tui = new TuiSessions(store, {
+    verify: (id, signal) => files.target(id, signal),
+    session: id => (ctx.get('sessions') as { get?(id: string): { append(type: string, data: unknown): unknown } | undefined } | undefined)?.get?.(id),
+    list: async () => (await sessionController()?.list({}))?.items ?? [],
+    rename: async (sessionId, title) => { await sessionController()?.rename({ sessionId, title }); },
+  });
+  return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };
 }
 
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */

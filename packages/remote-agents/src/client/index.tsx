@@ -22,6 +22,7 @@ import { symbols } from '@deepseek-ai/cordis';
 import { WorkspacePanel } from './workspace/panel.js';
 import { installWorkspaceSidebar } from './workspace/sidebar.js';
 import { installShellMenu } from './workspace/shell-menu.js';
+import { installTuiSessions } from './workspace/tui.js';
 import { installWorkspaceImport, type WorkspaceList } from './workspace/import.js';
 
 export interface Client extends LocaleContext {
@@ -89,6 +90,7 @@ export function apply(ctx: Client): void {
   ctx.effect(installCustomModelLabels);
   ctx.effect(installUsageStyles);
   installWorkspaceSidebar(ctx);
+  installTuiSessions(ctx);
   ctx.effect(installShellMenu);
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     // Read through the service itself: this plugin's proxy would resolve dependencies from our context.
