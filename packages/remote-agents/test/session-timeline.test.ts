@@ -35,3 +35,12 @@ test('only a native delivery receipt clears an unconfirmed message in history', 
   assert.equal(timelineRows([sent, entry(2, { type: 'delivery', clientMessageId: 'another-message' })])[0].status, 'unconfirmed');
   assert.equal(timelineRows([sent, entry(2, { type: 'delivery', clientMessageId: 'message-1' })])[0].status, undefined);
 });
+
+test('a turn the CLI started itself is headed by the notice it got, even an empty one', () => {
+  const rows = timelineRows([
+    entry(1, { type: 'user_message', text: 'Build it', clientMessageId: 'm-1' }), entry(2, { type: 'assistant_message', text: 'Done' }), entry(3, { type: 'turn_end', clientMessageId: 'm-1' }),
+    entry(4, { type: 'user_message', text: 'Background command "Run Codex" completed (exit code 0)', clientMessageId: 'cli-1', unprompted: true }), entry(5, { type: 'assistant_message', text: 'Checking' }),
+    entry(6, { type: 'turn_end', clientMessageId: 'cli-1' }), entry(7, { type: 'user_message', text: '', clientMessageId: 'cli-2', unprompted: true }), entry(8, { type: 'assistant_message', text: 'Again' }),
+  ]);
+  assert.deepEqual(rows.map(r => [r.kind, r.text]), [['user_message', 'Build it'], ['assistant_message', 'Done'], ['unprompted', 'Background command "Run Codex" completed (exit code 0)'], ['assistant_message', 'Checking'], ['unprompted', ''], ['assistant_message', 'Again']]);
+});

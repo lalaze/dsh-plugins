@@ -31,10 +31,12 @@ export function timelineRows(entries: TimelineEntry[]): TimelineRow[] {
       continue;
     }
     const text = typeof item.text === 'string' ? item.text : typeof item.message === 'string' ? item.message : '';
-    if (!text && item.type !== 'interrupted') continue;
+    // A turn the CLI started itself, as after a background task finished, is headed by the notice it got, if any.
+    const kind = item.type === 'user_message' && item.unprompted === true ? 'unprompted' : item.type;
+    if (!text && kind !== 'interrupted' && kind !== 'unprompted') continue;
     if ((item.type === 'assistant_message' || item.type === 'reasoning') && textRow?.kind === item.type) textRow.text += text;
     else {
-      const row: TimelineRow = { key: entry.seqStart, kind: item.type, text, timestamp: entry.timestamp,
+      const row: TimelineRow = { key: entry.seqStart, kind, text, timestamp: entry.timestamp,
         ...(item.type === 'user_message' && item.delivery === 'pending' && !confirmed.has(item.clientMessageId) ? { status: 'unconfirmed' } : {}) }; rows.push(row);
       textRow = item.type === 'assistant_message' || item.type === 'reasoning' ? row : undefined;
     }

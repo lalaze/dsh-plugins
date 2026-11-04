@@ -165,3 +165,51 @@ function stamp(value: string) {
   const date = new Date(value), two = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;
 }
+
+test('a turn the CLI ran by itself, as after a background task finished, shows here once it ends, headed as its own', async t => {
+  const { adapter, remote, task, agentId, elsewhere, agent, sent, answer } = await setup(t);
+  const live = remote.live(task().id);
+  const own = (id: string, notice: string, reply: string, done = true) => {
+    remote.append(agentId, { type: 'user_message', text: notice, clientMessageId: id, unprompted: true });
+    remote.append(agentId, { type: 'assistant_message', text: reply });
+    remote.append(agentId, { type: 'tool_call', callId: `${id}-tool`, name: 'Bash', status: 'completed' });
+    if (done) remote.append(agentId, { type: 'turn_end', clientMessageId: id, status: 'completed' });
+  };
+  live.status = 'running'; live.activeTurn = { turnId: 'own-turn', startedAt: null, unprompted: true };
+  own('cli-1', 'Background command "Run Codex" completed (exit code 0)', '走路动画换好了。', false);
+  assert.equal(await adapter.catchUp(agent), false, 'the turn still runs');
+  remote.append(agentId, { type: 'turn_end', clientMessageId: 'cli-1', status: 'completed' }); live.status = 'idle'; live.activeTurn = null;
+  assert.equal(await adapter.catchUp(agent), true);
+  const [notice] = sent;
+  assert.equal((notice.source as { summary?: string }).summary, 'Codex continued on its own');
+  assert.match(notice.content.map(b => b.type === 'text' ? b.text : '').join(''), /It is shown below/);
+  const sends = remote.sends, shown = await answer(notice);
+  const at = remote.entries.get(agentId)!.find(e => e.item.clientMessageId === 'cli-1')!.timestamp;
+  assert.equal(shown, `**Codex 自行继续了 1 轮**，没有新消息，例如它跑的后台任务完成后接着做。\n\n---\n\n**自行继续** · ${stamp(at)}\n\nBackground command "Run Codex" completed (exit code 0)\n\n**Codex**\n\n走路动画换好了。\n\n_工具: Bash_`);
+  assert.equal(remote.sends, sends, 'showing it sends nothing');
+  assert.deepEqual(task().chat?.delivered, { messageId: 'cli-1', cursor: null, done: true });
+  // Among turns sent from elsewhere, the block is headed by where those ran, and each turn by who started it.
+  own('cli-2', '', '再检查了一遍。');
+  elsewhere('phone-1', '提交发布', '已发布。', MAC_MINI);
+  assert.equal(await adapter.catchUp(agent), true);
+  assert.equal((sent.at(-1)!.source as { summary?: string }).summary, 'Codex turns on Mac mini');
+  assert.match(await answer(sent.at(-1)!), /^\*\*在 Mac mini 上进行的 2 轮\*\*[\s\S]*\*\*自行继续\*\* · [^\n]+\n\n\*\*Codex\*\*\n\n再检查了一遍。[\s\S]*\*\*你\*\*[^\n]*\n\n提交发布/);
+});
+
+test('a message sent while the CLI runs a turn of its own waits for that turn and shows it ahead of the reply', async t => {
+  const { adapter, remote, task, agentId, agent, answer } = await setup(t);
+  const live = remote.live(task().id);
+  live.status = 'running'; live.activeTurn = { turnId: 'own-turn', startedAt: null, unprompted: true };
+  remote.append(agentId, { type: 'user_message', text: 'Background command "Run Codex" completed (exit code 0)', clientMessageId: 'cli-1', unprompted: true });
+  remote.append(agentId, { type: 'assistant_message', text: '走路动画换好了。' });
+  const sends = remote.sends, replying = answer(user('跑完了吗'));
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(remote.sends, sends, 'the message waits for the turn');
+  assert.equal(await adapter.catchUp(agent), false, 'the conversation is busy with the message');
+  remote.append(agentId, { type: 'turn_end', clientMessageId: 'cli-1', status: 'completed' }); live.status = 'idle'; live.activeTurn = null;
+  const reply = await replying;
+  assert.equal(remote.sends, sends + 1); assert.equal(remote.interrupts, 0, 'the turn is never interrupted');
+  assert.match(reply, /^\*\*Codex 自行继续了 1 轮\*\*[\s\S]*\*\*Codex\*\*\n\n走路动画换好了。\n\n---\n\nFollow-up completed\.$/);
+  assert.deepEqual(prompts(remote.entries.get(agentId)), ['修复登录问题', 'Background command "Run Codex" completed (exit code 0)', '跑完了吗']);
+  assert.deepEqual(task().chat?.delivered?.done, true);
+});

@@ -41,7 +41,7 @@ const notice = (summary: string, shown = 'It is shown below') => createUserMessa
 /** How long a turn without a recorded end must have been quiet before it is shown as ended. */
 const QUIET_MS = 60_000;
 /** Finished turns this conversation did not send, ready to show: one markdown block and the last message among them. */
-interface Elsewhere { text: string; summary: string; lastMessageId: string }
+interface Elsewhere { text: string; summary: string; lastMessageId: string; turns: number }
 const CLI_NAMES: Readonly<Record<string, string>> = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
 export const chatProviderId = (cli: string) => `remote-cli-${cli}`;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
@@ -257,13 +257,16 @@ export class RemoteCliAdapter extends LlmAdapter {
     if (!ended) entries = entries.slice(0, latest);
     const messages = entries.filter(e => e.item.type === 'user_message'), lastMessageId = messages.at(-1)?.item.clientMessageId;
     if (typeof lastMessageId !== 'string' || !lastMessageId) return;
-    // Messages name the DSH that sent them since 0.2.75; a mix, or one without, reads as sent elsewhere.
-    const senders = messages.map(e => e.item.sentBy as { instance?: unknown; label?: unknown } | undefined);
+    // Messages name the DSH that sent them since 0.2.75; a mix, or one without, reads as sent elsewhere. Turns the CLI
+    // ran by itself, as after a background task finished, were sent by nobody: alone, they are headed as its own.
+    const sent = messages.filter(e => e.item.unprompted !== true);
+    const senders = sent.map(e => e.item.sentBy as { instance?: unknown; label?: unknown } | undefined);
     const [sender] = senders, label = typeof sender?.label === 'string' ? sender.label.replace(/\s+/g, ' ').replace(/[*_`[\]<>\\]/g, '').trim() : '';
     const from: TurnSource = typeof sender?.instance === 'string' && label && senders.every(s => s?.instance === sender.instance) ? service.sender(task.hostId, sender.instance, label) : undefined;
     const cli = CLI_NAMES[task.provider] ?? task.provider, turns = messages.length;
-    const summary = `${cli} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}`;
-    return { text: transcript(entries, { cli, elsewhere: { from } }).text, summary, lastMessageId };
+    const summary = sent.length ? `${cli} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}`
+      : `${cli} continued on its own${turns > 1 ? `, ${turns} turns` : ''}`;
+    return { text: transcript(entries, { cli, elsewhere: { from } }).text, summary, lastMessageId, turns };
   }
   /**
    * Show turns that another DSH sharing the host, or Open sessions, ran in this conversation's CLI session, once they
@@ -281,7 +284,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     const turns = await this.elsewhere(task.id).catch(() => undefined), key = turns && `${task.id}:elsewhere:${turns.lastMessageId}`;
     if (!key || this.woken.has(key) || this.released || this.active.has(id)) return false;
     this.woken.add(key);
-    agent.send(notice(turns.summary, 'They are shown below'), 'next-turn', true);
+    agent.send(notice(turns.summary, turns.turns === 1 ? 'It is shown below' : 'They are shown below'), 'next-turn', true);
     return true;
   }
   /**
@@ -588,6 +591,12 @@ export class RemoteCliAdapter extends LlmAdapter {
           // The composer's permission wins over a mode chosen in Open sessions; a custom DSH permission keeps the saved mode.
           const mode = presetMode(task.provider, task.modes ?? [], this.host.permission?.(sessionId));
           if (mode && mode !== service.store.task(t => t.id === task.id)?.modeId) await service.setMode(task.id, mode);
+          // Claude may be running a turn it started itself, as after a background task finished. As in its terminal, the
+          // message waits for that turn to end; the turn is then shown ahead of the reply (see `elsewhere`).
+          for (let summary = await service.summary(task.id), noted = false; busy(summary) && summary.unprompted; summary = await service.summary(task.id)) {
+            if (!noted) { noted = true; yield* textChunk('reasoning', `${provider.label} is finishing a turn it started itself; the message is sent when it ends.\n`); yield* endBlock(); }
+            await pause(this.pollMs, undefined, { signal });
+          }
           admitted = true; await service.send(task.id, { id: messageId, text, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
         } else admitted = true;
       }

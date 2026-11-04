@@ -60,7 +60,10 @@ export interface Backend {
   sharedWorkspaces?(timeout?: number): Promise<SharedWorkspace[]>;
   /** Called when the host reports its shared workspaces changed; returns the unsubscribe function. */
   onSharedWorkspaces?(listener: () => void): () => void;
-  /** Called with a task whose history another DSH drives, after it was brought up to date here; returns the unsubscribe function. */
+  /**
+   * Called with a task whose history grew without a message from this DSH: one another DSH drives, after it was brought
+   * up to date here, or one whose CLI ran a turn by itself; returns the unsubscribe function.
+   */
   onSharedHistory?(listener: (taskId: string) => void): () => void;
   /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
   sender?(instance: string, label: string): { self: true } | { name: string };
@@ -400,7 +403,11 @@ done`}`, 15_000, { login: false });
   }
   private session(task: Task, peer: JsonlPeer, history: TaskHistory, relay?: RelayLink): CliSession {
     // A finished turn changed the account's usage; read it again when it is next shown.
-    return new CliSession(peer, task, history, this.store, { turnEnded: () => this.accounts.delete(task.provider),
+    return new CliSession(peer, task, history, this.store, { turnEnded: ({ unprompted }) => {
+        this.accounts.delete(task.provider);
+        // A turn the CLI ran by itself grew the history without a message from here: told like one another DSH ran.
+        if (unprompted) for (const listener of this.historyListeners) { try { listener(task.id); } catch { /* A listener must not stop the session. */ } }
+      },
       usage: (usage, turn) => { for (const listener of this.store.usageListeners) { try { listener(task.id, usage, turn); } catch { /* Statistics must not break a session. */ } } }, ...(relay ? { ended: () => void this.relayEnded(task.id, relay.id).catch(() => {}) } : {}) }, relay);
   }
   /**

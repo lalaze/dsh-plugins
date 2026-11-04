@@ -227,6 +227,7 @@ export const zh: Record<string, string> = {
   "Retry starting session": "重试启动会话",
   "Session history": "会话历史",
   "This turn was stopped.": "本轮任务已停止。",
+  "{provider} continued on its own.": "{provider} 自行继续。",
   "Continue in the main chat. Pending approvals can also be answered here.": "在主对话中继续交流，也可以在这里处理待审批请求。",
   "Delivery is unconfirmed. Check the same message before sending another.": "消息送达情况未确认，请先检查原消息再发送下一条。",
   "Message the agent": "给智能体发消息",

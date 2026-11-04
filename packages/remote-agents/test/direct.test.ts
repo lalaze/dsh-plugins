@@ -1021,3 +1021,52 @@ test('Codex images are recorded: view_image by path, MCP and generated images by
   const saved = await readFile(join(store.directory, 'events', `${agent.id}.jsonl`), 'utf8');
   assert.equal(saved.includes(png.toString('base64')) || saved.includes(jpeg.toString('base64')), false, 'image bytes stay out of the shared history');
 });
+
+test('a turn Claude starts by itself after a background task is saved as its own turn, shown as running and announced when it ends', async t => {
+  const { service, ssh, request, backend } = await fixture(t, 'claude');
+  const announced: string[] = [];
+  const agent = await service.create(request); await tick();
+  backend().onSharedHistory(id => announced.push(id));
+  ssh.live.finish(); await tick();
+  const live = ssh.live;
+  // A notice during a turn is that turn's own business, and a result without output is not a turn.
+  await service.send(agent.id, { id: randomUUID(), text: 'Continue' }); await tick();
+  live.emit({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed', summary: 'Find references to the loader' });
+  live.finish(); await tick();
+  live.emit({ type: 'result', subtype: 'success' }); await tick();
+  assert.equal((await service.summary(agent.id)).status, 'idle');
+  assert.deepEqual(announced, []);
+  // Idle, Claude is told what it ran in the background finished, and goes on without a message from DSH.
+  live.emit({ type: 'system', subtype: 'task_notification', task_id: 'b2', status: 'completed', summary: 'Background command "Run Codex" completed (exit code 0)' });
+  live.emit({ type: 'system', subtype: 'task_notification', task_id: 'b3', status: 'stopped', summary: 'Background shell command did not finish' });
+  await tick();
+  assert.equal((await service.summary(agent.id)).status, 'idle', 'a notice alone is not a turn');
+  live.emit({ type: 'assistant', parent_tool_use_id: 'task-b4', message: { content: [{ type: 'text', text: 'Still searching' }] } }); await tick();
+  assert.equal((await service.summary(agent.id)).status, 'idle', 'a subagent left running in the background is not Claude going on');
+  live.emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: 'Checking the result.' } } });
+  live.emit({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'Checking the result.' }, { type: 'tool_use', id: 'tool-1', name: 'Bash', input: { command: 'ls' } }] } });
+  await tick();
+  const running = await service.summary(agent.id);
+  assert.equal(running.status, 'running'); assert.equal(running.unprompted, true);
+  await assert.rejects(service.send(agent.id, { id: randomUUID(), text: 'Done?' }, { interrupt: false }), /still working/);
+  live.emit({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'ok' }] } });
+  live.emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ' Done.' } } });
+  live.emit({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: ' Done.' }] } });
+  live.emit({ type: 'result', subtype: 'success', origin: { kind: 'task-notification' } }); await tick();
+  assert.equal((await service.summary(agent.id)).status, 'idle');
+  assert.deepEqual(announced, [agent.id], 'conversations are told once the turn ends');
+  const entries = (await service.detail(agent.id)).timeline!.entries;
+  const start = entries.findLastIndex(e => e.item.type === 'user_message'), own = entries[start].item;
+  assert.equal(own.unprompted, true); assert.match(String(own.clientMessageId), /^cli-/);
+  assert.equal(own.text, 'Background command "Run Codex" completed (exit code 0)\nBackground shell command did not finish (stopped)');
+  assert.equal(entries[start - 2].item.type, 'turn_end', 'it follows the previous turn');
+  assert.equal(entries[start - 1].item.text, 'Still searching', 'the subagent output stays where it arrived, outside any turn');
+  assert.deepEqual(types(entries.slice(start + 1)), ['assistant_message', 'tool_call', 'tool_call', 'assistant_message', 'turn_end']);
+  assert.equal(entries.at(-1)!.item.clientMessageId, own.clientMessageId);
+  assert.equal((await service.messageTimeline(agent.id, String(own.clientMessageId))).terminalStatus, 'completed');
+  // The next message continues the session as usual.
+  await service.send(agent.id, { id: randomUUID(), text: 'Thanks' }); await tick();
+  ssh.live.finish(); await tick();
+  assert.equal((await service.summary(agent.id)).status, 'idle');
+  assert.deepEqual(announced, [agent.id]);
+});

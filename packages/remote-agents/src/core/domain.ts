@@ -140,7 +140,8 @@ export interface Agent {
   model: string | null;
   title: string | null;
   status: string;
-  activeTurn?: { turnId: string; startedAt: string | null } | null;
+  /** `unprompted`: the CLI started this turn itself, as after a background task it ran finished, not for a message. */
+  activeTurn?: { turnId: string; startedAt: string | null; unprompted?: true } | null;
   pendingPermissions: Permission[];
   lastError?: string;
   nativeSessionId?: string | null;
@@ -246,6 +247,8 @@ export interface AgentSummary {
   attached: boolean;
   status: AgentStatus;
   pendingPermissions: number;
+  /** Running a turn the CLI started itself, as after a background task it ran finished, rather than answering a message. */
+  unprompted?: true;
   error?: string;
   resumable?: boolean;
   nativeSessionId?: string;

@@ -22,7 +22,8 @@ export async function initializeAcp(peer: JsonlPeer): Promise<any> {
   return result;
 }
 export interface SessionHooks {
-  turnEnded?(): void;
+  /** A turn ended; `unprompted` when the CLI started it itself rather than for a message (see `continueUnprompted`). */
+  turnEnded?(turn: { unprompted: boolean }): void;
   /** Tokens a finished turn used, with when it started, whether it succeeded and the model that ran. */
   usage?(usage: TurnUsage, turn: FinishedTurn): void;
   /** The CLI process ended or was terminated; a relay's remote files can be removed. */
@@ -57,6 +58,8 @@ export class CliSession {
   private endedSent = false;
   private restoring = false;
   private imageInput = false;
+  /** Background tasks Claude reported finished while idle; they head the turn it starts for them. */
+  private notices: string[] = [];
   /** Items produced by the output line being processed, saved together with its relay offset. */
   private batch?: { item: Item; turnId?: string }[];
   /** Images in that line's tool results, saved before its items so a chat reading them finds the files. */
@@ -204,7 +207,7 @@ export class CliSession {
     if (!open) return;
     this.activeMessage = id; this.agent.status = 'running';
     this.confirmed = message!.item.delivery !== 'pending' || entries.some(e => e.item.type === 'delivery' && e.item.clientMessageId === id);
-    this.agent.activeTurn = { turnId: entries.findLast(e => e.turnId)?.turnId ?? randomUUID(), startedAt: message!.timestamp };
+    this.agent.activeTurn = { turnId: entries.findLast(e => e.turnId)?.turnId ?? randomUUID(), startedAt: message!.timestamp, ...(message!.item.unprompted === true ? { unprompted: true as const } : {}) };
     for (const entry of entries) if (entry.item.type === 'tool_call') this.tools.set(String(entry.item.callId), entry.item);
     const answered = new Set(entries.filter(e => e.item.type === 'permission_response').map(e => String(e.item.requestId)));
     const requests = entries.filter((e): e is TimelineEntry & { item: { wire: WireMessage } } => e.item.type === 'permission_request' && e.item.relay === relay.id && !!e.item.wire);
@@ -225,7 +228,8 @@ export class CliSession {
       if (images.length && (protocol === 'antigravity' || (protocol === 'acp' && !this.imageInput))) throw new Error('This remote CLI does not support image input');
       await this.history.append({ type: 'user_message', text, clientMessageId: messageId, delivery: 'pending', ...(attachments.length ? { attachments: attachments.map(({ data, ...file }) => file) } : {}), ...(sentBy ? { sentBy } : {}) });
       if (messageId === this.task.id) await this.store.update(state => { state.tasks.find(t => t.id === this.task.id)!.native!.initialSent = true; });
-      this.activeMessage = messageId; this.confirmed = false; this.partialText = false; this.agent.lastError = undefined;
+      // Claude hands the notices of its finished background tasks to this message; they head no turn of its own now.
+      this.activeMessage = messageId; this.notices = []; this.confirmed = false; this.partialText = false; this.agent.lastError = undefined;
       this.agent.status = 'running'; this.agent.activeTurn = { turnId: randomUUID(), startedAt: new Date().toISOString() };
       // Prompt responses are handled with the output stream (see `message`), so a restarted DSH still recognizes them.
       const id = inputId('prompt', messageId);
@@ -240,11 +244,26 @@ export class CliSession {
     this.append({ type: 'delivery', clientMessageId: this.activeMessage });
   }
   private complete(toolStatus = 'completed'): void {
-    this.saveUsage(); this.hooks.turnEnded?.(); this.turnModel = undefined;
+    const unprompted = this.agent.activeTurn?.unprompted === true;
+    this.saveUsage(); this.turnModel = undefined;
     this.agent.status = 'idle'; this.agent.activeTurn = null; this.agent.pendingPermissions = []; this.permissions.clear();
     for (const [callId, detail] of this.tools) if (detail.status === 'running') this.append({ ...detail, type: 'tool_call', callId, status: toolStatus });
     if (this.activeMessage) this.append({ type: 'turn_end', clientMessageId: this.activeMessage, status: toolStatus });
     this.tools.clear(); for (const done of this.stopWaiters) done(); this.stopWaiters.clear(); this.activeMessage = undefined;
+    this.hooks.turnEnded?.({ unprompted });
+  }
+  /**
+   * Claude goes on without a message from DSH when a background task it ran finishes, or at a wake-up it scheduled.
+   * Its output would otherwise land after the previous turn's end, unseen, with the session reading as idle. Such
+   * output opens a turn of the CLI's own, headed by the task notices it got, saved and shown like any other turn.
+   * Only Claude's own output counts: a subagent it left running in the background may still stream while it is idle.
+   */
+  private continueUnprompted(subagent = false): void {
+    if (subagent || this.activeMessage || this.admitting || this.restoring || this.stopping || this.interrupting) return;
+    const id = `cli-${randomUUID()}`;
+    this.append({ type: 'user_message', text: this.notices.join('\n'), clientMessageId: id, unprompted: true });
+    this.notices = []; this.activeMessage = id; this.confirmed = true; this.partialText = false; this.agent.lastError = undefined;
+    this.agent.status = 'running'; this.agent.activeTurn = { turnId: randomUUID(), startedAt: new Date().toISOString(), unprompted: true };
   }
   private setContext(context: ContextUsage | undefined): void { if (context) this.agent.context = context; }
   /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
@@ -313,6 +332,12 @@ export class CliSession {
       this.codexTotal = m.params?.tokenUsage?.total ?? this.codexTotal;
     }
     if (this.suspended) return; // A resume can replay native history already present in our log.
+    // Claude reports a background task it ran as finished. Mid-turn the notice is the turn's own business; while idle it
+    // heads the turn Claude starts for it (see `continueUnprompted`). A notice that starts no turn is kept for the next.
+    if (m.type === 'system' && m.subtype === 'task_notification' && !this.activeMessage && typeof m.summary === 'string' && m.summary) {
+      const notice = `${m.summary}${typeof m.status === 'string' && m.status && m.status !== 'completed' ? ` (${m.status})` : ''}`;
+      if (!this.notices.includes(notice)) this.notices.push(notice);
+    }
     if (m.event === 'step_update') {
       const step = m.step_update ?? {}; this.confirm();
       if (step.step_type === 'agent_response' && typeof step.text_delta === 'string') { this.partialText = true; this.append({ type: 'assistant_message', text: step.text_delta }); }
@@ -361,11 +386,12 @@ export class CliSession {
     if (m.type === 'control_request') this.claudeRequest(m);
     if (m.type === 'stream_event') {
       const event = m.event ?? {};
+      if (event.type === 'content_block_delta' && ['text_delta', 'thinking_delta'].includes(event.delta?.type)) this.continueUnprompted(!!m.parent_tool_use_id);
       if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') { this.confirm(); this.partialText = true; this.append({ type: 'assistant_message', text: String(event.delta.text ?? '') }); }
       if (event.type === 'content_block_delta' && event.delta?.type === 'thinking_delta') this.append({ type: 'reasoning', text: String(event.delta.thinking ?? '') });
     }
     if (m.type === 'assistant') {
-      this.confirm();
+      this.continueUnprompted(!!m.parent_tool_use_id); this.confirm();
       // Subagent messages run in their own context window.
       const used = m.parent_tool_use_id ? undefined : claudeMessageTokens(m.message?.usage);
       if (used !== undefined && this.agent.context) this.setContext({ used, max: this.agent.context.max });
@@ -421,6 +447,7 @@ export class CliSession {
     const request = m.request ?? {};
     const reply = (response: unknown): WireMessage => ({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response } });
     if (request.subtype !== 'can_use_tool') { if (!this.restoring) this.write(reply({}), inputId('auto', `claude-${m.request_id}`)); return; }
+    this.continueUnprompted();
     const name = String(request.tool_name ?? 'Tool');
     // Only echo native allow-rule suggestions, and only after the user selects their scope.
     // Keep updates in this closure: the client supplies an action ID, never arbitrary rules.
