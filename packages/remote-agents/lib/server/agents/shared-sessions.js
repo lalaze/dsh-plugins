@@ -346,8 +346,9 @@ export class SharedSessions {
             return;
         if (this.held.has(id))
             void this.serial(id, () => this.push(id)).catch(() => { });
-        // Histories are copied when read here; one already open, such as a session on screen, follows right away.
-        else if (this.owner.loaded(id))
+        // Histories are copied when read here; one already open, such as a session on screen, follows right away. So does a
+        // conversation's while another DSH runs a turn in it, however long it was unused: the conversation shows that turn live.
+        else if (this.owner.loaded(id) || task.chat && this.remoteBusy(id))
             void this.serial(id, () => this.pull(id)).then(() => this.owner.followed?.(id)).catch(() => { });
         this.adoptIfOrphaned(id);
     }
@@ -718,6 +719,11 @@ export class SharedSessions {
         const { instance: _instance, ...live } = session.live;
         delete live.at;
         return structuredClone(live);
+    }
+    /** Whether the other DSH driving a session reports a turn in it. */
+    remoteBusy(id) {
+        const live = this.remoteLive(id);
+        return !!live && (live.status === 'running' || live.status === 'initializing' || !!live.activeTurn || !!live.pendingPermissions?.length);
     }
     /** The other DSH driving a session, by name. */
     controller(id) {

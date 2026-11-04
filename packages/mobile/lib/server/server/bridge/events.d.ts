@@ -42,8 +42,10 @@ export declare function openApprovals(events: readonly {
 }[]): PendingInteraction[];
 /** DSH `userQuestions.active` entries still open, in the shared form. */
 export declare function openQuestions(active: unknown, now?: number): PendingInteraction[];
-/** Text of an assistant stream chunk, by kind. */
-export declare function chunkText(chunk: unknown): {
-    text?: string;
-    reasoning?: string;
-};
+/** What a phone shows of a reply being written. `reasoning` is what the model thought since its latest text. */
+export interface ReplyDraft {
+    text: string;
+    reasoning: string;
+}
+/** Add one chunk of a reply being written, or one record of the compact form DSH keeps of it, to its draft. */
+export declare function addToDraft(draft: ReplyDraft, chunk: unknown): void;

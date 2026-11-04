@@ -143,9 +143,26 @@ export function openQuestions(active, now = Date.now()) {
     }
     return result;
 }
-/** Text of an assistant stream chunk, by kind. */
-export function chunkText(chunk) {
+/** Add one chunk of a reply being written, or one record of the compact form DSH keeps of it, to its draft. */
+export function addToDraft(draft, chunk) {
     const value = asDict(chunk);
+    if (value.type === 'chunk')
+        return addToDraft(draft, value.chunk);
+    // A CLI's narration between tool calls comes as separate blocks, which read as paragraphs once the reply is saved.
+    if (value.type === 'block-start' && value.blockType === 'text' && draft.text) {
+        draft.text += '\n\n';
+        return;
+    }
+    const { text, reasoning } = chunkText(value);
+    if (text) {
+        draft.text += text;
+        draft.reasoning = '';
+    }
+    if (reasoning)
+        draft.reasoning += reasoning;
+}
+/** Text of an assistant stream chunk, by kind. */
+function chunkText(value) {
     if (value.type === 'text-delta' && typeof value.text === 'string')
         return { text: value.text };
     if (value.type === 'reasoning-delta' && typeof value.text === 'string')

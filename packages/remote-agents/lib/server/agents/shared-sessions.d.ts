@@ -140,6 +140,8 @@ export declare class SharedSessions {
     private tick;
     /** Live status reported by the DSH driving the session, when that is another one. */
     remoteLive(id: string): Partial<Agent> | undefined;
+    /** Whether the other DSH driving a session reports a turn in it. */
+    private remoteBusy;
     /** The other DSH driving a session, by name. */
     controller(id: string): string | undefined;
     /** Delete a session for every DSH; the deletion is kept until the host can be reached. */

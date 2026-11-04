@@ -54,6 +54,12 @@ export type HostFollowFrame = {
         type: 'event';
         event: HostEvent;
     }[];
+    assistantStream?: {
+        activeAttempt?: {
+            attemptId: string;
+            stream: readonly unknown[];
+        };
+    };
 } | {
     type: 'event';
     event: HostEvent;

@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { busy } from '../core/domain.js';
 import { accessOf, loggerOf } from '../core/dsh-host.js';
 import { dshHome } from '../workspace/access.js';
 import { SharedChatAdoption } from './adopt.js';
@@ -71,19 +72,19 @@ export function installChat(ctx, service, projects, workspace) {
         scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
         for (const agent of host.agents.list?.() ?? [])
             wake(agent);
-        // A conversation in use here shows a turn another DSH ran in its CLI session, or one the CLI ran by itself, once
-        // that turn ends. The history changes many times during the turn: look once it has been quiet for a moment.
+        // A conversation shows a turn another DSH runs in its CLI session as it goes, and one the CLI ran by itself once it
+        // ends. The history changes many times during a turn: look at most once a second. A conversation without an agent,
+        // as after DSH restarted, gets one when such a turn runs, which shows it through `wake`.
         const followed = new Map();
         const historyChanged = (taskId) => {
             const sessionId = service.store.task(t => t.id === taskId)?.chat?.sessionId;
-            if (!sessionId)
+            if (!sessionId || followed.has(taskId))
                 return;
-            clearTimeout(followed.get(taskId));
             const timer = setTimeout(() => {
                 followed.delete(taskId);
                 const agent = host.agents.get(sessionId);
-                if (agent)
-                    void adapter.catchUp(agent).catch(() => { });
+                void (agent ? adapter.catchUp(agent) : service.summary(taskId).then(summary => { if (busy(summary) && !summary.archived)
+                    return controller('sessionController').resolveAgent(sessionId); })).catch(() => { });
             }, 1000);
             timer.unref?.();
             followed.set(taskId, timer);

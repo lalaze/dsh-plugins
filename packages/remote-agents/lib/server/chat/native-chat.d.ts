@@ -107,14 +107,14 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     private unsynced;
     /**
      * Finished turns of a conversation's CLI session that the conversation never showed, because another DSH sharing the
-     * host or Open sessions sent them, after the last turn it showed and before `until`, a message it just sent. A turn
-     * still running waits for a later look. Undefined when there are none, or when the turn the conversation showed last
-     * is no longer in the history.
+     * host or Open sessions sent them, after the last turn it showed and before `until`, a message it just sent, and one
+     * that is still running. Undefined when there are none, or when the turn the conversation showed last is no longer in
+     * the history.
      */
     private elsewhere;
     /**
-     * Show turns that another DSH sharing the host, or Open sessions, ran in this conversation's CLI session, once they
-     * finished. Like `sync` it wakes the conversation with a notice and sends nothing to the CLI.
+     * Show turns that another DSH sharing the host, or Open sessions, ran in this conversation's CLI session; one still
+     * running streams on as it goes. Like `sync` it wakes the conversation with a notice and sends nothing to the CLI.
      */
     catchUp(agent: SyncAgent): Promise<boolean>;
     /**
