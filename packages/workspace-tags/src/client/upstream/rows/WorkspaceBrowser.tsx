@@ -46,7 +46,7 @@ import { usePresentationGroups, MirrorSessionRow, PresentedRow, type Presentatio
 import type { TagState, WorkspaceTag } from '../../../shared/tags.ts'
 import type { SectionMode, TagRuntime } from '../../tags/contract.ts'
 import {
-  asTagTranslate, RowTrail, SectionBlock, SpaceSwitcher, TagIcon, useTagging, workspaceTags,
+  asTagTranslate, RowTrail, SectionBlock, SpaceSwitcher, TagIcon, useHeldCompletion, useTagging, workspaceTags,
 } from '../../tags/parts.tsx'
 import {
   activityBySpace, browserSections, inSpace, isActiveStatus, liveFilter, rowActivity, sectionFolded, sessionActivity,
@@ -78,6 +78,25 @@ function watermarkRows(sessions: readonly SessionNode[], watermark: number): {
     if (session.blank) return true
     count += 1
     return count <= watermark
+  })
+  return { rows, hiddenCount: sessions.length - rows.length }
+}
+
+/**
+ * workspace-tags: a Workspace's rows in Running: those that run, the open one and a search reveal,
+ * then the first `others` of its resting Sessions, each in list order.
+ */
+function runningRows(
+  sessions: readonly SessionNode[],
+  current: SessionId | undefined,
+  revealSessionId: SessionId | undefined,
+  others: number,
+): { rows: readonly SessionNode[]; hiddenCount: number } {
+  let count = 0
+  const rows = sessions.filter((session) => {
+    if (session.blank || session.running || session.runningSubagentCount > 0 || session.id === current || session.id === revealSessionId) return true
+    count += 1
+    return count <= others
   })
   return { rows, hiddenCount: sessions.length - rows.length }
 }
@@ -389,6 +408,8 @@ function SessionTree({
     : owningGroupKey(workspaces, revealSessionId)
   // Per-group raised watermarks; an absent key means the base watermark.
   const [storedWatermarks, setStoredWatermarks] = useState<Readonly<Record<string, number>>>({})
+  // workspace-tags: how many of a Workspace's resting Sessions its Running section shows.
+  const [runningOthers, setRunningOthers] = useState<Readonly<Record<string, number>>>({})
   // Advances on user-driven watermark changes so AnimatedRows settles them; automatic raises animate.
   const [watermarkMotionKey, setWatermarkMotionKey] = useState(0)
   // Transient drag marker state; the selected mode owns the resulting order.
@@ -568,8 +589,11 @@ function SessionTree({
     : fullGroups.get(revealGroup)?.sessions.find(node => node.id === revealSessionId)
   const revealSections = revealNode === undefined || sections === undefined
     ? []
-    : sections.filter(section => (section.kind === 'tag' || section.kind === 'untagged' || section.kind === (sessionActivity(revealNode) ?? 'idle'))
-      && section.groups.some(group => group.key === revealGroup)).map(section => section.key)
+    : sections.filter((section) => {
+      const activity = sessionActivity(revealNode)
+      return (section.kind === 'tag' || section.kind === 'untagged' || section.kind === (activity ?? 'idle') || (section.kind === 'running' && activity === undefined))
+        && section.groups.some(group => group.key === revealGroup)
+    }).map(section => section.key)
   const revealSection = revealSections.some(key => !sectionFolded(tagging?.collapsed ?? {}, key) && !sectionFolds.has(`${key}/${revealGroup}`))
     ? undefined
     : revealSections[0]
@@ -587,8 +611,8 @@ function SessionTree({
   // workspace-tags: `section` marks a Workspace in a Status section, whose Sessions are only
   // those in the section's state: they drag among themselves, and a folded row's mark counts only them.
   // Waiting, Completed and Running pass `toggle` and fold on their own. Waiting and Completed show all
-  // their rows; Running, which lists every Session of its Workspaces, passes `limit` to keep the
-  // sidebar's "Show more", raised from its own rows since the sidebar's may be folded.
+  // their rows; Running, which also lists the Sessions resting beside its running ones, passes `limit`
+  // to keep those behind a "Show more" of its own, as the sidebar's own rows may be folded.
   const renderGroup = (
     group: GroupNode,
     depth: number,
@@ -600,18 +624,16 @@ function SessionTree({
     const dragScope = sectionKey === undefined ? group.key : `${sectionKey}/${group.key}`
     const children = childrenByParent.get(group.key) ?? []
     const compatibleDrag = workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key)
-    const baseline = section?.limit === true
-      ? Math.max(SESSION_WATERMARK_BASE, requiredWatermark(
-        group.sessions,
-        current,
-        group.key === revealGroup ? revealSessionId : undefined,
-      ))
-      : baselines.get(group.key) ?? SESSION_WATERMARK_BASE
-    const stored = sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE
-    const watermark = section?.limit === true ? Math.max(stored, baseline) : stored
-    const limited = section?.toggle === undefined || section.limit === true
-    const collapsed = limited ? watermarkRows(group.sessions, baseline) : { rows: group.sessions, hiddenCount: 0 }
-    const visible = limited ? watermarkRows(group.sessions, watermark) : collapsed
+    const baseline = baselines.get(group.key) ?? SESSION_WATERMARK_BASE
+    const watermark = sessionWatermarks[group.key] ?? SESSION_WATERMARK_BASE
+    const reveal = group.key === revealGroup ? revealSessionId : undefined
+    const others = runningOthers[group.key] ?? 0
+    const collapsed = section?.limit === true
+      ? runningRows(group.sessions, current, reveal, 0)
+      : section?.toggle === undefined ? watermarkRows(group.sessions, baseline) : { rows: group.sessions, hiddenCount: 0 }
+    const visible = section?.limit === true
+      ? runningRows(group.sessions, current, reveal, others)
+      : section?.toggle === undefined ? watermarkRows(group.sessions, watermark) : collapsed
     const sessionsExpanded = visible.hiddenCount === 0
     rowKeys.push(`workspace:${group.key}`)
     const childRows = externalChildren === undefined ? (group.expanded ? children.map(child => renderGroup(child, depth + 1)) : []) : externalChildren
@@ -789,6 +811,11 @@ function SessionTree({
             data-row-key={`overflow:${group.key}`}
             aria-expanded={sessionsExpanded}
             onClick={() => {
+              if (section?.limit === true) {
+                setRunningOthers(marks => ({ ...marks, [group.key]: sessionsExpanded ? 0 : visible.hiddenCount <= SESSION_WATERMARK_BASE ? Infinity : others + SESSION_WATERMARK_BASE }))
+                setWatermarkMotionKey(key => key + 1)
+                return
+              }
               if (sessionsExpanded) {
                 dropWatermarks(key => key === group.key)
                 return
@@ -1148,7 +1175,10 @@ export function WorkspaceBrowser({
     setProviderState(old => phase || error || value ? { lease, value, error, phase } : old?.lease === lease ? null : old)
   }, [])
   const provider = providerState?.value ?? null
-  const presentationStatuses = useSessionStatus(value => value)
+  // workspace-tags: under Status, the open Session stays in Completed until the user leaves it.
+  const mainSession = Object.values(list.byId).find(session => (session.retainedBy.mainView ?? 0) > 0)?.id
+  const presentationStatuses = useHeldCompletion(useSessionStatus(value => value), sectionMode === 'status' ? mainSession : undefined)
+  const useHeldStatus: typeof useSessionStatus = select => select(presentationStatuses)
   const spaceTag = tagging === undefined ? null : tagView.view.untaggedOnly ? { id: UNTAGGED_FILTER, name: asTagTranslate(t)('tags.section.untagged'), color: 'gray' as const } : liveFilter(tagState, tagView.view.filter)
   const flatSpace = useMemo(() => spaceTag === null || tagging === undefined ? undefined : {
     tag: spaceTag,
@@ -1694,7 +1724,7 @@ export function WorkspaceBrowser({
                 usePanelInfo={usePanelInfo}
                 list={list}
                 shortcuts={shortcuts}
-                useSessionStatus={useSessionStatus}
+                useSessionStatus={useHeldStatus}
                 onSessionRenameRequest={requestSessionRename}
                 renderSlot={renderSlot}
                 workspaces={orderedWorkspaces}

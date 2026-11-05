@@ -1,10 +1,12 @@
 /**
  * Tag and Status sections over ui-workspace's Workspace groups, and the space
  * filter that narrows every grouping to one tag. A Workspace appears in every
- * Tag section it qualifies for; a running Workspace appears only in Running.
+ * Tag or Status section it qualifies for, and each Session in one Status section.
  * The sidebar's Workspace order is kept inside each section; empty sections
  * are left out.
  */
+import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { TagState, WorkspaceTag } from '../../shared/tags.ts'
 import type { GroupNode, SessionNode } from '../upstream/tree.ts'
 import type { SectionMode } from './contract.ts'
@@ -25,9 +27,9 @@ export interface BrowserSection {
   tag?: WorkspaceTag
   /**
    * Tag sections hold whole Workspaces. Waiting and Completed hold each Workspace
-   * with only its Sessions in that state. Any running Session puts the whole
-   * Workspace, including all its Sessions, in Running alone; otherwise a Workspace can qualify for several
-   * sections. Idle follows the Workspace's own fold.
+   * with only its Sessions in that state. Running holds a Workspace with a running
+   * Session, with the Sessions resting beside it, and Idle the others, following the
+   * Workspace's own fold.
    */
   groups: readonly GroupNode[]
   /** Workspaces in Tag and Idle sections, running Sessions in Running, matching Sessions in the others. */
@@ -127,10 +129,10 @@ export function tagSections(groups: readonly GroupNode[], state: TagState): Brow
 
 /**
  * Waiting for the user, then finished and unread, then running, then Idle.
- * Any running Session (including a subagent) puts its Workspace only in Running,
- * with all its Sessions. Otherwise each state lists every Workspace
- * with Sessions in that state and only those Sessions. Idle also holds
- * Workspaces without Sessions, where a new one starts.
+ * What needs the user always shows in its own section, a Workspace that also runs
+ * something included. A Workspace with a running Session (including a subagent)
+ * keeps its resting Sessions in Running, so it is not in Idle as well. Idle also
+ * holds Workspaces without Sessions, where a new one starts.
  * @param groups - the rendered groups, whose Sessions follow their fold state.
  * @param sessionsOf - a group's Sessions regardless of its fold state.
  */
@@ -139,11 +141,6 @@ export function statusSections(groups: readonly GroupNode[], sessionsOf: (group:
   const idle: GroupNode[] = []
   for (const group of groups) {
     const all = sessionsOf(group)
-    const running = all.filter(node => node.running || node.runningSubagentCount > 0)
-    if (running.length > 0) {
-      active.get('running')!.push({ ...group, expanded: true, sessions: all })
-      continue
-    }
     const byKind = new Map<ActiveStatus, SessionNode[]>()
     for (const node of all) {
       const kind = sessionActivity(node)
@@ -152,8 +149,15 @@ export function statusSections(groups: readonly GroupNode[], sessionsOf: (group:
       if (members === undefined) byKind.set(kind, [node])
       else members.push(node)
     }
-    for (const [kind, sessions] of byKind) active.get(kind)!.push({ ...group, expanded: true, sessions })
-    if (all.length === 0 || all.some(node => sessionActivity(node) === undefined)) {
+    const busy = byKind.has('running')
+    for (const kind of ['waiting', 'completed'] as const) {
+      const sessions = byKind.get(kind)
+      if (sessions !== undefined) active.get(kind)!.push({ ...group, expanded: true, sessions })
+    }
+    if (busy) {
+      const sessions = all.filter((node) => { const kind = sessionActivity(node); return kind === 'running' || kind === undefined })
+      active.get('running')!.push({ ...group, expanded: true, sessions })
+    } else if (all.length === 0 || all.some(node => sessionActivity(node) === undefined)) {
       idle.push({ ...group, sessions: group.sessions.filter(node => sessionActivity(node) === undefined) })
     }
   }
@@ -161,11 +165,32 @@ export function statusSections(groups: readonly GroupNode[], sessionsOf: (group:
     .filter(([, members]) => members.length > 0)
     .map(([kind, members]) => ({
       key: `status:${kind}`, kind, groups: members, count: members.reduce((n, member) => n + (kind === 'running'
-        ? member.sessions.filter(node => node.running || node.runningSubagentCount > 0).length
+        ? member.sessions.filter(node => sessionActivity(node) === 'running').length
         : member.sessions.length), 0),
     }))
   if (idle.length > 0) sections.push({ key: 'status:idle', kind: 'idle', groups: idle, count: idle.length })
   return sections
+}
+
+/**
+ * The Session whose completion to keep showing. Opening a Session reads its completion at once,
+ * which would take the row out from under the click, often into the folded Idle, so it stays
+ * until the user leaves it or it has something new to show.
+ * @param held - the Session held so far.
+ * @param previous - DSH's status before this one.
+ * @param open - the Session in the main view.
+ */
+export function heldCompletion(
+  held: SessionId | undefined,
+  previous: SessionStatusSnapshot,
+  statuses: SessionStatusSnapshot,
+  open: SessionId | undefined,
+): SessionId | undefined {
+  if (open === undefined) return undefined
+  const status = statuses.get(open)
+  if (status?.running === true || status?.pendingInteraction !== undefined) return undefined
+  if (held === open) return held
+  return previous.get(open)?.completionUnread === true && status?.completionUnread !== true ? open : undefined
 }
 
 /** Idle starts folded: it is the catch-all, and the sections above it are what needs a look. */

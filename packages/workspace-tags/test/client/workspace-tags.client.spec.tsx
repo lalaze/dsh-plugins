@@ -18,7 +18,7 @@ import { WorkspaceBrowser } from '../../src/client/upstream/rows/WorkspaceBrowse
 import { en } from '../../src/client/upstream/locales.ts'
 import { createTagRuntime } from '../../src/client/tags/runtime.ts'
 import {
-  activityBySpace, inSpace, liveFilter, rowActivity, sectionFolded, sessionActivity, statusSections, tagSections,
+  activityBySpace, heldCompletion, inSpace, liveFilter, rowActivity, sectionFolded, sessionActivity, statusSections, tagSections,
 } from '../../src/client/tags/sections.ts'
 import { TagDialogOverlay, TagMenuOverlay, type TagOverlayProps } from '../../src/client/tags/overlays.tsx'
 
@@ -117,27 +117,46 @@ describe('sections', () => {
     expect(rowActivity([node('l')])).toBeUndefined()
   })
 
-  it('puts a Workspace with any running Session only in Running with all its Sessions, ahead of every other state', () => {
+  it('lifts what needs the user out of a running Workspace, and Running keeps the rest', () => {
     const sessions: Record<string, SessionNode[]> = {
       alpha: [node('a1', { running: true }), waiting('a2'), node('a3')],
       beta: [node('b1', { completed: true }), node('b2', { running: true }), node('b3', { runningSubagentCount: 2 })],
       gamma: [waiting('c1')],
       delta: [node('d1'), node('d2', { completed: true, archived: true }), node('d3', { running: true })],
       epsilon: [],
+      // Blocked on the user is not running: the Workspace's other Sessions rest in Idle.
+      zeta: [node('z1', { pendingInteraction: 'approval', running: true }), node('z2')],
     }
-    const groups = [...['alpha', 'beta', 'gamma', 'epsilon'].map(group), { ...group('delta'), expanded: true, sessions: sessions.delta! }]
+    const groups = [...['alpha', 'beta', 'gamma', 'epsilon', 'zeta'].map(group), { ...group('delta'), expanded: true, sessions: sessions.delta! }]
     const sections = statusSections(groups, g => sessions[g.key]!)
     expect(sections.map(section => [
       section.kind, section.groups.map(g => [g.key, g.expanded, g.sessions.map(n => n.id)]), section.count,
     ])).toEqual([
-      ['waiting', [['gamma', true, ['c1']]], 1],
-      ['running', [['alpha', true, ['a1', 'a2', 'a3']], ['beta', true, ['b1', 'b2', 'b3']], ['delta', true, ['d1', 'd2', 'd3']]], 4],
+      ['waiting', [['alpha', true, ['a2']], ['gamma', true, ['c1']], ['zeta', true, ['z1']]], 3],
+      ['completed', [['beta', true, ['b1']]], 1],
+      ['running', [['alpha', true, ['a1', 'a3']], ['beta', true, ['b2', 'b3']], ['delta', true, ['d1', 'd2', 'd3']]], 4],
       // Idle follows the sidebar's fold, holds Workspaces without Sessions, and counts Workspaces.
-      ['idle', [['epsilon', false, []]], 1],
+      ['idle', [['epsilon', false, []], ['zeta', false, []]], 2],
     ])
     expect(sectionFolded({}, 'status:idle')).toBe(true)
     expect(sectionFolded({}, 'status:waiting')).toBe(false)
     expect(sectionFolded({ 'status:idle': false }, 'status:idle')).toBe(false)
+  })
+
+  it('holds a completion the user just opened until they leave it or it starts again', () => {
+    const unread = statuses({ a: { completionUnread: true }, b: { completionUnread: true } })
+    const read = statuses({ b: { completionUnread: true } })
+    expect(heldCompletion(undefined, unread, read, sid('a'))).toBe('a')
+    expect(heldCompletion(undefined, unread, unread, sid('a'))).toBeUndefined()
+    expect(heldCompletion(sid('a'), read, read, sid('a'))).toBe('a')
+    // Left it, for nothing or for a Session with nothing to hold.
+    expect(heldCompletion(sid('a'), read, read, undefined)).toBeUndefined()
+    expect(heldCompletion(sid('a'), read, read, sid('c'))).toBeUndefined()
+    // Sent the next step, or the agent asks something.
+    expect(heldCompletion(sid('a'), read, statuses({ a: { running: true } }), sid('a'))).toBeUndefined()
+    expect(heldCompletion(sid('a'), read, statuses({ a: { pendingInteraction: approval('a') } }), sid('a'))).toBeUndefined()
+    // A Session that was read because it started again is not held.
+    expect(heldCompletion(undefined, unread, statuses({ a: { running: true } }), sid('a'))).toBeUndefined()
   })
 
   it('counts what needs the user and what runs in every space, whatever the filter hides', () => {
@@ -277,7 +296,7 @@ describe('WorkspaceBrowser with tags', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View options' }))
     fireEvent.click(await screen.findByRole('menuitem', { name: /^Status/ }))
     // What needs the user leads; Idle, the catch-all, starts folded.
-    expect(sectionNames()).toEqual([['Waiting for you', ['gamma']], ['Completed', ['delta']], ['Running', ['beta']], ['Idle', []]])
+    expect(sectionNames()).toEqual([['Waiting for you', ['gamma']], ['Finished, your turn', ['delta']], ['Running', ['beta']], ['Idle', []]])
     fireEvent.click(sectionHeader('Idle'))
     expect(sectionNames().at(-1)).toEqual(['Idle', ['alpha']])
     expect(runtime.view.getSnapshot().collapsed).toEqual({ 'status:idle': false })
@@ -298,37 +317,41 @@ describe('WorkspaceBrowser with tags', () => {
     expect(sectionNames()).toEqual([['Idle', ['alpha', 'delta']]])
   })
 
-  it('shows all Sessions of a running Workspace without duplicating it in other Status sections', async () => {
+  it('shows what needs the user apart from a running Workspace, which keeps the rest behind Show more', async () => {
     const { runtime, store } = await mount({
-      useSessions: hook(sessionState([summary('a1', { running: true }), summary('a2'), summary('a3'), summary('b1'),
+      useSessions: hook(sessionState([summary('a1', { running: true }), summary('a2'), summary('a3'), summary('a4'), summary('b1'),
         summary('x1', { origin: 'subagent', running: true })])),
-      useSessionStatus: hook(statuses({ a3: { pendingInteraction: approval('a3') }, x1: { running: true, pendingInteraction: approval('x1') } })),
-      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1', 'a2', 'a3']), workspace('beta', ['b1'])])),
+      useSessionStatus: hook(statuses({ a3: { pendingInteraction: approval('a3') }, a4: { completionUnread: true }, x1: { running: true, pendingInteraction: approval('x1') } })),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1', 'a2', 'a3', 'a4']), workspace('beta', ['b1'])])),
     })
     act(() => { runtime.setMode('status') })
     expect(store.getSnapshot().groupExpansion).toEqual({})
-    // Alpha's waiting and idle Sessions do not give it Waiting or Idle entries while a1 runs.
     expect(sectionSessions()).toEqual([
-      ['Running', [['alpha', ['a1', 'a2', 'a3']]]],
+      ['Waiting for you', [['alpha', ['a3']]]],
+      ['Finished, your turn', [['alpha', ['a4']]]],
+      ['Running', [['alpha', ['a1']]]],
       ['Idle', []],
     ])
+    expect(within(sectionHeader('Finished, your turn')).getByText('1')).toBeTruthy()
     expect(within(sectionHeader('Idle')).getByText('1')).toBeTruthy()
     expect(within(sectionHeader('Running')).getByText('1')).toBeTruthy()
-    // Folding alpha inside Running does not change the sidebar's own Workspace fold.
-    fireEvent.click(workspaceRow('alpha')[0]!)
-    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', []]]])
-    expect(within(workspaceRow('alpha')[0]!).getByRole('img', { name: '1 waiting for you' })).toBeTruthy()
+    // Only the sections that call for the user are marked to stand out.
+    expect(['Waiting for you', 'Finished, your turn', 'Running', 'Idle'].map(name => sectionHeader(name).hasAttribute('data-attention')))
+      .toEqual([true, true, false, false])
+    // Folding alpha inside Running does not change the sidebar's own Workspace fold, or its other copies.
+    fireEvent.click(within(section('Running')).getAllByRole('treeitem')[0]!)
+    expect(sectionSessions()[2]).toEqual(['Running', [['alpha', []]]])
+    expect(sectionSessions()[1]).toEqual(['Finished, your turn', [['alpha', ['a4']]]])
     expect(store.getSnapshot().groupExpansion).toEqual({})
     // Only beta, which has no running Session, remains in Idle.
     fireEvent.click(sectionHeader('Idle'))
     expect(sectionNames().at(-1)).toEqual(['Idle', ['beta']])
-    expect(workspaceRow('alpha')).toHaveLength(1)
     fireEvent.click(workspaceRow('beta')[0]!)
     expect(store.getSnapshot().groupExpansion).toEqual({ beta: true })
     expect(sectionSessions().at(-1)).toEqual(['Idle', [['beta', ['b1']]]])
   })
 
-  it('folds a running Workspace\'s other Sessions behind Show more, keeping its running one in view', async () => {
+  it('leaves a running Workspace\'s resting Sessions behind Show more, wherever the running one sits', async () => {
     const ids = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8']
     const { runtime } = await mount({
       useSessions: hook(sessionState(ids.map(id => summary(id, { running: id === 'a7' })))),
@@ -336,12 +359,81 @@ describe('WorkspaceBrowser with tags', () => {
       useWorkspaces: hook(workspaceState([workspace('alpha', ids)])),
     })
     act(() => { runtime.setMode('status') })
-    // The sidebar's own alpha is folded; the Running section still shows down to a7.
-    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ids.slice(0, 7)]]])
-    fireEvent.click(within(section('Running')).getByRole('button', { name: 'Show 1 more sessions' }))
+    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ['a7']]]])
+    const more = () => within(section('Running')).getByRole('button', { name: /^Show/ })
+    expect(more().textContent).toContain('7')
+    fireEvent.click(more())
+    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ['a1', 'a2', 'a3', 'a4', 'a5', 'a7']]]])
+    expect(more().textContent).toContain('2')
+    fireEvent.click(more())
     expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ids]]])
     fireEvent.click(within(section('Running')).getByRole('button', { name: 'Show less' }))
-    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ids.slice(0, 7)]]])
+    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ['a7']]]])
+  })
+
+  it('keeps the open Session in view in Running though it rests', async () => {
+    const { runtime } = await mount({
+      useSessions: hook(sessionState([summary('a1'), summary('a2', { retainedBy: { mainView: 1 } }), summary('a3', { running: true }), summary('a4')])),
+      useSessionStatus: hook(statuses({})),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1', 'a2', 'a3', 'a4'])])),
+    })
+    act(() => { runtime.setMode('status') })
+    expect(sectionSessions()[0]).toEqual(['Running', [['alpha', ['a2', 'a3']]]])
+    expect(within(section('Running')).getByRole('button', { name: /^Show/ }).textContent).toContain('2')
+  })
+
+  it('keeps a finished Session where it was while it is open, and lets it go when the user leaves or goes on', async () => {
+    const store = <T,>(initial: T) => {
+      let value = initial
+      const listeners = new Set<() => void>()
+      return {
+        get: () => value,
+        set: (next: T) => { value = next; for (const listener of listeners) listener() },
+        source: { getSnapshot: () => value, subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) } },
+      }
+    }
+    const sessionsOf = (open?: string, running?: string) => sessionState(['a1', 'd1'].map(id => summary(id, {
+      ...open === id ? { retainedBy: { mainView: 1 } } : {}, ...running === id ? { running: true } : {},
+    })))
+    const list = store(sessionsOf())
+    const status = store(statuses({ d1: { completionUnread: true } }))
+    const { runtime } = await mount({
+      useSessions: bindSnapshotSelector(list.source),
+      useSessionStatus: bindSnapshotSelector(status.source),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1']), workspace('delta', ['d1'])])),
+    })
+    act(() => { runtime.setMode('status') })
+    expect(sectionSessions()[0]).toEqual(['Finished, your turn', [['delta', ['d1']]]])
+    // Opening it reads it, in DSH's own status, and it stays under the click.
+    act(() => { list.set(sessionsOf('d1')); status.set(statuses({})) })
+    expect(sectionSessions()[0]).toEqual(['Finished, your turn', [['delta', ['d1']]]])
+    // Leaving it, it rests.
+    act(() => { list.set(sessionsOf('a1')) })
+    expect(sectionNames()).toEqual([['Idle', []]])
+    expect(within(sectionHeader('Idle')).getByText('2')).toBeTruthy()
+    // Finished again, opened, and sent on: it runs.
+    act(() => { status.set(statuses({ d1: { completionUnread: true } })) })
+    act(() => { list.set(sessionsOf('d1')); status.set(statuses({})) })
+    expect(sectionSessions()[0]).toEqual(['Finished, your turn', [['delta', ['d1']]]])
+    act(() => { list.set(sessionsOf('d1', 'd1')); status.set(statuses({ d1: { running: true } })) })
+    expect(sectionSessions()[0]).toEqual(['Running', [['delta', ['d1']]]])
+  })
+
+  it('does not hold a read completion outside the Status grouping', async () => {
+    const list = sessionState([summary('a1', { retainedBy: { mainView: 1 } }), summary('d1')])
+    let setStatus = (_: SessionStatusSnapshot) => {}
+    const status = {
+      value: statuses({ a1: { completionUnread: true } }),
+      getSnapshot() { return status.value },
+      subscribe(listener: () => void) { setStatus = (next) => { status.value = next; listener() }; return () => {} },
+    }
+    await mount({
+      useSessions: hook(list),
+      useSessionStatus: bindSnapshotSelector(status),
+      useWorkspaces: hook(workspaceState([workspace('alpha', ['a1']), workspace('delta', ['d1'])])),
+    })
+    act(() => { setStatus(statuses({})) })
+    expect(within(workspaceRow('alpha')[0]!).queryByRole('img', { name: '1 completed' })).toBeNull()
   })
 
   it('unfolds the section that holds a revealed search result', async () => {
@@ -453,7 +545,8 @@ describe('WorkspaceBrowser with tags', () => {
     })
     act(() => { runtime.setMode('status') })
     expect(store.getSnapshot().orderBy).toBe('updated')
-    // Running lists every Session of its Workspace; the drop saves the Workspace's order and selects Manual.
+    // Shown, Running's resting Sessions drag too; the drop saves the Workspace's order and selects Manual.
+    fireEvent.click(within(section('Running')).getByRole('button', { name: /^Show/ }))
     fireEvent.dragStart(sessionRows('a3')[0]!, { dataTransfer: dragData() })
     fireDrag(sessionRows('a1')[0]!, 'dragOver', 'before')
     fireDrag(sessionRows('a1')[0]!, 'drop', 'before')

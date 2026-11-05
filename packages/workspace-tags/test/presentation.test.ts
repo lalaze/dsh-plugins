@@ -53,6 +53,19 @@ test('one tag/query/archive/group/count pipeline covers both owners; mirrored hi
   contribution.visibility = { showHidden: true, showSubagents: true }
   assert.equal(collectPresentation([group('a')], tags, contribution).flatMap(g => g.sessions).length, 4)
 })
+test('status sections lift waiting and finished sessions out of a running workspace, and each session shows once', () => {
+  const row = (id: string, facts: Partial<SessionNode>): SessionNode => ({ ...node(id, 1), id: id as SessionId, ...facts })
+  const busy: GroupNode = { ...group('a'), sessions: [row('run', { running: true }), row('ask', { pendingInteraction: 'approval', running: true }), row('done', { completed: true }), row('rest', {}), row('old', { completed: true, archived: true })] }
+  const blocked: GroupNode = { ...group('a'), key: 'blocked', workspaceId: 'blocked' as WorkspaceId, sessions: [row('ask2', { pendingInteraction: 'question', running: true }), row('rest2', {})] }
+  const empty: GroupNode = { ...group('a'), key: 'empty', workspaceId: 'empty' as WorkspaceId, sessions: [] }
+  const sections = sectionPresentation(projectPresentation(collectPresentation([busy, blocked, empty], tags), tags, { tagId: null, archived: 'show', order: 'manual' }), tags, 'status')
+  assert.deepEqual(sections.map(section => [section.kind, section.groups.map(g => [g.key, g.sessions.map(s => s.title)]), section.count]), [
+    ['waiting', [['local:same', ['ask']], ['local:blocked', ['ask2']]], 2],
+    ['completed', [['local:same', ['done']]], 1],
+    ['running', [['local:same', ['run', 'rest', 'old']]], 1],
+    ['idle', [['local:blocked', ['rest2']], ['local:empty', []]], 2],
+  ])
+})
 test('a native full-text match only augments its qualified local session, never the same-id mirror', () => {
   const all = collectPresentation([group('a')], tags, peer('a', 'b'))
   const result = projectPresentation(all, tags, { tagId: null, archived: 'default', query: 'body only needle', order: 'updated' }, new Set(['local:same']))

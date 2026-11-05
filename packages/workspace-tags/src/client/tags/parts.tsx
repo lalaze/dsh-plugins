@@ -1,7 +1,9 @@
 /** Small tag pieces the sidebar rows and the overlays share. */
-import { useSyncExternalStore, type ReactNode } from 'react'
+import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
 import clsx from 'clsx'
+import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   IconCheckCircleOutlineRegular, IconDarkOutlineRegular, IconPlayOutlineRegular, IconTriangleRightFillRegular,
   IconWarningOutlineRegular, StateDot,
@@ -10,7 +12,7 @@ import { emptyTagState, type TagColor, type TagState, type WorkspaceTag } from '
 import type { TagRuntime, TagSnapshot, TagViewState } from './contract.ts'
 import type { Attention, BrowserSection, RowActivity, SpaceActivity } from './sections.ts'
 import css from './tags.module.css'
-import { UNTAGGED_FILTER } from './sections.ts'
+import { heldCompletion, UNTAGGED_FILTER } from './sections.ts'
 
 type Translate = (key: never, vars?: Record<string, string | number>) => string
 /** The browser's `workspace` translator, narrowed to what these parts need. */
@@ -159,6 +161,9 @@ function StatusIcon({ kind }: { kind: keyof typeof statusIcon }) {
   return <Icon size={16} className={css[kind]} />
 }
 
+/** What a section header stands out for: the user has something to do there. */
+const attentionStyle = { waiting: css.attentionWaiting, completed: css.attentionCompleted } as const
+
 /** One Tag or Status section: a fold header over its Workspace groups. */
 export function SectionBlock({ section, collapsed, onToggle, t, children }: {
   section: Pick<BrowserSection, 'key' | 'kind' | 'tag' | 'count'>
@@ -175,9 +180,10 @@ export function SectionBlock({ section, collapsed, onToggle, t, children }: {
     : section.kind === 'untagged'
       ? <span className={clsx(css.dot, css.hollow)} aria-hidden="true" />
       : <StatusIcon kind={section.kind} />
+  const attention = section.kind === 'waiting' || section.kind === 'completed' ? attentionStyle[section.kind] : undefined
   return (
     <div className={css.section} role="group" aria-label={label} data-section-key={section.key}>
-      <button type="button" className={css.sectionHeader} aria-expanded={!collapsed} onClick={onToggle}>
+      <button type="button" className={clsx(css.sectionHeader, attention)} data-attention={attention === undefined ? undefined : ''} aria-expanded={!collapsed} onClick={onToggle}>
         <IconTriangleRightFillRegular className={clsx(css.sectionArrow, !collapsed && css.sectionArrowOpen)} />
         <span className={css.sectionMarker} aria-hidden="true">{marker}</span>
         <span className={css.sectionLabel}>{label}</span>
@@ -186,6 +192,23 @@ export function SectionBlock({ section, collapsed, onToggle, t, children }: {
       {!collapsed && children}
     </div>
   )
+}
+
+/**
+ * DSH's status with the completion the user just opened still unread, see {@link heldCompletion}.
+ * @param open - the Session in the main view, or undefined when no section should hold it.
+ */
+export function useHeldCompletion(statuses: SessionStatusSnapshot, open: SessionId | undefined): SessionStatusSnapshot {
+  const [held, setHeld] = useState<SessionId>()
+  const [previous, setPrevious] = useState(statuses)
+  const next = heldCompletion(held, previous, statuses, open)
+  if (next !== held) setHeld(next)
+  if (previous !== statuses) setPrevious(statuses)
+  return useMemo(() => {
+    if (next === undefined) return statuses
+    const status = statuses.get(next)
+    return new Map(statuses).set(next, { running: status?.running, pendingInteraction: status?.pendingInteraction, completionUnread: true })
+  }, [statuses, next])
 }
 
 const emptyTags: HostObservable<TagSnapshot> = { getSnapshot: () => EMPTY_SNAPSHOT, subscribe: () => () => {} }

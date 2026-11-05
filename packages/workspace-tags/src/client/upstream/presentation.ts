@@ -129,11 +129,14 @@ export function sectionPresentation(groups: readonly PresentedGroup[], tags: Tag
     sections.push({ key: 'untagged', kind: 'untagged', groups: groups.filter(group => !group.tagIds.some(id => known.has(id))), count: 0 })
     return sections.map(section => ({ ...section, count: section.groups.length })).filter(section => section.count > 0)
   }
+  // Ranked as sessionActivity ranks a Session. What needs the user shows on its own even
+  // while its Workspace runs something; the others rest in Running then, or in Idle.
+  const state = (session: PresentedSession) => session.waiting ? 'waiting' : session.running ? 'running' : session.completed && !session.archived ? 'completed' : 'idle'
   return (['waiting', 'completed', 'running', 'idle'] as const).map(kind => {
     const members = groups.flatMap(group => {
-      const running = group.sessions.some(session => session.running)
-      if (running) return kind === 'running' ? [group] : []
-      const sessions = group.sessions.filter(session => kind === 'waiting' ? session.waiting : kind === 'completed' ? !session.waiting && session.completed && !session.archived : kind === 'idle' ? !session.waiting && (!session.completed || session.archived) : false)
+      const busy = group.sessions.some(session => state(session) === 'running')
+      if (busy ? kind === 'idle' : kind === 'running') return []
+      const sessions = group.sessions.filter(session => state(session) === kind || kind === 'running' && state(session) === 'idle')
       return sessions.length > 0 || kind === 'idle' && group.sessions.length === 0 ? [{ ...group, sessions }] : []
     })
     return { key: `status:${kind}`, kind, groups: members, count: members.reduce((sum, group) => sum + (kind === 'idle' ? 1 : kind === 'running' ? group.sessions.filter(s => s.running).length : group.sessions.length), 0) }
