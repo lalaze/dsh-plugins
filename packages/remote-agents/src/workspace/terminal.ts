@@ -2,14 +2,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { quote } from '../core/ssh.js';
 import { dshHome } from './access.js';
-import { CLAUDE_LAUNCHER, TERMINAL_LAUNCHER } from './domain.js';
+import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from './domain.js';
 
 /**
  * Native terminal keeps its PTY, resizing and keyboard handling; the selected shell runs SSH.
  * DSH remembers one shell for every conversation, so outside a remote workspace the launcher opens the local shell.
- * The Remote Claude launcher runs the interactive `claude` there first, a session DSH neither drives nor records.
- * In a TUI conversation (see tui.ts) it runs the same Claude session every time, identified by DSH_SESSION_ID, which DSH
- * sets in its terminals, so that reopening the conversation resumes it.
+ * The Remote Claude and Remote Codex launchers run the interactive CLI there first, a session DSH neither drives nor
+ * records. In a TUI conversation of that CLI (see tui.ts) it runs the same session every time, found through DSH_SESSION_ID,
+ * which DSH sets in its terminals, so that reopening the conversation resumes it.
  * DSH does not pass DSH_HOME to its terminals, so the launcher carries the home it was installed from.
  * `modules` is the compiled server root the launcher imports the store, SSH and workspace modules from.
  */
@@ -18,7 +18,7 @@ export async function installWorkspaceTerminal(controller: { config?: { shellCan
   if (!Array.isArray(candidates)) return { dispose: () => {} };
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const script = join(directory, 'remote-workspace.mjs'), launcherPath = (name: string) => join(directory, process.platform === 'win32' ? `${name}.cmd` : name);
-  const launcher = launcherPath(TERMINAL_LAUNCHER), claudeLauncher = launcherPath(CLAUDE_LAUNCHER);
+  const launcher = launcherPath(TERMINAL_LAUNCHER), claudeLauncher = launcherPath(CLAUDE_LAUNCHER), codexLauncher = launcherPath(CODEX_LAUNCHER);
   const source = `import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -51,18 +51,29 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const url = new URL(connectionInput(host.connection));
   const target = (url.username ? decodeURIComponent(url.username) + '@' : '') + url.hostname;
   const shell = '"\${SHELL:-/bin/sh}"';
+  const cli = process.argv[2];
   const dshSession = process.env.DSH_SESSION_ID;
   const saved = store.snapshot();
-  const claudeSession = dshSession && saved.tuiSessions?.includes(dshSession) ? tuiClaudeSession(dshSession) : undefined;
   const details = (dshSession && saved.tuiDetails?.[dshSession]) || {};
+  // Only a TUI conversation's own CLI is its session; the other launcher, chosen in its sidebar, is that CLI as usual.
+  const own = dshSession && saved.tuiSessions?.includes(dshSession) && (details.cli ?? 'claude') === cli;
+  const claudeSession = own ? tuiClaudeSession(dshSession) : undefined;
   const choice = (details.model ? ' --model "' + details.model + '"' : '') + (details.effort ? ' --effort "' + details.effort + '"' : '');
   // Claude Code saves a session only once it has a message, so the first launches of a new one have nothing to resume.
   // Those use the model chosen in the composer; a resumed session keeps whatever /model chose since.
   const claude = claudeSession ? 'if find "\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/projects" -maxdepth 2 -name ' + claudeSession + '.jsonl 2>/dev/null | grep -q .; then claude --resume ' + claudeSession + '; else claude --session-id ' + claudeSession + choice + '; fi' : 'claude';
+  // Codex's own screen would turn the wheel into its prompt history, and leave nothing for the terminal to scroll. Its
+  // update prompt would run an install on the first Enter, and typing starts as soon as a conversation is selected.
+  const codexFlags = ' --no-alt-screen -c check_for_update_on_startup=false';
+  const codexChoice = (details.model ? ' -m "' + details.model + '"' : '') + (details.effort ? ' -c model_reasoning_effort="' + details.effort + '"' : '');
+  // The thread is saved when the conversation starts, but Codex opens it with the configured model until it has a turn.
+  // From then on it keeps whatever /model chose. A thread that is gone, say removed by hand, leaves a new one to start.
+  const codex = own && details.thread ? 'dsh_file=$(find "\${CODEX_HOME:-\$HOME/.codex}/sessions" -maxdepth 4 -name "rollout-*-' + details.thread + '.jsonl" 2>/dev/null | head -n 1); if [ -z "\$dsh_file" ]; then codex' + codexFlags + codexChoice + '; elif grep -q task_started "\$dsh_file"; then codex resume' + codexFlags + ' ' + details.thread + '; else codex resume' + codexFlags + codexChoice + ' ' + details.thread + '; fi' : 'codex' + codexFlags;
+  const interactive = cli === 'claude' ? claude : cli === 'codex' ? codex : undefined;
   // The same process stays in charge of the terminal throughout; a shell run beside it could be left without the TTY.
-  const start = process.argv[2] === 'claude' ? shell + " -lic '" + claude + "; exec " + shell + " -l'" : shell + ' -l';
+  const start = interactive ? shell + " -lic '" + interactive + "; exec " + shell + " -l'" : shell + ' -l';
   // SSH does not carry COLORTERM. Without it Claude Code falls back to 256 colors, which turns its orange pink.
-  const command = 'cd ' + quote(placement.cwd) + (process.argv[2] === 'claude' ? ' && export COLORTERM=truecolor' : '') + ' && exec ' + start;
+  const command = 'cd ' + quote(placement.cwd) + (interactive ? ' && export COLORTERM=truecolor' : '') + ' && exec ' + start;
   run('ssh', ['-tt', '-o', 'StrictHostKeyChecking=yes', ...(url.port ? ['-p', url.port] : []), '--', target, command], process.env);
 }
 `;
@@ -70,8 +81,8 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const installLauncher = (path: string, argument: string) => writeFile(path, process.platform === 'win32'
     ? `@echo off\r\nset ELECTRON_RUN_AS_NODE=1\r\n"${process.execPath}" "${script}"${argument && ` ${argument}`}\r\n`
     : `#!/bin/sh\nELECTRON_RUN_AS_NODE=1 exec ${quote(process.execPath)} ${quote(script)}${argument && ` ${argument}`}\n`, { mode: 0o700 });
-  await installLauncher(launcher, ''); await installLauncher(claudeLauncher, 'claude');
-  const launchers = [launcher, claudeLauncher];
+  await installLauncher(launcher, ''); await installLauncher(claudeLauncher, 'claude'); await installLauncher(codexLauncher, 'codex');
+  const launchers = [launcher, claudeLauncher, codexLauncher];
   for (const path of launchers) if (!candidates.includes(path)) candidates.push(path);
   // Leave the launchers on disk until the next boot: an already open native terminal may still start them.
   return { shell: launcher, dispose: () => { for (const path of launchers) { const index = candidates.indexOf(path); if (index >= 0) candidates.splice(index, 1); } } };

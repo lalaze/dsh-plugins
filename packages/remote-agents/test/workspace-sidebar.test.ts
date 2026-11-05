@@ -96,14 +96,14 @@ test('native sidebar claims only verified remote sessions, invalidates workspace
   assert.equal(listeners.size, 0); assert.equal(types.size, 0); assert.equal(slots.size, 0);
 });
 
-test('Remote Claude counts as a remote launcher when remembering the user\'s shell', t => {
+test('Remote Claude and Remote Codex count as remote launchers when remembering the user\'s shell', t => {
   const storage = new Map<string, string>([['dsh.terminal.shell', '/bin/zsh']]), previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
     getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); }, removeItem: (key: string) => { storage.delete(key); },
   } });
   t.after(() => { if (previous) Object.defineProperty(globalThis, 'localStorage', previous); else Reflect.deleteProperty(globalThis, 'localStorage'); });
   const shell = () => storage.get('dsh.terminal.shell');
-  for (const [workspace, claude] of [['/dsh/terminal/Remote workspace', '/dsh/terminal/Remote Claude'], ['C:\\dsh\\terminal\\Remote workspace.cmd', 'C:\\dsh\\terminal\\Remote Claude.cmd']] as const) {
+  for (const [workspace, claude] of [['/dsh/terminal/Remote workspace', '/dsh/terminal/Remote Claude'], ['/dsh/terminal/Remote workspace', '/dsh/terminal/Remote Codex'], ['C:\\dsh\\terminal\\Remote workspace.cmd', 'C:\\dsh\\terminal\\Remote Claude.cmd'], ['C:\\dsh\\terminal\\Remote workspace.cmd', 'C:\\dsh\\terminal\\Remote Codex.cmd']] as const) {
     storage.set('dsh.terminal.shell', '/bin/zsh');
     preferTerminalShell(workspace); assert.equal(shell(), workspace);
     // Chosen in the menu: a reload in the remote conversation keeps it, and leaving gives the user's shell back.

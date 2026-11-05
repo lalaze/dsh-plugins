@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { FILE_LIMIT } from '../../workspace/domain.js';
+import { FILE_LIMIT, type TuiCli } from '../../workspace/domain.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 
 /** The part of a browser's DataTransfer this reads, for a drop or a paste alike. */
@@ -44,18 +44,19 @@ export async function clipboardImage(clipboard: Pick<Clipboard, 'read'> | undefi
     }
   } catch { /* the caller treats this as an empty clipboard */ }
 }
-/** A path as a terminal gives a dropped file: escaped for a shell, which Claude Code undoes when it looks for an image. */
+/** A path as a terminal gives a dropped file: escaped for a shell, which both CLIs undo when they look for an image. */
 export const terminalPath = (path: string) => path.replace(/[^\p{L}\p{N}\p{M}_./@%+=:,-]/gu, '\\$&');
 /** The files Claude Code turns into a placeholder such as `[Image #1]`. It reads them first, so the placeholder comes late. */
 const CLAUDE_IMAGE = /\.(?:png|jpe?g|gif|webp)$/i;
 /**
- * What to paste for files that are ready together: one paste per file, other files before images, since an image's late
- * placeholder would land after whatever is pasted behind it anyway, and without a space in between in a single paste.
- * Each ends in a space, as a terminal's drop does, so typing can carry on. A placeholder drops that space, so text coming
- * after an earlier image needs its own.
+ * What to paste for files that are ready together: one paste per file, as neither CLI takes several images in one. Each
+ * ends in a space, as a terminal's drop does, so typing can carry on. Codex places its placeholder at once, with a space.
+ * Claude Code's comes late, so other files go before images, since it would land after whatever is pasted behind it
+ * anyway; and it drops that space, so text coming after an earlier image needs its own.
  * @param afterImage - whether the terminal was last given an image.
  */
-export function pastesFor(paths: readonly string[], afterImage: boolean): string[] {
+export function pastesFor(paths: readonly string[], afterImage: boolean, cli: TuiCli): string[] {
+  if (cli === 'codex') return paths.map(path => `${terminalPath(path)} `);
   const images = paths.filter(path => CLAUDE_IMAGE.test(path)), others = paths.filter(path => !CLAUDE_IMAGE.test(path));
   return [...others.map((path, index) => `${!index && afterImage ? ' ' : ''}${terminalPath(path)} `), ...images.map(path => `${terminalPath(path)} `)];
 }
@@ -203,7 +204,7 @@ export function useFilePaste(root: React.RefObject<HTMLElement | null>, add: (pi
       event.preventDefault(); event.stopPropagation();
       latest.current(picked);
     };
-    // Claude Code's own Ctrl+V reads the clipboard of the remote machine, which is not the one the user copied on. The key
+    // The CLI's own Ctrl+V reads the clipboard of the remote machine, which is not the one the user copied on. The key
     // goes back to the terminal when there is no image here, so the terminal still sees it. A key sent back is not trusted.
     const key = (event: KeyboardEvent) => {
       if (!event.isTrusted || !event.ctrlKey || event.shiftKey || event.altKey || event.metaKey || event.key.toLowerCase() !== 'v') return;
@@ -227,7 +228,7 @@ export function useFilePaste(root: React.RefObject<HTMLElement | null>, add: (pi
  * so a path waits one more check.
  * @param terminal - DSH's terminal state.
  */
-export function useUploadedPaths(root: React.RefObject<HTMLElement | null>, sessionId: string, uploads: TuiUploads, terminal: { getSnapshot(): { writable?: boolean } }): void {
+export function useUploadedPaths(root: React.RefObject<HTMLElement | null>, sessionId: string, uploads: TuiUploads, terminal: { getSnapshot(): { writable?: boolean } }, cli: TuiCli): void {
   const { paths } = useSyncExternalStore(uploads.subscribe, () => uploads.status(sessionId));
   const afterImage = useRef(false);
   useEffect(() => {
@@ -239,11 +240,11 @@ export function useUploadedPaths(root: React.RefObject<HTMLElement | null>, sess
       if (!ready || !usable) { ready = usable; return; }
       clearInterval(timer);
       const taken = uploads.take(sessionId);
-      for (const text of pastesFor(taken, afterImage.current)) pasteIntoTerminal(input, text);
+      for (const text of pastesFor(taken, afterImage.current, cli)) pasteIntoTerminal(input, text);
       afterImage.current = taken.some(path => CLAUDE_IMAGE.test(path));
     }, 150);
     return () => clearInterval(timer);
-  }, [root, sessionId, uploads, terminal, paths]);
+  }, [root, sessionId, uploads, terminal, paths, cli]);
 }
 
 /** Uses DSH's drop mask, so a drop looks the same here as in a chat. */
@@ -260,7 +261,7 @@ export const fileStyles = `.ra-tui-files{position:absolute;top:12px;right:12px;z
  * Where a TUI conversation's composer would be. It stands in for the composer on every tab of the conversation, unlike the
  * terminal, which has only its own, so a file dropped on another tab reaches the terminal too rather than the hidden composer.
  */
-export function TuiDropTarget({ sessionId, uploads, icon }: { sessionId: string; uploads: TuiUploads; icon: React.ReactNode }) {
+export function TuiDropTarget({ sessionId, uploads, cli, icon }: { sessionId: string; uploads: TuiUploads; cli: string; icon: React.ReactNode }) {
   useLocale();
   const marker = useRef<HTMLDivElement>(null);
   const dragging = useFileDrop(marker, picked => uploads.add(sessionId, picked));
@@ -268,7 +269,7 @@ export function TuiDropTarget({ sessionId, uploads, icon }: { sessionId: string;
     {dragging && createPortal(<div className="ra-tui-drop" role="status">
       <style>{dropStyles}</style>
       {icon}
-      <div className="ra-tui-drop-title">{ui('Drop files here to add them to Claude Code')}</div>
+      <div className="ra-tui-drop-title">{ui('Drop files here to add them to {cli}', { cli })}</div>
       <div className="ra-tui-drop-hint">{ui('They are uploaded to the remote machine and their paths go into the prompt. Up to 50 MB each.')}</div>
     </div>, document.body)}
   </div>;

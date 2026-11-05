@@ -76,6 +76,16 @@ export class WorkspaceService {
     const target = await this.target(sessionId, signal);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.claudeTitleRecords(claudeSession));
   }
+  /** A new Codex thread in the conversation's verified remote directory. */
+  async codexThread(sessionId: string, name: string, signal: AbortSignal): Promise<string> {
+    const target = await this.target(sessionId, signal);
+    return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.codexThread(target.cwd, name, signal));
+  }
+  /** The title records of a Codex thread on the conversation's verified machine. */
+  async codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string> {
+    const target = await this.target(sessionId, signal);
+    return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.codexTitleRecords(thread));
+  }
   async upload(sessionId: string, path: string, rev: string | null, size: number, input: AsyncIterable<Uint8Array>, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown> {
     revision(rev); const target = await this.target(sessionId, signal, expected);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.upload(target.cwd, path, rev, size, input, signal));

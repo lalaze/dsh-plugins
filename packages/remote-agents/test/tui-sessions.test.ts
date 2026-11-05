@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { RemoteError } from '../src/core/domain.js';
-import { claudeTitle, TuiSessions, tuiClaudeSession } from '../src/workspace/tui.js';
+import { claudeTitle, CODEX_THREAD_NAME, codexTitle, TuiSessions, tuiClaudeSession } from '../src/workspace/tui.js';
 import { fixture } from './fakes.js';
 
+const THREAD = '01a1a960-0696-7481-b86c-ea7a878c6479';
 const signal = new AbortController().signal, record = (type: string, field: string, value: string) => JSON.stringify({ type, [field]: value, sessionId: 'x' });
 async function setup(t: Parameters<typeof fixture>[0], blank: boolean | undefined = true) {
-  const f = await fixture(t), events: [string, unknown][] = [], titles: string[] = [], remote = { records: '', reads: [] as string[], selections: [] as Record<string, unknown>[], selectFails: false };
+  const f = await fixture(t), events: [string, unknown][] = [], titles: string[] = [], remote = { records: '', reads: [] as string[], selections: [] as Record<string, unknown>[], selectFails: false, codexRecords: '', codexReads: [] as string[], threads: 0, threadFails: false };
   const tui = new TuiSessions(f.store, {
     verify: async id => { if (id === 'local') throw new RemoteError('Not a remote workspace', 409); return { hostId: 'host-1' }; },
     session: id => (id === 'closed' ? undefined : { append: (type, data) => { events.push([type, data]); } }),
@@ -14,6 +15,8 @@ async function setup(t: Parameters<typeof fixture>[0], blank: boolean | undefine
     rename: async (_id, title) => { titles.push(title); },
     selectModel: async selection => { if (remote.selectFails) throw new Error('catalog not ready'); remote.selections.push(selection); },
     titleRecords: async (_id, claudeSession) => { remote.reads.push(claudeSession); return remote.records; },
+    codexThread: async () => { remote.threads += 1; if (remote.threadFails) throw new RemoteError('Codex is not installed on this SSH host', 409); return THREAD; },
+    codexTitleRecords: async (_id, thread) => { remote.codexReads.push(thread); return remote.codexRecords; },
   });
   return { f, tui, events, titles, remote };
 }
@@ -151,3 +154,72 @@ test('the title 0.2.81 gave a conversation is replaced', async t => {
   assert.equal(await tui.syncTitle('remote', 'Claude TUI 03:04', signal), 'Fix login');
   assert.deepEqual(titles, ['Fix login']);
 });
+
+const codexMessage = (...text: string[]) => JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: text.map(value => ({ type: 'text', text: value })) } } });
+const codexName = (name: string) => JSON.stringify({ id: THREAD, thread_name: name, updated_at: '2026-11-05T01:39:19Z' });
+
+test('a Codex conversation starts its thread first and remembers it, with its model and effort', async t => {
+  const { f, tui, events, titles, remote } = await setup(t);
+  await tui.start('remote', { cli: 'codex', model: 'project-1/codex/gpt-6.1-sol', effort: 'xhigh' }, signal);
+  assert.equal(remote.threads, 1);
+  assert.deepEqual(f.store.snapshot().tuiDetails?.remote, { title: 'Codex', cli: 'codex', thread: THREAD, model: 'gpt-6.1-sol', effort: 'xhigh', modelRecorded: true });
+  assert.deepEqual(tui.list(), ['remote']);
+  assert.deepEqual(tui.codex(), ['remote']);
+  assert.equal(events.length, 2);
+  assert.deepEqual(titles, ['Codex']);
+  assert.deepEqual(remote.selections, [{ sessionId: 'remote', provider: 'remote-cli-codex', model: 'project-1/codex/gpt-6.1-sol', reasoningEffort: 'xhigh' }], 'the row gets Codex\'s icon');
+  await tui.start('remote', { cli: 'codex' }, signal);
+  assert.equal(remote.threads, 1, 'starting it again makes no second thread');
+});
+
+test('a Codex conversation that cannot get a thread records nothing, so it can be started again', async t => {
+  const { f, tui, events, titles, remote } = await setup(t);
+  remote.threadFails = true;
+  await assert.rejects(tui.start('remote', { cli: 'codex' }, signal), /not installed/);
+  assert.deepEqual(tui.list(), []);
+  assert.equal(f.store.snapshot().tuiDetails?.remote, undefined);
+  assert.deepEqual([events, titles], [[], []]);
+  remote.threadFails = false;
+  await tui.start('remote', { cli: 'codex' }, signal);
+  assert.deepEqual(tui.codex(), ['remote']);
+});
+
+test('each CLI takes only its own model, and anything but Codex is Claude Code', async t => {
+  const { f, tui, remote } = await setup(t);
+  await tui.start('remote', { cli: 'codex', model: 'project-1/claude/opus' }, signal);
+  assert.equal(f.store.snapshot().tuiDetails?.remote?.model, undefined);
+  const other = await setup(t);
+  await other.tui.start('remote', { cli: 'grok', model: 'project-1/claude/opus' }, signal);
+  assert.equal(other.f.store.snapshot().tuiDetails?.remote?.model, 'opus');
+  assert.equal(other.f.store.snapshot().tuiDetails?.remote?.cli, undefined);
+  assert.deepEqual(other.tui.codex(), []);
+  assert.equal(other.remote.threads, 0);
+  assert.equal(remote.threads, 1);
+});
+
+test('a Codex thread titles the conversation by its /rename, then its first prompt', () => {
+  assert.equal(codexTitle(''), undefined);
+  assert.equal(codexTitle(codexName(CODEX_THREAD_NAME)), undefined, 'the name it started with says nothing');
+  assert.equal(codexTitle([codexName(CODEX_THREAD_NAME), codexMessage('Fix  the\nlogin'), codexMessage('later')].join('\n')), 'Fix the login');
+  assert.equal(codexTitle([codexName('Login work'), codexMessage('Fix the login')].join('\n')), 'Login work');
+  assert.equal(codexTitle(codexMessage('/srv/app/a.png what is this')), undefined, 'a dropped path says nothing');
+  assert.equal(codexTitle([codexMessage('/srv/app/a.png'), codexMessage('Second message')].join('\n')), 'Second message');
+  assert.equal(codexTitle(codexMessage('x'.repeat(200)))?.length, 80);
+  assert.equal(codexTitle(['not json', JSON.stringify({ payload: { item: { type: 'UserMessage', content: 'odd' } } }), codexMessage('Fine')].join('\n')), 'Fine');
+});
+
+test('a Codex conversation follows its thread and leaves a DSH rename alone, and never reads Claude Code', async t => {
+  const { tui, titles, remote } = await setup(t);
+  await tui.start('remote', { cli: 'codex' }, signal);
+  remote.codexRecords = [codexName(CODEX_THREAD_NAME), codexMessage('Fix the login')].join('\n');
+  assert.equal(await tui.syncTitle('remote', 'Codex', signal), 'Fix the login');
+  assert.deepEqual(remote.codexReads, [THREAD]);
+  assert.deepEqual(remote.reads, []);
+  assert.deepEqual(titles, ['Codex', 'Fix the login']);
+  assert.equal(await tui.syncTitle('remote', 'Fix the login', signal), undefined, 'unchanged');
+  remote.codexRecords = [codexName('Login work'), codexMessage('Fix the login')].join('\n');
+  assert.equal(await tui.syncTitle('remote', 'Fix the login', signal), 'Login work');
+  assert.equal(await tui.syncTitle('remote', 'My own title', signal), undefined, 'renamed in DSH');
+  assert.deepEqual(titles.at(-1), 'Login work');
+});
+

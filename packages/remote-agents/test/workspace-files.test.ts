@@ -5,13 +5,14 @@ import { mkdtemp, mkdir, readFile, writeFile, symlink, rm, readdir, realpath, ch
 import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { OpenSshTransport } from '../src/core/ssh.js';
+import { OpenSshTransport, type SshTransport } from '../src/core/ssh.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';
 import { fileOperation, hash, WorkspaceService } from '../src/workspace/service.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { expectedTarget, workspaceTransferHandler } from '../src/workspace/http.js';
 import type { WorkspaceFile, WorkspaceManifest } from '../src/workspace/domain.js';
 import { fixture } from './fakes.js';
+import { codexTitle, CODEX_THREAD_NAME } from '../src/workspace/tui.js';
 import { REMOTE_DSH_RUNNER } from '../src/workspace/runner.js';
 import { promisify } from 'node:util';
 
@@ -249,6 +250,72 @@ test('a conversation\'s own file goes to its verified machine and directory, out
   cwd = '';
   await assert.rejects(workspace.attach('session', path, content(), data.length, hash(data), signal), /verified remote workspace/);
 });
+/** An app server that answers from a table, and records what it is told. */
+function codexServer(answers: Record<string, unknown>, path = '/usr/bin/codex') {
+  const sent: { id?: unknown; method?: string; params?: unknown; error?: unknown }[] = [], state = { stopped: 0, started: undefined as { cwd: string; argv: string[] } | undefined };
+  let deliver: (data: Buffer) => void = () => {};
+  const line = (value: unknown) => setImmediate(() => deliver(Buffer.from(`${JSON.stringify(value)}\n`)));
+  const transport: SshTransport = {
+    exec: async () => path,
+    start: (cwd, argv) => {
+      state.started = { cwd, argv };
+      return {
+        write(value) {
+          const message = JSON.parse(value) as { id?: string; method?: string }; sent.push(message);
+          if (message.method === 'thread/start') line({ id: 'server-1', method: 'item/tool/requestUserInput', params: {} });
+          if (message.id !== undefined && message.method && message.method in answers) line({ id: message.id, result: answers[message.method] });
+        },
+        stop() { state.stopped += 1; }, onData(callback) { deliver = callback; }, onExit() {},
+      };
+    },
+  };
+  return { files: new WorkspaceFiles(transport), sent, state };
+}
+const THREAD = '01a1a960-0696-7481-b86c-ea7a878c6479';
+
+test('a Codex thread is started on the app server and saved by naming it, as nothing else saves one without a message', async () => {
+  const { files, sent, state } = codexServer({ initialize: {}, 'thread/start': { thread: { id: THREAD } }, 'thread/name/set': {} });
+  assert.equal(await files.codexThread('/srv/app', 'DSH TUI', new AbortController().signal), THREAD);
+  assert.deepEqual(state.started, { cwd: '/srv/app', argv: ['/usr/bin/codex', 'app-server'] });
+  assert.deepEqual(sent.map(message => message.method ?? `reply ${message.id}`), ['initialize', 'initialized', 'thread/start', 'reply server-1', 'thread/name/set']);
+  assert.deepEqual(sent.find(message => message.method === 'thread/start')?.params, { cwd: '/srv/app' });
+  assert.deepEqual(sent.find(message => message.method === 'thread/name/set')?.params, { threadId: THREAD, name: 'DSH TUI' });
+  assert.ok(sent.find(message => message.id === 'server-1')?.error, 'whatever it asks is refused, as this connection runs nothing');
+  assert.equal(state.stopped, 1, 'the app server goes away afterwards');
+});
+
+test('starting a Codex thread reports a missing CLI or a bad answer, and leaves no app server behind', async () => {
+  const signal = new AbortController().signal;
+  const missing = codexServer({}, '');
+  await assert.rejects(missing.files.codexThread('/srv/app', 'x', signal), /Codex is not installed/);
+  assert.equal(missing.state.started, undefined);
+  const odd = codexServer({ initialize: {}, 'thread/start': { thread: { id: '$(touch x)' } } });
+  await assert.rejects(odd.files.codexThread('/srv/app', 'x', signal), /did not start a thread/);
+  assert.equal(odd.sent.some(message => message.method === 'thread/name/set'), false, 'an odd ID goes no further');
+  assert.equal(odd.state.stopped, 1);
+  const controller = new AbortController(), silent = codexServer({ initialize: {} });
+  const started = silent.files.codexThread('/srv/app', 'x', controller.signal);
+  setTimeout(() => controller.abort(), 20);
+  await assert.rejects(started, /closed/);
+  assert.ok(silent.state.stopped >= 1, 'giving up closes it');
+});
+
+test('a Codex thread\'s title records come from the name index and its own record file, on the real shell', async t => {
+  const d = await directory(t), other = '01a1a95c-463c-7df3-8065-26d0933aeb53', sessions = join(d.root, '.codex/sessions/2026/11/04');
+  await mkdir(sessions, { recursive: true });
+  const message = (text: string) => JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text }] } } });
+  await writeFile(join(sessions, `rollout-2026-11-04T20-39-19-${THREAD}.jsonl`), [JSON.stringify({ type: 'session_meta', payload: { id: THREAD } }), message('Fix the login'), message('Second')].join('\n'));
+  await writeFile(join(sessions, `rollout-2026-11-04T20-40-00-${other}.jsonl`), message('Another thread'));
+  assert.equal(codexTitle(await d.files.codexTitleRecords(THREAD)), 'Fix the login', 'no index yet');
+  const index = (id: string, name: string) => JSON.stringify({ id, thread_name: name, updated_at: 'now' });
+  await writeFile(join(d.root, '.codex/session_index.jsonl'), [index(THREAD, CODEX_THREAD_NAME), index(other, 'Theirs')].join('\n'));
+  assert.equal(codexTitle(await d.files.codexTitleRecords(THREAD)), 'Fix the login');
+  await writeFile(join(d.root, '.codex/session_index.jsonl'), [index(THREAD, CODEX_THREAD_NAME), index(other, 'Theirs'), index(THREAD, 'Login work')].join('\n'));
+  assert.equal(codexTitle(await d.files.codexTitleRecords(THREAD)), 'Login work', 'the newest name wins');
+  assert.equal(codexTitle(await d.files.codexTitleRecords('01a1a95c-0000-7df3-8065-26d0933aeb53')), undefined, 'a thread that is gone has none');
+  assert.throws(() => d.files.codexTitleRecords('$(touch x)'), /Invalid Codex thread/);
+});
+
 test('sync never deletes a synced path that became a symbolic link on either side, nor anything below it', async t => {
   const f = await fixture(t), d = await directory(t); await f.service.close();
   const agents = new RemoteAgentsService(f.store, host => ({ ...f.remote.backend(host), workspaceFiles: d.files })); t.after(() => agents.close());

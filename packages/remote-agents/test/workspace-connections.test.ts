@@ -70,6 +70,18 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   assert.match(id ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(tui, `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic 'if find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${id}.jsonl 2>/dev/null | grep -q .; then claude --resume ${id}; else claude --session-id ${id}; fi; exec "\${SHELL:-/bin/sh}" -l'`);
   assert.equal(await launchTui('session-tui'), tui, 'stable across launches');
+  // Remote Codex does the same with the thread saved when the conversation started.
+  const codex = controller.config.shellCandidates[3]!; assert.equal(basename(codex), 'Remote Codex');
+  const thread = '01a1a960-0696-7481-b86c-ea7a878c6479';
+  const launchCodex = async (session?: string) => { await promisify(execFile)(codex, [], { cwd: anchor, env: { ...env, ...(session ? { DSH_SESSION_ID: session } : {}) }, timeout: 5000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
+  const plainCodex = `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic 'codex --no-alt-screen -c check_for_update_on_startup=false; exec "\${SHELL:-/bin/sh}" -l'`;
+  assert.equal(await launchCodex(), plainCodex, 'outside a TUI conversation it is plain Codex');
+  assert.equal(await launchCodex('session-chat'), plainCodex);
+  await writeFile(f.path, JSON.stringify({ ...JSON.parse(await readFile(f.path, 'utf8')), tuiSessions: ['session-tui', 'session-opus', 'session-codex', 'session-bare'], tuiDetails: { 'session-opus': { model: 'opus[1m]', effort: 'high', title: 'Claude Code' }, 'session-codex': { cli: 'codex', thread, model: 'gpt-6.1-sol', effort: 'xhigh', title: 'Codex' }, 'session-bare': { cli: 'codex', thread, title: 'Codex' } } }));
+  assert.equal(await launchCodex('session-codex'), `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic 'dsh_file=$(find "\${CODEX_HOME:-$HOME/.codex}/sessions" -maxdepth 4 -name "rollout-*-${thread}.jsonl" 2>/dev/null | head -n 1); if [ -z "$dsh_file" ]; then codex --no-alt-screen -c check_for_update_on_startup=false -m "gpt-6.1-sol" -c model_reasoning_effort="xhigh"; elif grep -q task_started "$dsh_file"; then codex resume --no-alt-screen -c check_for_update_on_startup=false ${thread}; else codex resume --no-alt-screen -c check_for_update_on_startup=false -m "gpt-6.1-sol" -c model_reasoning_effort="xhigh" ${thread}; fi; exec "\${SHELL:-/bin/sh}" -l'`, 'the model applies until the thread has a turn');
+  assert.ok((await launchCodex('session-bare')).includes(`else codex resume --no-alt-screen -c check_for_update_on_startup=false ${thread}; fi`), 'with no model chosen Codex uses its own');
+  assert.equal(await launchCodex('session-tui'), plainCodex, 'in a Claude conversation Remote Codex is plain Codex');
+  assert.equal(await launchTui('session-codex'), `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic 'claude; exec "\${SHELL:-/bin/sh}" -l'`, 'and in a Codex conversation Remote Claude is plain Claude');
   assert.doesNotMatch(await launchTui('session-chat'), /--resume/, 'another conversation runs a plain claude');
   // The composer's model applies to the first launch; a resumed session keeps what /model chose since.
   const opus = await launchTui('session-opus'), opusId = /--resume ([0-9a-f-]{36});/.exec(opus)?.[1];
@@ -87,6 +99,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
   assert.match((await launchClaude(local)).stderr, /Not a remote workspace/, 'Remote Claude never starts Claude on the DSH machine');
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
+  assert.match((await promisify(execFile)(codex, [], { cwd: local, env, timeout: 5000 })).stderr, /Not a remote workspace/, 'nor Remote Codex Codex');
   cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);
 });
 

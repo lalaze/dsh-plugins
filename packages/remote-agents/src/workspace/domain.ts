@@ -1,8 +1,11 @@
 /** Shared, browser-safe workspace contracts. Paths are relative to a verified workspace. */
 /** The launcher's file name, which DSH's terminal shell menu shows as the item label. */
 export const TERMINAL_LAUNCHER = 'Remote workspace';
-/** Beside it in the same directory: the same terminal, starting Claude Code. */
-export const CLAUDE_LAUNCHER = 'Remote Claude';
+/** Beside it in the same directory: the same terminal, starting Claude Code or Codex. */
+export const CLAUDE_LAUNCHER = 'Remote Claude', CODEX_LAUNCHER = 'Remote Codex';
+/** The CLIs a TUI conversation can run. */
+export type TuiCli = 'claude' | 'codex';
+export const TUI_LAUNCHERS: Record<TuiCli, string> = { claude: CLAUDE_LAUNCHER, codex: CODEX_LAUNCHER };
 /** `terminalShell` is the Remote workspace launcher path, as listed in DSH's terminal shell menu. */
 export interface WorkspaceTarget { hostId: string; label: string; cwd: string; terminalShell?: string }
 export interface WorkspaceEntry { name: string; path: string; kind: 'file' | 'directory' | 'symlink' | 'other'; size: number; modified: string }

@@ -144,14 +144,21 @@ test('a path is typed as a terminal types a dropped file', () => {
   assert.equal(terminalPath('/srv/$(x);`y`&|*?<>"#!/a'), String.raw`/srv/\$\(x\)\;\`y\`\&\|\*\?\<\>\"\#\!/a`);
 });
 
-test('each file is its own paste, images last, and text stays apart from an earlier image', () => {
-  assert.deepEqual(pastesFor(['/r/a.txt'], false), ['/r/a.txt '], 'an empty prompt gets no stray space');
-  assert.deepEqual(pastesFor(['/r/a.png'], false), ['/r/a.png ']);
-  assert.deepEqual(pastesFor(['/r/a.png', '/r/b.txt', '/r/c.txt', '/r/d.JPG', '/r/e.webp'], false), ['/r/b.txt ', '/r/c.txt ', '/r/a.png ', '/r/d.JPG ', '/r/e.webp '], 'a placeholder comes late, so text goes first');
-  assert.deepEqual(pastesFor(['/r/b.txt', '/r/c.txt'], true), [' /r/b.txt ', '/r/c.txt '], 'an image dropped earlier counts, once');
-  assert.deepEqual(pastesFor(['/r/b.png'], true), ['/r/b.png '], 'Claude Code spaces its own placeholders');
-  assert.deepEqual(pastesFor(['/my app/a.txt'], false), [String.raw`/my\ app/a.txt `]);
-  assert.deepEqual(pastesFor([], true), []);
+test('for Claude Code each file is its own paste, images last, and text stays apart from an earlier image', () => {
+  const pastes = (paths: string[], afterImage: boolean) => pastesFor(paths, afterImage, 'claude');
+  assert.deepEqual(pastes(['/r/a.txt'], false), ['/r/a.txt '], 'an empty prompt gets no stray space');
+  assert.deepEqual(pastes(['/r/a.png'], false), ['/r/a.png ']);
+  assert.deepEqual(pastes(['/r/a.png', '/r/b.txt', '/r/c.txt', '/r/d.JPG', '/r/e.webp'], false), ['/r/b.txt ', '/r/c.txt ', '/r/a.png ', '/r/d.JPG ', '/r/e.webp '], 'a placeholder comes late, so text goes first');
+  assert.deepEqual(pastes(['/r/b.txt', '/r/c.txt'], true), [' /r/b.txt ', '/r/c.txt '], 'an image dropped earlier counts, once');
+  assert.deepEqual(pastes(['/r/b.png'], true), ['/r/b.png '], 'Claude Code spaces its own placeholders');
+  assert.deepEqual(pastes(['/my app/a.txt'], false), [String.raw`/my\ app/a.txt `]);
+  assert.deepEqual(pastes([], true), []);
+});
+
+test('for Codex each file is its own paste, in order, as its placeholder comes at once with a space after it', () => {
+  assert.deepEqual(pastesFor(['/r/a.png', '/r/b.txt', '/r/c.png'], false, 'codex'), ['/r/a.png ', '/r/b.txt ', '/r/c.png ']);
+  assert.deepEqual(pastesFor(['/r/b.txt'], true, 'codex'), ['/r/b.txt '], 'no extra space after an earlier image');
+  assert.deepEqual(pastesFor(['/my app/a.txt'], false, 'codex'), [String.raw`/my\ app/a.txt `]);
 });
 
 /** Uploads held open until the test finishes them. */

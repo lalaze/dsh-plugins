@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { CLAUDE_LAUNCHER } from '../../workspace/domain.js';
+import { TUI_LAUNCHERS, type TuiCli } from '../../workspace/domain.js';
 import { api } from '../api.js';
 import { useCurrentModel } from '../composer/usage.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
@@ -8,10 +8,11 @@ import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useF
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
 const TERMINAL_TAB = '@deepseek-ai/dsh-client-ui-sidebar-terminal', SHELL_KEY = 'dsh.terminal.shell';
-const CACHE_KEY = 'remote-agents.tui.sessions', GENERATION_KEY = 'remote-agents.tui.generation';
+const CACHE_KEY = 'remote-agents.tui.sessions', CODEX_CACHE_KEY = 'remote-agents.tui.codex', GENERATION_KEY = 'remote-agents.tui.generation';
 const REMOTE_ANCHOR = /(?:^|[/\\])remote-workspaces[/\\]/;
-/** The chat provider of the remote Claude Code; only its models offer the TUI. */
-const CLAUDE_PROVIDER = 'remote-cli-claude';
+const CLI_NAMES: Record<TuiCli, string> = { claude: 'Claude Code', codex: 'Codex' };
+/** Only these chat providers' models offer the TUI. */
+const PROVIDER_CLIS: Record<string, TuiCli | undefined> = { 'remote-cli-claude': 'claude', 'remote-cli-codex': 'codex' };
 const TITLE_INTERVAL = 15_000;
 /**
  * A terminal cell is about 0.6em wide, so a Chinese glyph (1em) leaves a gap in its two cells (1.2em) and the text reads
@@ -56,7 +57,7 @@ interface Terminals {
   close(sessionId: string, key: string, contentId: string): void;
 }
 interface Services {
-  slots: Slots; terminals: Terminals; uploads: TuiUploads; t: unknown; title(sessionId: string): string | undefined;
+  slots: Slots; terminals: Terminals; uploads: TuiUploads; t: unknown; title(sessionId: string): string | undefined; cli(sessionId: string): TuiCli;
   theme: { getSnapshot(): unknown; subscribe(listener: () => void): () => void };
 }
 type SessionList = { getSnapshot(): { byId?: Record<string, { cwd?: string; blank?: boolean; title?: string }> }; subscribe(listener: () => void): () => void };
@@ -66,20 +67,26 @@ const write = (key: string, value: string | null) => {
   try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* storage may be unavailable */ }
 };
 
-/** Which conversations are TUI ones. Cached in the browser: DSH picks the view and composer before any request returns. */
+/** Which conversations are TUI ones, and which of them run Codex. Cached in the browser: DSH picks the view and composer before any request returns. */
 class TuiStore {
   private ids = new Set<string>();
+  private codex = new Set<string>();
   private readonly listeners = new Set<() => void>();
   constructor() {
-    try { this.ids = new Set(JSON.parse(read(CACHE_KEY) ?? '[]') as string[]); } catch { /* a damaged cache only delays the view */ }
+    try {
+      this.ids = new Set(JSON.parse(read(CACHE_KEY) ?? '[]') as string[]);
+      this.codex = new Set(JSON.parse(read(CODEX_CACHE_KEY) ?? '[]') as string[]);
+    } catch { /* a damaged cache only delays the view */ }
   }
   has = (id: string | undefined) => id !== undefined && this.ids.has(id);
+  cli = (id: string): TuiCli => (this.codex.has(id) ? 'codex' : 'claude');
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  set(ids: Iterable<string>) {
-    this.ids = new Set(ids); write(CACHE_KEY, JSON.stringify([...this.ids]));
+  set(ids: Iterable<string>, codex: Iterable<string> = []) {
+    this.ids = new Set(ids); this.codex = new Set(codex);
+    write(CACHE_KEY, JSON.stringify([...this.ids])); write(CODEX_CACHE_KEY, JSON.stringify([...this.codex]));
     for (const listener of this.listeners) listener();
   }
-  add(id: string) { this.set([...this.ids, id]); }
+  add(id: string, cli: TuiCli) { this.set([...this.ids, id], cli === 'codex' ? [...this.codex, id] : this.codex); }
 }
 
 const terminalKey = (generation: number) => `remote-agents-tui-${generation}`;
@@ -87,7 +94,7 @@ const terminalContent = (sessionId: string, generation: number) => `remote-agent
 const savedGeneration = (sessionId: string) => Number(read(`${GENERATION_KEY}.${sessionId}`)) || 0;
 
 /**
- * Archiving a TUI conversation ends its Claude Code, as DSH ends nothing itself; unarchiving resumes it in a new terminal.
+ * Archiving a TUI conversation ends its CLI, as DSH ends nothing itself; unarchiving resumes it in a new terminal.
  * @param archived - DSH's archive set.
  * @param isTui - whether a conversation is a TUI one.
  * @param close - ends the conversation's terminal; a conversation with none is left alone.
@@ -133,9 +140,9 @@ function TuiTerminal({ root, sessionId, services, shell, generation, restart }: 
     });
     return off;
   }, [model]);
-  // After DSH restarted the terminal is gone; a new one resumes the same Claude session.
+  // After DSH restarted the terminal is gone; a new one resumes the same CLI session.
   useEffect(() => { if (state.issue === 'missingTerminal') restart(); }, [state.issue]);
-  useUploadedPaths(root, sessionId, services.uploads, model.state);
+  useUploadedPaths(root, sessionId, services.uploads, model.state, services.cli(sessionId));
   const Body = slots.entries('sidebar.right.pane.tab').find(entry => entry.options.key === TERMINAL_TAB)?.component as React.FC<any> | undefined;
   if (!Body) return <div className="ra-empty" role="alert">{ui("DSH's terminal is not available")}</div>;
   return <Body view={() => model} t={t}
@@ -147,10 +154,11 @@ function TuiTerminal({ root, sessionId, services, shell, generation, restart }: 
 /** The conversation area of a TUI conversation. */
 function TuiView({ sessionId, services }: { sessionId: string; services: Services }) {
   useLocale();
+  const cli = services.cli(sessionId);
   const [generation, restart] = useGeneration(sessionId);
   const root = useRef<HTMLDivElement>(null);
   useFilePaste(root, picked => services.uploads.add(sessionId, picked));
-  // Claude Code titles the conversation after its first exchange, and may again later.
+  // The CLI's title comes after the first exchange, and may change later.
   useEffect(() => {
     const controller = new AbortController();
     const sync = () => {
@@ -186,15 +194,15 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   useEffect(() => {
     const controller = new AbortController();
     services.terminals.launchShells(sessionId, controller.signal).then(({ shells }) => {
-      const found = shells.find(item => item.name.replace(/\.cmd$/i, '') === CLAUDE_LAUNCHER);
-      if (found) setShell(found.path); else setError(ui('The Remote Claude shell is not available in this conversation'));
+      const found = shells.find(item => item.name.replace(/\.cmd$/i, '') === TUI_LAUNCHERS[cli]);
+      if (found) setShell(found.path); else setError(ui('The {shell} shell is not available in this conversation', { shell: TUI_LAUNCHERS[cli] }));
     }, cause => { if (!controller.signal.aborted) setError(localizeError(cause instanceof Error ? cause.message : String(cause))); });
     return () => controller.abort();
   }, [services, sessionId]);
   return <div ref={root} data-remote-agents-tui="" style={{ position: 'relative', flex: '1 1 0', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <style>{viewStyles}{fileStyles}</style>
     {shell && fontReady ? <TuiTerminal key={generation} root={root} sessionId={sessionId} services={services} shell={shell} generation={generation} restart={restart} />
-      : <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting Claude Code…')}</div>}
+      : <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
     <TuiFileStatus sessionId={sessionId} uploads={services.uploads} />
   </div>;
 }
@@ -207,26 +215,35 @@ function ClaudeMascot({ width = 24 }: { width?: number }) {
   </svg>;
 }
 
-/** Offered in a new conversation of a remote workspace while a remote Claude model is selected; DSH lists it once started. */
+/** Codex's prompt, as its terminal banner opens with it. */
+function CodexMark({ width = 24 }: { width?: number }) {
+  return <svg viewBox="0 0 16 10" width={width} height={width * 10 / 16} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 1.5 7 5 3 8.5M9 8.5h4.5" />
+  </svg>;
+}
+const CliMark = ({ cli, width }: { cli: TuiCli; width?: number }) => (cli === 'codex' ? <CodexMark width={width} /> : <ClaudeMascot width={width} />);
+
+/** Offered in a new conversation of a remote workspace while a remote Claude or Codex model is selected; DSH lists it once started. */
 function StartButton({ sessionId, sessions, store }: { sessionId?: string; sessions: SessionList; store: TuiStore }) {
   useLocale();
   const session = useSyncExternalStore(sessions.subscribe, () => (sessionId === undefined ? undefined : sessions.getSnapshot()?.byId?.[sessionId]));
   const selection = useCurrentModel(sessionId);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
-  if (sessionId === undefined || !session?.blank || !session.cwd || !REMOTE_ANCHOR.test(session.cwd) || store.has(sessionId) || selection?.provider !== CLAUDE_PROVIDER) return null;
+  const cli = selection ? PROVIDER_CLIS[selection.provider] : undefined;
+  if (sessionId === undefined || !session?.blank || !session.cwd || !REMOTE_ANCHOR.test(session.cwd) || store.has(sessionId) || !selection || !cli) return null;
   const start = () => {
     setBusy(true); setError('');
-    api('tuiStart', { sessionId, model: selection.model, effort: selection.reasoningEffort }).then(() => store.add(sessionId), cause => setError(localizeError(cause instanceof Error ? cause.message : String(cause)))).finally(() => setBusy(false));
+    api('tuiStart', { sessionId, cli, model: selection.model, effort: selection.reasoningEffort }).then(() => store.add(sessionId, cli), cause => setError(localizeError(cause instanceof Error ? cause.message : String(cause)))).finally(() => setBusy(false));
   };
   return <><style>{startStyles}</style>
     <button type="button" className="ra-tui-start" data-remote-agents-tui-start="" data-failed={error ? '' : undefined} disabled={busy} onClick={start}
-      aria-label={ui('Start in TUI')} title={error ? `${ui('Could not start the TUI')}: ${error}` : ui('Start this conversation in the Claude Code terminal interface')}>
-      <ClaudeMascot />
+      aria-label={ui('Start in TUI')} title={error ? `${ui('Could not start the TUI')}: ${error}` : ui('Start this conversation in the {cli} terminal interface', { cli: CLI_NAMES[cli] })}>
+      <CliMark cli={cli} />
     </button></>;
 }
 
 /**
- * Conversations that are the interactive Claude Code: a row in the workspace list, with the terminal as the conversation
+ * Conversations that are the interactive Claude Code or Codex: a row in the workspace list, with the terminal as the conversation
  * area and no composer. DSH's chat view entry is swapped in place, as git-view's takeover does, so the tab row stays as it
  * is and DSH's chat is untouched elsewhere.
  */
@@ -240,12 +257,12 @@ export function installTuiSessions(ctx: Client): void {
     const on = (scoped as unknown as { on(event: string, listener: () => void): () => void }).on;
     if (!terminals || !sessions || !themes || typeof slots.entries !== 'function' || typeof slots.subscribe !== 'function') return;
     const store = new TuiStore();
-    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), title: id => sessions.getSnapshot()?.byId?.[id]?.title,
+    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title,
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
       theme: { getSnapshot: () => themes.getTheme(), subscribe: listener => on.call(scoped, 'theme/change', listener) } };
     scoped.effect(() => {
       const controller = new AbortController();
-      void api<{ sessions: string[] }>('tuiSessions', {}, controller.signal).then(value => store.set(value.sessions), () => {});
+      void api<{ sessions: string[]; codex?: string[] }>('tuiSessions', {}, controller.signal).then(value => store.set(value.sessions, value.codex), () => {});
       return () => controller.abort();
     });
     slots.inject('conversation.view', () => {
@@ -281,7 +298,7 @@ export function installTuiSessions(ctx: Client): void {
       return () => { offWorkspaces(); offStore(); };
     });
     // DSH elects the composer when its slot changes, so registering again makes it look at the current TUI list.
-    const NoComposer = ({ sessionId }: { sessionId: string }) => <TuiDropTarget sessionId={sessionId} uploads={services.uploads} icon={<ClaudeMascot width={96} />} />;
+    const NoComposer = ({ sessionId }: { sessionId: string }) => <TuiDropTarget sessionId={sessionId} uploads={services.uploads} cli={CLI_NAMES[store.cli(sessionId)]} icon={<CliMark cli={store.cli(sessionId)} width={96} />} />;
     const hideComposer = () => slots.inject('conversation.composer', () => slots.register({ name: 'conversation.composer', select: ({ sessionId }: { sessionId?: string }) => (store.has(sessionId) ? true : null) }, NoComposer)) as (() => void) | undefined;
     scoped.effect(() => {
       let release = hideComposer();

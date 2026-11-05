@@ -1,10 +1,10 @@
-import { CLAUDE_LAUNCHER, TERMINAL_LAUNCHER } from '../../workspace/domain.js';
+import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from '../../workspace/domain.js';
 
 /**
  * DSH's New terminal opens one browser-remembered shell in every conversation (dsh-api-terminal-controller's
  * `dsh.terminal.shell`). While a remote conversation is in view it is the Remote workspace launcher; leaving gives
- * back the shell remembered before, unless another shell was chosen meanwhile. Remote Claude, chosen in the menu,
- * stays for the remote conversations in view but is not another shell of the user's: it only runs in a remote workspace.
+ * back the shell remembered before, unless another shell was chosen meanwhile. Remote Claude and Remote Codex, chosen in
+ * the menu, stay for the remote conversations in view but are not other shells of the user's: they only run in a remote workspace.
  */
 const DSH_KEY = 'dsh.terminal.shell', SAVED_KEY = 'remote-agents.terminal.previousShell';
 type Saved = { remote: string; previous: string | null };
@@ -24,10 +24,10 @@ const saved = (): Saved | undefined => {
   return undefined;
 };
 
-/** Whether `shell` is the Remote workspace launcher at `remote` or the Remote Claude launcher beside it. */
+/** Whether `shell` is the Remote workspace launcher at `remote` or a CLI's launcher beside it. */
 const isLauncher = (shell: string | null, remote: string) => {
   const name = remote.lastIndexOf(TERMINAL_LAUNCHER);
-  return shell === remote || (name >= 0 && shell === remote.slice(0, name) + CLAUDE_LAUNCHER + remote.slice(name + TERMINAL_LAUNCHER.length));
+  return shell === remote || (name >= 0 && [CLAUDE_LAUNCHER, CODEX_LAUNCHER].some(cli => shell === remote.slice(0, name) + cli + remote.slice(name + TERMINAL_LAUNCHER.length)));
 };
 
 /** @param remoteShell - the Remote workspace launcher while a remote conversation is in view, otherwise undefined. */

@@ -38,11 +38,11 @@ export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   return { hostId: identifier(v.hostId), cwd: workspacePath(v.cwd, 'remote workspace'), label: '' };
 }
 export async function workspaceAction(features: WorkspaceFeatures, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-  if (action === 'tuiSessions') return { sessions: features.tui?.list() ?? [] };
+  if (action === 'tuiSessions') return { sessions: features.tui?.list() ?? [], codex: features.tui?.codex() ?? [] };
   const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
   if (action === 'tuiStart') {
     if (!features.tui) throw new RemoteError('The TUI is unavailable', 501);
-    await features.tui.start(sessionId, { model: input.model, effort: input.effort }, signal);
+    await features.tui.start(sessionId, { cli: input.cli, model: input.model, effort: input.effort }, signal);
     return { sessionId };
   }
   if (action === 'tuiTitle') return { title: await features.tui?.syncTitle(sessionId, input.current, signal) };
