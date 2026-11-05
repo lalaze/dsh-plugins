@@ -59,7 +59,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
           }
           // The editor suggests the models each machine's CLIs list; a preset names them by CLI, not by machine.
           const hosts = projects.hosts().map(project => ({ id: project.hostId, label: project.label, providers: project.providers.filter(p => p.status === 'ready').map(p => ({ id: p.id, label: p.label,
-            models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { isDefault: true } : {}), ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}) })) })) }));
+            models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { isDefault: true } : {}), ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}), ...(m.defaultThinkingOptionId ? { defaultThinkingOptionId: m.defaultThinkingOptionId } : {}) })) })) }));
           result = { presets: service.store.teamPresets(), builtin: BUILTIN_PRESETS, hosts }; break;
         }
         case 'chatSpeed': result = projects.speed(field(input.sessionId, 'session ID', 256), field(input.model, 'model', 1000)); break;

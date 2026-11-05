@@ -15,7 +15,7 @@ import { allPresets, choosePreset, parseTeamCommand, type TeamPreset } from './p
 export const TEAM_COMMAND = 'team';
 export const CREATE_TOOL = 'agent_teams_create';
 export const TEAM_PLUGIN = '@nanmicoder/dsh-agent-teams';
-export const TEAM_HINT = '[preset] [member=cli/model] [--plan] <goal>';
+export const TEAM_HINT = '[preset] [member=cli/model@thinking] [--plan] <goal>';
 
 export interface CommandAgent { id: string; session: Pick<Session, 'header'> }
 export interface CommandInvocation { agent: CommandAgent; rawInput: string; signal: AbortSignal }

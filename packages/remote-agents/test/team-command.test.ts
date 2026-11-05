@@ -6,7 +6,7 @@ import { Store } from '../src/core/store.js';
 import type { Provider } from '../src/core/domain.js';
 import { CREATE_TOOL, installTeamCommand, runTeamCommand, TEAM_COMMAND, type CommandInvocation, type TeamCommandDeps, type Tools } from '../src/teams/command.js';
 import { buildTeamPlan, teamNameOf, type Catalog } from '../src/teams/plan.js';
-import { allPresets, BUILTIN_PRESETS, choosePreset, parseMemberSpec, parseTeamCommand, teamPresetInput, type TeamPreset } from '../src/teams/presets.js';
+import { allPresets, BUILTIN_PRESETS, choosePreset, membersWithoutWork, modelsNamed, parseMemberSpec, parseTeamCommand, taskOrder, teamPresetInput, type PresetTask, type TeamPreset } from '../src/teams/presets.js';
 import { fixture, providers } from './fakes.js';
 
 const catalog = (extra: Provider[] = []): Catalog => ({ projectId: 'host-1', hostLabel: 'Mac mini', providers: [...structuredClone(providers), ...extra] });
@@ -121,7 +121,7 @@ test('/team creates the team through agent_teams_create for the conversation and
 
 test('/team explains what is missing instead of starting: the goal, the plugin, the workspace machine, or AgentTeams’ own refusal', async () => {
   const { tools, calls } = registry();
-  assert.deepEqual(await runTeamCommand(tools, deps(), invocation('pair')), { kind: 'error', text: 'Usage: /team [preset] [member=cli/model] [--plan] <goal>. Presets: solo (coder); pair (coder, reviewer)' });
+  assert.deepEqual(await runTeamCommand(tools, deps(), invocation('pair')), { kind: 'error', text: 'Usage: /team [preset] [member=cli/model@thinking] [--plan] <goal>. Presets: solo (coder); pair (coder, reviewer)' });
   assert.deepEqual(await runTeamCommand(undefined, deps(), invocation('coder=codex go')), { kind: 'error', text: '/team needs the @nanmicoder/dsh-agent-teams plugin; install and enable it, then restart DSH' });
   assert.deepEqual(await runTeamCommand({ ...tools, get: () => undefined }, deps(), invocation('coder=codex go')), { kind: 'error', text: '/team needs the @nanmicoder/dsh-agent-teams plugin; install and enable it, then restart DSH' });
   const unknown = registry({ isError: true, error: { message: 'Unknown tool', info: { code: 'UNKNOWN_TOOL' } } });
@@ -146,7 +146,7 @@ test('the command registers once the host offers slash commands and tools, and u
   assert.equal(registered.length, 0, 'waits for the command registry');
   const disposeCommands = ctx.provide('commands', commands), disposeTools = ctx.provide('tools', registry().tools);
   await new Promise(resolve => setTimeout(resolve, 20));
-  assert.deepEqual(registered.map(definition => [definition.name, definition.input?.hint]), [[TEAM_COMMAND, '[preset] [member=cli/model] [--plan] <goal>']]);
+  assert.deepEqual(registered.map(definition => [definition.name, definition.input?.hint]), [[TEAM_COMMAND, '[preset] [member=cli/model@thinking] [--plan] <goal>']]);
   await plugin.dispose(); await disposeTools(); await disposeCommands();
   assert.equal(unregistered, 1);
 });
@@ -177,4 +177,36 @@ test('team presets are saved in the registry and served, validated, by the setti
   const reopened = new Store(path); await reopened.open();
   assert.deepEqual(reopened.teamPresets(), [{ ...docs, label: 'Docs' }], 'presets survive a restart');
   assert.deepEqual(await (await post({ action: 'teamPresets' })).json().then((value: { presets: TeamPreset[] }) => value.presets), [{ ...docs, label: 'Docs' }]);
+});
+
+const stepsOf = (tasks: PresetTask[]) => taskOrder(tasks).steps.map(step => step.map(task => task.id));
+test('the run order follows dependencies and gives a member one task at a time', () => {
+  assert.deepEqual(stepsOf(BUILTIN_PRESETS.find(preset => preset.id === 'pair')!.tasks), [['work'], ['review']]);
+  // Different members with nothing to wait for start together.
+  assert.deepEqual(stepsOf([{ id: 'a', subject: 'x', assignee: 'one' }, { id: 'b', subject: 'x', assignee: 'two' }, { id: 'c', subject: 'x', assignee: 'three', dependencies: ['a', 'b'] }]), [['a', 'b'], ['c']]);
+  // The same member takes them in list order, as the scheduler does.
+  assert.deepEqual(stepsOf([{ id: 'a', subject: 'x', assignee: 'one' }, { id: 'b', subject: 'x', assignee: 'one' }]), [['a'], ['b']]);
+  // Listed before its dependency, a task still runs after it.
+  assert.deepEqual(stepsOf([{ id: 'late', subject: 'x', assignee: 'one', dependencies: ['early'] }, { id: 'early', subject: 'x', assignee: 'two' }]), [['early'], ['late']]);
+  // A member's next task waits for its earlier one even when a dependency frees it sooner.
+  assert.deepEqual(stepsOf([{ id: 'a', subject: 'x', assignee: 'one' }, { id: 'b', subject: 'x', assignee: 'one', dependencies: ['a'] }, { id: 'c', subject: 'x', assignee: 'one' }]), [['a'], ['b'], ['c']]);
+  // A task open to anyone never waits on a member.
+  assert.deepEqual(stepsOf([{ id: 'a', subject: 'x', assignee: 'one' }, { id: 'b', subject: 'x' }]), [['a', 'b']]);
+});
+test('the run order names tasks that wait on each other and ignores a dependency on no task', () => {
+  const { steps, stuck } = taskOrder([{ id: 'a', subject: 'x', dependencies: ['b'] }, { id: 'b', subject: 'x', dependencies: ['a'] }, { id: 'c', subject: 'x', dependencies: ['gone'] }]);
+  assert.deepEqual(steps.map(step => step.map(task => task.id)), [['c']]);
+  assert.deepEqual(stuck.map(task => task.id), ['a', 'b']);
+});
+test('a member with no task of its own and nothing open to anyone is reported as never starting', () => {
+  const members = [{ name: 'coder' }, { name: 'work' }, { name: '' }];
+  assert.deepEqual(membersWithoutWork({ members, tasks: [{ id: 'work', subject: 'x', assignee: 'coder' }] }).map(member => member.name), ['work']);
+  assert.deepEqual(membersWithoutWork({ members, tasks: [{ id: 'a', subject: 'x', assignee: 'coder' }, { id: 'b', subject: 'x' }] }), []);
+});
+test('a model name means the exact model first, else every model containing it', () => {
+  const models = [{ id: 'gpt-6', label: 'GPT 6' }, { id: 'gpt-6-mini', label: 'GPT 6 mini' }, { id: 'o9', label: 'Nine' }];
+  assert.deepEqual(modelsNamed(models, 'GPT-6').map(model => model.id), ['gpt-6']);
+  assert.deepEqual(modelsNamed(models, 'nine').map(model => model.id), ['o9']);
+  assert.deepEqual(modelsNamed(models, 'gpt').map(model => model.id), ['gpt-6', 'gpt-6-mini']);
+  assert.deepEqual(modelsNamed(models, 'zzz'), []);
 });

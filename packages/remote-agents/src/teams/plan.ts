@@ -1,6 +1,6 @@
 import { chatModelId, chatProviderId } from '../chat/native-chat.js';
 import { PROVIDER_LABELS, RemoteError, type Model, type Provider } from '../core/domain.js';
-import type { MemberSpec, TeamPreset } from './presets.js';
+import { modelsNamed, sameName, type MemberSpec, type TeamPreset } from './presets.js';
 
 /** The CLIs one machine of the conversation's workspace offers, as the model picker lists them. */
 export interface Catalog { projectId: string; hostLabel: string; providers: Provider[] }
@@ -14,22 +14,19 @@ export interface TeamPlan {
 }
 export const MAX_TEAM_NAME = 40;
 
-const same = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
 function pickModel(cli: string, provider: Provider, wanted: string | undefined): Model {
   const label = PROVIDER_LABELS[cli];
   if (!provider.models.length) throw new RemoteError(`${label} lists no models on this machine`);
   if (wanted === undefined) return provider.models.find(model => model.isDefault) ?? provider.models[0];
-  const exact = provider.models.find(model => model.id === wanted) ?? provider.models.find(model => same(model.id, wanted) || same(model.label, wanted));
-  if (exact) return exact;
-  const lower = wanted.toLowerCase(), partial = provider.models.filter(model => model.id.toLowerCase().includes(lower) || model.label.toLowerCase().includes(lower));
-  if (partial.length === 1) return partial[0];
-  if (partial.length > 1) throw new RemoteError(`Several ${label} models match "${wanted}": ${partial.map(model => model.id).join(', ')}`);
+  const named = modelsNamed(provider.models, wanted);
+  if (named.length === 1) return named[0];
+  if (named.length > 1) throw new RemoteError(`Several ${label} models match "${wanted}": ${named.map(model => model.id).join(', ')}`);
   throw new RemoteError(`${label} has no model "${wanted}" on this machine; models: ${provider.models.map(model => model.id).join(', ')}`);
 }
 function pickEffort(model: Model, wanted: string | undefined): string | undefined {
   if (wanted === undefined) return undefined;
   const options = model.thinkingOptions ?? [];
-  const option = options.find(choice => same(choice.id, wanted) || same(choice.label, wanted));
+  const option = options.find(choice => sameName(choice.id, wanted) || sameName(choice.label, wanted));
   if (option) return option.id;
   throw new RemoteError(options.length ? `${model.label} has no thinking level "${wanted}"; levels: ${options.map(choice => choice.id).join(', ')}` : `${model.label} has no thinking levels`);
 }
