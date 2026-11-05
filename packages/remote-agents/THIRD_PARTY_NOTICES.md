@@ -10,6 +10,8 @@ The Codex logo in `src/client/workspace/tui.tsx` is adapted from [`@lobehub/icon
 
 `lib/terminal-holder.mjs`, which runs on SSH hosts, bundles `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0, each under the MIT License: Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js).
 
+`lib/client.js` bundles `@xterm/addon-webgl` 0.19.0 under the same license and copyright.
+
 The browser bundle includes the packages below, each under the license of its section; their copyright notices are listed with them. Regenerate this file with `node ../../scripts/third-party-notices.mjs`.
 
 ## MIT License
