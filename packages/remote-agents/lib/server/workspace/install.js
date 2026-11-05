@@ -9,7 +9,7 @@ import { WorkspaceTagSync } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
 import { TuiFiles } from './tui-files.js';
-import { TuiSessions } from './tui.js';
+import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
 import { WorktreeService } from './worktrees.js';
@@ -106,6 +106,8 @@ export async function installWorkspaces(ctx, store, machines) {
             await controller.selectModel(selection);
         },
         titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
+        codexThread: (id, signal) => files.codexThread(id, CODEX_THREAD_NAME, signal),
+        codexTitleRecords: (id, thread, signal) => files.codexTitleRecords(id, thread, signal),
     });
     ctx.connection.fetch.register({ path: '/api/remote-agents/tui-files', methods: ['POST'], requestBody: 'streaming',
         fetch: tuiFilesHandler(new TuiFiles({ isTui: id => tui.list().includes(id), directory: store.directory, attach: (...file) => files.attach(...file) })) });

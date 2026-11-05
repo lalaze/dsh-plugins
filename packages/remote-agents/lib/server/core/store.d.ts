@@ -45,10 +45,12 @@ export interface State {
     tuiDetails?: Record<string, TuiDetails>;
 }
 /**
- * A TUI conversation's first launch of Claude Code, the title the plugin last gave it, and whether DSH has been told the
- * conversation's model.
+ * A TUI conversation's first launch of its CLI, the title the plugin last gave it, and whether DSH has been told the
+ * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code.
  */
 export interface TuiDetails {
+    cli?: 'codex';
+    thread?: string;
     model?: string;
     effort?: string;
     title?: string;

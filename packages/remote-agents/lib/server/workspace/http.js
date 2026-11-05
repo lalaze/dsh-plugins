@@ -35,12 +35,12 @@ export function expectedTarget(value) {
 }
 export async function workspaceAction(features, action, input, signal) {
     if (action === 'tuiSessions')
-        return { sessions: features.tui?.list() ?? [] };
+        return { sessions: features.tui?.list() ?? [], codex: features.tui?.codex() ?? [] };
     const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
     if (action === 'tuiStart') {
         if (!features.tui)
             throw new RemoteError('The TUI is unavailable', 501);
-        await features.tui.start(sessionId, { model: input.model, effort: input.effort }, signal);
+        await features.tui.start(sessionId, { cli: input.cli, model: input.model, effort: input.effort }, signal);
         return { sessionId };
     }
     if (action === 'tuiTitle')

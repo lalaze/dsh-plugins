@@ -5,6 +5,14 @@ export declare class WorkspaceFiles {
     constructor(transport: SshTransport);
     /** The records that can title a Claude Code session, from its file on this machine if it has saved that session. */
     claudeTitleRecords(claudeSession: string): Promise<string>;
+    /** The records that can title a Codex thread: its newest line of Codex's name index and its first user messages. */
+    codexTitleRecords(thread: string): Promise<string>;
+    /**
+     * Starts a Codex thread for `codex resume` to open, as Codex cannot be told the ID of a session it starts. App server
+     * only saves the thread once it has a message or a name, and it needs no message from this connection for a name.
+     * @returns the thread's ID.
+     */
+    codexThread(cwd: string, name: string, signal: AbortSignal): Promise<string>;
     /** Runs one shell operation and returns its data; the program reports handled failures with their status. */
     private run;
     /** Remote DSH runs on Node.js, so only its own operations need it on the host. */

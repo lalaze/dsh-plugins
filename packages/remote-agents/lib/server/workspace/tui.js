@@ -1,13 +1,19 @@
 import { createHash } from 'node:crypto';
 import { RemoteError } from '../core/domain.js';
-/** What a conversation shows until Claude Code has titled it. */
-const FIRST_TITLE = 'Claude Code', MAX_TITLE = 120, MAX_PROMPT_TITLE = 80;
+/** What a conversation shows until its CLI has titled it. */
+const FIRST_TITLES = { claude: 'Claude Code', codex: 'Codex' };
+const MAX_TITLE = 120, MAX_PROMPT_TITLE = 80;
 /** The title 0.2.81 gave every TUI conversation, which is replaced like the plugin's own. */
 const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
 /** Model and effort reach the remote command line inside double quotes. */
 const COMMAND_VALUE = /^[\w.:[\]-]+$/;
-/** The chat provider of the remote Claude Code. */
-const CLAUDE_PROVIDER = 'remote-cli-claude';
+/** The chat provider of each remote CLI. */
+const PROVIDERS = { claude: 'remote-cli-claude', codex: 'remote-cli-codex' };
+/**
+ * Codex saves a new thread only once it has a message or a name, and `codex resume` needs it saved, so a TUI conversation's
+ * thread starts with this name. It keeps Codex from titling the thread by itself, so `/rename` is the only title it can have.
+ */
+export const CODEX_THREAD_NAME = 'DSH TUI';
 /** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
 export function tuiClaudeSession(sessionId) {
     const hash = createHash('sha256').update(`dsh-tui:${sessionId}`).digest('hex');
@@ -39,22 +45,45 @@ export function claudeTitle(records) {
     const title = [custom, own].find(value => typeof value === 'string' && value.trim());
     return title?.trim().slice(0, MAX_TITLE) ?? prompt;
 }
-/** The Claude model of a chat model route, `<project>/<cli>/<model>`. */
-function claudeModel(route) {
+/**
+ * A conversation's title from its Codex thread: the user's /rename, then the first prompt.
+ * @param records - the thread's newest line of Codex's name index and the first of its user messages.
+ */
+export function codexTitle(records) {
+    let name, prompt;
+    for (const line of records.split('\n')) {
+        try {
+            const record = JSON.parse(line);
+            if (record.thread_name !== undefined)
+                name = record.thread_name;
+            const item = record.payload?.item;
+            if (item?.type !== 'UserMessage' || prompt !== undefined || !Array.isArray(item.content))
+                continue;
+            const text = item.content.map((part) => (part?.type === 'text' && typeof part.text === 'string' ? part.text : '')).join(' ').replace(/\s+/g, ' ').trim();
+            // A path says nothing about the conversation, like a slash command in Claude Code's.
+            if (text && !text.startsWith('/'))
+                prompt = text.slice(0, MAX_PROMPT_TITLE);
+        }
+        catch { /* not a whole record */ }
+    }
+    return typeof name === 'string' && name.trim() && name !== CODEX_THREAD_NAME ? name.trim().slice(0, MAX_TITLE) : prompt;
+}
+/** The model of a chat model route, `<project>/<cli>/<model>`, if it is this CLI's. */
+function routeModel(route, expected) {
     if (typeof route !== 'string')
         return;
     const [, cli, model] = route.split('/');
     try {
-        return cli === 'claude' && model ? decodeURIComponent(model) : undefined;
+        return cli === expected && model ? decodeURIComponent(model) : undefined;
     }
     catch {
         return undefined;
     }
 }
 /**
- * Conversations whose main view is the interactive Claude Code instead of DSH's chat. Each stays a real DSH session, so
- * it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one records
- * an empty turn. The conversation itself lives in the remote Claude Code; see the Remote Claude launcher in terminal.ts.
+ * Conversations whose main view is the interactive Claude Code or Codex instead of DSH's chat. Each stays a real DSH
+ * session, so it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one
+ * records an empty turn. The conversation itself lives in the remote CLI; see the launchers in terminal.ts.
  */
 export class TuiSessions {
     store;
@@ -64,6 +93,11 @@ export class TuiSessions {
         this.dsh = dsh;
     }
     list() { return this.store.snapshot().tuiSessions ?? []; }
+    /** Those of `list` that run Codex. */
+    codex() {
+        const { tuiSessions = [], tuiDetails } = this.store.snapshot();
+        return tuiSessions.filter(id => tuiDetails?.[id]?.cli === 'codex');
+    }
     /**
      * Tell DSH the conversation's model, once. A session shows its model in the workspace list only if a selection or a
      * request recorded it: a TUI conversation sends no requests, and the composer may only be showing a remembered default.
@@ -74,35 +108,39 @@ export class TuiSessions {
         const details = this.store.snapshot().tuiDetails?.[sessionId];
         if (details?.modelRecorded)
             return;
-        await this.dsh.selectModel({ sessionId, provider: CLAUDE_PROVIDER, model: route ?? `${hostId}/claude/${encodeURIComponent(details?.model ?? 'default')}`,
+        const cli = details?.cli ?? 'claude';
+        await this.dsh.selectModel({ sessionId, provider: PROVIDERS[cli], model: route ?? `${hostId}/${cli}/${encodeURIComponent(details?.model ?? 'default')}`,
             ...(details?.effort ? { reasoningEffort: details.effort } : {}) });
         await this.store.update(state => { state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...state.tuiDetails?.[sessionId], modelRecorded: true } }; });
     }
-    /** @param selection - the composer's model route and effort, which the first launch of Claude Code uses. */
+    /** @param selection - the CLI, and the composer's model route and effort, which its first launch uses. */
     async start(sessionId, selection, signal) {
+        const cli = selection.cli === 'codex' ? 'codex' : 'claude';
         const target = await this.dsh.verify(sessionId, signal);
         if (this.list().includes(sessionId))
             return;
         const session = this.dsh.session(sessionId);
         if (!session)
             throw new RemoteError('This conversation is not open', 409);
-        // Its turns would stay in DSH while Claude Code started from nothing.
+        // Its turns would stay in DSH while the CLI started from nothing.
         if ((await this.dsh.list()).find(row => row.sessionId === sessionId)?.blank === false)
             throw new RemoteError('Only a new conversation can start in the TUI', 409);
         signal.throwIfAborted();
-        const model = claudeModel(selection.model), effort = selection.effort;
+        const thread = cli === 'codex' ? await this.dsh.codexThread(sessionId, signal) : undefined;
+        signal.throwIfAborted();
+        const model = routeModel(selection.model, cli), effort = selection.effort;
         await this.store.update(state => {
             state.tuiSessions = [...state.tuiSessions ?? [], sessionId];
-            state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title: FIRST_TITLE,
+            state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title: FIRST_TITLES[cli], ...(thread ? { cli: 'codex', thread } : {}),
                     ...(model && COMMAND_VALUE.test(model) ? { model } : {}), ...(typeof effort === 'string' && COMMAND_VALUE.test(effort) ? { effort } : {}) } };
         });
         await this.recordModel(sessionId, target.hostId, model ? selection.model : undefined).catch(() => { });
         session.append('turn/start', { turn: 1 });
         session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
-        await this.dsh.rename(sessionId, FIRST_TITLE);
+        await this.dsh.rename(sessionId, FIRST_TITLES[cli]);
     }
     /**
-     * Follow Claude Code's title, until the conversation is renamed in DSH.
+     * Follow the CLI's title, until the conversation is renamed in DSH.
      * @param current - the conversation's title in DSH.
      * @returns the new title, if it changed.
      */
@@ -117,7 +155,7 @@ export class TuiSessions {
         await this.recordModel(sessionId, target.hostId).catch(() => { });
         if (renamed)
             return;
-        const title = claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(sessionId), signal));
+        const title = saved?.thread ? codexTitle(await this.dsh.codexTitleRecords(sessionId, saved.thread, signal)) : claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(sessionId), signal));
         if (!title || title === shown)
             return;
         await this.dsh.rename(sessionId, title);

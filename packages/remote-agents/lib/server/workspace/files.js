@@ -4,7 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { REMOTE_DSH_RUNNER } from './runner.js';
 import { WORKSPACE_SHELL } from './shell.js';
-import { quote } from '../core/ssh.js';
+import { initializeCodex } from '../agents/runtime.js';
+import { JsonlPeer, quote } from '../core/ssh.js';
 const digest = (data) => createHash('sha256').update(data).digest('hex');
 const KINDS = { d: 'directory', f: 'file', l: 'symlink', o: 'other' };
 /** A workspace path, normalized relative to the workspace. Containment of links is checked on the host. */
@@ -60,6 +61,44 @@ export class WorkspaceFiles {
         return this.transport.exec(`dsh_file=$(find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${quote(`${claudeSession}.jsonl`)} 2>/dev/null | head -n 1)
 [ -z "$dsh_file" ] || { grep -a -m 5 '"type":"last-prompt"' "$dsh_file"; grep -a '"type":"ai-title"' "$dsh_file" | tail -n 1; grep -a '"type":"custom-title"' "$dsh_file" | tail -n 1; }
 true`, 20_000);
+    }
+    /** The records that can title a Codex thread: its newest line of Codex's name index and its first user messages. */
+    codexTitleRecords(thread) {
+        if (!UUID.test(thread))
+            throw new RemoteError('Invalid Codex thread');
+        return this.transport.exec(`dsh_home="\${CODEX_HOME:-$HOME/.codex}"
+grep -a ${quote(thread)} "$dsh_home/session_index.jsonl" 2>/dev/null | tail -n 1
+dsh_file=$(find "$dsh_home/sessions" -maxdepth 4 -name ${quote(`rollout-*-${thread}.jsonl`)} 2>/dev/null | head -n 1)
+[ -z "$dsh_file" ] || grep -a -m 5 '"type":"UserMessage"' "$dsh_file"
+true`, 20_000);
+    }
+    /**
+     * Starts a Codex thread for `codex resume` to open, as Codex cannot be told the ID of a session it starts. App server
+     * only saves the thread once it has a message or a name, and it needs no message from this connection for a name.
+     * @returns the thread's ID.
+     */
+    async codexThread(cwd, name, signal) {
+        const path = await this.transport.exec(`printf '%s' "$(command -v codex 2>/dev/null || true)"`, 20_000);
+        signal.throwIfAborted();
+        if (!path.startsWith('/'))
+            throw new RemoteError('Codex is not installed on this SSH host', 409);
+        const peer = new JsonlPeer(this.transport.start(remotePath(cwd), [path, 'app-server']));
+        const abort = () => peer.close();
+        signal.addEventListener('abort', abort, { once: true });
+        try {
+            peer.onMessage(message => { if (message.method && message.id !== undefined)
+                peer.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Starting a thread executes nothing' } }); });
+            await initializeCodex(peer);
+            const result = await peer.request('thread/start', { cwd }), id = result?.thread?.id;
+            if (typeof id !== 'string' || !UUID.test(id))
+                throw new RemoteError('Codex did not start a thread', 502);
+            await peer.request('thread/name/set', { threadId: id, name });
+            return id;
+        }
+        finally {
+            signal.removeEventListener('abort', abort);
+            peer.close();
+        }
     }
     /** Runs one shell operation and returns its data; the program reports handled failures with their status. */
     async run(op, cwd, at, values, options) {

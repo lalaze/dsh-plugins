@@ -7,6 +7,11 @@ interface SessionRow {
     sessionId: string;
     blank?: boolean;
 }
+/**
+ * Codex saves a new thread only once it has a message or a name, and `codex resume` needs it saved, so a TUI conversation's
+ * thread starts with this name. It keeps Codex from titling the thread by itself, so `/rename` is the only title it can have.
+ */
+export declare const CODEX_THREAD_NAME = "DSH TUI";
 /** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
 export declare function tuiClaudeSession(sessionId: string): string;
 /**
@@ -16,9 +21,14 @@ export declare function tuiClaudeSession(sessionId: string): string;
  */
 export declare function claudeTitle(records: string): string | undefined;
 /**
- * Conversations whose main view is the interactive Claude Code instead of DSH's chat. Each stays a real DSH session, so
- * it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one records
- * an empty turn. The conversation itself lives in the remote Claude Code; see the Remote Claude launcher in terminal.ts.
+ * A conversation's title from its Codex thread: the user's /rename, then the first prompt.
+ * @param records - the thread's newest line of Codex's name index and the first of its user messages.
+ */
+export declare function codexTitle(records: string): string | undefined;
+/**
+ * Conversations whose main view is the interactive Claude Code or Codex instead of DSH's chat. Each stays a real DSH
+ * session, so it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one
+ * records an empty turn. The conversation itself lives in the remote CLI; see the launchers in terminal.ts.
  */
 export declare class TuiSessions {
     private readonly store;
@@ -39,8 +49,14 @@ export declare class TuiSessions {
         }): Promise<void>;
         /** The title records of a Claude session on the conversation's machine. */
         titleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string>;
+        /** Starts a saved Codex thread with CODEX_THREAD_NAME on the conversation's machine, and returns its ID. */
+        codexThread(sessionId: string, signal: AbortSignal): Promise<string>;
+        /** The title records of a Codex thread on the conversation's machine. */
+        codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string>;
     });
     list(): string[];
+    /** Those of `list` that run Codex. */
+    codex(): string[];
     /**
      * Tell DSH the conversation's model, once. A session shows its model in the workspace list only if a selection or a
      * request recorded it: a TUI conversation sends no requests, and the composer may only be showing a remembered default.
@@ -48,13 +64,14 @@ export declare class TuiSessions {
      * @param route - the composer's model route; a conversation started by an earlier version has none, so its is rebuilt.
      */
     private recordModel;
-    /** @param selection - the composer's model route and effort, which the first launch of Claude Code uses. */
+    /** @param selection - the CLI, and the composer's model route and effort, which its first launch uses. */
     start(sessionId: string, selection: {
+        cli?: unknown;
         model?: unknown;
         effort?: unknown;
     }, signal: AbortSignal): Promise<void>;
     /**
-     * Follow Claude Code's title, until the conversation is renamed in DSH.
+     * Follow the CLI's title, until the conversation is renamed in DSH.
      * @param current - the conversation's title in DSH.
      * @returns the new title, if it changed.
      */
