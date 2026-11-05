@@ -1,14 +1,73 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { quote } from '../core/ssh.js';
 import { dshHome } from './access.js';
 import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from './domain.js';
+import { tabHolder, TERMINAL_ID_ENV } from './holder-protocol.js';
+/** Replaces a property, usually a method of the object's class. The returned function restores it, unless it has been replaced again since. */
+function override(target, key, value) {
+    const own = Object.getOwnPropertyDescriptor(target, key);
+    target[key] = value;
+    return () => {
+        if (target[key] !== value)
+            return;
+        if (own)
+            Object.defineProperty(target, key, own);
+        else
+            delete target[key];
+    };
+}
+/**
+ * DSH tells a terminal's process its session but not which terminal it is, and that is what finds a sidebar terminal's
+ * holder again. DSH reads its execution environment first thing and synchronously in `spawn`, so the replacement is only ever
+ * seen by that call. A DSH that works differently leaves terminals without the ID, which then end with their connection as before.
+ */
+export function passTerminalId(controller) {
+    const { spawn, execution } = controller;
+    if (typeof spawn !== 'function' || typeof execution !== 'function')
+        return () => { };
+    return override(controller, 'spawn', function (agent, owner, request, signal) {
+        const restore = override(this, 'execution', function (target) {
+            restore();
+            const running = execution.call(this, target), { subprocess } = running;
+            return { ...running, subprocess: new Proxy(subprocess, { get(source, key) {
+                        const value = Reflect.get(source, key, source);
+                        if (key !== 'spawnTerminal' || typeof value !== 'function')
+                            return typeof value === 'function' ? value.bind(source) : value;
+                        return (options) => value.call(source, { ...options, env: { ...options.env, [TERMINAL_ID_ENV]: request.id } });
+                    } }) };
+        });
+        try {
+            return spawn.call(this, agent, owner, request, signal);
+        }
+        finally {
+            restore();
+        }
+    });
+}
+/**
+ * Closing a sidebar terminal should end what runs in it. DSH ends its process the same way when it quits, which must leave
+ * the holder on the host running, and only a close passes through here. A host that cannot be reached keeps it until it expires.
+ */
+export function endClosedTerminals(controller, end) {
+    const { close } = controller;
+    if (typeof close !== 'function')
+        return () => { };
+    return override(controller, 'close', function (agent, id) {
+        void end(agent.id, tabHolder(agent.id, id)).catch(() => { });
+        return close.call(this, agent, id);
+    });
+}
 /**
  * Native terminal keeps its PTY, resizing and keyboard handling; the selected shell runs SSH.
  * DSH remembers one shell for every conversation, so outside a remote workspace the launcher opens the local shell.
  * The Remote Claude and Remote Codex launchers run the interactive CLI there first, a session DSH neither drives nor
  * records. In a TUI conversation of that CLI (see tui.ts) it runs the same session every time, found through DSH_SESSION_ID,
  * which DSH sets in its terminals, so that reopening the conversation resumes it.
+ * On the host the shell or CLI runs in a holder (see terminal-hold.ts), so it outlives DSH and the connection; a host that
+ * cannot run one gets a plain connection.
  * DSH does not pass DSH_HOME to its terminals, so the launcher carries the home it was installed from.
  * `modules` is the compiled server root the launcher imports the store, SSH and workspace modules from.
  */
@@ -19,6 +78,9 @@ export async function installWorkspaceTerminal(controller, directory, stateFile,
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const script = join(directory, 'remote-workspace.mjs'), launcherPath = (name) => join(directory, process.platform === 'win32' ? `${name}.cmd` : name);
     const launcher = launcherPath(TERMINAL_LAUNCHER), claudeLauncher = launcherPath(CLAUDE_LAUNCHER), codexLauncher = launcherPath(CODEX_LAUNCHER);
+    // The build writes it next to lib/server. Only the holder needs it, and a host then gets a plain connection without it.
+    const holderPath = fileURLToPath(new URL('../terminal-holder.mjs', modules));
+    const holderVersion = await readFile(holderPath).then(data => createHash('sha256').update(data).digest('hex').slice(0, 16), () => undefined);
     const source = `import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -26,6 +88,8 @@ import { Store } from ${JSON.stringify(new URL('core/store.js', modules).href)};
 import { WorkspaceAccess, omcStateDir, under } from ${JSON.stringify(new URL('workspace/access.js', modules).href)};
 import { connectionInput, quote } from ${JSON.stringify(new URL('core/ssh.js', modules).href)};
 import { tuiClaudeSession } from ${JSON.stringify(new URL('workspace/tui.js', modules).href)};
+import { holdTerminal, TERMINAL_KEEPALIVE, TERMINAL_TYPING } from ${JSON.stringify(new URL('workspace/terminal-hold.js', modules).href)};
+import { tabHolder, tuiHolder, TERMINAL_ID_ENV } from ${JSON.stringify(new URL('workspace/holder-protocol.js', modules).href)};
 const run = (file, args, env) => {
   const child = spawn(file, args, { stdio: 'inherit', env });
   child.on('error', e => { process.stderr.write(e.message + '\\n'); process.exitCode = 1; });
@@ -79,7 +143,13 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const start = interactive ? shell + " -lic '" + interactive + "; exec " + shell + " -l'" : shell + ' -l';
   // SSH does not carry COLORTERM. Without it Claude Code falls back to 256 colors, which turns its orange pink.
   const command = 'cd ' + quote(placement.cwd) + (interactive ? ' && export COLORTERM=truecolor' : '') + ' && exec ' + start;
-  run('ssh', ['-tt', '-o', 'StrictHostKeyChecking=yes', ...(url.port ? ['-p', url.port] : []), '--', target, command], process.env);
+  const ssh = ['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', ...TERMINAL_KEEPALIVE, ...TERMINAL_TYPING, ...(url.port ? ['-p', url.port] : []), '--', target];
+  const terminalId = process.env[TERMINAL_ID_ENV];
+  const holder = own ? tuiHolder(dshSession) : dshSession && terminalId ? tabHolder(dshSession, terminalId) : undefined;
+  const version = ${JSON.stringify(holderVersion ?? null)};
+  const kept = holder && version ? await holdTerminal({ ssh, holder, command, script: { path: ${JSON.stringify(holderPath)}, version } }) : 'direct';
+  if (kept === 'direct') run('ssh', [...ssh, command], process.env);
+  else process.exitCode = kept;
 }
 `;
     await writeFile(script, source, { mode: 0o600 });
@@ -93,8 +163,9 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
     for (const path of launchers)
         if (!candidates.includes(path))
             candidates.push(path);
+    const stopPassing = passTerminalId(controller);
     // Leave the launchers on disk until the next boot: an already open native terminal may still start them.
-    return { shell: launcher, dispose: () => { for (const path of launchers) {
+    return { shell: launcher, dispose: () => { stopPassing(); for (const path of launchers) {
             const index = candidates.indexOf(path);
             if (index >= 0)
                 candidates.splice(index, 1);

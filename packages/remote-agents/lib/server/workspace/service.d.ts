@@ -24,6 +24,8 @@ export declare class WorkspaceService {
      * conversation's verified machine. It may be outside the workspace: the CLI there already read it.
      */
     readViewed(sessionId: string, path: string, limit: number, signal: AbortSignal): Promise<Buffer | undefined>;
+    /** Ends a terminal the user closed, which otherwise keeps running on the conversation's machine. */
+    endHolder(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
     /** The title records of a Claude Code session on the conversation's verified machine. */
     claudeTitleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string>;
     /** The team tools for the CLI of a TUI conversation in this verified workspace. */

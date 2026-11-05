@@ -35,6 +35,7 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'tuiStart':
                 case 'tuiTitle':
                 case 'tuiPrepare':
+                case 'tuiEnd':
                 case 'tuiTeam':
                 case 'workspaceTunnels':
                 case 'addWorkspaceTunnel':

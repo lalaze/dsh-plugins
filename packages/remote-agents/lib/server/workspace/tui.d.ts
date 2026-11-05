@@ -59,6 +59,8 @@ export declare class TuiSessions {
             command: string;
             args: string[];
         } | undefined>;
+        /** Ends a terminal's holder on the conversation's machine. */
+        endHolder?(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
     });
     list(): string[];
     /** Those of `list` that run Codex. */
@@ -81,6 +83,8 @@ export declare class TuiSessions {
      * without the tools if this fails or AgentTeams is not installed.
      */
     prepare(sessionId: string, signal: AbortSignal): Promise<void>;
+    /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
+    end(sessionId: string, signal: AbortSignal): Promise<void>;
     /**
      * Follow the CLI's title, until the conversation is renamed in DSH.
      * @param current - the conversation's title in DSH.

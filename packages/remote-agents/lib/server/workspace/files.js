@@ -6,6 +6,7 @@ import { REMOTE_DSH_RUNNER } from './runner.js';
 import { WORKSPACE_SHELL } from './shell.js';
 import { initializeCodex } from '../agents/runtime.js';
 import { JsonlPeer, quote } from '../core/ssh.js';
+import { endHolderScript } from './holder-protocol.js';
 const digest = (data) => createHash('sha256').update(data).digest('hex');
 const KINDS = { d: 'directory', f: 'file', l: 'symlink', o: 'other' };
 /** A workspace path, normalized relative to the workspace. Containment of links is checked on the host. */
@@ -57,6 +58,8 @@ export class WorkspaceFiles {
         this.transport = transport;
     }
     /** The records that can title a Claude Code session, from its file on this machine if it has saved that session. */
+    /** Ends a terminal's holder and what runs in it, if there is one. */
+    async endHolder(holder) { await this.transport.exec(endHolderScript(holder), 15_000, { login: false }); }
     claudeTitleRecords(claudeSession) {
         return this.transport.exec(`dsh_file=$(find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${quote(`${claudeSession}.jsonl`)} 2>/dev/null | head -n 1)
 [ -z "$dsh_file" ] || { grep -a -m 5 '"type":"last-prompt"' "$dsh_file"; grep -a '"type":"ai-title"' "$dsh_file" | tail -n 1; grep -a '"type":"custom-title"' "$dsh_file" | tail -n 1; }

@@ -49,6 +49,10 @@ export async function workspaceAction(features, action, input, signal) {
         await features.tui?.prepare(sessionId, signal);
         return { ok: true };
     }
+    if (action === 'tuiEnd') {
+        await features.tui?.end(sessionId, signal);
+        return { ok: true };
+    }
     if (action === 'tuiTeam') {
         if (!features.captain)
             throw new RemoteError('The TUI is unavailable', 501);

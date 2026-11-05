@@ -4,6 +4,8 @@ export declare class WorkspaceFiles {
     private readonly transport;
     constructor(transport: SshTransport);
     /** The records that can title a Claude Code session, from its file on this machine if it has saved that session. */
+    /** Ends a terminal's holder and what runs in it, if there is one. */
+    endHolder(holder: string): Promise<void>;
     claudeTitleRecords(claudeSession: string): Promise<string>;
     /** The records that can title a Codex thread: its newest line of Codex's name index and its first user messages. */
     codexTitleRecords(thread: string): Promise<string>;

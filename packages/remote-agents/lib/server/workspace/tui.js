@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { RemoteError } from '../core/domain.js';
+import { tuiHolder } from './holder-protocol.js';
 /** What a conversation shows until its CLI has titled it. */
 const FIRST_TITLES = { claude: 'Claude Code', codex: 'Codex' };
 const MAX_TITLE = 120, MAX_PROMPT_TITLE = 80;
@@ -158,6 +159,11 @@ export class TuiSessions {
             const { bridge: _old, ...details } = state.tuiDetails?.[sessionId] ?? {};
             state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...details, ...(bridge ? { bridge } : {}) } };
         });
+    }
+    /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
+    async end(sessionId, signal) {
+        if (this.list().includes(sessionId))
+            await this.dsh.endHolder?.(sessionId, tuiHolder(sessionId), signal);
     }
     /**
      * Follow the CLI's title, until the conversation is renamed in DSH.
