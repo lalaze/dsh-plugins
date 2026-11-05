@@ -82,7 +82,8 @@ test('a permission requested while one DSH drives the CLI can be answered from a
   assert.match((await transcript(second.service, agent.id)).text, /decision accept/);
   assert.deepEqual((await h.lines('replies.log')).map(r => r.decision), ['accept']);
   await waitFor(async () => /decision accept/.test((await transcript(h.first.service, agent.id)).text), 'the first DSH sees the answer');
-  assert.deepEqual((await h.first.service.state(agent.id)).permissions, []);
+  // Its output and its pending requests reach the first DSH separately.
+  await waitFor(async () => (await h.first.service.state(agent.id)).permissions.length === 0, 'the request is gone on the first DSH');
 });
 
 test('a CLI whose DSH quits is driven by another once its lease expires, and the first does not take it back', { skip: !supported }, async t => {
@@ -262,7 +263,8 @@ test('a conversation showing another DSH\'s turn shows it to the end when that D
   const agent = await h.first.service.create(h.request('claude', 'stream 1'));
   await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'first turn');
   await imported(second.service, agent.id);
-  const shownAlready = (await transcript(second.service, agent.id)).entries.find(e => e.item.type === 'user_message')!.item.clientMessageId as string;
+  // The history reaches this DSH when it is read, in the background.
+  const shownAlready = (await waitFor(async () => (await transcript(second.service, agent.id)).entries.find(e => e.item.type === 'user_message'), 'the shared history')).item.clientMessageId as string;
   const route = chatModelId(secondHost, 'claude', 'fake-model'), provider = chatProviderId('claude'), sessionId = SessionId('main-chat-2');
   await second.store.update(state => { state.tasks.find(task => task.id === agent.id)!.chat = { sessionId, route, delivered: { messageId: shownAlready, cursor: null, done: true } }; });
   const adapter = new RemoteCliAdapter(new ChatProjects(second.service), { agent: () => ({ id: 'dsh-agent' }), step: () => undefined, cwd: () => h.cwd,
@@ -440,7 +442,8 @@ test('a shared workspace is offered with its local folder, and one removed from 
   assert.deepEqual(offered.map(w => w.remotePath), [h.cwd]);
   assert.ok(existsSync(join(offered[0].path, '.dsh-remote-meta.json')), 'its local folder is ready for DSH to add');
   assert.deepEqual(await workspaces.shared(), [], 'another client asking right away is not offered it again');
-  assert.ok(second.store.seenWorkspaces(second.store.hosts()[0].id).includes(gone), 'the removed folder is not offered again');
+  // The two workspaces can reach this DSH in separate reports of the registry, so the removed one may take another look.
+  await waitFor(async () => { await workspaces.shared(); return second.store.seenWorkspaces(second.store.hosts()[0].id).includes(gone); }, 'the removed folder is not offered again');
 });
 
 test('deleting a shared machine’s sessions everywhere needs the machine; removing it here only does not', { skip: !supported }, async t => {

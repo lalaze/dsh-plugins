@@ -47,6 +47,9 @@ export const waitFor = async <T>(read: () => T | Promise<T>, message: string, ti
   }
 };
 export async function relayHarness(t: TestContext, env: Record<string, string> = {}, options: { longHome?: boolean } = {}) {
+  // The plugin unrefs its timers so that it never keeps DSH from exiting. With only those pending, as while a restart waits
+  // for an offline host, Node would see nothing left to do, end the test as unfinished and cancel the rest of the file.
+  const keepAlive = setInterval(() => {}, 1000); t.after(() => clearInterval(keepAlive));
   // A long HOME puts the relay's Unix socket path beyond the ~104–108 byte platform limit.
   // Match process.cwd() and remote canonical paths on platforms where tmpdir() is a symlink.
   const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-relay-'))), home = join(root, ...(options.longHome ? ['a-very-long-home-directory-name-'.repeat(4)] : []), 'home'), state = join(root, 'state');
@@ -80,7 +83,8 @@ export async function relayHarness(t: TestContext, env: Record<string, string> =
   t.after(async () => {
     for (const service of services) await service.close().catch(() => {});
     for (const pid of await remember()) try { process.kill(pid, 'SIGKILL'); } catch {}
-    await rm(root, { recursive: true, force: true });
+    // What runs on the host may still be finishing a write there.
+    await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
   const first = await open();
   const hostId = (await first.service.addHost({ label: 'Local relay host', connection: 'ssh://builder@localhost' })).hosts[0].id;

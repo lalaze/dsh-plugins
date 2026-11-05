@@ -106,7 +106,7 @@ async function setup(t: TestContext) {
     agent: (id: string) => id === 'session-1' ? agent : undefined,
   });
   return { root, home, store, host, sharing, calls, launched, killed, agent, tools, skillsDir, scripts, transport: localTransport(home, scripts), task: (id: string) => store.task(t => t.id === id)!,
-    bridge: () => (sharing as unknown as { bridges: Map<string, { retry?: unknown; checked: number }> }).bridges.get(host.id) };
+    bridge: () => (sharing as unknown as { bridges: Map<string, { retry?: unknown; checked: number; forward?: { up?: boolean } }> }).bridges.get(host.id) };
 }
 
 test('MCP tool names map to their DSH server', () => {
@@ -301,7 +301,8 @@ test('reattached CLIs get the forward back before DSH loads its MCP servers; a r
   tools.length = 0;
   sharing.attached(host, transport, task('panel-task'));
   sharing.attached(host, transport, task('chat-task'));
-  await until(async () => (await pointers(home)).length === 1);
+  // The pointer is written just before the forward counts as up; one stopped in between is killed again as it fails.
+  await until(async () => (await pointers(home)).length === 1 && bridge()?.forward?.up === true);
   assert.equal(launched.length, 1, 'only the CLI with a DSH conversation needs the forward');
   sharing.forget(host.id);
   assert.equal(killed.length, 1);
