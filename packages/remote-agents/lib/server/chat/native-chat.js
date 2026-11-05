@@ -357,6 +357,19 @@ export class RemoteCliAdapter extends LlmAdapter {
             yield { type: 'finish', reason: { kind: 'stop' } };
             return;
         }
+        const terminal = options.sessionId ? this.host.terminal?.(options.sessionId) : undefined;
+        if (terminal) {
+            // This conversation's CLI runs in a terminal, so a turn here is AgentTeams waking its captain: it goes to that CLI.
+            // The reply only ends the turn. Nothing reads the conversation's DSH history, so maintenance has nothing to do.
+            if (options.purpose !== 'compaction')
+                await terminal(options.messages.slice(options.messages.findLastIndex(m => m.role === 'assistant') + 1).filter(m => m.role === 'user' && isTeamPrompt(m.source)).map(m => blockText(m.content)));
+            const text = 'Handed to the terminal.';
+            yield { type: 'block-start', index: 0, blockType: 'text' };
+            yield { type: 'text-delta', index: 0, text };
+            yield { type: 'block-end', index: 0, block: { type: 'text', text } };
+            yield { type: 'finish', reason: { kind: 'stop' } };
+            return;
+        }
         if (options.purpose === 'compaction') {
             // Harness maintenance gets a disposable session, never an instruction injected into the live coding turn.
             const sessionId = `remote-compaction-${randomUUID()}`;

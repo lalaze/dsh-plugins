@@ -26,6 +26,10 @@ export class RemoteAgentsService {
     }
     async sshConfig() { return this.readSshConfig(); }
     /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
+    /** See Backend.captainBridge. */
+    captainBridge(hostId, sessionId, signal) {
+        return this.use(hostId, async (backend) => backend.captainBridge?.(sessionId, signal));
+    }
     async withWorkspace(hostId, verify, action) {
         return this.use(hostId, async (backend) => {
             await verify();

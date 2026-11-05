@@ -46,7 +46,8 @@ export interface State {
 }
 /**
  * A TUI conversation's first launch of its CLI, the title the plugin last gave it, and whether DSH has been told the
- * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code.
+ * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code. `bridge` is
+ * the MCP server that gives its CLI the team tools, and `inbox` the team's messages waiting for the CLI to take them.
  */
 export interface TuiDetails {
     cli?: 'codex';
@@ -55,6 +56,11 @@ export interface TuiDetails {
     effort?: string;
     title?: string;
     modelRecorded?: boolean;
+    bridge?: {
+        command: string;
+        args: string[];
+    };
+    inbox?: string[];
 }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord {

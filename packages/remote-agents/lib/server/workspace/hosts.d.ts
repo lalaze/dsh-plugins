@@ -15,6 +15,11 @@ export interface WorkspaceHosts {
     }): Promise<DirectoryListing>;
     /** Run `action` on the machine's connection once `verify` confirms the workspace still belongs to it. */
     withWorkspace<T>(hostId: string, verify: () => Promise<void>, action: (files: WorkspaceFiles) => Promise<T>): Promise<T>;
+    /** The MCP server that gives a TUI conversation's CLI the team tools on the machine, if it can have them. */
+    captainBridge?(hostId: string, sessionId: string, signal?: AbortSignal): Promise<{
+        command: string;
+        args: string[];
+    } | undefined>;
     /** Workspaces DSH instances sharing the machine added, and marking them offered here or adding one. */
     sharedWorkspaces(hostId: string): Promise<SharedWorkspace[]>;
     seeWorkspaces(hostId: string, paths: string[]): Promise<void>;

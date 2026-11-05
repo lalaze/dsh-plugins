@@ -12,6 +12,12 @@ export declare const TEAM_SERVER = ".agent-teams";
 export declare const TEAM_MCP_NAME = "dsh-agent-teams";
 /** The tools AgentTeams lets a member call; captain tools are never passed. */
 export declare const TEAM_MEMBER_TOOLS: readonly string[];
+/** The bridge server of a TUI conversation's CLI, which leads the team rather than working in it. */
+export declare const TEAM_CAPTAIN_SERVER = ".agent-teams-captain";
+/** Starts a team from a /team line, as a CLI cannot know the model routes `agent_teams_create` needs. */
+export declare const TEAM_START_TOOL = "start_team";
+/** What a captain does after that, under AgentTeams' own names. */
+export declare const TEAM_CAPTAIN_TOOLS: readonly string[];
 export interface TeamMember {
     team: string;
     member: string;

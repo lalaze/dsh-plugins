@@ -22,6 +22,8 @@ export function installTeamCommand(ctx, deps) {
         }));
     });
 }
+/** The line's grammar and the presets to choose from. */
+export const teamUsage = (saved) => `${TEAM_HINT}. Presets: ${allPresets(saved).map(preset => `${preset.id} (${preset.members.map(member => member.name).join(', ')})`).join(', ')}. A member's cli is claude or codex.`;
 /** Parse the line, resolve the members on the workspace's machine and create the team. Never throws. */
 export async function runTeamCommand(tools, deps, invocation) {
     try {

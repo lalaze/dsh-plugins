@@ -56,5 +56,7 @@ export interface TeamCommandDeps {
     catalogs(hostIds: readonly string[]): Catalog[];
 }
 export declare function installTeamCommand(ctx: Context, deps: TeamCommandDeps): void;
+/** The line's grammar and the presets to choose from. */
+export declare const teamUsage: (saved: TeamPreset[]) => string;
 /** Parse the line, resolve the members on the workspace's machine and create the team. Never throws. */
 export declare function runTeamCommand(tools: Tools | undefined, deps: TeamCommandDeps, invocation: CommandInvocation): Promise<CommandResult>;

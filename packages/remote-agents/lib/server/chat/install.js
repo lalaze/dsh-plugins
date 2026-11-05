@@ -39,6 +39,7 @@ export function installChat(ctx, service, projects, workspace) {
             permission: id => accessOf(scoped, sessionOf(id)).permission,
             unattended: id => accessOf(scoped, sessionOf(id)).unattended,
             teamMember: id => teamMemberOf(sessionOf(id)),
+            terminal: id => (workspace.captain?.isTui(id) ? messages => workspace.captain.deliver(id, messages) : undefined),
             userContent: (id, messageId) => sessionOf(id)?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source)))?.content,
             attachments: {
                 image: async (ref, signal) => {

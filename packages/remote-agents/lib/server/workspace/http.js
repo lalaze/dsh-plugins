@@ -44,7 +44,16 @@ export async function workspaceAction(features, action, input, signal) {
         return { sessionId };
     }
     if (action === 'tuiTitle')
-        return { title: await features.tui?.syncTitle(sessionId, input.current, signal) };
+        return { title: await features.tui?.syncTitle(sessionId, input.current, signal), waiting: features.captain?.waiting(sessionId) ?? 0 };
+    if (action === 'tuiPrepare') {
+        await features.tui?.prepare(sessionId, signal);
+        return { ok: true };
+    }
+    if (action === 'tuiTeam') {
+        if (!features.captain)
+            throw new RemoteError('The TUI is unavailable', 501);
+        return { text: await features.captain.team(sessionId, typeof input.line === 'string' ? input.line : '', signal) };
+    }
     if (action === 'workspaceTarget') {
         const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
         return shell ? { ...target, terminalShell: shell } : target;

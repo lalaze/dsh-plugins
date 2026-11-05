@@ -125,10 +125,11 @@ function proxy(taskFile, server) {
   }
   connect().catch(() => { failed = true; retry(); });
   process.stdin.on('end', () => { ended = true; });
-  const team = server === '.agent-teams';
+  const team = server === '.agent-teams', captain = server === '.agent-teams-captain';
   serve({
-    name: team ? 'dsh-agent-teams' : 'dsh-' + server,
-    instructions: team ? 'Coordination tools of the DSH AgentTeams team this session works for. They run in DSH on the user\'s computer, not on this host.'
+    name: team || captain ? 'dsh-agent-teams' : 'dsh-' + server,
+    instructions: captain ? 'Lead a team of other coding CLIs from this session. Use start_team when the user asks to split work, delegate it to Codex or Claude, or run a team, or when they write a /team line. These tools run in DSH on the user\'s computer, not on this host.'
+      : team ? 'Coordination tools of the DSH AgentTeams team this session works for. They run in DSH on the user\'s computer, not on this host.'
       : 'Tools of the "' + server + '" MCP server configured in DSH. They run in DSH on the user\'s computer, not on this host, and DSH may ask the user to approve a call.',
     async list() {
       try { const tools = (await request('list', {})).tools; writeJson(cache, tools); return tools; }

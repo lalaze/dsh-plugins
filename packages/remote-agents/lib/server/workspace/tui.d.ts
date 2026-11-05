@@ -39,6 +39,7 @@ export declare class TuiSessions {
             hostId: string;
         }>;
         session(sessionId: string): TuiSession | undefined;
+        agent?(sessionId: string): unknown;
         list(): Promise<readonly SessionRow[]>;
         rename(sessionId: string, title: string): Promise<void>;
         selectModel(selection: {
@@ -53,6 +54,11 @@ export declare class TuiSessions {
         codexThread(sessionId: string, signal: AbortSignal): Promise<string>;
         /** The title records of a Codex thread on the conversation's machine. */
         codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string>;
+        /** The MCP server that gives the conversation's CLI the team tools, if it can have them. */
+        captainBridge?(sessionId: string, signal: AbortSignal): Promise<{
+            command: string;
+            args: string[];
+        } | undefined>;
     });
     list(): string[];
     /** Those of `list` that run Codex. */
@@ -70,6 +76,11 @@ export declare class TuiSessions {
         model?: unknown;
         effort?: unknown;
     }, signal: AbortSignal): Promise<void>;
+    /**
+     * Before the CLI launches: what it needs to lead teams, which the launcher reads from the saved state. The CLI runs
+     * without the tools if this fails or AgentTeams is not installed.
+     */
+    prepare(sessionId: string, signal: AbortSignal): Promise<void>;
     /**
      * Follow the CLI's title, until the conversation is renamed in DSH.
      * @param current - the conversation's title in DSH.
