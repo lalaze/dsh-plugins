@@ -36,22 +36,48 @@ export function modelSwitchNote(item: TimelineEntry['item'], userText: string): 
   return labels.switchNote(String(item.from), String(item.to), item.category ? ` (${String(item.category)})` : '');
 }
 
-/** The input fields that name what a tool works on, most telling first. */
-const TOOL_TARGETS = ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt'];
-const TOOL_TARGET_LIMIT = 100;
+/** A sentence wraps with the line around it. Code does not: DSH moves code that does not fit to a line of its own, so it stays short. */
+const TOOL_SENTENCE_LIMIT = 100, TOOL_CODE_LIMIT = 60;
+const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
+function clip(text: string, limit: number, cut = false): string {
+  const characters = [...text];
+  return characters.length > limit ? `${characters.slice(0, limit).join('').trimEnd()}…` : cut ? `${text}…` : text;
+}
+/** A long path keeps its end, which names the file, starting at a folder. */
+function clipPath(path: string): string {
+  const characters = [...path];
+  if (characters.length <= TOOL_CODE_LIMIT) return path;
+  const end = characters.slice(1 - TOOL_CODE_LIMIT).join('');
+  return `…${end.slice(Math.max(end.indexOf('/'), 0))}`;
+}
+/** Code keeps markdown in it as written, and only a backtick could end it early. It needs no separator, which DSH could leave alone on the line above. */
+const asCode = (text: string) => ` \`${text.replace(/`/g, "'")}\``;
+const asSentence = (text: string) => ` · ${clip(oneLine(text), TOOL_SENTENCE_LIMIT).replace(/[\\`*_~[\]<>|$&]/g, '\\$&')}`;
 /**
- * The line a reply ends with while tools run: the one started last and what it works on, in the language of what the user
- * wrote. The target is inline code, so markdown in it stays as written; only a backtick could end the code early.
+ * What a tool works on. The CLI's own sentence comes first: 90% of the commands in real sessions run past 100 characters and
+ * a third are several lines, while 96% come with a sentence of about 50 characters.
  */
+function toolTarget(input: Record<string, unknown>): string {
+  const field = (...keys: string[]) => keys.map(key => input[key]).find((v): v is string => typeof v === 'string' && !!v.trim())?.trim() ?? '';
+  const description = field('description');
+  if (description) return asSentence(description);
+  const [line, ...rest] = field('command').split('\n');
+  if (line) return asCode(clip(oneLine(line), TOOL_CODE_LIMIT, rest.length > 0));
+  const path = field('file_path', 'path');
+  if (path) return asCode(clipPath(oneLine(path)));
+  const other = field('pattern', 'query', 'url');
+  if (other) return asCode(clip(oneLine(other), TOOL_CODE_LIMIT));
+  const prompt = field('prompt');
+  return prompt ? asSentence(prompt) : '';
+}
+
+/** The line a reply ends with while tools run: the one started last and what it works on, in the language of what the user wrote. */
 export function toolStatus(running: readonly TimelineEntry['item'][], userText: string): string {
   const call = running.at(-1);
   if (!call) return '';
   const input = typeof call.detail === 'object' && call.detail !== null ? call.detail as Record<string, unknown> : {};
-  const value = TOOL_TARGETS.map(key => input[key]).find((v): v is string => typeof v === 'string' && !!v.trim());
-  const characters = [...value?.replace(/\s+/g, ' ').replace(/`/g, "'").trim() ?? ''];
-  const target = characters.length > TOOL_TARGET_LIMIT ? `${characters.slice(0, TOOL_TARGET_LIMIT).join('')}…` : characters.join('');
   const labels = /[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en;
-  return `> ${labels.running(`${String(call.name ?? 'Tool')}${target ? ` · \`${target}\`` : ''}`, running.length - 1)}`;
+  return `> ${labels.running(`${String(call.name ?? 'Tool')}${toolTarget(input)}`, running.length - 1)}`;
 }
 
 /** `unprompted`: the CLI started the turn itself; `user` then holds the task notices it got, if any. */

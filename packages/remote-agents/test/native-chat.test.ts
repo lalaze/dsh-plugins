@@ -950,7 +950,7 @@ for (const [who, overrides] of [
     remote.append(agent.id, { type: 'assistant_message', text: 'The result.' });
   };
   const { screens, saved } = replay(await collect(adapter.stream(claude('Check the port'))));
-  assert.ok(screens.includes('> Running Bash · `ls`'), screens.join('\n---\n'));
+  assert.ok(screens.includes('> Running Bash `ls`'), screens.join('\n---\n'));
   assert.deepEqual(saved.filter(block => block.type === 'text' && block.text), [{ type: 'text', text: 'The result.' }]);
   assert.deepEqual(saved.filter(block => block.type === 'reasoning').map(block => block.text), ['Checking the port.']);
 });
@@ -982,9 +982,9 @@ test('the tool Claude is running shows at the end of the reply, and DSH never sa
   };
   const { screens, stopped, saved } = replay(await collect(adapter.stream(claude('Run the tests'))));
   const seen = [...new Set(screens)];
-  assert.ok(seen.includes('Looking.\n\n> Running Bash · `pnpm test`'), seen.join('\n---\n'));
-  assert.ok(seen.includes('Looking.\n\n> Running Read · `/srv/a.ts` (1 more running)'), seen.join('\n---\n'));
-  assert.ok(seen.includes('Looking.\n\n> Running Grep · `foo`'), seen.join('\n---\n'));
+  assert.ok(seen.includes('Looking.\n\n> Running Bash `pnpm test`'), seen.join('\n---\n'));
+  assert.ok(seen.includes('Looking.\n\n> Running Read `/srv/a.ts` (1 more running)'), seen.join('\n---\n'));
+  assert.ok(seen.includes('Looking.\n\n> Running Grep `foo`'), seen.join('\n---\n'));
   assert.equal(screens.at(-1), 'Looking.\n\nDone.', 'the line is gone when the reply ends');
   assert.ok(!stopped.some(block => block.includes('Running')), 'a Stop at any moment keeps no status');
   assert.deepEqual(saved, [{ type: 'text', text: 'Looking.' }, { type: 'text', text: 'Done.' }]);
@@ -997,7 +997,7 @@ test('a tool Claude runs before writing anything shows too, in the language of t
     remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'completed', detail: 'a.ts' });
   };
   const { screens, stopped, saved } = replay(await collect(adapter.stream(claude('看看目录'))));
-  assert.ok(screens.includes('> 正在运行 Bash · `ls`'), screens.join('\n---\n'));
+  assert.ok(screens.includes('> 正在运行 Bash `ls`'), screens.join('\n---\n'));
   assert.equal(screens.at(-1), '');
   assert.deepEqual(stopped, [], 'a Stop saves no reply at all');
   assert.ok(saved.every(block => !block.text.trim()), 'what DSH saves shows nothing');
@@ -1025,14 +1025,30 @@ test('Codex replies show no running-tool line', async t => {
   assert.deepEqual([...new Set(replay(await collect(adapter.stream(options()))).screens)], ['', 'Looking.']);
 });
 
-test('the running-tool line names the tool’s target on one short line that markdown cannot break', () => {
+test('the running-tool line says what the tool works on in a line that reads well and markdown cannot break', () => {
   const call = (name: string, detail: unknown) => ({ type: 'tool_call' as const, callId: name, name, status: 'running', detail });
   assert.equal(toolStatus([], 'Fix'), '');
-  assert.equal(toolStatus([call('Bash', { command: 'pnpm  test\n  --watch', description: 'Run tests' })], 'Fix'), '> Running Bash · `pnpm test --watch`');
-  assert.equal(toolStatus([call('Bash', { command: 'echo `date`' })], 'Fix'), "> Running Bash · `echo 'date'`");
   assert.equal(toolStatus([call('Skill', {})], 'Fix'), '> Running Skill');
   assert.equal(toolStatus([call('Other', 'not an object')], '修复'), '> 正在运行 Other');
-  assert.equal(toolStatus([call('Read', { file_path: '/a' }), call('Agent', { description: 'Look around' })], '修复'), '> 正在运行 Agent · `Look around`（另有 1 个工具在运行）');
-  const long = toolStatus([call('Bash', { command: 'x'.repeat(500) })], 'Fix');
-  assert.equal(long, `> Running Bash · \`${'x'.repeat(100)}…\``);
+
+  // The CLI's own sentence beats a command: most commands are long scripts.
+  assert.equal(toolStatus([call('Bash', { command: 'pnpm  test\n  --watch', description: 'Run tests' })], 'Fix'), '> Running Bash · Run tests');
+  assert.equal(toolStatus([call('Read', { file_path: '/a' }), call('Agent', { description: 'Look around', prompt: 'Long brief' })], '修复'), '> 正在运行 Agent · Look around（另有 1 个工具在运行）');
+  assert.equal(toolStatus([call('Bash', { command: 'ls', description: 'Read  `a_b`\n*now* <b>' })], 'Fix'), '> Running Bash · Read \\`a\\_b\\` \\*now\\* \\<b\\>');
+  assert.equal(toolStatus([call('Bash', { command: 'ls', description: 'Print $HOME & $PATH' })], 'Fix'), '> Running Bash · Print \\$HOME \\& \\$PATH');
+  assert.equal(toolStatus([call('Bash', { command: 'ls', description: 'y'.repeat(500) })], 'Fix'), `> Running Bash · ${'y'.repeat(100)}…`);
+  assert.equal(toolStatus([call('Bash', { command: 'ls', description: '  ' })], 'Fix'), '> Running Bash `ls`');
+
+  // Without one, code stands by itself, as DSH moves code that does not fit to its own line and a lone separator would stay behind.
+  assert.equal(toolStatus([call('Bash', { command: 'echo `date`' })], 'Fix'), "> Running Bash `echo 'date'`");
+  assert.equal(toolStatus([call('Bash', { command: "\n  cat > /tmp/v.sh <<'EOF'\n#!/bin/bash\nunset A\nEOF\n" })], 'Fix'), "> Running Bash `cat > /tmp/v.sh <<'EOF'…`");
+  assert.equal(toolStatus([call('Bash', { command: 'x'.repeat(500) })], 'Fix'), `> Running Bash \`${'x'.repeat(60)}…\``);
+  assert.equal(toolStatus([call('Bash', { command: `${'x'.repeat(58)}  y z` })], 'Fix'), `> Running Bash \`${'x'.repeat(58)} y…\``, 'spaces inside count as one');
+  assert.equal(toolStatus([call('Grep', { pattern: 'a'.repeat(60) })], 'Fix'), `> Running Grep \`${'a'.repeat(60)}\``);
+
+  // A path keeps its end, which names the file.
+  assert.equal(toolStatus([call('Read', { file_path: '/a/b.ts' })], 'Fix'), '> Running Read `/a/b.ts`');
+  const path = '/Volumes/data/code/dsh-plugins/packages/remote-agents/src/chat/transcript.ts';
+  assert.equal(toolStatus([call('Read', { file_path: path })], 'Fix'), '> Running Read `…/dsh-plugins/packages/remote-agents/src/chat/transcript.ts`');
+  assert.equal(toolStatus([call('Read', { path: `/${'z'.repeat(80)}` })], 'Fix'), `> Running Read \`…${'z'.repeat(59)}\``);
 });
