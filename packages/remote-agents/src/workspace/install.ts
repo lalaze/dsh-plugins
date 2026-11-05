@@ -14,6 +14,7 @@ import { WorkspaceTagSync, type WorkspaceTagsService } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { installWorkspaceTerminal } from './terminal.js';
 import { TuiCaptain, type CaptainTerminal, type ScreenLine } from './tui-captain.js';
+import { installTuiActivity } from './tui-activity.js';
 import { TuiFiles } from './tui-files.js';
 import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
@@ -95,6 +96,7 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
   ctx.connection.fetch.register({ path: '/api/remote-agents/download', methods: ['GET'], requestBody: 'buffered', fetch: transfer });
   // The client's EDITOR_SRC; the build writes the bundle next to lib/server.
   ctx.connection.fetch.register({ path: '/api/remote-agents/editor.js', methods: ['GET'], requestBody: 'buffered', fetch: editorHandler(new URL('../../editor.js', import.meta.url)) });
+  installTuiActivity(ctx, store);
   ctx.inject(['terminalController'], scoped => {
     let disposed = false, cleanup: (() => void) | undefined;
     void installWorkspaceTerminal(scoped.get('terminalController'), join(store.directory, 'terminal'), join(store.directory, 'state.json'))
