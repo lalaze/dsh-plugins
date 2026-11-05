@@ -407,6 +407,48 @@ test('an AgentTeams member CLI gets the member tools without any sharing setting
   assert.equal(calls.length, 1);
 });
 
+test('a TUI conversation\'s CLI leads teams through its own bridge server, as that conversation', async t => {
+  const { home, sharing, transport, host, task, calls, tools, agent } = await setup(t);
+  assert.equal(await sharing.prepareCaptain(host, transport, 'session-1'), undefined, 'nothing without AgentTeams');
+  tools.push(...['agent_teams_claim_task', 'agent_teams_update_task', 'agent_teams_send_message', 'agent_teams_status', 'agent_teams_create', 'agent_teams_delete'].map(name => ({ name, description: name, parameters: { type: 'object', properties: {} } })));
+  assert.equal(await sharing.prepareCaptain(host, transport, 'session-1'), undefined, 'nor before a team can be started');
+  const started: string[] = [];
+  let outcome: { kind: 'success' | 'error'; text?: string } = { kind: 'success', text: 'Team "x" started.' }, isTui = true;
+  sharing.host.team = { start: async (id, line) => { started.push(`${id}: ${line}`); return outcome; }, usage: () => 'USAGE', guide: 'GUIDE' };
+  sharing.host.tuiConversation = id => isTui && id === 'session-1';
+  const bridge = (await sharing.prepareCaptain(host, transport, 'session-1'))!;
+  assert.equal(bridge.args.at(-1), '.agent-teams-captain');
+  const client = mcp(t, bridge.command, bridge.args, home);
+  const hello = (await client.request('initialize', { protocolVersion: '2025-11-25' })).result;
+  assert.equal(hello.serverInfo.name, 'dsh-agent-teams');
+  assert.match(hello.instructions, /start_team/);
+  const listed = (await client.request('tools/list')).result.tools as { name: string; description: string }[];
+  assert.deepEqual(listed.map(tool => tool.name), ['start_team', 'agent_teams_send_message', 'agent_teams_status', 'agent_teams_delete'], 'a captain\'s tools, without the member-only ones or the one needing model routes');
+  assert.match(listed[0].description, /USAGE/);
+  assert.deepEqual((await client.request('tools/call', { name: 'start_team', arguments: { line: 'solo fix it' } })).result, { content: [{ type: 'text', text: 'Team "x" started.\n\nGUIDE' }] });
+  assert.deepEqual(started, ['session-1: solo fix it']);
+  outcome = { kind: 'error', text: 'needs the plugin' };
+  assert.deepEqual((await client.request('tools/call', { name: 'start_team', arguments: { line: 'x' } })).result, { content: [{ type: 'text', text: 'needs the plugin' }], isError: true });
+  await client.request('tools/call', { name: 'agent_teams_status', arguments: {} });
+  assert.deepEqual(calls, [{ name: 'agent_teams_status', arguments: {}, agent }], 'AgentTeams sees the conversation as the captain');
+  assert.match((await client.request('tools/call', { name: 'agent_teams_claim_task', arguments: {} })).result.content[0].text, /no AgentTeams tool/);
+  // The token is for this server only, and an ordinary CLI's is not for this one.
+  const elsewhere = mcp(t, bridge.command, [...bridge.args.slice(0, -1), 'github'], home);
+  await elsewhere.request('initialize', { protocolVersion: '2025-11-25' });
+  assert.deepEqual((await elsewhere.request('tools/list')).result.tools, []);
+  const ordinary = (await sharing.prepare(host, transport, task('chat-task'), 'codex')).servers.find(s => s.name === 'dsh-github');
+  if (ordinary) {
+    const stolen = mcp(t, ordinary.command, [...ordinary.args.slice(0, -1), '.agent-teams-captain'], home);
+    await stolen.request('initialize', { protocolVersion: '2025-11-25' });
+    assert.deepEqual((await stolen.request('tools/list')).result.tools, []);
+  }
+  isTui = false;
+  const gone = mcp(t, bridge.command, bridge.args, home);
+  await gone.request('initialize', { protocolVersion: '2025-11-25' });
+  assert.match((await gone.request('tools/call', { name: 'start_team', arguments: { line: 'y' } })).result.content[0].text, /could not run/, 'nor once the conversation is no TUI');
+  assert.equal(started.length, 2);
+});
+
 test('a shared MCP server named like the team server gives way to it for members', async t => {
   const { sharing, transport, host, task, tools } = await setup(t);
   tools.push({ name: 'mcp__agent-teams__ping', description: 'ping' }, { name: 'agent_teams_status', description: 'status' });

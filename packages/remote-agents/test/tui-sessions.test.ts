@@ -7,10 +7,12 @@ import { fixture } from './fakes.js';
 const THREAD = '01a1a960-0696-7481-b86c-ea7a878c6479';
 const signal = new AbortController().signal, record = (type: string, field: string, value: string) => JSON.stringify({ type, [field]: value, sessionId: 'x' });
 async function setup(t: Parameters<typeof fixture>[0], blank: boolean | undefined = true) {
-  const f = await fixture(t), events: [string, unknown][] = [], titles: string[] = [], remote = { records: '', reads: [] as string[], selections: [] as Record<string, unknown>[], selectFails: false, codexRecords: '', codexReads: [] as string[], threads: 0, threadFails: false };
+  const f = await fixture(t), events: [string, unknown][] = [], titles: string[] = [], remote = { records: '', reads: [] as string[], selections: [] as Record<string, unknown>[], selectFails: false, codexRecords: '', codexReads: [] as string[], threads: 0, threadFails: false, agent: undefined as { phase?: { kind: string; lastTurn?: number } } | undefined, bridge: undefined as { command: string; args: string[] } | undefined };
   const tui = new TuiSessions(f.store, {
     verify: async id => { if (id === 'local') throw new RemoteError('Not a remote workspace', 409); return { hostId: 'host-1' }; },
     session: id => (id === 'closed' ? undefined : { append: (type, data) => { events.push([type, data]); } }),
+    agent: () => remote.agent,
+    captainBridge: async () => remote.bridge,
     list: async () => (blank === undefined ? [] : [{ sessionId: 'remote', blank }]),
     rename: async (_id, title) => { titles.push(title); },
     selectModel: async selection => { if (remote.selectFails) throw new Error('catalog not ready'); remote.selections.push(selection); },
@@ -221,5 +223,41 @@ test('a Codex conversation follows its thread and leaves a DSH rename alone, and
   assert.equal(await tui.syncTitle('remote', 'Fix the login', signal), 'Login work');
   assert.equal(await tui.syncTitle('remote', 'My own title', signal), undefined, 'renamed in DSH');
   assert.deepEqual(titles.at(-1), 'Login work');
+});
+
+test('starting a TUI tells a live agent about its turn, as a real one numbered the same would corrupt the log', async t => {
+  const { tui, remote } = await setup(t);
+  remote.agent = { phase: { kind: 'idle', lastTurn: 0 } };
+  await tui.start('remote', {}, signal);
+  assert.equal(remote.agent.phase?.lastTurn, 1);
+  const busy = await setup(t);
+  busy.remote.agent = { phase: { kind: 'running' } };
+  await busy.tui.start('remote', {}, signal);
+  assert.equal(busy.remote.agent.phase?.lastTurn, undefined, 'a running phase is left alone');
+  const none = await setup(t);
+  await none.tui.start('remote', {}, signal);
+  assert.equal(none.events.length, 2, 'and no agent is no problem');
+});
+
+test('a TUI remembers the bridge its CLI leads teams through, for the launcher to read', async t => {
+  const { f, tui, remote } = await setup(t);
+  await tui.prepare('remote', signal);
+  assert.equal(f.store.snapshot().tuiDetails?.remote, undefined, 'not a TUI yet');
+  await tui.start('remote', {}, signal);
+  remote.bridge = { command: '/bin/node', args: ['bridge.mjs'] };
+  await tui.prepare('remote', signal);
+  assert.deepEqual(f.store.snapshot().tuiDetails?.remote?.bridge, remote.bridge);
+  remote.bridge = undefined;
+  await tui.prepare('remote', signal);
+  assert.equal(f.store.snapshot().tuiDetails?.remote?.bridge, undefined, 'AgentTeams was removed');
+  assert.equal(f.store.snapshot().tuiDetails?.remote?.title, 'Claude Code', 'the rest stays');
+});
+
+test('a team started from /team titles the conversation by its name, and a cut title ends in no space', () => {
+  const notice = 'Team "Fix the login" started (1 member, 1 task): coder → Codex. Members report here.';
+  assert.equal(claudeTitle(record('last-prompt', 'lastPrompt', notice)), 'Fix the login');
+  assert.equal(codexTitle(codexMessage(notice)), 'Fix the login');
+  assert.equal(codexTitle(codexMessage('Team "Fix" is staged for review (1 member, 1 task)')), 'Fix');
+  assert.equal(codexTitle(codexMessage(`${'x'.repeat(79)} and more`))?.length, 79, 'DSH trims titles, and a difference would read as a rename');
 });
 

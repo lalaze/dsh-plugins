@@ -5,6 +5,8 @@ import type { TuiCli } from './domain.js';
 
 /** The part of a DSH session this needs. */
 interface TuiSession { append(type: string, data: unknown): unknown }
+/** The part of DSH's agent loop that numbers turns. */
+interface TuiAgent { phase?: { kind?: string; lastTurn?: number } }
 interface SessionRow { sessionId: string; blank?: boolean }
 
 /** What a conversation shows until its CLI has titled it. */
@@ -28,6 +30,9 @@ export function tuiClaudeSession(sessionId: string): string {
   return [hash.slice(0, 8), hash.slice(8, 12), `4${hash.slice(13, 16)}`, `8${hash.slice(17, 20)}`, hash.slice(20, 32)].join('-');
 }
 
+/** A team's start reaches the CLI as its first message when the user typed /team. Its name is what titles the conversation. */
+const promptTitle = (text: string) => (/^Team "(.+?)" (?:started|is staged)\b/.exec(text)?.[1] ?? text).slice(0, MAX_PROMPT_TITLE).trim();
+
 /**
  * A conversation's title from Claude Code's session file: the user's /rename, then Claude's own title, then the first
  * prompt. Claude often writes no title, for a short greeting especially, and DSH titles its other conversations by their
@@ -43,7 +48,7 @@ export function claudeTitle(records: string): string | undefined {
       if (record.type === 'last-prompt' && prompt === undefined && typeof record.lastPrompt === 'string') {
         const text = record.lastPrompt.replace(/\s+/g, ' ').trim();
         // A slash command says nothing about the conversation.
-        if (text && !text.startsWith('/')) prompt = text.slice(0, MAX_PROMPT_TITLE);
+        if (text && !text.startsWith('/')) prompt = promptTitle(text);
       }
     } catch { /* not a whole record */ }
   }
@@ -65,7 +70,7 @@ export function codexTitle(records: string): string | undefined {
       if (item?.type !== 'UserMessage' || prompt !== undefined || !Array.isArray(item.content)) continue;
       const text = item.content.map((part: { type?: string; text?: unknown }) => (part?.type === 'text' && typeof part.text === 'string' ? part.text : '')).join(' ').replace(/\s+/g, ' ').trim();
       // A path says nothing about the conversation, like a slash command in Claude Code's.
-      if (text && !text.startsWith('/')) prompt = text.slice(0, MAX_PROMPT_TITLE);
+      if (text && !text.startsWith('/')) prompt = promptTitle(text);
     } catch { /* not a whole record */ }
   }
   return typeof name === 'string' && name.trim() && name !== CODEX_THREAD_NAME ? name.trim().slice(0, MAX_TITLE) : prompt;
@@ -88,6 +93,7 @@ export class TuiSessions {
     /** Rejects a conversation that is not a verified remote workspace. */
     verify(sessionId: string, signal: AbortSignal): Promise<{ hostId: string }>;
     session(sessionId: string): TuiSession | undefined;
+    agent?(sessionId: string): unknown;
     list(): Promise<readonly SessionRow[]>;
     rename(sessionId: string, title: string): Promise<void>;
     selectModel(selection: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<void>;
@@ -97,6 +103,8 @@ export class TuiSessions {
     codexThread(sessionId: string, signal: AbortSignal): Promise<string>;
     /** The title records of a Codex thread on the conversation's machine. */
     codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string>;
+    /** The MCP server that gives the conversation's CLI the team tools, if it can have them. */
+    captainBridge?(sessionId: string, signal: AbortSignal): Promise<{ command: string; args: string[] } | undefined>;
   }) {}
   list(): string[] { return this.store.snapshot().tuiSessions ?? []; }
   /** Those of `list` that run Codex. */
@@ -139,7 +147,23 @@ export class TuiSessions {
     await this.recordModel(sessionId, target.hostId, model ? selection.model as string : undefined).catch(() => {});
     session.append('turn/start', { turn: 1 });
     session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
+    // An agent reads its last turn once, when it is created, and AgentTeams wakes a captain with a real turn. Numbered 1
+    // again, that turn would leave a log DSH refuses to load.
+    const phase = (this.dsh.agent?.(sessionId) as TuiAgent | undefined)?.phase;
+    if (phase?.kind === 'idle') phase.lastTurn = 1;
     await this.dsh.rename(sessionId, FIRST_TITLES[cli]);
+  }
+  /**
+   * Before the CLI launches: what it needs to lead teams, which the launcher reads from the saved state. The CLI runs
+   * without the tools if this fails or AgentTeams is not installed.
+   */
+  async prepare(sessionId: string, signal: AbortSignal): Promise<void> {
+    if (!this.list().includes(sessionId) || !this.dsh.captainBridge) return;
+    const bridge = await this.dsh.captainBridge(sessionId, signal);
+    await this.store.update(state => {
+      const { bridge: _old, ...details } = state.tuiDetails?.[sessionId] ?? {};
+      state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...details, ...(bridge ? { bridge } : {}) } };
+    });
   }
   /**
    * Follow the CLI's title, until the conversation is renamed in DSH.

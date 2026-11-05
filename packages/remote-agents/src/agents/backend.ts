@@ -14,13 +14,15 @@ import { readAccountUsage } from './usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WorkspaceFiles } from '../workspace/files.js';
-import { acpServers, sharedArguments, type LaunchSharing } from '../sharing/sharing.js';
+import { acpServers, sharedArguments, type CaptainBridge, type LaunchSharing } from '../sharing/sharing.js';
 import { SharedSessions } from './shared-sessions.js';
 export { connectionInput } from '../core/ssh.js';
 
 /** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
 export interface Backend {
   workspaceFiles?: WorkspaceFiles;
+  /** The MCP server that gives a TUI conversation's CLI the team tools on this host, if it can have them. */
+  captainBridge?(sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined>;
   connect(): Promise<string>;
   close(): Promise<void>;
   homeDirectory(): Promise<string>;
@@ -678,6 +680,9 @@ done`}`, 15_000, { login: false });
     if (session) { if (session.alive) session.release(); this.sessions.delete(id); }
     await this.removeFiles(id);
     await this.store.update(state => { state.tasks = state.tasks.filter(t => t.id !== id); });
+  }
+  captainBridge(sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined> {
+    return this.sharing()?.prepareCaptain(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, sessionId, signal) ?? Promise.resolve(undefined);
   }
   async account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null> {
     this.assertOpen();

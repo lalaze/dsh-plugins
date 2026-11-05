@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.92:** A TUI conversation can now lead a team, on Claude Code and on Codex. With `dsh-agent-teams` installed, type `/team …` in the terminal, as in a chat, or tell the CLI to split the work, which it does with a new `start_team` tool. Members' reports reach the CLI by themselves as messages in the terminal, and the CLI can check the team, message members, change tasks and delete the team. A report waits while the prompt holds a draft or the CLI is asking you something, as Enter there would answer it, and the top right says so. A TUI already running gets the team tools in its next terminal; typing `/team` and receiving reports work before that. Attachments and everything else are unchanged. No action is needed.
+
 **Upgrading from 0.2.91:** The button that starts a Codex TUI, and the notice shown while dragging files onto one, now use Codex's logo instead of a plain `>_`. No action is needed.
 
 **Upgrading from 0.2.90:** TUI conversations now run Codex too. In a new conversation of a remote workspace, select a remote Codex model and click `>_` at the bottom left of the composer. Dropping and pasting files work as with Claude Code, and after a DSH restart the row resumes the same Codex thread with its model. Its title is a `/rename` in the TUI, then the first message, as Codex does not title these threads itself. Codex runs without its full-screen mode, so the wheel scrolls through the conversation, and without its update prompt at launch, where the first Enter would install; run `codex update` on the remote machine to update it. **Remote Codex** is also in the native terminal's shell menu. No action is needed.

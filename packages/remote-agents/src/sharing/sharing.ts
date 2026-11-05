@@ -8,7 +8,7 @@ import { BRIDGE_SCRIPT, BRIDGE_VERSION } from './bridge-script.js';
 import { RemoteError, type HostConfig, type NativeProtocol, type Task } from '../core/domain.js';
 import { connectionInput, quote, type SshTransport } from '../core/ssh.js';
 import type { Store } from '../core/store.js';
-import { TEAM_MCP_NAME, TEAM_MEMBER_TOOLS, TEAM_SERVER } from '../chat/agent-teams.js';
+import { TEAM_CAPTAIN_SERVER, TEAM_CAPTAIN_TOOLS, TEAM_MCP_NAME, TEAM_MEMBER_TOOLS, TEAM_SERVER, TEAM_START_TOOL } from '../chat/agent-teams.js';
 
 /** One stdio MCP server a remote CLI starts: the bridge script in proxy or skills mode. */
 export interface SharedServer { name: string; command: string; args: string[] }
@@ -19,6 +19,8 @@ export interface LaunchSharing {
   prepare(host: HostConfig, transport: SshTransport, task: Task, protocol: NativeProtocol, signal?: AbortSignal): Promise<SharedLaunch>;
   /** A CLI kept running while DSH was away was reattached: its proxies need the reverse forward again. Never throws. */
   attached(host: HostConfig, transport: SshTransport, task: Task): void;
+  /** Prepare the host for a TUI conversation's CLI to lead teams; nothing when AgentTeams is not installed or the host cannot. */
+  prepareCaptain(host: HostConfig, transport: SshTransport, sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined>;
   /** The host was removed: stop sharing with it. */
   forget(hostId: string): void;
 }
@@ -53,6 +55,14 @@ export interface SharingHost {
   tools?: SharingTools; skills?: SharingSkills; attachments?: SharingAttachments; agent?(sessionId: string): unknown;
   /** Whether the conversation is an AgentTeams member, whose CLI then gets the member tools. */
   teamMember?(sessionId: string): boolean;
+  /** Whether the conversation is a TUI one, whose CLI may lead teams. */
+  tuiConversation?(sessionId: string): boolean;
+  /** How that CLI starts a team, and what it should do then. */
+  team?: {
+    start(sessionId: string, line: string, signal: AbortSignal): Promise<{ kind: 'success' | 'error'; text?: string }>;
+    usage(): string;
+    guide: string;
+  };
 }
 
 export interface SharingCatalog {
@@ -73,6 +83,10 @@ const INSTALL_TTL = 60_000;
 const shareableSource = (source: string) => !source.startsWith('project-');
 
 const toolSet = (tools: SharedTool[] | undefined) => tools ? JSON.stringify(tools) : '';
+/** The MCP server a TUI conversation's CLI starts for the team tools. */
+export interface CaptainBridge { command: string; args: string[] }
+/** A bridge connection's task for a TUI conversation, which has no CLI task of its own. */
+const CAPTAIN_TASK = 'tui:';
 
 /** `mcp__<server>__<tool>`: DSH's MCP client names every tool after its configured server. */
 export function mcpServerOf(name: string): string | undefined {
@@ -215,6 +229,13 @@ export class Sharing implements LaunchSharing {
   }
   /** The AgentTeams member tools DSH has loaded; captain tools are never shared. */
   private teamTools(): SharedTool[] { return (this.host.tools?.schemas() ?? []).filter(tool => TEAM_MEMBER_TOOLS.includes(tool.name)); }
+  /** What a TUI conversation's CLI leads a team with, once DSH has loaded AgentTeams. */
+  private captainTools(): SharedTool[] {
+    const tools = (this.host.tools?.schemas() ?? []).filter(tool => TEAM_CAPTAIN_TOOLS.includes(tool.name)), start = this.host.team;
+    if (!start || !tools.length) return [];
+    return [{ name: TEAM_START_TOOL, description: `Start an AgentTeams team of remote coding CLIs for a goal, and run it at once. Pass the line a user would write after /team: ${start.usage()}`,
+      parameters: { type: 'object', properties: { line: { type: 'string', description: 'For example: pair coder=codex reviewer=claude/opus Fix the login timeout' } }, required: ['line'] } }, ...tools];
+  }
   /**
    * A CLI working as an AgentTeams member gets the member tools without any sharing setting: the team needs them.
    * Only the member's own CLI: one the member delegates to must not claim or report its tasks for it.
@@ -255,7 +276,7 @@ export class Sharing implements LaunchSharing {
     this.toolsTimer = setTimeout(() => {
       const servers = this.mcpServers();
       for (const [name, seen] of this.listed) {
-        const now = toolSet(name === TEAM_SERVER ? this.teamTools() : servers.get(name));
+        const now = toolSet(name === TEAM_SERVER ? this.teamTools() : name === TEAM_CAPTAIN_SERVER ? this.captainTools() : servers.get(name));
         if (now !== seen) { this.listed.set(name, now); this.changed(name); }
       }
     }, 200);
@@ -319,13 +340,16 @@ export class Sharing implements LaunchSharing {
     });
   }
   private async hello(message: Record<string, any>): Promise<{ server: string; task: string } | undefined> {
-    if (message.op !== 'hello' || typeof message.task !== 'string' || typeof message.token !== 'string' || typeof message.server !== 'string' || !SERVER.test(message.server) && message.server !== TEAM_SERVER) return;
+    if (message.op !== 'hello' || typeof message.task !== 'string' || typeof message.token !== 'string' || typeof message.server !== 'string' || !SERVER.test(message.server) && message.server !== TEAM_SERVER && message.server !== TEAM_CAPTAIN_SERVER) return;
     const expected = Buffer.from(await this.token(message.task), 'hex'), given = Buffer.from(/^[a-f0-9]{64}$/.test(message.token) ? message.token : '', 'hex');
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return;
-    return this.store.task(t => t.id === message.task) ? { server: message.server, task: message.task } : undefined;
+    // The captain server is only for a TUI conversation's CLI, and that CLI gets nothing else.
+    if (message.task.startsWith(CAPTAIN_TASK)) return message.server === TEAM_CAPTAIN_SERVER && this.host.tuiConversation?.(message.task.slice(CAPTAIN_TASK.length)) ? { server: message.server, task: message.task } : undefined;
+    return message.server !== TEAM_CAPTAIN_SERVER && this.store.task(t => t.id === message.task) ? { server: message.server, task: message.task } : undefined;
   }
   private async handle(connection: { server: string; task: string; calls: Map<number, AbortController> }, message: Record<string, any>): Promise<unknown> {
     if (connection.server === TEAM_SERVER) return this.handleTeam(connection, message);
+    if (connection.server === TEAM_CAPTAIN_SERVER) return this.handleCaptain(connection, message);
     const { server } = connection, tools = this.mcpServers().get(server), prefix = `mcp__${server}__`;
     if (message.op === 'list') {
       if (!this.mcpShared(server)) return { tools: [] };
@@ -346,6 +370,32 @@ export class Sharing implements LaunchSharing {
     try {
       const input = message.arguments && typeof message.arguments === 'object' && !Array.isArray(message.arguments) ? message.arguments : {};
       const result = await this.host.tools.execute({ callId: `remote-mcp-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
+      return { content: await mcpContent(result, this.host.attachments, controller.signal), ...(result.isError ? { isError: true } : {}) };
+    } finally { connection.calls.delete(message.id); }
+  }
+
+  /** A TUI conversation's CLI leads teams as that conversation's DSH agent, which AgentTeams then treats as the captain. */
+  private async handleCaptain(connection: { task: string; calls: Map<number, AbortController> }, message: Record<string, any>): Promise<unknown> {
+    const sessionId = connection.task.slice(CAPTAIN_TASK.length), tools = this.captainTools();
+    if (message.op === 'list') {
+      this.listed.set(TEAM_CAPTAIN_SERVER, toolSet(tools));
+      return { tools: tools.map(tool => ({ name: tool.name, description: tool.description,
+        inputSchema: tool.parameters && typeof tool.parameters === 'object' ? tool.parameters : { type: 'object', properties: {} } })) };
+    }
+    if (message.op !== 'call') throw new Error('Unknown bridge request');
+    const failure = (text: string) => ({ content: [{ type: 'text', text }], isError: true });
+    const input = message.arguments && typeof message.arguments === 'object' && !Array.isArray(message.arguments) ? message.arguments : {};
+    const controller = new AbortController(); connection.calls.set(message.id, controller);
+    try {
+      if (message.name === TEAM_START_TOOL && this.host.team) {
+        const result = await this.host.team.start(sessionId, typeof input.line === 'string' ? input.line : '', controller.signal);
+        return result.kind === 'error' ? failure(result.text ?? 'AgentTeams could not create the team') : { content: [{ type: 'text', text: `${result.text ?? 'The team started.'}\n\n${this.host.team.guide}` }] };
+      }
+      const tool = tools.find(t => t.name === String(message.name));
+      if (!tool || !this.host.tools) return failure(`DSH has no AgentTeams tool named "${String(message.name)}".`);
+      const agent = this.host.agent?.(sessionId);
+      if (!agent) return failure('DSH runs team tools with this conversation, which is not open in DSH. Open it there, then retry.');
+      const result = await this.host.tools.execute({ callId: `remote-team-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
       return { content: await mcpContent(result, this.host.attachments, controller.signal), ...(result.isError ? { isError: true } : {}) };
     } finally { connection.calls.delete(message.id); }
   }
@@ -589,6 +639,21 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
       } catch (error) { signal?.throwIfAborted(); this.log(`Sharing DSH MCP servers with ${host.label} failed: ${String(error)}`); }
     }
     return launch;
+  }
+  async prepareCaptain(host: HostConfig, transport: SshTransport, sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined> {
+    if (this.closed || !this.captainTools().length || !transport.transfer) return;
+    const bridge = this.bridge(host, transport), info = await this.install(bridge);
+    const directory = `${info.home}/${BASE}/bridge`, instance = await this.instance(), task = `${CAPTAIN_TASK}${sessionId}`;
+    const file = `${directory}/tasks/tui-${createHash('sha256').update(sessionId).digest('hex').slice(0, 32)}.json`, cache = `${directory}/cache/${instance}`;
+    const content = Buffer.from(JSON.stringify({ task, token: await this.token(task), pointer: `${directory}/current-${instance}`, cache }));
+    // Through stdin: a command line is visible to other users of either machine.
+    await transport.transfer(`umask 077; mkdir -p ${quote(`${directory}/tasks`)} ${quote(cache)} && cat > ${quote(`${file}.tmp`)} && mv -f ${quote(`${file}.tmp`)} ${quote(file)}`,
+      { input: (async function* () { yield content; })(), maxBytes: 4096, signal, login: false });
+    // Wait a little for the forward, so the CLI's first tool listing reaches DSH; a slow host does not hold up the launch.
+    const forward = this.ensureForward(bridge, info).catch(error => this.log(`Sharing team tools with ${host.label} failed: ${String(error)}`));
+    const timeout = delay(FORWARD_WAIT, undefined, { signal, ref: false }); timeout.catch(() => {});
+    await Promise.race([forward, timeout]);
+    return { command: info.node, args: [`${info.home}/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs`, 'proxy', file, TEAM_CAPTAIN_SERVER] };
   }
   attached(host: HostConfig, transport: SshTransport, task: Task): void {
     try {

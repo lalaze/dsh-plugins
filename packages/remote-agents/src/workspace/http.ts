@@ -3,12 +3,13 @@ import { FILE_LIMIT, type WorkspaceTarget } from './domain.js';
 import type { WorkspaceService } from './service.js';
 import { revision, workspacePath } from './service.js';
 import type { WorkspaceTunnels } from './tunnels.js';
+import type { TuiCaptain } from './tui-captain.js';
 import type { TuiFiles } from './tui-files.js';
 import type { TuiSessions } from './tui.js';
 import type { JobAction, WorktreeService } from './worktrees.js';
 
 /** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
-export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string }; worktrees?: WorktreeService; tui?: TuiSessions }
+export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string }; worktrees?: WorktreeService; tui?: TuiSessions; captain?: TuiCaptain }
 const JOB_ACTIONS: readonly JobAction[] = ['cancel', 'retry', 'skip', 'discard'];
 /** Worktree workspaces: a project's DSH workspace path, a worktree's path on its machine, and operation IDs. */
 export async function worktreeAction(worktrees: WorktreeService, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
@@ -45,7 +46,12 @@ export async function workspaceAction(features: WorkspaceFeatures, action: strin
     await features.tui.start(sessionId, { cli: input.cli, model: input.model, effort: input.effort }, signal);
     return { sessionId };
   }
-  if (action === 'tuiTitle') return { title: await features.tui?.syncTitle(sessionId, input.current, signal) };
+  if (action === 'tuiTitle') return { title: await features.tui?.syncTitle(sessionId, input.current, signal), waiting: features.captain?.waiting(sessionId) ?? 0 };
+  if (action === 'tuiPrepare') { await features.tui?.prepare(sessionId, signal); return { ok: true }; }
+  if (action === 'tuiTeam') {
+    if (!features.captain) throw new RemoteError('The TUI is unavailable', 501);
+    return { text: await features.captain.team(sessionId, typeof input.line === 'string' ? input.line : '', signal) };
+  }
   if (action === 'workspaceTarget') {
     const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
     return shell ? { ...target, terminalShell: shell } : target;

@@ -5,6 +5,7 @@ import { useCurrentModel } from '../composer/usage.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 import type { Client } from '../index.js';
 import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
+import { useTeamLine } from './tui-team.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
 const TERMINAL_TAB = '@deepseek-ai/dsh-client-ui-sidebar-terminal', SHELL_KEY = 'dsh.terminal.shell';
@@ -158,12 +159,15 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   const [generation, restart] = useGeneration(sessionId);
   const root = useRef<HTMLDivElement>(null);
   useFilePaste(root, picked => services.uploads.add(sessionId, picked));
+  // Typed in the terminal, /team reaches DSH rather than the CLI, which has no such command.
+  useTeamLine(root, async line => { await api('tuiTeam', { sessionId, line }); }, message => services.uploads.report(sessionId, message));
+  const [reports, setReports] = useState(0);
   // The CLI's title comes after the first exchange, and may change later.
   useEffect(() => {
     const controller = new AbortController();
     const sync = () => {
       if (document.visibilityState === 'hidden') return;
-      void api('tuiTitle', { sessionId, current: services.title(sessionId) }, controller.signal).catch(() => {});
+      void api<{ waiting?: number }>('tuiTitle', { sessionId, current: services.title(sessionId) }, controller.signal).then(value => setReports(value.waiting ?? 0), () => {});
     };
     sync();
     const timer = setInterval(sync, TITLE_INTERVAL);
@@ -193,7 +197,8 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   }, []);
   useEffect(() => {
     const controller = new AbortController();
-    services.terminals.launchShells(sessionId, controller.signal).then(({ shells }) => {
+    // What the launcher reads to give the CLI the team tools has to be there first. The CLI starts without them on a failure.
+    Promise.all([services.terminals.launchShells(sessionId, controller.signal), api('tuiPrepare', { sessionId }, controller.signal).catch(() => {})]).then(([{ shells }]) => {
       const found = shells.find(item => item.name.replace(/\.cmd$/i, '') === TUI_LAUNCHERS[cli]);
       if (found) setShell(found.path); else setError(ui('The {shell} shell is not available in this conversation', { shell: TUI_LAUNCHERS[cli] }));
     }, cause => { if (!controller.signal.aborted) setError(localizeError(cause instanceof Error ? cause.message : String(cause))); });
@@ -203,7 +208,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     <style>{viewStyles}{fileStyles}</style>
     {shell && fontReady ? <TuiTerminal key={generation} root={root} sessionId={sessionId} services={services} shell={shell} generation={generation} restart={restart} />
       : <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
-    <TuiFileStatus sessionId={sessionId} uploads={services.uploads} />
+    <TuiFileStatus sessionId={sessionId} uploads={services.uploads} notice={reports ? ui('Team messages waiting for an empty prompt: {count}', { count: reports }) : undefined} />
   </div>;
 }
 
