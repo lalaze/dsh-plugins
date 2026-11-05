@@ -3,7 +3,6 @@ import type { LaunchSharing } from '../sharing/sharing.js';
 import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import type { CaptainBridge } from '../sharing/sharing.js';
 import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type SharedTag, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
 export interface UsageOptions {
     /** The conversation's selected route; picks its CLI when the conversation used several. */
@@ -54,8 +53,6 @@ export declare class RemoteAgentsService {
     constructor(store: Store, factory?: BackendFactory, readSshConfig?: typeof readSshConfigHosts);
     sshConfig(): Promise<import("../core/domain.js").SshConfigHosts>;
     /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
-    /** See Backend.captainBridge. */
-    captainBridge(hostId: string, sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined>;
     withWorkspace<T>(hostId: string, verify: () => Promise<void>, action: (files: WorkspaceFiles) => Promise<T>): Promise<T>;
     hosts(): Host[];
     /** Closed for a plugin reload or DSH shutdown; remote work must not be stopped then. */
@@ -161,6 +158,11 @@ export declare class RemoteAgentsService {
     archive(id: string, archived?: boolean, options?: {
         onlyIdle?: boolean;
     }): Promise<AgentSummary>;
+    /**
+     * Ends an idle CLI's process on its host; the session itself stays and its next message resumes it. A finished
+     * subagent would otherwise hold one of the account's relay slots until someone archives it.
+     */
+    release(id: string): Promise<void>;
     delete(id: string): Promise<void>;
     /** Applies from the next message: the idle session is released and resumed with the new mode. */
     setMode(id: string, modeId: string): Promise<AgentSummary>;

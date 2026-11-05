@@ -4,12 +4,10 @@ import { sharesSessions } from '../core/domain.js';
 import { dshHome, under, WorkspaceAccess } from './access.js';
 import { editorHandler } from './editor-route.js';
 import { tuiFilesHandler, workspaceTransferHandler } from './http.js';
-import { CLAUDE_LAUNCHER, CODEX_LAUNCHER } from './domain.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { endClosedTerminals, installWorkspaceTerminal } from './terminal.js';
-import { TuiCaptain } from './tui-captain.js';
 import { installTuiActivity } from './tui-activity.js';
 import { TuiFiles } from './tui-files.js';
 import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
@@ -114,28 +112,11 @@ export async function installWorkspaces(ctx, store, machines) {
         titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
         codexThread: (id, signal) => files.codexThread(id, CODEX_THREAD_NAME, signal),
         codexTitleRecords: (id, thread, signal) => files.codexTitleRecords(id, thread, signal),
-        captainBridge: (id, signal) => files.captainBridge(id, signal),
         endHolder: (id, holder, signal) => files.endHolder(id, holder, signal),
     });
     ctx.connection.fetch.register({ path: '/api/remote-agents/tui-files', methods: ['POST'], requestBody: 'streaming',
         fetch: tuiFilesHandler(new TuiFiles({ isTui: id => tui.list().includes(id), directory: store.directory, attach: (...file) => files.attach(...file) })) });
-    const captain = new TuiCaptain(store, id => tuiTerminal(ctx.get('terminalController'), id, store.snapshot().tuiDetails?.[id]?.cli === 'codex' ? CODEX_LAUNCHER : CLAUDE_LAUNCHER));
-    ctx.effect(() => () => captain.close());
-    return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui, captain } };
-}
-/** A TUI conversation's running terminal: the one started from its CLI's launcher, as the conversation may have others open. */
-function tuiTerminal(controller, sessionId, launcher) {
-    for (const terminal of controller?.owners?.get(sessionId)?.terminals.values() ?? []) {
-        if (terminal.info.state !== 'running' || terminal.info.shell?.name?.replace(/\.cmd$/i, '') !== launcher)
-            continue;
-        return {
-            lines: () => {
-                const { active } = terminal.screen.buffer;
-                return Array.from({ length: terminal.screen.rows }, (_, row) => active.getLine(active.viewportY + row)).filter(line => !!line);
-            },
-            write: data => terminal.enqueue(() => terminal.handle.write(data)),
-        };
-    }
+    return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };
 }
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */
 function installTagSync(ctx, store, machines, access) {

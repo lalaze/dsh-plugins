@@ -1,5 +1,4 @@
 import { type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from './domain.js';
-import { type TeamPreset } from '../teams/presets.js';
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup {
     hostId: string;
@@ -40,14 +39,12 @@ export interface State {
     seenWorkspaces?: Record<string, string[]>;
     sharedDeletions?: SharedDeletion[];
     tagSync?: Record<string, TagSyncRecord>;
-    teamPresets?: TeamPreset[];
     tuiSessions?: string[];
     tuiDetails?: Record<string, TuiDetails>;
 }
 /**
  * A TUI conversation's first launch of its CLI, the title the plugin last gave it, and whether DSH has been told the
- * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code. `bridge` is
- * the MCP server that gives its CLI the team tools, and `inbox` the team's messages waiting for the CLI to take them.
+ * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code.
  */
 export interface TuiDetails {
     cli?: 'codex';
@@ -56,11 +53,6 @@ export interface TuiDetails {
     effort?: string;
     title?: string;
     modelRecorded?: boolean;
-    bridge?: {
-        command: string;
-        args: string[];
-    };
-    inbox?: string[];
 }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord {
@@ -101,11 +93,6 @@ export declare class Store {
     /** This DSH's identity for shared hosts, created on first use. */
     instance(): Promise<Instance>;
     tagSync(key: string): TagSyncRecord | undefined;
-    /** The saved `/team` presets in order; the first is the one a line without a preset name uses. */
-    teamPresets(): TeamPreset[];
-    /** Save a preset in place, or append it; `first` makes it the default. */
-    saveTeamPreset(raw: unknown, first?: boolean): Promise<TeamPreset[]>;
-    removeTeamPreset(id: string): Promise<TeamPreset[]>;
     seenWorkspaces(hostId: string): string[];
     sharedDeletions(hostId: string): string[];
     relayCleanups(hostId: string): RelayCleanup[];

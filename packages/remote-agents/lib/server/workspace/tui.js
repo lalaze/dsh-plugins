@@ -20,8 +20,8 @@ export function tuiClaudeSession(sessionId) {
     const hash = createHash('sha256').update(`dsh-tui:${sessionId}`).digest('hex');
     return [hash.slice(0, 8), hash.slice(8, 12), `4${hash.slice(13, 16)}`, `8${hash.slice(17, 20)}`, hash.slice(20, 32)].join('-');
 }
-/** A team's start reaches the CLI as its first message when the user typed /team. Its name is what titles the conversation. */
-const promptTitle = (text) => (/^Team "(.+?)" (?:started|is staged)\b/.exec(text)?.[1] ?? text).slice(0, MAX_PROMPT_TITLE).trim();
+/** Without a trailing space: DSH trims titles, and a difference would read as a rename. */
+const promptTitle = (text) => text.slice(0, MAX_PROMPT_TITLE).trim();
 /**
  * A conversation's title from Claude Code's session file: the user's /rename, then Claude's own title, then the first
  * prompt. Claude often writes no title, for a short greeting especially, and DSH titles its other conversations by their
@@ -140,25 +140,12 @@ export class TuiSessions {
         await this.recordModel(sessionId, target.hostId, model ? selection.model : undefined).catch(() => { });
         session.append('turn/start', { turn: 1 });
         session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
-        // An agent reads its last turn once, when it is created, and AgentTeams wakes a captain with a real turn. Numbered 1
-        // again, that turn would leave a log DSH refuses to load.
+        // An agent reads its last turn once, when it is created. A later turn here, numbered 1 again, would leave a log DSH
+        // refuses to load.
         const phase = this.dsh.agent?.(sessionId)?.phase;
         if (phase?.kind === 'idle')
             phase.lastTurn = 1;
         await this.dsh.rename(sessionId, FIRST_TITLES[cli]);
-    }
-    /**
-     * Before the CLI launches: what it needs to lead teams, which the launcher reads from the saved state. The CLI runs
-     * without the tools if this fails or AgentTeams is not installed.
-     */
-    async prepare(sessionId, signal) {
-        if (!this.list().includes(sessionId) || !this.dsh.captainBridge)
-            return;
-        const bridge = await this.dsh.captainBridge(sessionId, signal);
-        await this.store.update(state => {
-            const { bridge: _old, ...details } = state.tuiDetails?.[sessionId] ?? {};
-            state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...details, ...(bridge ? { bridge } : {}) } };
-        });
     }
     /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
     async end(sessionId, signal) {

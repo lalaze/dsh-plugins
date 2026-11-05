@@ -83,7 +83,7 @@ export interface ArchiveCheck {
     }[];
 }
 export type StepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
-export type JobAction = 'cancel' | 'retry' | 'skip' | 'discard';
+export type JobAction = 'cancel' | 'retry' | 'skip' | 'discard' | 'confirm';
 /** A message for the client to translate: an English key with `{name}` values, and Git's own words when there are any. */
 export interface JobMessage {
     key: string;
@@ -115,6 +115,8 @@ export interface CreateRequest {
     mode: 'new' | 'existing';
     base?: string;
     branch?: string;
+    /** The setup commands the form showed. It reads the project's checkout, so a branch's own wait for a confirmation. */
+    setup?: readonly string[];
 }
 export interface ArchiveRequest {
     path: string;

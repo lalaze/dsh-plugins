@@ -141,6 +141,8 @@ export interface TunnelConfig {
 export interface Tunnel extends TunnelConfig {
     status: 'starting' | 'running' | 'stopped' | 'error';
     error?: string;
+    /** The addresses of the DSH machine a local tunnel listens on while it runs. */
+    listening?: string[];
 }
 export declare const FILE_LIMIT: number;
 export declare const TEXT_LIMIT: number;

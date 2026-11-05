@@ -59,8 +59,8 @@ export interface ChatHost extends Partial<ToolHost> {
     unattended?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
     /** The AgentTeams team and member this conversation runs as, when it is a team member. */
     teamMember?(sessionId: NonNullable<GenerateOptions['sessionId']>): TeamMember | undefined;
-    /** Hands the team's messages to the CLI in the terminal of a TUI conversation; absent for any other conversation. */
-    terminal?(sessionId: NonNullable<GenerateOptions['sessionId']>): ((messages: readonly string[]) => Promise<void>) | undefined;
+    /** Whether the conversation's CLI runs in its terminal, as a TUI conversation's does. */
+    tui?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
     /** A file from the conversation's verified remote workspace, or undefined when it is too large to show. */
     image?(sessionId: NonNullable<GenerateOptions['sessionId']>, path: string, signal: AbortSignal): Promise<Uint8Array | undefined>;
     /** A file the CLI looked at by absolute path on the conversation's verified machine, inside the workspace or not; undefined when too large. */

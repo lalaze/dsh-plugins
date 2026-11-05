@@ -2,13 +2,11 @@ import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing,
 import { type SshTransport } from '../core/ssh.js';
 import type { Store } from '../core/store.js';
 import { WorkspaceFiles } from '../workspace/files.js';
-import { type CaptainBridge, type LaunchSharing } from '../sharing/sharing.js';
+import { type LaunchSharing } from '../sharing/sharing.js';
 export { connectionInput } from '../core/ssh.js';
 /** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
 export interface Backend {
     workspaceFiles?: WorkspaceFiles;
-    /** The MCP server that gives a TUI conversation's CLI the team tools on this host, if it can have them. */
-    captainBridge?(sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined>;
     connect(): Promise<string>;
     close(): Promise<void>;
     homeDirectory(): Promise<string>;
@@ -244,7 +242,6 @@ export declare class SshBackend implements Backend {
     private removeFiles;
     /** Another DSH deleted a shared session: forget it here. Its CLI was stopped by that DSH. */
     private removeLocal;
-    captainBridge(sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined>;
     account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null>;
     /** Ask a running session of this CLI, or briefly start one without a prompt. */
     private readAccount;

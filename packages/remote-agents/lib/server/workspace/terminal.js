@@ -122,18 +122,13 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   // Only a TUI conversation's own CLI is its session; the other launcher, chosen in its sidebar, is that CLI as usual.
   const own = dshSession && saved.tuiSessions?.includes(dshSession) && (details.cli ?? 'claude') === cli;
   const claudeSession = own ? tuiClaudeSession(dshSession) : undefined;
-  // A TUI conversation's CLI leads teams through DSH's team tools, on the same bridge that gives them to team members.
-  const inQuotes = text => text.replace(/["\\\\$\`]/g, '\\\\$&');
-  const bridge = own ? details.bridge : undefined;
-  const claudeBridge = bridge ? ' --mcp-config "' + inQuotes(JSON.stringify({ mcpServers: { 'dsh-agent-teams': { type: 'stdio', ...bridge } } })) + '" --allowedTools mcp__dsh-agent-teams' : '';
-  const codexBridge = bridge ? ' -c "' + inQuotes('mcp_servers.dsh-agent-teams.command=' + JSON.stringify(bridge.command)) + '" -c "' + inQuotes('mcp_servers.dsh-agent-teams.args=' + JSON.stringify(bridge.args)) + '" -c "' + inQuotes('mcp_servers.dsh-agent-teams.default_tools_approval_mode="approve"') + '"' : '';
   const choice = (details.model ? ' --model "' + details.model + '"' : '') + (details.effort ? ' --effort "' + details.effort + '"' : '');
   // Claude Code saves a session only once it has a message, so the first launches of a new one have nothing to resume.
   // Those use the model chosen in the composer; a resumed session keeps whatever /model chose since.
-  const claude = claudeSession ? 'if find "\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/projects" -maxdepth 2 -name ' + claudeSession + '.jsonl 2>/dev/null | grep -q .; then claude' + claudeBridge + ' --resume ' + claudeSession + '; else claude' + claudeBridge + ' --session-id ' + claudeSession + choice + '; fi' : 'claude';
+  const claude = claudeSession ? 'if find "\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/projects" -maxdepth 2 -name ' + claudeSession + '.jsonl 2>/dev/null | grep -q .; then claude --resume ' + claudeSession + '; else claude --session-id ' + claudeSession + choice + '; fi' : 'claude';
   // Codex's own screen would turn the wheel into its prompt history, and leave nothing for the terminal to scroll. Its
   // update prompt would run an install on the first Enter, and typing starts as soon as a conversation is selected.
-  const codexFlags = ' --no-alt-screen -c check_for_update_on_startup=false' + codexBridge;
+  const codexFlags = ' --no-alt-screen -c check_for_update_on_startup=false';
   const codexChoice = (details.model ? ' -m "' + details.model + '"' : '') + (details.effort ? ' -c model_reasoning_effort="' + details.effort + '"' : '');
   // The thread is saved when the conversation starts, but Codex opens it with the configured model until it has a turn.
   // From then on it keeps whatever /model chose. A thread that is gone, say removed by hand, leaves a new one to start.

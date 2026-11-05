@@ -19,7 +19,6 @@ export interface LaunchSharing {
     /** A CLI kept running while DSH was away was reattached: its proxies need the reverse forward again. Never throws. */
     attached(host: HostConfig, transport: SshTransport, task: Task): void;
     /** Prepare the host for a TUI conversation's CLI to lead teams; nothing when AgentTeams is not installed or the host cannot. */
-    prepareCaptain(host: HostConfig, transport: SshTransport, sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined>;
     /** The host was removed: stop sharing with it. */
     forget(hostId: string): void;
 }
@@ -102,17 +101,6 @@ export interface SharingHost {
     agent?(sessionId: string): unknown;
     /** Whether the conversation is an AgentTeams member, whose CLI then gets the member tools. */
     teamMember?(sessionId: string): boolean;
-    /** Whether the conversation is a TUI one, whose CLI may lead teams. */
-    tuiConversation?(sessionId: string): boolean;
-    /** How that CLI starts a team, and what it should do then. */
-    team?: {
-        start(sessionId: string, line: string, signal: AbortSignal): Promise<{
-            kind: 'success' | 'error';
-            text?: string;
-        }>;
-        usage(): string;
-        guide: string;
-    };
 }
 export interface SharingCatalog {
     /** Whether DSH's tool and skill registries are loaded; without them nothing can be shared. */
@@ -131,11 +119,6 @@ export interface SharingCatalog {
         source: string;
         shared: boolean;
     }[];
-}
-/** The MCP server a TUI conversation's CLI starts for the team tools. */
-export interface CaptainBridge {
-    command: string;
-    args: string[];
 }
 /** `mcp__<server>__<tool>`: DSH's MCP client names every tool after its configured server. */
 export declare function mcpServerOf(name: string): string | undefined;
@@ -189,8 +172,6 @@ export declare class Sharing implements LaunchSharing {
     private mcpServers;
     /** The AgentTeams member tools DSH has loaded; captain tools are never shared. */
     private teamTools;
-    /** What a TUI conversation's CLI leads a team with, once DSH has loaded AgentTeams. */
-    private captainTools;
     /**
      * A CLI working as an AgentTeams member gets the member tools without any sharing setting: the team needs them.
      * Only the member's own CLI: one the member delegates to must not claim or report its tasks for it.
@@ -213,8 +194,6 @@ export declare class Sharing implements LaunchSharing {
     private accept;
     private hello;
     private handle;
-    /** A TUI conversation's CLI leads teams as that conversation's DSH agent, which AgentTeams then treats as the captain. */
-    private handleCaptain;
     /** The member tools keep their DSH names; AgentTeams itself checks that the calling conversation is a member. */
     private handleTeam;
     private bridge;
@@ -241,7 +220,6 @@ export declare class Sharing implements LaunchSharing {
     /** Replaced or removed: end the forward and never start another. */
     private stop;
     prepare(host: HostConfig, transport: SshTransport, task: Task, protocol: NativeProtocol, signal?: AbortSignal): Promise<SharedLaunch>;
-    prepareCaptain(host: HostConfig, transport: SshTransport, sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined>;
     attached(host: HostConfig, transport: SshTransport, task: Task): void;
     forget(hostId: string): void;
     /** Per-host forward problems, for the settings page. */

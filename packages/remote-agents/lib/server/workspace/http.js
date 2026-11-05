@@ -1,7 +1,7 @@
 import { field, identifier, RemoteError } from '../core/domain.js';
 import { FILE_LIMIT } from './domain.js';
 import { revision, workspacePath } from './service.js';
-const JOB_ACTIONS = ['cancel', 'retry', 'skip', 'discard'];
+const JOB_ACTIONS = ['cancel', 'retry', 'skip', 'discard', 'confirm'];
 /** Worktree workspaces: a project's DSH workspace path, a worktree's path on its machine, and operation IDs. */
 export async function worktreeAction(worktrees, action, input, signal) {
     const path = () => workspacePath(input.path, 'workspace path'), job = () => identifier(input.jobId);
@@ -12,7 +12,8 @@ export async function worktreeAction(worktrees, action, input, signal) {
         case 'createWorktree': {
             if (input.mode !== 'new' && input.mode !== 'existing')
                 throw new RemoteError('Invalid worktree mode');
-            return worktrees.create({ path: path(), mode: input.mode, base: name(input.base, 'branch'), branch: name(input.branch, 'branch') });
+            const setup = Array.isArray(input.setup) && input.setup.every(command => typeof command === 'string') ? input.setup : undefined;
+            return worktrees.create({ path: path(), mode: input.mode, base: name(input.base, 'branch'), branch: name(input.branch, 'branch'), setup });
         }
         case 'worktreeJob': return worktrees.job(job());
         case 'worktreeJobAction': {
@@ -44,19 +45,10 @@ export async function workspaceAction(features, action, input, signal) {
         return { sessionId };
     }
     if (action === 'tuiTitle')
-        return { title: await features.tui?.syncTitle(sessionId, input.current, signal), waiting: features.captain?.waiting(sessionId) ?? 0 };
-    if (action === 'tuiPrepare') {
-        await features.tui?.prepare(sessionId, signal);
-        return { ok: true };
-    }
+        return { title: await features.tui?.syncTitle(sessionId, input.current, signal) };
     if (action === 'tuiEnd') {
         await features.tui?.end(sessionId, signal);
         return { ok: true };
-    }
-    if (action === 'tuiTeam') {
-        if (!features.captain)
-            throw new RemoteError('The TUI is unavailable', 501);
-        return { text: await features.captain.team(sessionId, typeof input.line === 'string' ? input.line : '', signal) };
     }
     if (action === 'workspaceTarget') {
         const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
@@ -81,7 +73,7 @@ export async function workspaceAction(features, action, input, signal) {
     if (action === 'startWorkspaceTunnel') {
         await features.files.machines.connect(target.hostId);
         await features.files.target(sessionId, signal, target);
-        return features.tunnels.start(id, target.hostId);
+        return features.tunnels.start(id, target.hostId, input.access);
     }
     if (action === 'stopWorkspaceTunnel') {
         features.tunnels.stop(id, target.hostId);

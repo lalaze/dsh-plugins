@@ -28,11 +28,6 @@ export declare class WorkspaceService {
     endHolder(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
     /** The title records of a Claude Code session on the conversation's verified machine. */
     claudeTitleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string>;
-    /** The team tools for the CLI of a TUI conversation in this verified workspace. */
-    captainBridge(sessionId: string, signal: AbortSignal): Promise<{
-        command: string;
-        args: string[];
-    } | undefined>;
     /** A new Codex thread in the conversation's verified remote directory. */
     codexThread(sessionId: string, name: string, signal: AbortSignal): Promise<string>;
     /** The title records of a Codex thread on the conversation's verified machine. */

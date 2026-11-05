@@ -28,10 +28,6 @@ export class RemoteAgentsService {
     }
     async sshConfig() { return this.readSshConfig(); }
     /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
-    /** See Backend.captainBridge. */
-    captainBridge(hostId, sessionId, signal) {
-        return this.use(hostId, async (backend) => backend.captainBridge?.(sessionId, signal));
-    }
     async withWorkspace(hostId, verify, action) {
         return this.use(hostId, async (backend) => {
             await verify();
@@ -251,6 +247,7 @@ export class RemoteAgentsService {
     async use(hostId, action, expectedServerId) {
         let host = this.host(hostId);
         const current = this.connection(hostId);
+        // Only the connection speaks for the host. An action can fail for reasons of its own, such as a missing file or a CLI's error.
         try {
             if (!current.ready) {
                 current.status = 'connecting';
@@ -275,14 +272,10 @@ export class RemoteAgentsService {
             }
             await current.ready;
             host = this.host(hostId);
-            if (expectedServerId && host.serverId !== expectedServerId)
-                throw new RemoteError('Agent belongs to a different remote SSH machine', 409);
             // Recheck the SSH execution identity before each operation.
             const serverId = await current.backend.connect();
             if (serverId !== host.serverId)
                 throw new RemoteError('Remote SSH machine identity changed', 409);
-            void current.backend.cleanup?.();
-            return await action(current.backend, host);
         }
         catch (error) {
             current.status = 'error';
@@ -290,6 +283,15 @@ export class RemoteAgentsService {
             current.ready = undefined;
             // Independent SSH sessions keep running when another probe or request fails.
             throw new RemoteError(current.error, error instanceof RemoteError ? error.status : 502);
+        }
+        try {
+            if (expectedServerId && host.serverId !== expectedServerId)
+                throw new RemoteError('Agent belongs to a different remote SSH machine', 409);
+            void current.backend.cleanup?.();
+            return await action(current.backend, host);
+        }
+        catch (error) {
+            throw new RemoteError(this.safeError(error), error instanceof RemoteError ? error.status : 502);
         }
     }
     /** Local process state; never contacts the SSH host. */
@@ -334,16 +336,11 @@ export class RemoteAgentsService {
     /** One directory level on a verified host; `path` defaults to the remote home. */
     async browse(hostId, path, options = {}) {
         const target = path === undefined ? undefined : browsePath(path);
-        // Listing runs outside `use`: a missing directory must not mark the host connection as failed.
-        const backend = await this.use(hostId, async (backend) => backend);
-        if (!backend.listDirectory)
-            throw new RemoteError('This host cannot browse directories', 501);
-        try {
-            return await backend.listDirectory(target, options);
-        }
-        catch (error) {
-            throw new RemoteError(this.safeError(error), 502);
-        }
+        return this.use(hostId, async (backend) => {
+            if (!backend.listDirectory)
+                throw new RemoteError('This host cannot browse directories', 501);
+            return backend.listDirectory(target, options);
+        });
     }
     async addHost(input, options = {}) {
         const value = record(input);
@@ -799,6 +796,21 @@ export class RemoteAgentsService {
             else
                 delete next.archived; });
             return this.summary(id);
+        });
+    }
+    /**
+     * Ends an idle CLI's process on its host; the session itself stays and its next message resumes it. A finished
+     * subagent would otherwise hold one of the account's relay slots until someone archives it.
+     */
+    async release(id) {
+        return this.serial(id, async () => {
+            const task = this.task(id);
+            if (!task.agentId || task.native?.resumable === false)
+                return;
+            const live = await this.live(task);
+            if (live && busy(this.summarize(task, live)))
+                return;
+            await this.connection(task.hostId).backend.detach(task);
         });
     }
     async delete(id) {

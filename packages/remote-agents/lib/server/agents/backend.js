@@ -820,9 +820,6 @@ done`}`, 15_000, { login: false });
         await this.removeFiles(id);
         await this.store.update(state => { state.tasks = state.tasks.filter(t => t.id !== id); });
     }
-    captainBridge(sessionId, signal) {
-        return this.sharing()?.prepareCaptain(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, sessionId, signal) ?? Promise.resolve(undefined);
-    }
     async account(provider, cwd, refresh) {
         this.assertOpen();
         const definition = CLI_PROVIDERS.find(p => p.id === provider);

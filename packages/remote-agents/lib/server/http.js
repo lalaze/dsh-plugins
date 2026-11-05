@@ -1,7 +1,6 @@
 import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './core/domain.js';
 import { ChatProjects } from './chat/projects.js';
 import { workspaceAction, worktreeAction } from './workspace/http.js';
-import { BUILTIN_PRESETS, PRESET_ID } from './teams/presets.js';
 export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
@@ -34,9 +33,7 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'tuiSessions':
                 case 'tuiStart':
                 case 'tuiTitle':
-                case 'tuiPrepare':
                 case 'tuiEnd':
-                case 'tuiTeam':
                 case 'workspaceTunnels':
                 case 'addWorkspaceTunnel':
                 case 'startWorkspaceTunnel':
@@ -97,23 +94,6 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'chatProjects':
                     result = projects.list();
                     break;
-                case 'teamPresets':
-                case 'saveTeamPreset':
-                case 'removeTeamPreset': {
-                    if (action === 'saveTeamPreset')
-                        await service.store.saveTeamPreset(input.preset, input.first === true);
-                    else if (action === 'removeTeamPreset') {
-                        const id = field(input.presetId, 'preset id', 32).toLowerCase();
-                        if (!PRESET_ID.test(id))
-                            throw new RemoteError('Invalid preset id');
-                        await service.store.removeTeamPreset(id);
-                    }
-                    // The editor suggests the models each machine's CLIs list; a preset names them by CLI, not by machine.
-                    const hosts = projects.hosts().map(project => ({ id: project.hostId, label: project.label, providers: project.providers.filter(p => p.status === 'ready').map(p => ({ id: p.id, label: p.label,
-                            models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { isDefault: true } : {}), ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}), ...(m.defaultThinkingOptionId ? { defaultThinkingOptionId: m.defaultThinkingOptionId } : {}) })) })) }));
-                    result = { presets: service.store.teamPresets(), builtin: BUILTIN_PRESETS, hosts };
-                    break;
-                }
                 case 'markChatRead':
                     await service.markChatRead(field(input.sessionId, 'session ID', 256));
                     result = { ok: true };

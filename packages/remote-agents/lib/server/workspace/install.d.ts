@@ -5,7 +5,6 @@ import type { WorkspaceHosts } from './hosts.js';
 import { type WorkspaceFeatures } from './http.js';
 import { type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceTarget } from './domain.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
-import { TuiCaptain } from './tui-captain.js';
 import { WorkspaceTunnels } from './tunnels.js';
 import { WorktreeService } from './worktrees.js';
 /**
@@ -51,7 +50,6 @@ export interface Workspaces {
     features: WorkspaceFeatures & {
         tunnels: WorkspaceTunnels;
         worktrees: WorktreeService;
-        captain: TuiCaptain;
     };
 }
 /**

@@ -54,11 +54,6 @@ export declare class TuiSessions {
         codexThread(sessionId: string, signal: AbortSignal): Promise<string>;
         /** The title records of a Codex thread on the conversation's machine. */
         codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string>;
-        /** The MCP server that gives the conversation's CLI the team tools, if it can have them. */
-        captainBridge?(sessionId: string, signal: AbortSignal): Promise<{
-            command: string;
-            args: string[];
-        } | undefined>;
         /** Ends a terminal's holder on the conversation's machine. */
         endHolder?(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
     });
@@ -78,11 +73,6 @@ export declare class TuiSessions {
         model?: unknown;
         effort?: unknown;
     }, signal: AbortSignal): Promise<void>;
-    /**
-     * Before the CLI launches: what it needs to lead teams, which the launcher reads from the saved state. The CLI runs
-     * without the tools if this fails or AgentTeams is not installed.
-     */
-    prepare(sessionId: string, signal: AbortSignal): Promise<void>;
     /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
     end(sessionId: string, signal: AbortSignal): Promise<void>;
     /**

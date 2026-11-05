@@ -3,7 +3,6 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError } from './domain.js';
-import { MAX_PRESETS, teamPresetInput } from '../teams/presets.js';
 export class Store {
     path;
     state = { version: 1, hosts: [], tasks: [] };
@@ -117,14 +116,11 @@ export class Store {
             const entry = saved;
             return Array.isArray(entry?.names) && entry.names.every(name => typeof name === 'string') && (entry.at === undefined || typeof entry.at === 'string');
         }));
-        if (value.teamPresets !== undefined && !Array.isArray(value.teamPresets))
-            throw new Error('Invalid saved team presets');
-        const teamPresets = value.teamPresets === undefined ? undefined : value.teamPresets.map(teamPresetInput);
         this.state = { version: 1, hosts: value.hosts, tasks: value.tasks, ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects } : {}),
             ...(value.relayCleanups ? { relayCleanups: value.relayCleanups } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts } : {}),
             ...(value.chatFast ? { chatFast: value.chatFast } : {}), ...(value.sharing ? { sharing: value.sharing } : {}),
             ...(value.instance ? { instance: value.instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces } : {}),
-            ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions } : {}), ...(tagSync ? { tagSync } : {}), ...(teamPresets ? { teamPresets } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails } : {}) };
+            ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails } : {}) };
     }
     snapshot() { return structuredClone(this.state); }
     /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
@@ -145,30 +141,6 @@ export class Store {
         return structuredClone(this.state.instance);
     }
     tagSync(key) { return structuredClone(this.state.tagSync?.[key]); }
-    /** The saved `/team` presets in order; the first is the one a line without a preset name uses. */
-    teamPresets() { return structuredClone(this.state.teamPresets ?? []); }
-    /** Save a preset in place, or append it; `first` makes it the default. */
-    async saveTeamPreset(raw, first = false) {
-        const preset = teamPresetInput(raw);
-        await this.update(state => {
-            const presets = (state.teamPresets ?? []).filter(saved => saved.id !== preset.id), at = (state.teamPresets ?? []).findIndex(saved => saved.id === preset.id);
-            if (presets.length >= MAX_PRESETS)
-                throw new RemoteError(`Up to ${MAX_PRESETS} team presets can be saved`);
-            presets.splice(first ? 0 : at === -1 ? presets.length : at, 0, preset);
-            state.teamPresets = presets;
-        });
-        return this.teamPresets();
-    }
-    async removeTeamPreset(id) {
-        await this.update(state => {
-            const presets = (state.teamPresets ?? []).filter(saved => saved.id !== id);
-            if (presets.length)
-                state.teamPresets = presets;
-            else
-                delete state.teamPresets;
-        });
-        return this.teamPresets();
-    }
     seenWorkspaces(hostId) { return [...(this.state.seenWorkspaces?.[hostId] ?? [])]; }
     sharedDeletions(hostId) { return (this.state.sharedDeletions ?? []).filter(d => d.hostId === hostId).map(d => d.id); }
     relayCleanups(hostId) { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }

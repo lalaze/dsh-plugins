@@ -177,6 +177,7 @@ class Job {
             ...(this.error ? { error: this.error } : {}), ...(this.result ? { result: { ...this.result, warnings: [...this.result.warnings] } } : {}) };
     }
 }
+const sameCommands = (a, b) => !!b && a.length === b.length && a.every((command, index) => command === b[index]);
 export class WorktreeService {
     host;
     jobs = new Map();
@@ -429,6 +430,8 @@ export class WorktreeService {
                             step.state = 'skipped';
                     created.next = created.setup.length;
                 }
+                if (action === 'confirm')
+                    created.reviewed = true;
                 void this.drive(job, () => this.finish(job, created));
             }
             return job.view();
@@ -519,7 +522,7 @@ export class WorktreeService {
                 job.result.warnings.push({ key: 'Setup was skipped: {reason}', values: { reason: error instanceof Error ? error.message : String(error) } });
                 return { setup: [], teardown: [] };
             });
-            const created = { place, repo, worktree, branch, ownBranch, source: request.path, setup: config.setup, next: 0, workspaces: [] };
+            const created = { place, repo, worktree, branch, ownBranch, source: request.path, setup: config.setup, next: 0, workspaces: [], reviewed: sameCommands(config.setup, request.setup) };
             this.created.set(job.id, created);
             await this.finish(job, created);
         });
@@ -547,6 +550,11 @@ export class WorktreeService {
             if (job.steps.find(s => s.id === 'setup')?.state !== 'skipped')
                 job.step('setup', created.setup.length ? 'done' : 'skipped');
             return;
+        }
+        if (!created.reviewed) {
+            // In the log, which holds a whole setup file, for reading before choosing. Checking out a branch must not run what it brings.
+            job.write(`${created.setup.map(command => `$ ${command}`).join('\n')}\n`);
+            throw fail('This branch has setup commands that were not shown before. Read them above, then choose.', undefined, undefined, ['confirm', 'skip', 'discard']);
         }
         const env = { DSH_SOURCE_CHECKOUT_PATH: created.repo.main, DSH_WORKTREE_PATH: created.worktree, DSH_BRANCH_NAME: created.branch };
         while (created.next < created.setup.length) {
