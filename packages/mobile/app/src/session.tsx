@@ -88,8 +88,15 @@ export function SessionView({ state, sessionId, onBack }: { state: HubState; ses
     return () => { cancelled = true; handle.close() }
   }, [catchUp, merge, sessionId, state])
 
-  // Opening a session marks what it shows as seen.
-  useEffect(() => { if (entry && entry.state === 'idle') store.markSeen(state.hub.hubId, sessionId, entry.lastSeq) }, [entry?.lastSeq, entry?.state, sessionId, state])
+  // Opening a session marks what it shows as seen, here and on the computers sharing it once the phone is really showing it.
+  useEffect(() => {
+    if (!entry || entry.state !== 'idle') return
+    store.markSeen(state.hub.hubId, sessionId, entry.lastSeq)
+    const tell = () => { if (document.visibilityState === 'visible') void state.client.call('session.read', { sessionId }).catch(() => {}) }
+    tell()
+    document.addEventListener('visibilitychange', tell)
+    return () => document.removeEventListener('visibilitychange', tell)
+  }, [entry?.lastSeq, entry?.state, sessionId, state])
 
   // The sent message shows until the session has it.
   const delivered = outbox !== undefined && events.some(event => event.seq > outbox.after && userText(event) !== undefined)

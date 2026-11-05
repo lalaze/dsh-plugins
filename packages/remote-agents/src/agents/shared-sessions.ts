@@ -65,7 +65,7 @@ const CHUNK = 1024 * 1024;
 interface Lease { instance: string; label: string; age: number; at: number }
 interface Manifest extends Fields { rev: number; creator?: { instance: string; label: string } }
 /** `withdrawnBy` names the instance that stopped sharing a session it started; that instance keeps it. */
-interface RemoteSession { id: string; manifest?: Manifest; lease?: Lease; live?: Partial<Agent> & { instance?: string }; head?: { seq: number; bytes: number }; deleted?: true; withdrawnBy?: string }
+interface RemoteSession { id: string; manifest?: Manifest; lease?: Lease; live?: Partial<Agent> & { instance?: string }; head?: { seq: number; bytes: number }; read?: { seq: number }; deleted?: true; withdrawnBy?: string }
 /** `claimed`: this DSH now drives the session; `changed` means its history was replaced by the shared one. */
 export interface Acquired { status: 'claimed' | 'held' | 'deleted' | 'unavailable'; changed?: boolean }
 
@@ -87,6 +87,8 @@ export interface SharedOwner {
   unload(taskId: string): void;
   /** A history another DSH drives was brought up to date here, or that DSH's live status changed. */
   followed?(taskId: string): void;
+  /** How far a session has been read changed, here or on another DSH. */
+  read?(taskId: string): void;
 }
 
 /**
@@ -284,7 +286,9 @@ export class SharedSessions {
       return;
     }
     if (!session.manifest) return;
+    const readBefore = this.sessions.get(id)?.read?.seq;
     this.sessions.set(id, session);
+    if (session.read?.seq !== readBefore) this.owner.read?.(id);
     const mine = session.lease?.instance === this.me;
     if (mine) this.held.add(id);
     else if (this.held.delete(id)) void this.serial(id, () => this.lost(id)).catch(() => {});
@@ -538,6 +542,24 @@ export class SharedSessions {
     const { instance: _instance, ...live } = session.live as Partial<Agent> & { instance?: string; at?: string };
     delete (live as { at?: string }).at;
     return structuredClone(live);
+  }
+  /** How far a session has been read and how far its history goes, in the host's history positions. */
+  readPosition(id: string): { read: number; head: number } | undefined {
+    const session = this.sessions.get(id);
+    return session?.head ? { read: session.read?.seq ?? 0, head: session.head.seq } : undefined;
+  }
+  /** The user read a session as far as this DSH has it: tell the other DSH instances. Failing only leaves it unread there. */
+  async markRead(id: string): Promise<void> {
+    if (!await this.ready(5000)) return;
+    // What this DSH recorded while driving the session has to be on the host to count as read there.
+    if (this.held.has(id)) await this.serial(id, () => this.push(id)).catch(() => {});
+    const session = this.sessions.get(id);
+    if (!session?.head || (session.read?.seq ?? 0) >= session.head.seq) return;
+    const { read } = await this.call('markRead', { id, seq: session.head.seq, label: this.instance?.label ?? '' }, 5000);
+    const current = this.sessions.get(id);
+    if (!current || !read || (current.read?.seq ?? 0) >= read.seq) return;
+    current.read = read;
+    this.owner.read?.(id);
   }
   /** Whether the other DSH driving a session reports a turn in it. */
   private remoteBusy(id: string): boolean {

@@ -456,3 +456,47 @@ test('deleting a shared machine’s sessions everywhere needs the machine; remov
   assert.equal(second.store.snapshot().hosts.length, 0);
   assert.ok(h.first.store.task(task => task.id === agent.id));
 });
+
+test('a session read in one DSH reads as read in another until a new turn, and a read never moves back', { skip: !supported }, async t => {
+  const { h, second } = await twoInstances(t);
+  const chat = 'conversation-read-here', other = 'conversation-read-there';
+  const agent = await h.first.service.create(h.request('codex', 'stream 2'), { chat: { sessionId: chat, route: 'route' } });
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'turn finished');
+  await waitFor(async () => (await second.service.snapshot()).agents.some(a => a.id === agent.id), 'imported');
+  await second.store.update(state => { state.tasks.find(task => task.id === agent.id)!.chat = { sessionId: other, route: 'route' }; });
+
+  const told: string[] = [];
+  second.service.chatReadListeners.add(id => told.push(id));
+  assert.equal(second.service.chatReadMark(other), undefined, 'nobody has read it');
+  assert.equal(h.first.service.chatReadMark(chat), undefined);
+  assert.equal(second.service.chatReadMark('some-other-conversation'), undefined);
+
+  await h.first.service.markChatRead(chat);
+  const mark = h.first.service.chatReadMark(chat);
+  assert.ok(mark, 'read here at once');
+  await waitFor(() => second.service.chatReadMark(other) === mark, 'read on the other DSH');
+  assert.deepEqual(told, [other], 'the other DSH hears of it, under its own conversation');
+
+  // Reading again without anything new asks the host for nothing and keeps the mark.
+  await h.first.service.markChatRead(chat);
+  assert.equal(h.first.service.chatReadMark(chat), mark);
+
+  await h.first.service.send(agent.id, message('stream 2'));
+  await waitFor(() => h.first.service.chatReadMark(chat) === undefined, 'a new turn is unread here');
+  await waitFor(() => second.service.chatReadMark(other) === undefined, 'and on the other DSH');
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'second turn finished');
+  await waitFor(async () => (await second.service.summary(agent.id)).status === 'idle', 'followed to its end');
+
+  // Now the other direction: the DSH that does not drive the CLI reads it.
+  await second.service.markChatRead(other);
+  const next = second.service.chatReadMark(other);
+  assert.ok(next && next !== mark, 'a later read has a new mark');
+  await waitFor(() => h.first.service.chatReadMark(chat) === next, 'read on the DSH driving it');
+});
+
+test('a read reported for a session with no shared registry does nothing', { skip: !supported }, async t => {
+  const h = await relayHarness(t, FAST);
+  await h.first.service.connect(h.hostId);
+  await h.first.service.markChatRead('no-such-conversation');
+  assert.equal(h.first.service.chatReadMark('no-such-conversation'), undefined);
+});

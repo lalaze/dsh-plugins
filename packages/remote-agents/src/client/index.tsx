@@ -24,6 +24,7 @@ import { installWorkspaceSidebar } from './workspace/sidebar.js';
 import { installShellMenu } from './workspace/shell-menu.js';
 import { installTuiSessions } from './workspace/tui.js';
 import { installTuiActivity } from './workspace/tui-activity.js';
+import { installReadSync } from './sessions/read-sync.js';
 import { installWorkspaceImport, type WorkspaceList } from './workspace/import.js';
 
 export interface Client extends LocaleContext {
@@ -93,6 +94,7 @@ export function apply(ctx: Client): void {
   installWorkspaceSidebar(ctx);
   installTuiSessions(ctx);
   installTuiActivity(ctx);
+  installReadSync(ctx);
   ctx.effect(installShellMenu);
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     // Read through the service itself: this plugin's proxy would resolve dependencies from our context.

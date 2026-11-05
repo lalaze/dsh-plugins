@@ -368,3 +368,90 @@ test('a line a remote CLI shows after a closed block leaves the phone when that 
   for (const record of [{ type: 'text-chunks', index: 1, texts: ['Looking.', ' More.'] }, { type: 'chunk', chunk: { type: 'block-end', index: 1, block: { type: 'text', text: 'Looking. More.' } } }, { type: 'text-chunks', index: 1, texts: ['\n\n> Running Read'] }, { type: 'chunk', chunk: { type: 'block-end', index: 1, block: { type: 'text', text: 'Looking. More.' } } }]) addToDraft(reopened, record)
   assert.equal(reopened.text, 'Looking. More.')
 })
+
+/** The part of Remote Agents' tasks service that shares how far a conversation has been read. */
+function readRecords() {
+  const marks = new Map<string, string>(), told: string[] = [], listeners = new Set<(sessionId: string) => void>()
+  return {
+    marks, told,
+    read(sessionId: string, mark: string) { marks.set(sessionId, mark); for (const listener of listeners) listener(sessionId) },
+    unread(sessionId: string) { marks.delete(sessionId) },
+    service: {
+      tasksVersion: 1,
+      list: async () => [],
+      chatReadMark: (sessionId: string) => marks.get(sessionId),
+      markChatRead: async (sessionId: string) => { told.push(sessionId) },
+      subscribeChatRead: (listener: (sessionId: string) => void) => { listeners.add(listener); return () => listeners.delete(listener) },
+    },
+  }
+}
+
+const entryOf = async (client: HubClient, id: string) => (await client.call('sessions.changes', {})).sessions.find(s => s.sessionId === id)
+
+test('a session read on another computer reads as read here, once, and later output is new', async t => {
+  const records = readRecords()
+  const setup = await startHub(t, { tasks: () => records.service })
+  setup.host.addWorkspace('w1', 'project')
+  setup.host.addSession('s1', 'w1', 'Shared chat')
+  setup.host.append('s1', 'user/message', { role: 'user', content: [{ type: 'text', text: 'Hello' }], source: { kind: 'user' } })
+  setup.host.finish('s1', 'First reply')
+  const { client } = await pairedPhone(t, setup)
+  await waitFor(async () => (await entryOf(client, 's1'))?.lastSeq !== undefined, 5000, 'session listed')
+  await waitFor(async () => (await entryOf(client, 's1'))?.state === 'idle', 5000, 'idle')
+  assert.equal((await entryOf(client, 's1'))?.readSeq, undefined, 'nobody has read it yet')
+
+  records.read('s1', 'task:10')
+  const lastSeq = (await entryOf(client, 's1'))!.lastSeq
+  await waitFor(async () => (await entryOf(client, 's1'))?.readSeq === lastSeq, 5000, 'the read reaches the phone')
+
+  // This machine's session goes on without any new read: the phone sees it as new, also when the mark still covers the
+  // shared history, as for a turn of a DSH model.
+  setup.host.finish('s1', 'Second reply')
+  await waitFor(async () => { const entry = await entryOf(client, 's1'); return entry!.lastSeq > lastSeq && entry!.state === 'idle' }, 5000, 'more output')
+  assert.equal((await entryOf(client, 's1'))?.readSeq, lastSeq)
+
+  records.read('s1', 'task:20')
+  const after = (await entryOf(client, 's1'))!.lastSeq
+  await waitFor(async () => (await entryOf(client, 's1'))?.readSeq === after, 5000, 'a new read covers it')
+})
+
+test('a read that arrives during a turn this machine is still showing counts when the turn ends', async t => {
+  const records = readRecords()
+  const setup = await startHub(t, { tasks: () => records.service })
+  setup.host.addWorkspace('w1', 'project')
+  setup.host.addSession('s1', 'w1', 'Shared chat')
+  setup.host.append('s1', 'user/message', { role: 'user', content: [{ type: 'text', text: 'Hello' }], source: { kind: 'user' } })
+  setup.host.sessions.get('s1')!.running = true
+  setup.host.emit('s1')
+  const { client } = await pairedPhone(t, setup)
+  await waitFor(async () => (await entryOf(client, 's1'))?.state === 'running', 5000, 'running')
+
+  records.read('s1', 'task:10')
+  setup.host.emit('s1')
+  await new Promise(resolve => setTimeout(resolve, 100))
+  assert.equal((await entryOf(client, 's1'))?.readSeq, undefined, 'not while it runs')
+
+  setup.host.finish('s1', 'The reply')
+  await waitFor(async () => (await entryOf(client, 's1'))?.state === 'idle', 5000, 'finished')
+  await waitFor(async () => { const entry = await entryOf(client, 's1'); return entry?.readSeq === entry?.lastSeq }, 5000, 'read through the end of the turn')
+})
+
+test('opening a session on the phone tells the computers sharing it', async t => {
+  const records = readRecords()
+  const setup = await startHub(t, { tasks: () => records.service })
+  setup.host.addWorkspace('w1', 'project')
+  setup.host.addSession('s1', 'w1', 'Shared chat')
+  const { client } = await pairedPhone(t, setup)
+  assert.deepEqual(await client.call('session.read', { sessionId: 's1' }), { ok: true })
+  assert.deepEqual(records.told, ['s1'])
+})
+
+test('a Remote Agents without shared reads changes nothing for the phone', async t => {
+  const setup = await startHub(t, { tasks: () => ({ tasksVersion: 1, list: async () => [] }) })
+  setup.host.addWorkspace('w1', 'project')
+  setup.host.addSession('s1', 'w1', 'Local chat')
+  const { client } = await pairedPhone(t, setup)
+  assert.deepEqual(await client.call('session.read', { sessionId: 's1' }), { ok: true })
+  await waitFor(async () => (await entryOf(client, 's1')) !== undefined, 5000, 'session listed')
+  assert.equal((await entryOf(client, 's1'))?.readSeq, undefined)
+})

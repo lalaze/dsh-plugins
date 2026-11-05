@@ -62,6 +62,12 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
             models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { isDefault: true } : {}), ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}), ...(m.defaultThinkingOptionId ? { defaultThinkingOptionId: m.defaultThinkingOptionId } : {}) })) })) }));
           result = { presets: service.store.teamPresets(), builtin: BUILTIN_PRESETS, hosts }; break;
         }
+        case 'markChatRead': await service.markChatRead(field(input.sessionId, 'session ID', 256)); result = { ok: true }; break;
+        case 'chatReadMarks': {
+          const ids = Array.isArray(input.sessionIds) ? input.sessionIds.slice(0, 500).map(id => field(id, 'session ID', 256)) : [];
+          result = { marks: Object.fromEntries(ids.flatMap(id => { const mark = service.chatReadMark(id); return mark ? [[id, mark]] : []; })) };
+          break;
+        }
         case 'chatSpeed': result = projects.speed(field(input.sessionId, 'session ID', 256), field(input.model, 'model', 1000)); break;
         case 'setChatSpeed': result = await projects.setFast(field(input.sessionId, 'session ID', 256), input.fast === true); break;
         case 'setChatEffort': await projects.setEffort(field(input.provider, 'provider', 200), field(input.model, 'model', 1000), field(input.reasoningEffort, 'reasoning effort', 200)); result = { ok: true }; break;

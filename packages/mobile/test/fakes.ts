@@ -217,12 +217,12 @@ export class FakeRelay {
 
 export interface TestHub { hub: Hub; host: FakeHost; relay: FakeRelay; dir: string }
 
-export async function startHub(t: TestContext, options: { fetch?: typeof fetch } = {}): Promise<TestHub> {
+export async function startHub(t: TestContext, options: { fetch?: typeof fetch; tasks?: () => unknown } = {}): Promise<TestHub> {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-mobile-'))
   const relay = new FakeRelay()
   const address = await relay.listen()
   const host = new FakeHost()
-  const hub = await Hub.open({ stateDir: dir, host, version: '0.0.0-test', defaults: { name: 'Test Mac', relay: address, appUrl: 'https://phone.example/app/' }, fetch: options.fetch })
+  const hub = await Hub.open({ stateDir: dir, host, version: '0.0.0-test', ...(options.tasks ? { tasks: options.tasks } : {}), defaults: { name: 'Test Mac', relay: address, appUrl: 'https://phone.example/app/' }, fetch: options.fetch })
   t.after(async () => { await hub.close(); await relay.close(); await rm(dir, { recursive: true, force: true }) })
   await hub.start()
   await waitFor(() => hub.status().relay.state === 'online', 5000, 'relay online')

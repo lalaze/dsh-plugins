@@ -49,6 +49,8 @@ export interface SessionEntry {
   updatedAt: number
   /** Latest event sequence this machine knows of. */
   lastSeq: number
+  /** How far the session was read on another computer or phone sharing it, in this machine's event sequence. */
+  readSeq?: number
   archived: boolean
   forkOf?: string
   parentSessionId?: string
@@ -259,6 +261,8 @@ export interface Methods {
   'ping': { args: undefined; result: { ok: true } }
   'pair.request': { args: { token: string; name: string; platform?: string }; result: HubInfo }
   'sessions.changes': { args: { since?: string }; result: { cursor: string; sessions: SessionEntry[]; workspaces?: WorkspaceEntry[] } }
+  /** The user read this session on the phone. */
+  'session.read': { args: { sessionId: string }; result: { ok: true } }
   'session.events': { args: { sessionId: string; after?: number; before?: number; limit?: number }; result: { events: SyncedEvent[]; lastSeq: number; hasMore: boolean; hasEarlier: boolean } }
   'session.live': { args: { sessionId: string }; result: undefined }
   'tags': { args: undefined; result: TagState }

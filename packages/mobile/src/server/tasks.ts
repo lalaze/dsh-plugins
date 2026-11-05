@@ -25,6 +25,10 @@ export interface RemoteTasksService {
   stop(id: string): Promise<void>
   respond(id: string, requestId: string, answer: { behavior: 'allow' | 'deny'; selectedActionId?: string }): Promise<void>
   subscribe?(listener: () => void): () => void
+  /** The conversation's read mark from every DSH and phone sharing it. An older Remote Agents has none of these three. */
+  chatReadMark?(sessionId: string): string | undefined
+  markChatRead?(sessionId: string): Promise<void>
+  subscribeChatRead?(listener: (sessionId: string) => void): () => void
 }
 
 /** Only a version this hub understands is used; an older Remote Agents has no tasks service at all. */

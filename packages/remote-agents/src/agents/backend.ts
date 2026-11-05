@@ -67,6 +67,12 @@ export interface Backend {
    * up to date here, or one whose CLI ran a turn by itself; returns the unsubscribe function.
    */
   onSharedHistory?(listener: (taskId: string) => void): () => void;
+  /** How far a shared session has been read and how far its history goes; nothing when it is not shared. */
+  readPosition?(taskId: string): { read: number; head: number } | undefined;
+  /** The user read a shared session as far as this DSH has it. */
+  markRead?(taskId: string): Promise<void>;
+  /** Called with a task whose read position changed, here or on another DSH; returns the unsubscribe function. */
+  onSharedRead?(listener: (taskId: string) => void): () => void;
   /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
   sender?(instance: string, label: string): { self: true } | { name: string };
   shareWorkspace?(path: string): Promise<void>;
@@ -144,6 +150,7 @@ export class SshBackend implements Backend {
   /** Sessions shared with other DSH instances on the same SSH account; needs relays. */
   private readonly shared?: SharedSessions;
   private readonly historyListeners = new Set<(taskId: string) => void>();
+  private readonly readListeners = new Set<(taskId: string) => void>();
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport, private readonly sharing: () => LaunchSharing | undefined = () => undefined) {
     // Commands to the host share one SSH connection; its sockets live in this plugin's private state directory.
     this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') });
@@ -158,6 +165,7 @@ export class SshBackend implements Backend {
       loaded: id => this.histories.has(id),
       unload: id => { if (!this.sessions.has(id) && !this.restoring.has(id) && !this.starting.has(id)) this.histories.delete(id); },
       followed: id => { for (const listener of this.historyListeners) { try { listener(id); } catch { /* A listener must not stop the registry. */ } } },
+      read: id => { for (const listener of this.readListeners) { try { listener(id); } catch { /* A listener must not stop the registry. */ } } },
     });
   }
   startSharing(): void { if (!this.closed) this.shared?.start(); }
@@ -166,6 +174,12 @@ export class SshBackend implements Backend {
   onSharedHistory(listener: (taskId: string) => void): () => void {
     this.historyListeners.add(listener);
     return () => { this.historyListeners.delete(listener); };
+  }
+  readPosition(taskId: string): { read: number; head: number } | undefined { return this.shared?.readPosition(taskId); }
+  async markRead(taskId: string): Promise<void> { await this.shared?.markRead(taskId); }
+  onSharedRead(listener: (taskId: string) => void): () => void {
+    this.readListeners.add(listener);
+    return () => { this.readListeners.delete(listener); };
   }
   sender(instance: string, label: string): { self: true } | { name: string } { return this.shared?.sender(instance, label) ?? { name: label }; }
   async sharedWorkspaces(timeout?: number): Promise<SharedWorkspace[]> { if (!this.shared) return []; return this.shared.listWorkspaces(timeout); }

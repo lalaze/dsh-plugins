@@ -5,11 +5,11 @@ import { ui } from './i18n.js'
 
 export type Status = 'running' | 'waiting' | 'done' | 'idle'
 
-/** Waiting for an answer, running, finished with something not yet seen, or idle. */
+/** Waiting for an answer, running, finished with something not yet seen here or elsewhere, or idle. */
 export function statusOf(entry: SessionEntry, seen: number): Status {
   if (entry.state === 'waiting' || entry.pending.length > 0) return 'waiting'
   if (entry.state === 'running') return 'running'
-  return seen >= 0 && entry.lastSeq > seen ? 'done' : 'idle'
+  return seen >= 0 && entry.lastSeq > Math.max(seen, entry.readSeq ?? -1) ? 'done' : 'idle'
 }
 
 const LABELS: Record<Status, string> = { running: 'Running', waiting: 'Needs you', done: 'Done', idle: 'Idle' }
