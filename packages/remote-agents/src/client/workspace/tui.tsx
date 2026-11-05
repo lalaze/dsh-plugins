@@ -5,6 +5,7 @@ import { useCurrentModel } from '../composer/usage.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 import type { Client } from '../index.js';
 import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
+import { restoreRemoteTerminals } from './terminal-restore.js';
 import { useTeamLine } from './tui-team.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
@@ -269,6 +270,7 @@ export function installTuiSessions(ctx: Client): void {
     const workspaces = (get('workspaces') as { list?: { getSnapshot(): { archivedSessionIds?: readonly string[] } | undefined; subscribe(listener: () => void): () => void } } | undefined)?.list;
     const on = (scoped as unknown as { on(event: string, listener: () => void): () => void }).on;
     if (!terminals || !sessions || !themes || typeof slots.entries !== 'function' || typeof slots.subscribe !== 'function') return;
+    scoped.effect(() => restoreRemoteTerminals(terminals));
     const store = new TuiStore();
     const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title,
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
@@ -305,6 +307,7 @@ export function installTuiSessions(ctx: Client): void {
       const sync = () => closeArchived(workspaces.getSnapshot()?.archivedSessionIds ?? [], store.has, id => {
         const generation = savedGeneration(id);
         terminals.close(id, terminalKey(generation), terminalContent(id, generation));
+        void api('tuiEnd', { sessionId: id }).catch(() => {});
       }, closed);
       sync();
       const offWorkspaces = workspaces.subscribe(sync), offStore = store.subscribe(sync);

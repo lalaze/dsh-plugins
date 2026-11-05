@@ -42,7 +42,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
   // Every launcher invocation has a finite fallback, never the developer's interactive shell.
   await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
-  for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access', 'workspace/tui', 'teams/presets']) {
+  for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access', 'workspace/tui', 'workspace/holder-protocol', 'workspace/terminal-hold', 'teams/presets']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
     await mkdir(dirname(join(modules, name)), { recursive: true });
     await writeFile(join(modules, `${name}.js`), (await transform(source, { loader: 'ts', format: 'esm', target: 'node22' })).code);

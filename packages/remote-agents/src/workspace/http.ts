@@ -48,6 +48,7 @@ export async function workspaceAction(features: WorkspaceFeatures, action: strin
   }
   if (action === 'tuiTitle') return { title: await features.tui?.syncTitle(sessionId, input.current, signal), waiting: features.captain?.waiting(sessionId) ?? 0 };
   if (action === 'tuiPrepare') { await features.tui?.prepare(sessionId, signal); return { ok: true }; }
+  if (action === 'tuiEnd') { await features.tui?.end(sessionId, signal); return { ok: true }; }
   if (action === 'tuiTeam') {
     if (!features.captain) throw new RemoteError('The TUI is unavailable', 501);
     return { text: await features.captain.team(sessionId, typeof input.line === 'string' ? input.line : '', signal) };

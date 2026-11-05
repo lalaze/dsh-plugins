@@ -71,6 +71,11 @@ export class WorkspaceService {
     const target = await this.target(sessionId, signal);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
   }
+  /** Ends a terminal the user closed, which otherwise keeps running on the conversation's machine. */
+  async endHolder(sessionId: string, holder: string, signal: AbortSignal): Promise<void> {
+    const target = await this.target(sessionId, signal);
+    await this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.endHolder(holder));
+  }
   /** The title records of a Claude Code session on the conversation's verified machine. */
   async claudeTitleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string> {
     const target = await this.target(sessionId, signal);

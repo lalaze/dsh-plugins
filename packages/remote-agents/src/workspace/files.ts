@@ -6,6 +6,7 @@ import { REMOTE_DSH_RUNNER } from './runner.js';
 import { WORKSPACE_SHELL } from './shell.js';
 import { initializeCodex } from '../agents/runtime.js';
 import { JsonlPeer, quote, type SshTransport } from '../core/ssh.js';
+import { endHolderScript } from './holder-protocol.js';
 
 interface Location { path: string; parent: string; base: string }
 interface Match { path: string; line: number; text: string }
@@ -51,6 +52,8 @@ const BASIC_PATH = 'PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PAT
 export class WorkspaceFiles {
   constructor(private readonly transport: SshTransport) {}
   /** The records that can title a Claude Code session, from its file on this machine if it has saved that session. */
+  /** Ends a terminal's holder and what runs in it, if there is one. */
+  async endHolder(holder: string): Promise<void> { await this.transport.exec(endHolderScript(holder), 15_000, { login: false }); }
   claudeTitleRecords(claudeSession: string): Promise<string> {
     return this.transport.exec(`dsh_file=$(find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${quote(`${claudeSession}.jsonl`)} 2>/dev/null | head -n 1)
 [ -z "$dsh_file" ] || { grep -a -m 5 '"type":"last-prompt"' "$dsh_file"; grep -a '"type":"ai-title"' "$dsh_file" | tail -n 1; grep -a '"type":"custom-title"' "$dsh_file" | tail -n 1; }

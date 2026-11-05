@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { RemoteError } from '../core/domain.js';
 import type { Store } from '../core/store.js';
 import type { TuiCli } from './domain.js';
+import { tuiHolder } from './holder-protocol.js';
 
 /** The part of a DSH session this needs. */
 interface TuiSession { append(type: string, data: unknown): unknown }
@@ -105,6 +106,8 @@ export class TuiSessions {
     codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string>;
     /** The MCP server that gives the conversation's CLI the team tools, if it can have them. */
     captainBridge?(sessionId: string, signal: AbortSignal): Promise<{ command: string; args: string[] } | undefined>;
+    /** Ends a terminal's holder on the conversation's machine. */
+    endHolder?(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
   }) {}
   list(): string[] { return this.store.snapshot().tuiSessions ?? []; }
   /** Those of `list` that run Codex. */
@@ -164,6 +167,10 @@ export class TuiSessions {
       const { bridge: _old, ...details } = state.tuiDetails?.[sessionId] ?? {};
       state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...details, ...(bridge ? { bridge } : {}) } };
     });
+  }
+  /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
+  async end(sessionId: string, signal: AbortSignal): Promise<void> {
+    if (this.list().includes(sessionId)) await this.dsh.endHolder?.(sessionId, tuiHolder(sessionId), signal);
   }
   /**
    * Follow the CLI's title, until the conversation is renamed in DSH.

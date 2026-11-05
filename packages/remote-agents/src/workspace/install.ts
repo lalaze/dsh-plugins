@@ -12,7 +12,7 @@ import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, type GitBatch, type GitRun, type Works
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync, type WorkspaceTagsService } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
-import { installWorkspaceTerminal } from './terminal.js';
+import { endClosedTerminals, installWorkspaceTerminal, type ClosableTerminals } from './terminal.js';
 import { TuiCaptain, type CaptainTerminal, type ScreenLine } from './tui-captain.js';
 import { installTuiActivity } from './tui-activity.js';
 import { TuiFiles } from './tui-files.js';
@@ -98,6 +98,7 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
   ctx.connection.fetch.register({ path: '/api/remote-agents/editor.js', methods: ['GET'], requestBody: 'buffered', fetch: editorHandler(new URL('../../editor.js', import.meta.url)) });
   installTuiActivity(ctx, store);
   ctx.inject(['terminalController'], scoped => {
+    scoped.effect(() => endClosedTerminals(scoped.get('terminalController') as ClosableTerminals, (sessionId, holder) => files.endHolder(sessionId, holder, AbortSignal.timeout(20_000))));
     let disposed = false, cleanup: (() => void) | undefined;
     void installWorkspaceTerminal(scoped.get('terminalController'), join(store.directory, 'terminal'), join(store.directory, 'state.json'))
       .then(({ shell, dispose }) => { if (disposed) dispose(); else { cleanup = () => { delete terminal.shell; dispose(); }; terminal.shell = shell; } })
@@ -142,6 +143,7 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     codexThread: (id, signal) => files.codexThread(id, CODEX_THREAD_NAME, signal),
     codexTitleRecords: (id, thread, signal) => files.codexTitleRecords(id, thread, signal),
     captainBridge: (id, signal) => files.captainBridge(id, signal),
+    endHolder: (id, holder, signal) => files.endHolder(id, holder, signal),
   });
   ctx.connection.fetch.register({ path: '/api/remote-agents/tui-files', methods: ['POST'], requestBody: 'streaming',
     fetch: tuiFilesHandler(new TuiFiles({ isTui: id => tui.list().includes(id), directory: store.directory, attach: (...file) => files.attach(...file) })) });

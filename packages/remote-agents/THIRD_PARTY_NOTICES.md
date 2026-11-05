@@ -8,6 +8,8 @@ The interaction model follows [Paseo](https://github.com/getpaseo/paseo); no Pas
 
 The Codex logo in `src/client/workspace/tui.tsx` is adapted from [`@lobehub/icons-static-svg`](https://github.com/lobehub/lobe-icons) (1.102.0, MIT License, Copyright (c) 2023 LobeHub).
 
+`lib/terminal-holder.mjs`, which runs on SSH hosts, bundles `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0, each under the MIT License: Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js).
+
 The browser bundle includes the packages below, each under the license of its section; their copyright notices are listed with them. Regenerate this file with `node ../../scripts/third-party-notices.mjs`.
 
 ## MIT License
