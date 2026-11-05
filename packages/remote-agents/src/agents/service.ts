@@ -232,6 +232,7 @@ export class RemoteAgentsService {
   private async use<T>(hostId: string, action: (backend: Backend, host: HostConfig) => Promise<T>, expectedServerId?: string): Promise<T> {
     let host = this.host(hostId);
     const current = this.connection(hostId);
+    // Only the connection speaks for the host. An action can fail for reasons of its own, such as a missing file or a CLI's error.
     try {
       if (!current.ready) {
         current.status = 'connecting';
@@ -251,18 +252,20 @@ export class RemoteAgentsService {
       }
       await current.ready;
       host = this.host(hostId);
-      if (expectedServerId && host.serverId !== expectedServerId) throw new RemoteError('Agent belongs to a different remote SSH machine', 409);
       // Recheck the SSH execution identity before each operation.
       const serverId = await current.backend.connect();
       if (serverId !== host.serverId) throw new RemoteError('Remote SSH machine identity changed', 409);
-      void current.backend.cleanup?.();
-      return await action(current.backend, host);
     } catch (error) {
       current.status = 'error'; current.error = this.safeError(error);
       current.ready = undefined;
       // Independent SSH sessions keep running when another probe or request fails.
       throw new RemoteError(current.error, error instanceof RemoteError ? error.status : 502);
     }
+    try {
+      if (expectedServerId && host.serverId !== expectedServerId) throw new RemoteError('Agent belongs to a different remote SSH machine', 409);
+      void current.backend.cleanup?.();
+      return await action(current.backend, host);
+    } catch (error) { throw new RemoteError(this.safeError(error), error instanceof RemoteError ? error.status : 502); }
   }
   /** Local process state; never contacts the SSH host. */
   private async live(task: Task): Promise<Agent | null> {
@@ -300,11 +303,10 @@ export class RemoteAgentsService {
   /** One directory level on a verified host; `path` defaults to the remote home. */
   async browse(hostId: string, path?: string, options: { entries?: boolean } = {}): Promise<DirectoryListing> {
     const target = path === undefined ? undefined : browsePath(path);
-    // Listing runs outside `use`: a missing directory must not mark the host connection as failed.
-    const backend = await this.use(hostId, async backend => backend);
-    if (!backend.listDirectory) throw new RemoteError('This host cannot browse directories', 501);
-    try { return await backend.listDirectory(target, options); }
-    catch (error) { throw new RemoteError(this.safeError(error), 502); }
+    return this.use(hostId, async backend => {
+      if (!backend.listDirectory) throw new RemoteError('This host cannot browse directories', 501);
+      return backend.listDirectory(target, options);
+    });
   }
   async addHost(input: unknown, options: { discoverModels?: boolean } = {}): Promise<Dashboard> {
     const value = record(input);

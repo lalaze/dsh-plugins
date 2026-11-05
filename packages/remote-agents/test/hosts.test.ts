@@ -7,6 +7,9 @@ import { TaskHistory } from '../src/agents/history.js';
 import { createHandler } from '../src/http.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { Store } from '../src/core/store.js';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import type { Backend } from '../src/agents/backend.js';
 import { fixture } from './fakes.js';
 
 test('the SSH backend removes saved output for an offline host without remote execution', async t => {
@@ -67,4 +70,41 @@ test('confirmed removal clears offline host sessions and catalogs without reconn
   assert.equal(changes, 1, 'removal invalidates the model picker catalog');
   const reopened = new Store(path); await reopened.open();
   assert.deepEqual(reopened.snapshot(), store.snapshot());
+});
+
+test('a failed request leaves its host connected; only the connection itself marks the host', async t => {
+  const provider = { id: 'codex', label: 'Codex', status: 'ready', models: [{ id: 'model', label: 'Model' }], modes: [] };
+  let down: string | undefined;
+  const backend = {
+    connect: async () => { if (down) throw new Error(down); return 'machine-1'; },
+    close: async () => {}, agent: async () => null, target: async () => provider, providers: async () => [provider], homeDirectory: async () => '/home/user',
+    account: async () => { throw new Error('Could not read the plan limits'); },
+    listDirectory: async () => { throw new Error('Not a readable directory'); },
+  } as unknown as Backend;
+  const store = new Store(join(await mkdtemp(join(tmpdir(), 'ra-host-')), 'state.json')); await store.open();
+  const service = new RemoteAgentsService(store, () => backend);
+  t.after(() => service.close());
+  await service.addHost({ label: 'box', connection: 'ssh://user@box', enabledProviders: ['codex'] });
+  const hostId = store.hosts()[0].id, host = () => service.hosts()[0];
+  await service.connect(hostId);
+  assert.equal(host().status, 'connected');
+
+  const report = await service.usage('session', { target: { hostId, provider: 'codex' }, account: true });
+  assert.match(report!.account!.error!, /plan limits/);
+  assert.deepEqual([host().status, host().error], ['connected', undefined], 'plan limits that cannot be read say nothing about the connection');
+
+  await assert.rejects(service.create({ id: 'request-0001', hostId, cwd: '/srv', provider: 'codex', model: 'no-such-model', prompt: 'x' }), { status: 409, message: /model is unavailable/ });
+  assert.deepEqual([host().status, host().error], ['connected', undefined], 'nor does a request the host cannot serve');
+
+  await assert.rejects(service.browse(hostId, '/missing'), /Not a readable directory/);
+  assert.equal(host().status, 'connected');
+
+  down = 'ssh: connect to host box port 22: Connection refused';
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await assert.rejects(service.connect(hostId), /Connection refused/);
+  assert.deepEqual([host().status, host().error], ['error', down], 'a connection that fails does');
+
+  down = undefined;
+  await service.connect(hostId);
+  assert.deepEqual([host().status, host().error], ['connected', undefined], 'and it recovers');
 });
