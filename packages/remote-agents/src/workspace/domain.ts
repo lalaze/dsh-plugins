@@ -38,6 +38,10 @@ export const GIT_LIMITS = { commands: 16, arguments: 64, bytes: 64 * 1024, outpu
 export interface SyncChange { path: string; action: 'copy' | 'delete'; source: string | null; destination: string | null }
 export interface SyncResult { direction: 'pull' | 'push'; dryRun: boolean; changes: SyncChange[]; conflicts: string[]; skipped: string[]; planId?: string }
 export interface TunnelConfig { id: string; hostId: string; direction: 'local' | 'reverse'; listenPort: number; targetPort: number; targetHost: string }
-export interface Tunnel extends TunnelConfig { status: 'starting' | 'running' | 'stopped' | 'error'; error?: string }
+export interface Tunnel extends TunnelConfig {
+  status: 'starting' | 'running' | 'stopped' | 'error'; error?: string;
+  /** The addresses of the DSH machine a local tunnel listens on while it runs. */
+  listening?: string[];
+}
 export const FILE_LIMIT = 50 * 1024 * 1024;
 export const TEXT_LIMIT = 256 * 1024;

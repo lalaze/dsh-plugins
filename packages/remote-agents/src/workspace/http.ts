@@ -73,7 +73,7 @@ export async function workspaceAction(features: WorkspaceFeatures, action: strin
   const id = identifier(input.id);
   if (action === 'startWorkspaceTunnel') {
     await features.files.machines.connect(target.hostId); await features.files.target(sessionId, signal, target);
-    return features.tunnels.start(id, target.hostId);
+    return features.tunnels.start(id, target.hostId, input.access);
   }
   if (action === 'stopWorkspaceTunnel') { features.tunnels.stop(id, target.hostId); return { ok: true }; }
   if (action === 'removeWorkspaceTunnel') { await features.tunnels.remove(id, target.hostId); return { ok: true }; }

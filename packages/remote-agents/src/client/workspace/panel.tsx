@@ -9,8 +9,8 @@ const TOOLS = { files: 'Files', sync: 'Sync', tunnels: 'Tunnels', web: 'Remote D
 export type WorkspaceTool = keyof typeof TOOLS;
 const ALL_TOOLS = Object.keys(TOOLS) as WorkspaceTool[];
 /**
- * The address this browser reaches DSH at. Local tunnels listen on every interface of the DSH machine, so their links
- * use it too, and a managed remote DSH must trust it as the Host header those links send.
+ * The address this browser reaches DSH at. A local tunnel started from here listens there too, so its links use it, and a
+ * managed remote DSH must trust it as the Host header those links send.
  */
 const accessHost = () => /^https?:$/.test(location.protocol) && location.hostname ? location.hostname : 'localhost';
 const size = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -121,7 +121,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
     const saved = (await call<Tunnel[]>('workspaceTunnels')).find(t => t.direction === 'local' && t.listenPort === listenPort && t.targetHost === '127.0.0.1' && t.targetPort === targetPort);
     const id = saved?.id ?? requestId();
     if (!saved) await call('addWorkspaceTunnel', { tunnel: { id, direction: 'local', listenPort, targetPort, targetHost: '127.0.0.1' } });
-    await call('startWorkspaceTunnel', { id });
+    await call('startWorkspaceTunnel', { id, access: accessHost() });
     if (alive.current) setWebLink(`http://${accessHost()}:${listenPort}${remote.pathname}${remote.search}`);
   };
   // A binary image is fetched at the revision just read; an SVG previews the text being edited.
@@ -139,7 +139,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
   const svg = useMemo(() => file && mode === 'preview' && imageType(file.path) ? URL.createObjectURL(new Blob([draft], { type: 'image/svg+xml' })) : undefined, [file, mode, draft]);
   useEffect(() => () => { if (svg) URL.revokeObjectURL(svg); }, [svg]);
   const previewable = !!file && (isMarkdown(file.path) || !!imageType(file.path));
-  const tunnelAction = async (action: string, id: string) => { await call(action, { id }); setTunnels(await call<Tunnel[]>('workspaceTunnels')); };
+  const tunnelAction = async (action: string, id: string) => { await call(action, { id, access: accessHost() }); setTunnels(await call<Tunnel[]>('workspaceTunnels')); };
 
   const folders = path ? path.split('/') : [];
   // Browsing folders leaves the open file and its unsaved edits alone.
@@ -258,7 +258,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
         <form className="ra-ws-card" onSubmit={event => { event.preventDefault(); void run(async () => { const id = requestId();
           // A new tunnel starts right away; if starting fails it stays saved with the error, ready to retry.
           await call('addWorkspaceTunnel', { tunnel: { id, direction: tunnelDirection, listenPort: Number(listenPort), targetPort: Number(targetPort), targetHost: '127.0.0.1' } });
-          try { await call('startWorkspaceTunnel', { id }); } finally { setTunnels(await call<Tunnel[]>('workspaceTunnels')); } }); }}>
+          try { await call('startWorkspaceTunnel', { id, access: accessHost() }); } finally { setTunnels(await call<Tunnel[]>('workspaceTunnels')); } }); }}>
           {segmented(ui('Direction'), tunnelDirection, setTunnelDirection, [['local', ui('Local → remote')], ['reverse', ui('Remote → local')]] as const)}
           <div className="ra-ws-ports"><label className="ra-ws-field">{ui('Listen port')}<input className="ra-ws-input" type="number" min="1" max="65535" required value={listenPort} onChange={e => setListenPort(e.target.value)} /></label>
             <span className="ra-ws-arrow" aria-hidden="true">→</span>
@@ -268,7 +268,7 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
         <h3 className="ra-ws-subhead">{ui('Saved tunnels')}{tunnels.length > 0 && <span>{tunnels.length}</span>}</h3>
         {tunnels.length ? <ul className="ra-ws-tunnels">{tunnels.map(t => <li key={t.id} data-status={t.status}>
           <span className="ra-ws-dot" aria-hidden="true" />
-          <div className="ra-ws-tunnel-main"><span className="ra-mono">{t.listenPort} → {t.targetHost}:{t.targetPort}</span><small>{ui(t.direction === 'local' ? 'Local → remote' : 'Remote → local')} · {ui(t.status)}</small>{t.error && <small className="ra-ws-error" role="alert">{t.error}</small>}</div>
+          <div className="ra-ws-tunnel-main"><span className="ra-mono">{t.listenPort} → {t.targetHost}:{t.targetPort}</span><small>{ui(t.direction === 'local' ? 'Local → remote' : 'Remote → local')} · {ui(t.status)}{t.status === 'running' && t.listening && ` · ${t.listening.join(', ')}`}</small>{t.error && <small className="ra-ws-error" role="alert">{t.error}</small>}</div>
           <div className="ra-ws-row">{t.status === 'running' && t.direction === 'local' && <a className="ra-ws-icon" href={`http://${accessHost()}:${t.listenPort}`} target="_blank" rel="noreferrer" title={ui('Open')} aria-label={ui('Open')}><Icon kind="external" /></a>}
             <button type="button" className="ra-ws-icon" title={ui(t.status === 'running' ? 'Stop' : 'Start')} aria-label={ui(t.status === 'running' ? 'Stop' : 'Start')} disabled={busy} onClick={() => void run(() => tunnelAction(t.status === 'running' ? 'stopWorkspaceTunnel' : 'startWorkspaceTunnel', t.id))}><Icon kind={t.status === 'running' ? 'stop' : 'play'} /></button>
             <button type="button" className="ra-ws-icon ra-ws-danger" title={ui('Remove')} aria-label={ui('Remove')} disabled={busy} onClick={() => void run(() => tunnelAction('removeWorkspaceTunnel', t.id))}><Icon kind="trash" /></button></div>

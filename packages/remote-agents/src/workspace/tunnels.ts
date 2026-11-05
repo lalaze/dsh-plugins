@@ -1,7 +1,11 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { readFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
+import { networkInterfaces } from 'node:os';
 import { dirname } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { connectionInput } from '../core/ssh.js';
 import { field, identifier, record, RemoteError } from '../core/domain.js';
 import type { HostConfig } from '../core/domain.js';
@@ -14,20 +18,49 @@ export function tunnelConfig(raw: unknown): TunnelConfig {
   if (!/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(targetHost)) throw new RemoteError('Invalid tunnel target host');
   return { id: identifier(v.id), hostId: identifier(v.hostId), direction: v.direction, listenPort: port(v.listenPort), targetPort: port(v.targetPort), targetHost };
 }
-export function tunnelArguments(connection: string, config: TunnelConfig): string[] {
+const LOOPBACK = '127.0.0.1';
+/** Tailscale gives its machines addresses from this block (100.64.0.0/10). */
+const TAILNET = /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./;
+export interface TunnelNetwork {
+  /** This machine's addresses, without loopback. */
+  addresses(): string[];
+  /** The addresses a name stands for; none when they cannot be found out in time. */
+  lookup(host: string): Promise<string[]>;
+}
+const systemNetwork: TunnelNetwork = {
+  addresses: () => Object.values(networkInterfaces()).flatMap(entries => entries ?? []).filter(entry => !entry.internal && !entry.address.startsWith('fe80:')).map(entry => entry.address),
+  lookup: host => Promise.race([lookup(host, { all: true }).then(found => found.map(entry => entry.address)), delay(2000, [] as string[], { ref: false })]),
+};
+/**
+ * Where a local tunnel listens: this machine, and the address the browser starting it reached DSH at, so that its link opens
+ * from there. What it forwards often has no login of its own, so it is not offered to every network this machine is on.
+ * Behind a proxy, or a resolver that hides the real address, that address cannot be told, and the private tailnet is used.
+ * @param access - the browser's host name for DSH; an authenticated client's word, honored only for this machine's own addresses.
+ */
+export async function listenAddresses(access: unknown, network: TunnelNetwork = systemNetwork): Promise<string[]> {
+  const host = typeof access === 'string' ? access.replace(/^\[|\]$/g, '').toLowerCase() : '';
+  if (!host || host.length > 253 || host === 'localhost' || host === '::1' || host.startsWith('127.')) return [LOOPBACK];
+  const own = network.addresses().map(address => address.toLowerCase());
+  const named = isIP(host) ? [host] : await network.lookup(host).catch(() => [] as string[]);
+  const reached = own.filter(address => named.includes(address));
+  return [LOOPBACK, ...(reached.length ? reached : own.filter(address => TAILNET.test(address)))];
+}
+const bindAddress = (address: string) => (address.includes(':') ? `[${address}]` : address);
+export function tunnelArguments(connection: string, config: TunnelConfig, listen: readonly string[] = [LOOPBACK]): string[] {
   const url = new URL(connectionInput(connection));
   const target = `${decodeURIComponent(url.username) ? `${decodeURIComponent(url.username)}@` : ''}${url.hostname}`;
-  // User-facing local previews use the machine's Tailscale address. Reverse listeners stay remote-loopback only.
+  // Reverse listeners stay remote-loopback only.
   return ['-v', '-N', '-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ExitOnForwardFailure=yes', '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
-    ...(url.port ? ['-p', url.port] : []), config.direction === 'local' ? '-L' : '-R',
-    `${config.direction === 'local' ? '0.0.0.0' : '127.0.0.1'}:${config.listenPort}:${config.targetHost}:${config.targetPort}`, '--', target];
+    ...(url.port ? ['-p', url.port] : []),
+    ...(config.direction === 'local' ? listen.flatMap(address => ['-L', `${bindAddress(address)}:${config.listenPort}:${config.targetHost}:${config.targetPort}`]) : ['-R', `${LOOPBACK}:${config.listenPort}:${config.targetHost}:${config.targetPort}`]),
+    '--', target];
 }
 export class WorkspaceTunnels {
   private configs: TunnelConfig[] = [];
   private readonly live = new Map<string, { child: ChildProcessWithoutNullStreams; state: Tunnel }>();
   private writes = Promise.resolve();
   private closed = false;
-  constructor(private readonly path: string, private readonly hosts: () => HostConfig[], private readonly launch = (args: string[]) => spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] })) {}
+  constructor(private readonly path: string, private readonly hosts: () => HostConfig[], private readonly launch = (args: string[]) => spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] }), private readonly network: TunnelNetwork = systemNetwork) {}
   async open(): Promise<void> {
     try {
       const value: unknown = JSON.parse(await readFile(this.path, 'utf8'));
@@ -56,15 +89,19 @@ export class WorkspaceTunnels {
     });
     return { ...config, status: 'stopped' };
   }
-  async start(id: string, hostId: string): Promise<Tunnel> {
+  /** @param access - the browser's host name for DSH; see {@link listenAddresses}. A tunnel already running is left as it is. */
+  async start(id: string, hostId: string, access?: unknown): Promise<Tunnel> {
+    // Before the checks below, which must not be separated from starting by waiting. One that is up keeps its addresses.
+    const current = this.live.get(id)?.state.status;
+    const listen = current === 'running' || current === 'starting' ? undefined : await listenAddresses(access, this.network);
     const config = this.configs.find(c => c.id === id && c.hostId === hostId), host = this.hosts().find(h => h.id === hostId);
     if (!config || !host) throw new RemoteError('Tunnel not found', 404);
     if (this.closed) throw new RemoteError('Tunnel service is closed', 503);
     const previous = this.live.get(id);
     if (previous?.state.status === 'running') return structuredClone(previous.state);
     if (previous?.state.status === 'starting') throw new RemoteError('Tunnel is already starting', 409);
-    const child = this.launch(tunnelArguments(host.connection, config));
-    const entry: { child: ChildProcessWithoutNullStreams; state: Tunnel } = { child, state: { ...config, status: 'starting' } }; this.live.set(id, entry);
+    const child = this.launch(tunnelArguments(host.connection, config, listen));
+    const entry: { child: ChildProcessWithoutNullStreams; state: Tunnel } = { child, state: { ...config, status: 'starting', ...(config.direction === 'local' ? { listening: [...listen ?? [LOOPBACK]] } : {}) } }; this.live.set(id, entry);
     child.stdin.end(); child.stdout.resume();
     return new Promise((accept, reject) => {
       let output = '', ready = false;
