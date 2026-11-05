@@ -8,7 +8,7 @@ import { SshBackend } from '../src/agents/backend.js';
 import { Store } from '../src/core/store.js';
 import type { WorkspaceHosts } from '../src/workspace/hosts.js';
 import { LocalMachine, RemoteMachine } from '../src/workspace/worktree-machine.js';
-import { friendlyName, parseBranches, parseConfig, parseWorktrees, slugify, WorktreeService, type DshWorkspace, type DshWorkspaceController, type WorktreeHost, type WorktreeJob } from '../src/workspace/worktrees.js';
+import { friendlyName, parseBranches, parseConfig, parseWorktrees, slugify, WorktreeService, type DshWorkspace, type DshWorkspaceController, type WorktreeHost, type WorktreeJob, type CreateRequest } from '../src/workspace/worktrees.js';
 import { LocalTransport } from './relay-harness.js';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e' } }).trim();
@@ -79,6 +79,8 @@ function service(home: string, options: Partial<WorktreeHost> = {}) {
   };
   return { worktrees: new WorktreeService(host), dsh, tags };
 }
+/** Creates as the form does: with the setup commands it shows for the project. */
+const formCreate = async (worktrees: WorktreeService, request: CreateRequest) => worktrees.create({ ...request, setup: (await worktrees.inspect(request.path)).setup });
 async function settle(worktrees: WorktreeService, job: WorktreeJob): Promise<WorktreeJob> {
   for (const deadline = Date.now() + 30_000; Date.now() < deadline; await new Promise(resolve => setTimeout(resolve, 20))) {
     const view = worktrees.job(job.id);
@@ -129,7 +131,7 @@ test('a new branch from a project becomes a DSH workspace next to it, set up and
   assert.deepEqual(detail.branches.map(b => [b.name, b.local, b.remote]).sort(), [['feature/remote-only', false, 'origin/feature/remote-only'], ['main', true, 'origin/main']]);
   assert.equal(detail.setup.length, 2);
 
-  const job = await settle(worktrees, worktrees.create({ path: project, mode: 'new', base: 'main', branch: 'feat/login' }));
+  const job = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', base: 'main', branch: 'feat/login' }));
   assert.equal(job.state, 'done', JSON.stringify(job));
   assert.deepEqual(job.steps.map(s => [s.id, s.state]), [['prepare', 'done'], ['checkout', 'done'], ['register', 'done'], ['setup', 'done']]);
   const worktree = job.result!.worktree;
@@ -148,9 +150,9 @@ test('a new branch from a project becomes a DSH workspace next to it, set up and
   const again = await worktrees.inspect(project);
   assert.deepEqual(again.worktrees, [{ path: worktree, branch: 'feat/login', workspace: { workspaceId: created.workspaceId, title: 'project · feat/login', path: worktree } }]);
   assert.deepEqual((await worktrees.projects()).map(p => p.path), [project], 'a worktree workspace is listed under its repository once');
-  const taken = await settle(worktrees, worktrees.create({ path: project, mode: 'new', base: 'main', branch: 'feat/login' }));
+  const taken = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', base: 'main', branch: 'feat/login' }));
   assert.deepEqual([taken.state, taken.error?.key, taken.actions], ['failed', 'Branch {branch} already exists. Check it out instead.', []]);
-  const invalid = await settle(worktrees, worktrees.create({ path: project, mode: 'new', base: 'main', branch: 'bad..name' }));
+  const invalid = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', base: 'main', branch: 'bad..name' }));
   assert.equal(invalid.error?.key, '{branch} is not a valid branch name');
 });
 
@@ -158,11 +160,11 @@ test('checking out a remote branch tracks it; a branch already checked out elsew
   const { project, home } = await repository(t);
   const { worktrees, dsh } = service(home);
   dsh.add(project, 'project');
-  const job = await settle(worktrees, worktrees.create({ path: project, mode: 'existing', branch: 'feature/remote-only' }));
+  const job = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'existing', branch: 'feature/remote-only' }));
   assert.equal(job.state, 'done', JSON.stringify(job.error));
   assert.equal(git(job.result!.worktree, 'rev-parse', '--abbrev-ref', '@{upstream}'), 'origin/feature/remote-only');
   assert.equal(await readFile(join(job.result!.worktree, 'remote.txt'), 'utf8'), 'r\n');
-  const busy = await settle(worktrees, worktrees.create({ path: project, mode: 'existing', branch: 'main' }));
+  const busy = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'existing', branch: 'main' }));
   assert.equal(busy.error?.key, 'Branch {branch} is already checked out at {path}');
   assert.equal(busy.error?.values?.path, project);
 });
@@ -172,11 +174,43 @@ test('a workspace inside the repository opens the same folder in the worktree', 
   const { worktrees, dsh } = service(home);
   const app = join(project, 'packages', 'app');
   dsh.add(app, 'app');
-  const job = await settle(worktrees, worktrees.create({ path: app, mode: 'new', branch: 'app-work' }));
+  const job = await settle(worktrees, await formCreate(worktrees, { path: app, mode: 'new', branch: 'app-work' }));
   assert.equal(job.state, 'done', JSON.stringify(job.error));
   assert.equal(job.result!.path, join(job.result!.worktree, 'packages', 'app'));
   assert.equal(job.result!.title, 'app · app-work');
   assert.equal(await exists(join(job.result!.worktree, 'setup-ran.txt')), true, 'setup runs at the top of the worktree');
+});
+
+test('setup commands that were not shown wait for a confirmation before anything runs', async t => {
+  const { project, home, seed } = await repository(t);
+  const { worktrees, dsh } = service(home);
+  dsh.add(project, 'project');
+  for (const branch of ['feature/confirm', 'feature/skip']) {
+    git(seed, 'checkout', '-q', 'main'); git(seed, 'checkout', '-q', '-b', branch);
+    await writeFile(join(seed, '.dsh', 'worktree.json'), JSON.stringify({ setup: ['echo ran > branch-ran.txt'] }));
+    git(seed, 'add', '-A'); git(seed, 'commit', '-q', '-m', 'own setup'); git(seed, 'push', '-q', 'origin', branch);
+  }
+  git(project, 'fetch', '-q', 'origin');
+  const shown = (await worktrees.inspect(project)).setup;
+  assert.equal(shown.some(command => command.includes('branch-ran')), false, 'the form shows the project\'s commands');
+
+  const waiting = await settle(worktrees, worktrees.create({ path: project, mode: 'existing', branch: 'feature/confirm', setup: shown }));
+  assert.equal(waiting.state, 'failed');
+  assert.deepEqual(waiting.actions, ['confirm', 'skip', 'discard']);
+  assert.match(waiting.log, /\$ echo ran > branch-ran\.txt/, 'the commands are there to read');
+  assert.deepEqual(waiting.steps.map(step => [step.id, step.state]), [['prepare', 'done'], ['checkout', 'done'], ['register', 'done'], ['setup', 'pending']]);
+  const worktree = waiting.result!.worktree;
+  assert.equal(await exists(join(worktree, 'branch-ran.txt')), false, 'nothing ran yet');
+  await assert.rejects(worktrees.act(waiting.id, 'retry'), /not available/);
+  const confirmed = await settle(worktrees, await worktrees.act(waiting.id, 'confirm'));
+  assert.equal(confirmed.state, 'done', JSON.stringify(confirmed));
+  assert.equal(await exists(join(worktree, 'branch-ran.txt')), true);
+
+  const unshown = await settle(worktrees, worktrees.create({ path: project, mode: 'existing', branch: 'feature/skip' }));
+  assert.deepEqual(unshown.actions, ['confirm', 'skip', 'discard'], 'a request that names no commands was shown none');
+  const skipped = await settle(worktrees, await worktrees.act(unshown.id, 'skip'));
+  assert.equal(skipped.state, 'done', JSON.stringify(skipped));
+  assert.equal(await exists(join(skipped.result!.worktree, 'branch-ran.txt')), false);
 });
 
 test('a failed setup can be retried, skipped or discarded', async t => {
@@ -187,7 +221,7 @@ test('a failed setup can be retried, skipped or discarded', async t => {
   const { worktrees, dsh } = service(home);
   dsh.add(project, 'project');
 
-  const failed = await settle(worktrees, worktrees.create({ path: project, mode: 'new', branch: 'retry-me' }));
+  const failed = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', branch: 'retry-me' }));
   assert.deepEqual([failed.state, failed.error?.key, failed.error?.values?.code, failed.actions], ['failed', 'Setup command failed with exit code {code}', '1', ['retry', 'skip', 'discard']]);
   assert.equal(dsh.items.length, 2, 'the workspace is in DSH before its setup runs');
   await writeFile(join(project, 'ready'), '');
@@ -196,12 +230,12 @@ test('a failed setup can be retried, skipped or discarded', async t => {
   assert.equal(await readFile(join(retried.result!.worktree, 'done.txt'), 'utf8'), 'done\n');
 
   await rm(join(project, 'ready'));
-  const skipped = await settle(worktrees, worktrees.create({ path: project, mode: 'new', branch: 'skip-me' }));
+  const skipped = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', branch: 'skip-me' }));
   const done = await settle(worktrees, await worktrees.act(skipped.id, 'skip'));
   assert.deepEqual([done.state, done.steps.at(-1)!.state], ['done', 'skipped']);
   assert.equal(await exists(join(done.result!.worktree, 'done.txt')), false);
 
-  const discarded = await settle(worktrees, await worktrees.act((await settle(worktrees, worktrees.create({ path: project, mode: 'new', branch: 'drop-me' }))).id, 'discard'));
+  const discarded = await settle(worktrees, await worktrees.act((await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', branch: 'drop-me' }))).id, 'discard'));
   assert.equal(discarded.state, 'discarded', JSON.stringify(discarded.error));
   assert.equal(await exists(discarded.result!.worktree), false);
   assert.throws(() => git(project, 'rev-parse', '--verify', 'refs/heads/drop-me'), 'the branch it created is deleted');
@@ -213,7 +247,7 @@ test('archiving warns about unsaved work, runs teardown, removes the worktree an
   const { project, home } = await repository(t);
   const { worktrees, dsh } = service(home);
   dsh.add(project, 'project');
-  const job = await settle(worktrees, worktrees.create({ path: project, mode: 'new', branch: 'to-archive' }));
+  const job = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', branch: 'to-archive' }));
   const worktree = job.result!.worktree;
   dsh.items.find(item => item.path === worktree)!.sessionIds = ['session-a', 'session-b'];
 
@@ -240,7 +274,7 @@ test('archiving warns about unsaved work, runs teardown, removes the worktree an
   assert.deepEqual(dsh.items.map(item => item.title), ['project']);
   assert.deepEqual((await worktrees.inspect(project)).worktrees, []);
 
-  const merged = await settle(worktrees, worktrees.create({ path: project, mode: 'new', branch: 'merged' }));
+  const merged = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', branch: 'merged' }));
   const archived = await settle(worktrees, worktrees.archive({ path: project, worktree: merged.result!.worktree, deleteBranch: true }));
   assert.deepEqual(archived.steps.map(s => [s.id, s.state]), [['sessions', 'done'], ['teardown', 'done'], ['remove', 'done'], ['branch', 'done'], ['unregister', 'done']]);
   assert.throws(() => git(project, 'rev-parse', '--verify', 'refs/heads/merged'));
@@ -276,7 +310,7 @@ test('on an SSH machine the worktree, its setup and its archive run through the 
   assert.deepEqual((await worktrees.projects()).map(p => [p.title, p.location]), [['project', { kind: 'remote', hostId: 'host-box-1', host: 'Box' }]]);
   const detail = await worktrees.inspect(projectAnchor);
   assert.equal(detail.root.startsWith(join(await realpath(remoteHome), '.dsh-remote-agents', 'worktrees', 'project-')), true);
-  const job = await settle(worktrees, worktrees.create({ path: projectAnchor, mode: 'new', branch: 'remote-work' }));
+  const job = await settle(worktrees, await formCreate(worktrees, { path: projectAnchor, mode: 'new', branch: 'remote-work' }));
   assert.equal(job.state, 'done', JSON.stringify(job.error));
   assert.equal(anchors.get(job.result!.path!), job.result!.worktree);
   assert.equal(await readFile(join(job.result!.worktree, 'setup-ran.txt'), 'utf8'), `remote-work|${job.result!.worktree}|${project}`);

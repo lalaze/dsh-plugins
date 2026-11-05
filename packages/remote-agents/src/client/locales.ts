@@ -419,6 +419,8 @@ export const zh: Record<string, string> = {
   "Check out files": "检出文件",
   "Add to DSH": "添加到 DSH",
   "Run setup": "运行初始化命令",
+  "Run these commands": "运行这些命令",
+  "This branch has setup commands that were not shown before. Read them above, then choose.": "这个分支有之前没有显示过的初始化命令。请先看上面列出的内容，再做选择。",
   "Archive its sessions": "归档其中的会话",
   "Run teardown": "运行清理命令",
   "Remove the worktree": "删除工作树",

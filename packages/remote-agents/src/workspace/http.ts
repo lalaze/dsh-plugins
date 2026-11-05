@@ -10,7 +10,7 @@ import type { JobAction, WorktreeService } from './worktrees.js';
 
 /** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
 export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string }; worktrees?: WorktreeService; tui?: TuiSessions; captain?: TuiCaptain }
-const JOB_ACTIONS: readonly JobAction[] = ['cancel', 'retry', 'skip', 'discard'];
+const JOB_ACTIONS: readonly JobAction[] = ['cancel', 'retry', 'skip', 'discard', 'confirm'];
 /** Worktree workspaces: a project's DSH workspace path, a worktree's path on its machine, and operation IDs. */
 export async function worktreeAction(worktrees: WorktreeService, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
   const path = () => workspacePath(input.path, 'workspace path'), job = () => identifier(input.jobId);
@@ -20,7 +20,8 @@ export async function worktreeAction(worktrees: WorktreeService, action: string,
     case 'worktreeInspect': return worktrees.inspect(path(), signal);
     case 'createWorktree': {
       if (input.mode !== 'new' && input.mode !== 'existing') throw new RemoteError('Invalid worktree mode');
-      return worktrees.create({ path: path(), mode: input.mode, base: name(input.base, 'branch'), branch: name(input.branch, 'branch') });
+      const setup = Array.isArray(input.setup) && input.setup.every(command => typeof command === 'string') ? input.setup as string[] : undefined;
+      return worktrees.create({ path: path(), mode: input.mode, base: name(input.base, 'branch'), branch: name(input.branch, 'branch'), setup });
     }
     case 'worktreeJob': return worktrees.job(job());
     case 'worktreeJobAction': {

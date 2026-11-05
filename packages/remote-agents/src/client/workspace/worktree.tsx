@@ -23,7 +23,7 @@ const STEP_LABELS: Record<string, string> = {
   prepare: 'Check the branch', checkout: 'Check out files', register: 'Add to DSH', setup: 'Run setup',
   sessions: 'Archive its sessions', teardown: 'Run teardown', remove: 'Remove the worktree', branch: 'Delete the branch', unregister: 'Remove from DSH',
 };
-const ACTION_LABELS: Record<JobAction, string> = { cancel: 'Stop', retry: 'Retry', skip: 'Skip the remaining setup', discard: 'Delete this worktree' };
+const ACTION_LABELS: Record<JobAction, string> = { cancel: 'Stop', retry: 'Retry', skip: 'Skip the remaining setup', discard: 'Delete this worktree', confirm: 'Run these commands' };
 const where = (project: Pick<WorktreeProject, 'location'>) => project.location.kind === 'remote' ? project.location.host : ui('This computer');
 /** A path under the machine's home folder as `~/…`. */
 const tilde = (path: string, home?: string) => home && home !== '/' && (path === home || path.startsWith(`${home}/`)) ? `~${path.slice(home.length)}` : path;
@@ -83,8 +83,9 @@ function ArchiveConfirm({ project, worktree, onCancel, onArchived }: { project: 
       {check.unpushed === null && <li data-tone="warn">{ui('This repository has no remote, so its commits exist only on this branch')}</li>}
       {check.dirty === 0 && !check.unpushed && check.unpushed !== null && <li>{ui('No unsaved work: every change is committed and pushed')}</li>}
       {check.workspaces.length > 0 && <li>{sessions ? ui('Its DSH workspace and {count} conversations will be archived', { count: String(sessions) }) : ui('Its DSH workspace will be removed')}</li>}
-      {check.teardown.length > 0 && <li>{ui('{count} teardown commands run first', { count: String(check.teardown.length) })}</li>}
     </ul>}
+    {!!check?.teardown.length && <details className="ra-wt-setup"><summary>{ui('{count} teardown commands run first', { count: String(check.teardown.length) })}</summary>
+      <pre className="ra-mono">{check.teardown.map(command => `$ ${command}`).join('\n')}</pre></details>}
     {check?.branch && <label className="ra-wt-check">
       <input type="checkbox" checked={deleteBranch && !!check.mergedInto} disabled={!check.mergedInto} onChange={event => setDeleteBranch(event.target.checked)} />
       <span>{ui('Also delete branch {branch}', { branch: check.branch })}<small>{check.mergedInto ? ui('Merged into {base}', { base: check.mergedInto }) : ui('Not merged, so the branch is kept')}</small></span>
@@ -162,7 +163,7 @@ export function ProjectFlow({ projects, busy, onPicked }: { projects: WorktreePr
   const create = async () => {
     setError(''); setNotice('');
     try {
-      const started = await api<WorktreeJob>('createWorktree', { path: project.path, mode, ...(mode === 'new' ? { base, branch: name.trim() } : { branch: existing }) });
+      const started = await api<WorktreeJob>('createWorktree', { path: project.path, mode, setup: detail?.setup ?? [], ...(mode === 'new' ? { base, branch: name.trim() } : { branch: existing }) });
       setJobName(branch ?? ''); setJob(started);
     } catch (failure) { setError(localizeError(failure)); }
   };

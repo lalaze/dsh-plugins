@@ -68,7 +68,7 @@ export interface ArchiveCheck {
   workspaces: { workspaceId: string; title: string; sessions: number }[];
 }
 export type StepState = 'pending' | 'running' | 'done' | 'failed' | 'skipped';
-export type JobAction = 'cancel' | 'retry' | 'skip' | 'discard';
+export type JobAction = 'cancel' | 'retry' | 'skip' | 'discard' | 'confirm';
 /** A message for the client to translate: an English key with `{name}` values, and Git's own words when there are any. */
 export interface JobMessage { key: string; values?: Record<string, string>; detail?: string }
 export interface WorktreeJob {
@@ -80,7 +80,11 @@ export interface WorktreeJob {
   actions: JobAction[];
   result?: { path?: string; title?: string; branch: string | null; worktree: string; warnings: JobMessage[] };
 }
-export interface CreateRequest { path: string; mode: 'new' | 'existing'; base?: string; branch?: string }
+export interface CreateRequest {
+  path: string; mode: 'new' | 'existing'; base?: string; branch?: string;
+  /** The setup commands the form showed. It reads the project's checkout, so a branch's own wait for a confirmation. */
+  setup?: readonly string[];
+}
 export interface ArchiveRequest { path: string; worktree: string; deleteBranch?: boolean }
 
 /** DSH's host workspace registry, as far as worktree workspaces use it. */
@@ -232,7 +236,10 @@ class Job {
 interface Created {
   place: Place; repo: Repository; worktree: string; branch: string; ownBranch: boolean; source: string;
   setup: string[]; next: number; workspaces: string[];
+  /** Whether these setup commands have been shown; those that were not never run without a confirmation. */
+  reviewed: boolean;
 }
+const sameCommands = (a: readonly string[], b: readonly string[] | undefined) => !!b && a.length === b.length && a.every((command, index) => command === b[index]);
 
 export class WorktreeService {
   private readonly jobs = new Map<string, Job>();
@@ -417,6 +424,7 @@ export class WorktreeService {
       if (action === 'discard') void this.drive(job, async () => { await this.discard(job, created); job.state = 'discarded'; }).then(() => { if (job.state === 'done') job.state = 'discarded'; });
       else {
         if (action === 'skip') { for (const step of job.steps) if (step.state === 'failed' || step.state === 'pending') step.state = 'skipped'; created.next = created.setup.length; }
+        if (action === 'confirm') created.reviewed = true;
         void this.drive(job, () => this.finish(job, created));
       }
       return job.view();
@@ -490,7 +498,7 @@ export class WorktreeService {
         job.result!.warnings.push({ key: 'Setup was skipped: {reason}', values: { reason: error instanceof Error ? error.message : String(error) } });
         return { setup: [], teardown: [] };
       });
-      const created: Created = { place, repo, worktree, branch, ownBranch, source: request.path, setup: config.setup, next: 0, workspaces: [] };
+      const created: Created = { place, repo, worktree, branch, ownBranch, source: request.path, setup: config.setup, next: 0, workspaces: [], reviewed: sameCommands(config.setup, request.setup) };
       this.created.set(job.id, created);
       await this.finish(job, created);
     });
@@ -515,6 +523,11 @@ export class WorktreeService {
       job.step('register', 'done');
     }
     if (created.next >= created.setup.length) { if (job.steps.find(s => s.id === 'setup')?.state !== 'skipped') job.step('setup', created.setup.length ? 'done' : 'skipped'); return; }
+    if (!created.reviewed) {
+      // In the log, which holds a whole setup file, for reading before choosing. Checking out a branch must not run what it brings.
+      job.write(`${created.setup.map(command => `$ ${command}`).join('\n')}\n`);
+      throw fail('This branch has setup commands that were not shown before. Read them above, then choose.', undefined, undefined, ['confirm', 'skip', 'discard']);
+    }
     const env = { DSH_SOURCE_CHECKOUT_PATH: created.repo.main, DSH_WORKTREE_PATH: created.worktree, DSH_BRANCH_NAME: created.branch };
     while (created.next < created.setup.length) {
       const command = created.setup[created.next];
