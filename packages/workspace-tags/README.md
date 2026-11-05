@@ -9,7 +9,7 @@ Supports English and Simplified Chinese, following DSH’s language setting with
 Under the sidebar header, **All** and one chip per tag pick which workspaces the sidebar shows, in every grouping, so tags such as “Work” and “Personal” act as separate spaces. Pick a chip again to go back to All. A chip you are not in shows a spinner while any of its sessions runs, and how many of its sessions need you (waiting for you, or finished and not opened yet), orange when any is waiting. Without a unified provider, search covers every native workspace and opening another space switches to All.
 
 - **Tag**: one section per tag, in name order, then **Untagged**. A workspace with several tags appears under each of them.
-- **Status**: **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Completed** (a session finished and you have not opened it yet), **Running** (an agent is executing, itself or through a subagent), then **Idle**. A workspace with any running session appears only in **Running**, with all its sessions folded behind **Show more** as in the sidebar; the section badge counts only running sessions. Otherwise a workspace appears in each state its sessions qualify for, listing only the sessions in that state. **Idle** also holds workspaces without sessions, counts workspaces where the others count sessions, and starts folded. Each status has its own icon, and the sections follow live as agents start and stop.
+- **Status**: **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Finished, your turn** (a session finished and you have not opened it yet; once opened it stays until you leave it or send the next message), **Running** (an agent is executing, itself or through a subagent), then **Idle**. The two sections that need you have a tinted header and a solid badge, and list their sessions even while another session of the same workspace runs. **Running** shows the running sessions and the open one; the workspace's other resting sessions wait behind **Show more** and stay out of **Idle**, and the section badge counts only running sessions. A workspace with nothing running lists its resting sessions in **Idle**. **Idle** also holds workspaces without sessions, counts workspaces where the others count sessions, and starts folded. Each status has its own icon, and the sections follow live as agents start and stop.
 
 A folded workspace row shows what its sessions would: a badge counting those that need you, or a spinner when one is only running. Right-click a workspace, or choose **Tags…** in its **⋯** menu, to tick its tags, create a tag (name and color) that is added to that workspace, or open **Manage tags…** to rename, recolor or delete tags. A workspace’s tags show as small dots at the end of its row in every grouping mode. Sections fold, and the Group by choice, folded sections and the chosen tag chip are remembered per browser. Inside a section, workspaces keep the sidebar’s order; drag workspaces into order under Workspace grouping, since a workspace can appear in several sections. Sessions drag into order inside any section, Running, Waiting and Completed included. A drop saves that workspace’s session order (switching **Order by** to **Manual**, as a drag does under Workspace grouping), so the order holds in every grouping and after a restart.
 
@@ -24,6 +24,13 @@ dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.2.0.tgz"
 ```
 
 Requires DSH 0.2.1-rc.3 or a later 0.2 release.
+
+## 0.2.2 finished tasks stand out
+
+- Under **Status**, sessions waiting for you and finished sessions always list in their own sections at the top, even while another session of the same workspace runs, so a workspace can now appear in several sections.
+- **Completed** is now **Finished, your turn**, and both sections that need you have a tinted header and a solid badge.
+- **Running** shows the running sessions and the open one. The workspace's other sessions wait behind **Show more**.
+- A finished session you open stays in its section until you leave it or send the next message.
 
 ## 0.2.0 unified presentation
 
