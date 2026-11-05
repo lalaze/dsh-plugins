@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { localizeError } from '../i18n.js';
 import { pressControl } from './tui-files.js';
+import { bufferRows, findXterm } from './tui-render.js';
 
 const PROMPT = /^\s*[❯›]\s?/;
 /** Where the prompt's text ends: an empty row, the rule under Claude Code's prompt, or the status line under Codex's. */
@@ -30,7 +31,11 @@ export function teamLine(text: string): string | undefined {
   return match ? (match[1] ?? '').trim() : undefined;
 }
 const CLEAR_PRESSES = 30;
-const screenRows = (root: HTMLElement) => Array.from(root.querySelectorAll('.xterm-rows > div'), row => (row.textContent ?? '').replace(/ /g, ' ').trimEnd());
+/** With WebGL drawing, the rows are not in the page; it is only ever on where the terminal itself can be reached. */
+const screenRows = (root: HTMLElement) => {
+  const xterm = findXterm(root);
+  return xterm ? bufferRows(xterm) : Array.from(root.querySelectorAll('.xterm-rows > div'), row => (row.textContent ?? '').replace(/ /g, ' ').trimEnd());
+};
 
 /**
  * Takes a /team line when Enter is pressed at the CLI's prompt, as neither CLI has such a command. The line stays there if

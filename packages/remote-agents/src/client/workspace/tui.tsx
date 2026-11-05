@@ -7,6 +7,7 @@ import { localizeError, ui, useLocale } from '../i18n.js';
 import type { Client } from '../index.js';
 import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
+import { TuiRenderChoices, TuiRenderMenu, useWebglRenderer } from './tui-render.js';
 import { KeptTerminals, type KeptTerminal } from './tui-kept.js';
 import { useTeamLine } from './tui-team.js';
 
@@ -37,9 +38,10 @@ ${cjkFace(700, ['PingFang SC Semibold', 'Microsoft YaHei Bold', 'Noto Sans CJK S
  * and xterm drops the alpha to get the opaque color it checks text contrast against.
  */
 const terminalStyles = `[data-remote-agents-tui] [data-sidebar-terminal]{padding-top:0}
-[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(255,255,255,.92)!important;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);padding:18px max(24px,calc((100% - 900px)/2))!important}
+[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(255,255,255,.92)!important;padding:18px max(24px,calc((100% - 900px)/2))!important}
 body[data-ds-dark-theme] [data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(21,21,23,.92)!important}
 [data-remote-agents-tui] .xterm-scrollable-element,[data-remote-agents-tui] .xterm-viewport,[data-remote-agents-tui] .xterm-screen{background:transparent!important}`;
+const blurStyles = '[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}';
 const viewStyles = 'div:has(>[data-slot="conversation.session"] [data-remote-agents-tui]){scrollbar-gutter:auto;margin-right:0}';
 const startStyles = `.ra-tui-start{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;cursor:pointer}
 .ra-tui-start:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
@@ -64,6 +66,7 @@ interface Terminals {
 interface Services {
   slots: Slots; terminals: Terminals; uploads: TuiUploads; t: unknown; title(sessionId: string): string | undefined; cli(sessionId: string): TuiCli;
   kept: KeptTerminals;
+  render: TuiRenderChoices;
   /** The launcher of each conversation prepared since DSH last connected: it needs preparing only once. */
   shells: Map<string, string>;
   theme: { getSnapshot(): unknown; subscribe(listener: () => void): () => void };
@@ -154,6 +157,7 @@ function TuiTerminal({ item, services }: { item: KeptTerminal; services: Service
     if (visible && state.info?.state === 'running' && (state.phase === 'failed' || state.phase === 'connected' && !state.writable)) model.connect();
   }, [visible]);
   useUploadedPaths(root, sessionId, services.uploads, model.state, services.cli(sessionId));
+  useWebglRenderer(item.host, visible, services.render, useSyncExternalStore(theme.subscribe, theme.getSnapshot));
   const Body = slots.entries('sidebar.right.pane.tab').find(entry => entry.options.key === TERMINAL_TAB)?.component as React.FC<any> | undefined;
   if (!Body) return <div className="ra-empty" role="alert">{ui("DSH's terminal is not available")}</div>;
   return <Body view={() => model} t={t}
@@ -165,8 +169,9 @@ function TuiTerminal({ item, services }: { item: KeptTerminal; services: Service
 /** Keeps the terminals mounted, here rather than in a conversation, which is gone whenever another one or another tab is shown. */
 function TuiTerminalLayer({ services }: { services: Services }) {
   const list = useSyncExternalStore(services.kept.subscribe, services.kept.snapshot);
+  const { blur } = useSyncExternalStore(services.render.subscribe, services.render.snapshot);
   return <>
-    <style>{fontStyles}{list.length ? terminalStyles : ''}</style>
+    <style>{fontStyles}{list.length ? terminalStyles : ''}{list.length && blur ? blurStyles : ''}</style>
     {list.map(item => createPortal(<TuiTerminal key={item.generation} item={item} services={services} />, item.host, item.sessionId))}
   </>;
 }
@@ -238,6 +243,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     <div ref={seat} style={{ display: 'contents' }} />
     {!ready && <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
     <TuiFileStatus sessionId={sessionId} uploads={services.uploads} notice={reports ? ui('Team messages waiting for an empty prompt: {count}', { count: reports }) : undefined} />
+    <TuiRenderMenu choices={services.render} />
   </div>;
 }
 
@@ -305,7 +311,7 @@ export function installTuiSessions(ctx: Client): void {
     scoped.effect(() => { document.body.append(hidden); return () => hidden.remove(); });
     const kept = new KeptTerminals<HTMLElement>(KEPT_TERMINALS, hidden, () => { const host = document.createElement('div'); host.style.display = 'contents'; return host; },
       { load: savedGeneration, save: (id, generation) => write(`${GENERATION_KEY}.${id}`, String(generation)) });
-    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title, kept, shells: new Map(),
+    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title, kept, shells: new Map(), render: new TuiRenderChoices(),
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
       theme: { getSnapshot: () => themes.getTheme(), subscribe: listener => on.call(scoped, 'theme/change', listener) } };
     // A restarted DSH has lost what was prepared, such as the forward for team tools.
