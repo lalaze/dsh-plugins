@@ -25,6 +25,10 @@ dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.2.0.tgz"
 
 Requires DSH 0.2.1-rc.3 or a later 0.2 release.
 
+## 0.2.4 Tag chip drops no longer get lost
+
+- Letting go of a tag chip right as the pointer entered another chip could do nothing. Every drop on the row now lands.
+
 ## 0.2.3 Drag tags into order
 
 - Drag a tag chip to move it; **All** and **Untagged** stay in front. Near the row's edge it scrolls to the chips out of view.
