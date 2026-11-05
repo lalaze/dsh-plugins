@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { handleTagRequest } from '../src/index.ts'
 import { TagStore } from '../src/server/store.ts'
-import { applyTagOperation, emptyTagState, parseTagState, TagError, type TagOperation, type TagState } from '../src/shared/tags.ts'
+import { applyTagOperation, emptyTagState, orderedTags, parseTagState, TagError, type TagOperation, type TagState } from '../src/shared/tags.ts'
 
 const ids = () => { let n = 0; return () => `t${++n}` }
 const run = (state: TagState, ...operations: TagOperation[]) => {
@@ -52,6 +52,40 @@ test('deleting a tag removes it from every Workspace, and forget drops a Workspa
   const before = structuredClone(state)
   run(state, { op: 'delete', id: 't2' })
   assert.deepEqual(state, before, 'operations never mutate their input')
+})
+
+test('tags show by name until the user orders them, then as ordered with new tags last', () => {
+  const names = (state: TagState) => orderedTags(state).map(tag => tag.name)
+  const initial = run(emptyTagState(),
+    { op: 'create', name: 'Zebra', color: 'red' },
+    { op: 'create', name: 'tag 10', color: 'blue' },
+    { op: 'create', name: 'tag 9', color: 'green' })
+  assert.deepEqual(names(initial), ['tag 9', 'tag 10', 'Zebra'])
+  assert.equal(initial.manualOrder, undefined)
+  const ordered = run(initial, { op: 'order', ids: ['t1', 't3', 't2'] })
+  assert.deepEqual(names(ordered), ['Zebra', 'tag 9', 'tag 10'])
+  // Every other operation keeps the order; `ids` restarts at t1 here, so give the new tag its own id.
+  const kept = [
+    applyTagOperation(ordered, { op: 'create', name: 'Alpha', color: 'gray' }, () => 'new').state,
+    run(ordered, { op: 'update', id: 't1', name: 'Yak' }),
+    run(ordered, { op: 'assign', workspaceId: 'ws', tagId: 't1', assigned: true }),
+    run(ordered, { op: 'forget', workspaceId: 'ws' }),
+  ]
+  assert.deepEqual(names(kept[0]!), ['Zebra', 'tag 9', 'tag 10', 'Alpha'])
+  assert.deepEqual(names(kept[1]!), ['Yak', 'tag 9', 'tag 10'])
+  assert.deepEqual(names(kept[2]!), names(ordered))
+  assert.deepEqual(names(kept[3]!), names(ordered))
+  assert.deepEqual(names(run(ordered, { op: 'delete', id: 't3' })), ['Zebra', 'tag 10'])
+})
+
+test('an order from before another client\'s change keeps its new tag and skips its deleted one', () => {
+  const state = run(emptyTagState(),
+    { op: 'create', name: 'A', color: 'red' },
+    { op: 'create', name: 'B', color: 'blue' },
+    { op: 'create', name: 'C', color: 'green' })
+  const ordered = run(state, { op: 'order', ids: ['t3', 'deleted', 't1', 't3'] })
+  assert.deepEqual(ordered.tags.map(tag => tag.id), ['t3', 't1', 't2'])
+  assert.throws(() => run(state, { op: 'order', ids: 'nope' as unknown as string[] }), TagError)
 })
 
 test('stored state is read leniently', () => {
@@ -125,6 +159,26 @@ test('a refresh with the current revision is answered without a body', async t =
   const changed = await get(first.revision)
   assert.equal(changed.status, 200)
   assert.notEqual((await changed.json() as { revision: string }).revision, first.revision)
+})
+
+test('the order survives a restart and a plugin that only knows tags and assignments', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'workspace-tags-'))
+  t.after(() => rm(dir, { recursive: true, force: true }))
+  const path = join(dir, 'tags.json')
+  const store = new TagStore(path)
+  await store.load()
+  const a = (await store.apply({ op: 'create', name: 'A', color: 'red' })).tag!
+  const b = (await store.apply({ op: 'create', name: 'B', color: 'blue' })).tag!
+  await store.apply({ op: 'order', ids: [b.id, a.id] })
+  // What dsh-remote-agents' tag sync sends when it gives a Workspace a tag this DSH lacks.
+  const current = store.snapshot()
+  await store.replace({
+    tags: [...current.tags, { id: 'c', name: 'C', color: 'green' }],
+    assignments: { ...current.assignments, ws: ['c'] },
+  })
+  const reopened = new TagStore(path); await reopened.load()
+  assert.deepEqual(orderedTags(reopened.snapshot()).map(tag => tag.name), ['B', 'A', 'C'])
+  assert.equal(reopened.snapshot().manualOrder, true)
 })
 
 test('a merged state replaces the tags, is normalized and reaches listeners', async t => {

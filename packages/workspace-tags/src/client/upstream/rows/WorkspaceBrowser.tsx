@@ -43,14 +43,14 @@ import { WorkspacePickFlow } from '../WorkspacePicker.tsx'
 import css from './WorkspaceBrowser.module.css'
 import { collectPresentation, projectPresentation, flattenPresentation, presentationActivity, type MirrorContribution } from '../presentation.ts'
 import { usePresentationGroups, MirrorSessionRow, PresentedRow, type PresentationContext } from './PresentationRows.tsx'
-import type { TagState, WorkspaceTag } from '../../../shared/tags.ts'
+import { orderedTags, type TagState, type WorkspaceTag } from '../../../shared/tags.ts'
 import type { SectionMode, TagRuntime } from '../../tags/contract.ts'
 import {
   asTagTranslate, RowTrail, SectionBlock, SpaceSwitcher, TagIcon, useHeldCompletion, useTagging, workspaceTags,
 } from '../../tags/parts.tsx'
 import {
   activityBySpace, browserSections, inSpace, isActiveStatus, liveFilter, rowActivity, sectionFolded, sessionActivity,
-  tagsByName, UNTAGGED_FILTER, type RowActivity,
+  UNTAGGED_FILTER, type RowActivity,
 } from '../../tags/sections.ts'
 
 /**
@@ -1098,8 +1098,10 @@ function SpaceSwitcherSeat({ presentation, runtime, state, filter, showActivity 
     expandedGroups: [...workspaces.map(workspace => workspace.workspaceId), UNGROUPED_KEY],
     ungroupedOrder: ungroupedSessionIds,
   }), state), [list, workspaces, rowState, statuses, ungroupedSessionIds, state])
-  const tags = useMemo(() => tagsByName(state.tags), [state.tags])
-  return <SpaceSwitcher tags={tags} filter={filter?.id ?? null} activity={presentationActivity(projectPresentation(presentation.all, state, { ...presentation.filter, query: '', tagId: null }), state)} onPick={id => { if (id === UNTAGGED_FILTER) runtime.setUntaggedOnly?.(true); else runtime.setFilter(id) }} t={asTagTranslate(t)} />
+  const tags = useMemo(() => orderedTags(state), [state])
+  const [chipDragging, setChipDragging] = useState(false)
+  useNativeDragAcceptance(chipDragging)
+  return <SpaceSwitcher tags={tags} onReorder={runtime.reorder} onDragActive={setChipDragging} filter={filter?.id ?? null} activity={presentationActivity(projectPresentation(presentation.all, state, { ...presentation.filter, query: '', tagId: null }), state)} onPick={id => { if (id === UNTAGGED_FILTER) runtime.setUntaggedOnly?.(true); else runtime.setFilter(id) }} t={asTagTranslate(t)} />
 }
 
 /**

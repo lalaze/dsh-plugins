@@ -218,6 +218,34 @@ describe('tag runtime', () => {
     })
   })
 
+  it('shows a new order at once, and puts it back when the host refuses it', async () => {
+    const host = fakeHost(tagged)
+    let answer!: () => void
+    let refuse = false
+    const slow = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        await new Promise<void>((resolve) => { answer = resolve })
+        if (refuse) return Response.json({ error: 'nope' }, { status: 500 })
+      }
+      return host.fetch(input, init)
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const runtime = createTagRuntime({ fetch: slow as unknown as typeof fetch, live: false })
+    await waitFor(() => { expect(runtime.tags.getSnapshot().phase).toBe('ready') })
+    const ids = () => runtime.tags.getSnapshot().state.tags.map(tag => tag.id)
+    runtime.reorder(['unused', 'client', 'urgent'])
+    expect(ids()).toEqual(['unused', 'client', 'urgent'])
+    answer()
+    await waitFor(() => { expect(host.operations).toEqual([{ op: 'order', ids: ['unused', 'client', 'urgent'] }]) })
+    refuse = true
+    runtime.reorder(['urgent', 'client', 'unused'])
+    expect(ids()).toEqual(['urgent', 'client', 'unused'])
+    answer()
+    await waitFor(() => { expect(ids()).toEqual(['unused', 'client', 'urgent']) })
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
+
   it('forgets a deleted Workspace only when it had tags', async () => {
     const host = fakeHost(tagged)
     const runtime = createTagRuntime({ fetch: host.fetch, live: false })
@@ -590,6 +618,84 @@ describe('WorkspaceBrowser with tags', () => {
       ['Client', [['alpha', ['a3', 'a1', 'a2']]]],
       ['Urgent', [['alpha', ['a3', 'a1', 'a2']]]],
     ])
+  })
+
+  describe('dragging tag chips', () => {
+    const chipRow = () => screen.getByRole('group', { name: 'Show workspaces by tag' })
+    const chipNames = () => within(chipRow()).getAllByRole('button').map(button => button.textContent)
+    /** jsdom chips have no boxes: lay them out side by side, 100px each, the tag chips from x = 0. */
+    const layOut = () => {
+      const chips = Array.from(chipRow().querySelectorAll<HTMLElement>('[draggable="true"]'))
+      chips.forEach((node, index) => {
+        node.getBoundingClientRect = () => ({ left: index * 100, width: 100 }) as DOMRect
+      })
+      return chips
+    }
+    const fireOverRow = (kind: 'dragOver' | 'drop', x: number) => {
+      const event = kind === 'dragOver' ? createEvent.dragOver(chipRow()) : createEvent.drop(chipRow())
+      Object.defineProperty(event, 'clientX', { value: x })
+      Object.defineProperty(event, 'dataTransfer', { value: { effectAllowed: '', dropEffect: '' } })
+      fireEvent(chipRow(), event)
+    }
+    const markedChips = () => within(chipRow()).getAllByRole('button').flatMap((button) => {
+      const mark = Array.from(button.classList).find(name => /chipDrop/.test(name))
+      return mark === undefined ? [] : [[button.textContent, /Before/.test(mark) ? 'before' : 'after']]
+    })
+
+    it('moves a tag chip, marks where it lands, and reorders the Tag sections and tag lists with it', async () => {
+      const { host, runtime } = await mount()
+      expect(chipNames()).toEqual(['All', 'Untagged', 'Client', 'Unused', 'Urgent'])
+      act(() => { runtime.setMode('tag') })
+      const [client] = layOut()
+      fireEvent.dragStart(client!, { dataTransfer: dragData() })
+      // Past the middle of Urgent: after the last chip.
+      fireOverRow('dragOver', 250)
+      expect(markedChips()).toEqual([['Urgent', 'after']])
+      fireOverRow('drop', 250)
+      fireEvent.dragEnd(client!)
+      expect(markedChips()).toEqual([])
+      expect(chipNames()).toEqual(['All', 'Untagged', 'Unused', 'Urgent', 'Client'])
+      await waitFor(() => { expect(host.operations).toEqual([{ op: 'order', ids: ['unused', 'urgent', 'client'] }]) })
+      expect(host.state().manualOrder).toBe(true)
+      expect(sectionNames().map(([name]) => name)).toEqual(['Urgent', 'Client', 'Untagged'])
+      // And toward the front, dropping in the gap before a chip.
+      const urgent = layOut()[1]!
+      fireEvent.dragStart(urgent, { dataTransfer: dragData() })
+      fireOverRow('dragOver', 10)
+      expect(markedChips()).toEqual([['Unused', 'before']])
+      fireOverRow('drop', 10)
+      expect(chipNames()).toEqual(['All', 'Untagged', 'Urgent', 'Unused', 'Client'])
+    })
+
+    it('leaves the order alone when a chip lands where it was or is let go off the row', async () => {
+      const { host } = await mount()
+      const [client, unused] = layOut()
+      // Either side of itself is where it already is: no mark, nothing saved.
+      fireEvent.dragStart(unused!, { dataTransfer: dragData() })
+      fireOverRow('dragOver', 120)
+      expect(markedChips()).toEqual([])
+      fireOverRow('drop', 120)
+      fireEvent.dragEnd(unused!)
+      fireEvent.dragStart(client!, { dataTransfer: dragData() })
+      fireOverRow('dragOver', 250)
+      expect(markedChips()).toEqual([['Urgent', 'after']])
+      fireEvent.dragLeave(chipRow(), { relatedTarget: document.body })
+      expect(markedChips()).toEqual([])
+      fireEvent.dragEnd(client!)
+      expect(chipNames()).toEqual(['All', 'Untagged', 'Client', 'Unused', 'Urgent'])
+      expect(host.operations).toEqual([])
+    })
+
+    it('keeps All and Untagged in place and still picks a space on click', async () => {
+      const { runtime } = await mount()
+      for (const name of [/^All/, /^Untagged/]) expect(chip(name).getAttribute('draggable')).toBeNull()
+      expect(chip(/^Client/).getAttribute('draggable')).toBe('true')
+      fireEvent.click(chip(/^Client/))
+      expect(runtime.view.getSnapshot().filter).toBe('client')
+      // Another drag's rows passing over the chips do nothing.
+      fireOverRow('dragOver', 10)
+      expect(markedChips()).toEqual([])
+    })
   })
 
   it('shows tag dots and opens the tag menu from a right-click or the row menu', async () => {

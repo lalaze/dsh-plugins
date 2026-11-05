@@ -124,6 +124,32 @@
   font-weight: 500;
 }
 
+/* Where a dragged tag chip would land: a line in the 4px gap beside this chip. */
+.chipDropBefore,
+.chipDropAfter {
+  position: relative;
+}
+
+.chipDropBefore::before,
+.chipDropAfter::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  border-radius: 1px;
+  corner-shape: round;
+  background: var(--dsw-alias-state-business-primary);
+}
+
+.chipDropBefore::before {
+  left: -4px;
+}
+
+.chipDropAfter::after {
+  right: -4px;
+}
+
 .chip .dot {
   width: 7px;
   height: 7px;

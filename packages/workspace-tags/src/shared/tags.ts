@@ -20,8 +20,11 @@ export const TAG_LIMIT = 200
 
 export interface WorkspaceTag { id: string; name: string; color: TagColor }
 
-/** Tags in creation order, and each Workspace's tag ids in the order they were added. */
-export interface TagState { tags: WorkspaceTag[]; assignments: Record<string, string[]> }
+/**
+ * Tags, and each Workspace's tag ids in the order they were added. Tags are in creation order and show by
+ * name until the user drags one; then `manualOrder` is set and they show as stored, new tags last.
+ */
+export interface TagState { tags: WorkspaceTag[]; assignments: Record<string, string[]>; manualOrder?: true }
 
 export type TagOperation =
   | { op: 'create'; name: string; color: TagColor; assignTo?: string }
@@ -31,6 +34,8 @@ export type TagOperation =
   | { op: 'assign'; workspaceId: string; tagId: string; assigned: boolean }
   /** Drop a deleted Workspace's assignments. */
   | { op: 'forget'; workspaceId: string }
+  /** Show tags in this order. Another client's newer tags stay, after these, and ids of tags it deleted are skipped. */
+  | { op: 'order'; ids: string[] }
 
 /** A rejected operation; its message is shown to the user. */
 export class TagError extends Error {
@@ -38,6 +43,12 @@ export class TagError extends Error {
 }
 
 export const emptyTagState = (): TagState => ({ tags: [], assignments: {} })
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
+
+/** Tags as every list shows them: in the user's order once there is one, else by name. */
+export const orderedTags = (state: Pick<TagState, 'tags' | 'manualOrder'>): WorkspaceTag[] =>
+  state.manualOrder === true ? [...state.tags] : [...state.tags].sort((a, b) => collator.compare(a.name, b.name))
 
 const isColor = (value: unknown): value is TagColor => (TAG_COLORS as readonly unknown[]).includes(value)
 const nameKey = (name: string) => name.normalize('NFC').toLowerCase()
@@ -65,6 +76,7 @@ export function tagName(value: unknown, tags: readonly WorkspaceTag[], self?: st
 export function applyTagOperation(state: TagState, operation: TagOperation, newId: () => string): { state: TagState; tag?: WorkspaceTag } {
   const tags = state.tags.map(tag => ({ ...tag }))
   const assignments = Object.fromEntries(Object.entries(state.assignments).map(([id, ids]) => [id, [...ids]]))
+  const order = state.manualOrder === true ? { manualOrder: true as const } : {}
   const find = (id: unknown) => {
     const tag = tags.find(candidate => candidate.id === id)
     if (!tag) throw new TagError('This tag no longer exists')
@@ -80,7 +92,7 @@ export function applyTagOperation(state: TagState, operation: TagOperation, newI
         const target = workspaceId(operation.assignTo)
         assignments[target] = [...assignments[target] ?? [], tag.id]
       }
-      return { state: { tags, assignments }, tag }
+      return { state: { tags, assignments, ...order }, tag }
     }
     case 'update': {
       const tag = find(operation.id)
@@ -89,7 +101,7 @@ export function applyTagOperation(state: TagState, operation: TagOperation, newI
         if (!isColor(operation.color)) throw new TagError('Choose a tag color')
         tag.color = operation.color
       }
-      return { state: { tags, assignments } }
+      return { state: { tags, assignments, ...order } }
     }
     case 'delete': {
       const tag = find(operation.id)
@@ -98,7 +110,7 @@ export function applyTagOperation(state: TagState, operation: TagOperation, newI
         if (rest.length > 0) assignments[id] = rest
         else delete assignments[id]
       }
-      return { state: { tags: tags.filter(candidate => candidate !== tag), assignments } }
+      return { state: { tags: tags.filter(candidate => candidate !== tag), assignments, ...order } }
     }
     case 'assign': {
       const target = workspaceId(operation.workspaceId)
@@ -107,11 +119,17 @@ export function applyTagOperation(state: TagState, operation: TagOperation, newI
       const next = operation.assigned === true ? [...rest, tag.id] : rest
       if (next.length > 0) assignments[target] = next
       else delete assignments[target]
-      return { state: { tags, assignments } }
+      return { state: { tags, assignments, ...order } }
     }
     case 'forget': {
       delete assignments[workspaceId(operation.workspaceId)]
-      return { state: { tags, assignments } }
+      return { state: { tags, assignments, ...order } }
+    }
+    case 'order': {
+      if (!Array.isArray(operation.ids)) throw new TagError('Unknown tag operation')
+      const listed = new Set(operation.ids)
+      const first = [...listed].flatMap(id => tags.find(tag => tag.id === id) ?? [])
+      return { state: { tags: [...first, ...tags.filter(tag => !listed.has(tag.id))], assignments, manualOrder: true } }
     }
     default:
       throw new TagError('Unknown tag operation')
@@ -139,5 +157,5 @@ export function parseTagState(value: unknown): TagState {
     const valid = [...new Set(ids.filter((tagId): tagId is string => typeof tagId === 'string' && known.has(tagId)))]
     if (valid.length > 0) assignments[id] = valid
   }
-  return { tags, assignments }
+  return { tags, assignments, ...record.manualOrder === true ? { manualOrder: true as const } : {} }
 }

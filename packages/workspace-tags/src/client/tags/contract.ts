@@ -38,6 +38,8 @@ export interface TagRuntime {
   menu: HostObservable<TagMenuRequest | null>
   dialog: HostObservable<TagDialogRequest | null>
   run(operation: TagOperation): Promise<WorkspaceTag | undefined>
+  /** Show the tags in this order at once and save it; a failed save puts them back and only logs. */
+  reorder(ids: string[]): void
   setMode(mode: SectionMode | null): void
   setSectionCollapsed(key: string, collapsed: boolean): void
   setFilter(tagId: string | null): void

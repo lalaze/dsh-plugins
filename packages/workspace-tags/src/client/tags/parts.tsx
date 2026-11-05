@@ -1,5 +1,5 @@
 /** Small tag pieces the sidebar rows and the overlays share. */
-import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useMemo, useState, useSyncExternalStore, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import clsx from 'clsx'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
@@ -93,22 +93,45 @@ export function RowTrail({ activity, tags, t }: { activity: RowActivity | undefi
   )
 }
 
+/** Where a tag chip dropped at this x lands among the tag chips: before the first whose middle is past it. */
+function chipDropIndex(row: HTMLElement, x: number): number {
+  const chips = Array.from(row.querySelectorAll('[draggable="true"]'))
+  const index = chips.findIndex((chip) => { const box = chip.getBoundingClientRect(); return x < box.left + box.width / 2 })
+  return index === -1 ? chips.length : index
+}
+
+/** The tag ids with one moved to a drop index, or undefined when that would leave it where it is. */
+function movedTagIds(tags: readonly WorkspaceTag[], id: string, at: number): string[] | undefined {
+  const from = tags.findIndex(tag => tag.id === id)
+  if (from === -1 || at === from || at === from + 1) return undefined
+  const ids = tags.filter(tag => tag.id !== id).map(tag => tag.id)
+  ids.splice(at < from ? at : at - 1, 0, id)
+  return ids
+}
+
 /**
- * The space switcher: All, then one chip per tag in name order. Picking a
- * tag narrows every grouping to its Workspaces; picking it again goes back
- * to All. A chip that is not selected carries a count of the Sessions in its
- * space that wait for the user or finished unread, tinted for waiting when
- * any does, and the running spinner while any of its Sessions runs, so a
- * filtered-out space still shows what goes on in it.
+ * The space switcher: All, then one chip per tag in the tags' order, which
+ * dragging a tag chip changes. Picking a tag narrows every grouping to its
+ * Workspaces; picking it again goes back to All. A chip that is not selected
+ * carries a count of the Sessions in its space that wait for the user or
+ * finished unread, tinted for waiting when any does, and the running spinner
+ * while any of its Sessions runs, so a filtered-out space still shows what
+ * goes on in it.
  */
-export function SpaceSwitcher({ tags, filter, activity, onPick, t }: {
+export function SpaceSwitcher({ tags, filter, activity, onPick, onReorder, onDragActive, t }: {
   tags: readonly WorkspaceTag[]
   filter: string | null
   activity: ReadonlyMap<string | null, SpaceActivity>
   onPick: (tagId: string | null) => void
+  onReorder: (ids: string[]) => void
+  onDragActive: (active: boolean) => void
   t: TagTranslate
 }) {
-  const chip = (id: string | null, name: string, marker: ReactNode) => {
+  // The tag chip being dragged and its drop index; null while the pointer is off the row.
+  const [drag, setDrag] = useState<{ id: string; at: number | null } | null>(null)
+  const endDrag = () => { setDrag(null); onDragActive(false) }
+  const dropAt = drag !== null && drag.at !== null && movedTagIds(tags, drag.id, drag.at) !== undefined ? drag.at : null
+  const chip = (id: string | null, name: string, marker: ReactNode, tagChip?: ButtonHTMLAttributes<HTMLButtonElement>) => {
     const selected = id === filter
     const count = activity.get(id) ?? { waiting: 0, completed: 0, running: 0 }
     const n = selected ? 0 : count.waiting + count.completed
@@ -117,9 +140,10 @@ export function SpaceSwitcher({ tags, filter, activity, onPick, t }: {
     const label = running ? t('tags.filter.running', { label: attention }) : attention
     return (
       <button
+        {...tagChip}
         key={id ?? ''}
         type="button"
-        className={clsx(css.chip, selected && css.chipSelected)}
+        className={clsx(css.chip, selected && css.chipSelected, tagChip?.className)}
         aria-pressed={selected}
         aria-label={label}
         title={label}
@@ -133,10 +157,39 @@ export function SpaceSwitcher({ tags, filter, activity, onPick, t }: {
     )
   }
   return (
-    <div className={css.filterRow}><span className={css.filterLabel} title={t('tags.filter.sharedHint')}>{t('tags.filter.projects')}</span><div className={css.switcher} role="group" aria-label={t('tags.filter.label')}>
+    <div className={css.filterRow}><span className={css.filterLabel} title={t('tags.filter.sharedHint')}>{t('tags.filter.projects')}</span><div
+      className={css.switcher}
+      role="group"
+      aria-label={t('tags.filter.label')}
+      onDragOver={drag === null ? undefined : (event) => {
+        event.preventDefault()
+        event.dataTransfer.dropEffect = 'move'
+        const at = chipDropIndex(event.currentTarget, event.clientX)
+        if (at !== drag.at) setDrag({ id: drag.id, at })
+      }}
+      onDragLeave={drag === null ? undefined : (event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrag({ id: drag.id, at: null })
+      }}
+      onDrop={drag === null ? undefined : (event) => {
+        event.preventDefault()
+        const ids = movedTagIds(tags, drag.id, chipDropIndex(event.currentTarget, event.clientX))
+        if (ids !== undefined) onReorder(ids)
+        endDrag()
+      }}
+    >
       {chip(null, t('tags.filter.all'), null)}
       {chip(UNTAGGED_FILTER, t('tags.section.untagged'), null)}
-      {tags.map(tag => chip(tag.id, tag.name, <TagDot color={tag.color} />))}
+      {tags.map((tag, index) => chip(tag.id, tag.name, <TagDot color={tag.color} />, {
+        className: clsx(dropAt === index && css.chipDropBefore, dropAt === tags.length && index === tags.length - 1 && css.chipDropAfter),
+        draggable: true,
+        onDragStart: (event) => {
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', tag.name)
+          setDrag({ id: tag.id, at: null })
+          onDragActive(true)
+        },
+        onDragEnd: endDrag,
+      }))}
     </div></div>
   )
 }

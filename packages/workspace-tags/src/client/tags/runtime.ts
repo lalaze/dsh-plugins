@@ -5,7 +5,7 @@
  * overlays.
  */
 import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
-import { emptyTagState, parseTagState, TAGS_ROUTE, type TagOperation, type WorkspaceTag } from '../../shared/tags.ts'
+import { applyTagOperation, emptyTagState, parseTagState, TAGS_ROUTE, type TagOperation, type WorkspaceTag } from '../../shared/tags.ts'
 import type { SectionMode, TagDialogRequest, TagMenuRequest, TagRuntime, TagSnapshot, TagViewState } from './contract.ts'
 import { sectionFoldedByDefault } from './sections.ts'
 
@@ -91,6 +91,17 @@ export function createTagRuntime(options: TagRuntimeOptions = {}): TagRuntime & 
 
   return {
     tags, view, menu, dialog, run,
+    reorder: (ids) => {
+      const operation: TagOperation = { op: 'order', ids }
+      const before = tags.getSnapshot()
+      // A refresh under way read the old order.
+      generation++
+      tags.set({ ...before, state: applyTagOperation(before.state, operation, () => '').state })
+      run(operation).catch((error: unknown) => {
+        tags.set(before)
+        console.warn('[dsh-workspace-tags] Could not save the tag order', error)
+      })
+    },
     setMode: mode => { view.update((draft) => { draft.mode = mode }) },
     setSectionCollapsed: (key, collapsed) => {
       view.update((draft) => {

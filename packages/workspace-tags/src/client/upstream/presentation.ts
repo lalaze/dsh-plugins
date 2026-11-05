@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import type { GroupNode, SessionNode, ArchivedFilter, SessionOrderBy } from './tree.ts'
-import type { TagState } from '../../shared/tags.ts'
+import { orderedTags, type TagState } from '../../shared/tags.ts'
 import { UNTAGGED_FILTER } from '../tags/sections.ts'
 
 /** Browser-only contract. No mirror identity is a host WorkspaceId or SessionId. */
@@ -122,7 +122,7 @@ export interface PresentedSection { key: string; kind: 'tag' | 'untagged' | 'wai
 export function sectionPresentation(groups: readonly PresentedGroup[], tags: TagState, mode: 'tag' | 'status'): PresentedSection[] {
   if (mode === 'tag') {
     const known = new Set(tags.tags.map(tag => tag.id))
-    const sections: PresentedSection[] = [...tags.tags].sort((a, b) => a.name.localeCompare(b.name)).map(tag => {
+    const sections: PresentedSection[] = orderedTags(tags).map(tag => {
       const members = groups.filter(group => group.tagIds.includes(tag.id))
       return { key: `tag:${tag.id}`, kind: 'tag' as const, tagId: tag.id, groups: members, count: members.length }
     })

@@ -7,7 +7,7 @@
  */
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
-import type { TagState, WorkspaceTag } from '../../shared/tags.ts'
+import { orderedTags, type TagState, type WorkspaceTag } from '../../shared/tags.ts'
 import type { GroupNode, SessionNode } from '../upstream/tree.ts'
 import type { SectionMode } from './contract.ts'
 
@@ -44,11 +44,6 @@ export interface RowActivity extends Attention { running: boolean }
 
 /** What a space chip shows: its Sessions that need the user, and how many only run. */
 export interface SpaceActivity extends Attention { running: number }
-
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
-
-export const tagsByName = (tags: readonly WorkspaceTag[]): WorkspaceTag[] =>
-  [...tags].sort((a, b) => collator.compare(a.name, b.name))
 
 /**
  * A Session's one state, ranked as its row's status dot ranks them: waiting
@@ -107,7 +102,7 @@ export function activityBySpace(groups: readonly GroupNode[], state: TagState): 
   return counts
 }
 
-/** Tag sections in name order, then Untagged; the ungrouped bucket has no tags. */
+/** Tag sections in the tags' order, then Untagged; the ungrouped bucket has no tags. */
 export function tagSections(groups: readonly GroupNode[], state: TagState): BrowserSection[] {
   const known = new Map(state.tags.map(tag => [tag.id, tag]))
   const byTag = new Map<string, GroupNode[]>()
@@ -121,7 +116,7 @@ export function tagSections(groups: readonly GroupNode[], state: TagState): Brow
       else members.push(group)
     }
   }
-  const sections: BrowserSection[] = tagsByName([...byTag.keys()].map(id => known.get(id)!))
+  const sections: BrowserSection[] = orderedTags(state).filter(tag => byTag.has(tag.id))
     .map(tag => ({ key: `tag:${tag.id}`, kind: 'tag' as const, tag, groups: byTag.get(tag.id)!, count: byTag.get(tag.id)!.length }))
   if (untagged.length > 0) sections.push({ key: 'untagged', kind: 'untagged', groups: untagged, count: untagged.length })
   return sections

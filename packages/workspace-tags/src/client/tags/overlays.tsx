@@ -10,7 +10,7 @@ import {
   IconSettingsOutlineRegular, IconTrashOutlineRegular, Menu, Modal, type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import type { HostObservable, PropsHooks, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import { TAG_COLORS, TAG_NAME_MAX, TagError, tagName, type TagColor, type WorkspaceTag } from '../../shared/tags.ts'
+import { orderedTags, TAG_COLORS, TAG_NAME_MAX, TagError, tagName, type TagColor, type WorkspaceTag } from '../../shared/tags.ts'
 import type { TagDialogRequest, TagMenuRequest, TagRuntime, TagSnapshot } from './contract.ts'
 import { TagDot, type TagTranslate } from './parts.tsx'
 import css from './tags.module.css'
@@ -32,8 +32,6 @@ export type TagOverlayProps =
   & PropsHooks<TagOverlayInjected['hooks']>
   & PropsLocale<'workspace'>
 
-const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' })
-const byName = (tags: readonly WorkspaceTag[]) => [...tags].sort((a, b) => collator.compare(a.name, b.name))
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 /** Workspace titles by id, as the sidebar shows them. */
@@ -68,7 +66,7 @@ function TagMenu({ request, useWorkspaceTags, useWorkspaces, run, openMenu, open
   const [error, setError] = useState<string | null>(null)
   const assigned = new Set(snapshot.state.assignments[request.workspaceId] ?? [])
   for (const [id, value] of pending) if (value) assigned.add(id); else assigned.delete(id)
-  const tags = byName(snapshot.state.tags)
+  const tags = orderedTags(snapshot.state)
   const close = () => { openMenu(null) }
   const status: MenuEntry[] = snapshot.phase === 'loading' && tags.length === 0
     ? [{ id: 'status', label: t('tags.menu.loading'), disabled: true }]
@@ -128,7 +126,7 @@ export function TagDialogOverlay({ useTagDialog, useWorkspaceTags, useWorkspaces
   if (request === null) return null
   const close = () => { openDialog(null) }
   if (request.kind === 'manage') {
-    return <ManageTags tags={snapshot.state.tags} assignments={snapshot.state.assignments} titles={titles} run={run} openDialog={openDialog} onClose={close} t={translate} />
+    return <ManageTags tags={orderedTags(snapshot.state)} assignments={snapshot.state.assignments} titles={titles} run={run} openDialog={openDialog} onClose={close} t={translate} />
   }
   const editing = request.kind === 'edit' ? snapshot.state.tags.find(tag => tag.id === request.tagId) : undefined
   // A tag deleted elsewhere while its editor was open: nothing left to edit.
@@ -288,7 +286,7 @@ function ManageTags({ tags, assignments, titles, run, openDialog, onClose, t }: 
         ? <div className={css.empty}>{t('tags.manage.empty')}</div>
         : (
           <ul className={css.manageList}>
-            {byName(tags).map(tag => tag.id === confirming
+            {tags.map(tag => tag.id === confirming
               ? (
                 <li key={tag.id} className={clsx(css.manageRow, css.confirmRow)}>
                   <span className={css.confirmText}>{t('tags.manage.confirmDelete', { name: tag.name })}</span>

@@ -6,9 +6,9 @@ Supports English and Simplified Chinese, following DSH’s language setting with
 
 `dsh-workspace-tags` adds colored tags to the workspaces in the DeepSeek Harness sidebar, a row of tag chips that narrows the sidebar to one tag, and two more **Group by** choices in the sidebar’s view options.
 
-Under the sidebar header, **All** and one chip per tag pick which workspaces the sidebar shows, in every grouping, so tags such as “Work” and “Personal” act as separate spaces. Pick a chip again to go back to All. A chip you are not in shows a spinner while any of its sessions runs, and how many of its sessions need you (waiting for you, or finished and not opened yet), orange when any is waiting. Without a unified provider, search covers every native workspace and opening another space switches to All.
+Under the sidebar header, **All** and one chip per tag pick which workspaces the sidebar shows, in every grouping, so tags such as “Work” and “Personal” act as separate spaces. Pick a chip again to go back to All. A chip you are not in shows a spinner while any of its sessions runs, and how many of its sessions need you (waiting for you, or finished and not opened yet), orange when any is waiting. Without a unified provider, search covers every native workspace and opening another space switches to All. Tags start in name order; drag a tag chip to move it, near the row's edge to reach chips scrolled out of view. The Tag sections, the tag menu and **Manage tags…** follow that order, a new tag goes last, and the order is kept on the DSH host, shared by the desktop app and remote web clients. The phone still lists tags by name.
 
-- **Tag**: one section per tag, in name order, then **Untagged**. A workspace with several tags appears under each of them.
+- **Tag**: one section per tag, in the chips' order, then **Untagged**. A workspace with several tags appears under each of them.
 - **Status**: **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Finished, your turn** (a session finished and you have not opened it yet; once opened it stays until you leave it or send the next message), **Running** (an agent is executing, itself or through a subagent), then **Idle**. The two sections that need you have a tinted header and a solid badge, and list their sessions even while another session of the same workspace runs. **Running** shows the running sessions and the open one; the workspace's other resting sessions wait behind **Show more** and stay out of **Idle**, and the section badge counts only running sessions. A workspace with nothing running lists its resting sessions in **Idle**. **Idle** also holds workspaces without sessions, counts workspaces where the others count sessions, and starts folded. Each status has its own icon, and the sections follow live as agents start and stop.
 
 A folded workspace row shows what its sessions would: a badge counting those that need you, or a spinner when one is only running. Right-click a workspace, or choose **Tags…** in its **⋯** menu, to tick its tags, create a tag (name and color) that is added to that workspace, or open **Manage tags…** to rename, recolor or delete tags. A workspace’s tags show as small dots at the end of its row in every grouping mode. Sections fold, and the Group by choice, folded sections and the chosen tag chip are remembered per browser. Inside a section, workspaces keep the sidebar’s order; drag workspaces into order under Workspace grouping, since a workspace can appear in several sections. Sessions drag into order inside any section, Running, Waiting and Completed included. A drop saves that workspace’s session order (switching **Order by** to **Manual**, as a drag does under Workspace grouping), so the order holds in every grouping and after a restart.
@@ -24,6 +24,12 @@ dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.2.0.tgz"
 ```
 
 Requires DSH 0.2.1-rc.3 or a later 0.2 release.
+
+## 0.2.3 Drag tags into order
+
+- Drag a tag chip to move it; **All** and **Untagged** stay in front. Near the row's edge it scrolls to the chips out of view.
+- The Tag sections, the tag menu and **Manage tags…** follow that order, and a new tag goes last. Until the first drag, tags stay in name order.
+- The order is kept on the DSH host, shared by the desktop app and remote web clients. The phone still lists tags by name.
 
 ## 0.2.2 finished tasks stand out
 
