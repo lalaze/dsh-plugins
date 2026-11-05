@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.91:** The button that starts a Codex TUI, and the notice shown while dragging files onto one, now use Codex's logo instead of a plain `>_`. No action is needed.
+
 **Upgrading from 0.2.90:** TUI conversations now run Codex too. In a new conversation of a remote workspace, select a remote Codex model and click `>_` at the bottom left of the composer. Dropping and pasting files work as with Claude Code, and after a DSH restart the row resumes the same Codex thread with its model. Its title is a `/rename` in the TUI, then the first message, as Codex does not title these threads itself. Codex runs without its full-screen mode, so the wheel scrolls through the conversation, and without its update prompt at launch, where the first Enter would install; run `codex update` on the remote machine to update it. **Remote Codex** is also in the native terminal's shell menu. No action is needed.
 
 **Upgrading from 0.2.89:** TUI conversations now take files. Drag files onto the window or paste them (Cmd+V, or Ctrl+V for an image): they are uploaded to `.dsh-remote-agents/attachments/tui/` in the remote project and their paths go into Claude Code's prompt, where an image shows as `[Image #1]`. Each file can be up to 50 MB, folders are not supported, and uploaded files are not cleaned up. A file dropped on a TUI conversation used to go into a hidden composer, and Claude Code never received it. Attachments uploaded to a remote project, a chat's included, are also kept out of Git now, by a `.gitignore` in `.dsh-remote-agents/`. No action is needed.
