@@ -14,12 +14,6 @@ export const TEAM_MCP_NAME = 'dsh-agent-teams';
 /** The tools AgentTeams lets a member call; captain tools are never passed. */
 export const TEAM_MEMBER_TOOLS: readonly string[] = ['agent_teams_claim_task', 'agent_teams_update_task', 'agent_teams_send_message', 'agent_teams_status'];
 const PLUGIN = '@nanmicoder/dsh-agent-teams';
-/** The bridge server of a TUI conversation's CLI, which leads the team rather than working in it. */
-export const TEAM_CAPTAIN_SERVER = '.agent-teams-captain';
-/** Starts a team from a /team line, as a CLI cannot know the model routes `agent_teams_create` needs. */
-export const TEAM_START_TOOL = 'start_team';
-/** What a captain does after that, under AgentTeams' own names. */
-export const TEAM_CAPTAIN_TOOLS: readonly string[] = ['agent_teams_status', 'agent_teams_send_message', 'agent_teams_approve', 'agent_teams_edit_plan', 'agent_teams_add_member', 'agent_teams_remove_member', 'agent_teams_create_task', 'agent_teams_reassign_task', 'agent_teams_amend_task', 'agent_teams_resume', 'agent_teams_delete'];
 
 export interface TeamMember { team: string; member: string }
 

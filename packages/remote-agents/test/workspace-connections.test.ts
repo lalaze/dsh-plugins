@@ -85,7 +85,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
   // Every launcher invocation has a finite fallback, never the developer's interactive shell.
   await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
-  for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access', 'workspace/tui', 'workspace/holder-protocol', 'workspace/terminal-hold', 'teams/presets']) {
+  for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access', 'workspace/tui', 'workspace/holder-protocol', 'workspace/terminal-hold']) {
     const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
     await mkdir(dirname(join(modules, name)), { recursive: true });
     await writeFile(join(modules, `${name}.js`), (await transform(source, { loader: 'ts', format: 'esm', target: 'node22' })).code);
@@ -124,18 +124,6 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   assert.equal(await launchCodex('session-codex'), `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic 'dsh_file=$(find "\${CODEX_HOME:-$HOME/.codex}/sessions" -maxdepth 4 -name "rollout-*-${thread}.jsonl" 2>/dev/null | head -n 1); if [ -z "$dsh_file" ]; then codex --no-alt-screen -c check_for_update_on_startup=false -m "gpt-6.1-sol" -c model_reasoning_effort="xhigh"; elif grep -q task_started "$dsh_file"; then codex resume --no-alt-screen -c check_for_update_on_startup=false ${thread}; else codex resume --no-alt-screen -c check_for_update_on_startup=false -m "gpt-6.1-sol" -c model_reasoning_effort="xhigh" ${thread}; fi; exec "\${SHELL:-/bin/sh}" -l'`, 'the model applies until the thread has a turn');
   assert.ok((await launchCodex('session-bare')).includes(`else codex resume --no-alt-screen -c check_for_update_on_startup=false ${thread}; fi`), 'with no model chosen Codex uses its own');
   assert.equal(await launchCodex('session-tui'), plainCodex, 'in a Claude conversation Remote Codex is plain Codex');
-  // With AgentTeams, each CLI gets the team tools through the bridge the conversation prepared.
-  const bridge = { command: '/usr/bin/node', args: ['/home/me/bridge.mjs', 'proxy', '/home/me/tui.json', '.agent-teams-captain'] };
-  const saved = JSON.parse(await readFile(f.path, 'utf8'));
-  await writeFile(f.path, JSON.stringify({ ...saved, tuiDetails: { ...saved.tuiDetails, 'session-tui': { title: 'Claude Code', bridge }, 'session-codex': { ...saved.tuiDetails['session-codex'], model: undefined, effort: undefined, bridge } } }));
-  const led = await launchTui('session-tui'), ledId = /--resume ([0-9a-f-]{36});/.exec(led)?.[1];
-  const config = JSON.stringify(JSON.stringify({ mcpServers: { 'dsh-agent-teams': { type: 'stdio', ...bridge } } }));
-  assert.ok(led.includes(`then claude --mcp-config ${config} --allowedTools mcp__dsh-agent-teams --resume ${ledId}; else claude --mcp-config ${config} --allowedTools mcp__dsh-agent-teams --session-id ${ledId}; fi`), led);
-  const ledCodex = await launchCodex('session-codex');
-  const quoted = (value: string) => JSON.stringify(value);
-  assert.ok(ledCodex.includes(`codex resume --no-alt-screen -c check_for_update_on_startup=false -c ${quoted(`mcp_servers.dsh-agent-teams.command=${JSON.stringify(bridge.command)}`)} -c ${quoted(`mcp_servers.dsh-agent-teams.args=${JSON.stringify(bridge.args)}`)} -c ${quoted('mcp_servers.dsh-agent-teams.default_tools_approval_mode="approve"')} ${thread}; fi`), ledCodex);
-  assert.equal(ledCodex.split("'").length, led.split("'").length, 'and no quote of its own breaks the command');
-  assert.equal(await launchCodex('session-tui'), plainCodex, 'the other CLI gets no team tools there');
   assert.equal(await launchTui('session-codex'), `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic 'claude; exec "\${SHELL:-/bin/sh}" -l'`, 'and in a Codex conversation Remote Claude is plain Claude');
   assert.doesNotMatch(await launchTui('session-chat'), /--resume/, 'another conversation runs a plain claude');
   // The composer's model applies to the first launch; a resumed session keeps what /model chose since.

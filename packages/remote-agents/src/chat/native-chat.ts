@@ -71,8 +71,8 @@ export interface ChatHost extends Partial<ToolHost> {
   unattended?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
   /** The AgentTeams team and member this conversation runs as, when it is a team member. */
   teamMember?(sessionId: NonNullable<GenerateOptions['sessionId']>): TeamMember | undefined;
-  /** Hands the team's messages to the CLI in the terminal of a TUI conversation; absent for any other conversation. */
-  terminal?(sessionId: NonNullable<GenerateOptions['sessionId']>): ((messages: readonly string[]) => Promise<void>) | undefined;
+  /** Whether the conversation's CLI runs in its terminal, as a TUI conversation's does. */
+  tui?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
   /** A file from the conversation's verified remote workspace, or undefined when it is too large to show. */
   image?(sessionId: NonNullable<GenerateOptions['sessionId']>, path: string, signal: AbortSignal): Promise<Uint8Array | undefined>;
   /** A file the CLI looked at by absolute path on the conversation's verified machine, inside the workspace or not; undefined when too large. */
@@ -344,12 +344,10 @@ export class RemoteCliAdapter extends LlmAdapter {
       yield { type: 'block-start', index: 0, blockType: 'text' }; yield { type: 'text-delta', index: 0, text: title };
       yield { type: 'block-end', index: 0, block: { type: 'text', text: title } }; yield { type: 'finish', reason: { kind: 'stop' } }; return;
     }
-    const terminal = options.sessionId ? this.host.terminal?.(options.sessionId) : undefined;
-    if (terminal) {
-      // This conversation's CLI runs in a terminal, so a turn here is AgentTeams waking its captain: it goes to that CLI.
-      // The reply only ends the turn. Nothing reads the conversation's DSH history, so maintenance has nothing to do.
-      if (options.purpose !== 'compaction') await terminal(options.messages.slice(options.messages.findLastIndex(m => m.role === 'assistant') + 1).filter(m => m.role === 'user' && isTeamPrompt(m.source)).map(m => blockText(m.content)));
-      const text = 'Handed to the terminal.';
+    if (options.sessionId && this.host.tui?.(options.sessionId)) {
+      // The CLI runs in the terminal and takes its messages there: a turn from anywhere else, such as another client, must
+      // not start a second CLI beside it. Nothing reads the conversation's DSH history, so maintenance has nothing to do.
+      const text = 'This conversation runs in its terminal.';
       yield { type: 'block-start', index: 0, blockType: 'text' }; yield { type: 'text-delta', index: 0, text };
       yield { type: 'block-end', index: 0, block: { type: 'text', text } }; yield { type: 'finish', reason: { kind: 'stop' } }; return;
     }

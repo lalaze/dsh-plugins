@@ -1052,3 +1052,13 @@ test('the running-tool line says what the tool works on in a line that reads wel
   assert.equal(toolStatus([call('Read', { file_path: path })], 'Fix'), '> Running Read `…/dsh-plugins/packages/remote-agents/src/chat/transcript.ts`');
   assert.equal(toolStatus([call('Read', { path: `/${'z'.repeat(80)}` })], 'Fix'), `> Running Read \`…${'z'.repeat(59)}\``);
 });
+
+test('a turn in a TUI conversation starts no CLI, as its CLI runs in the terminal', async () => {
+  const adapter = new RemoteCliAdapter({} as ChatProjects, { agent: () => undefined, step: () => undefined, tui: id => id === 'tui' });
+  const run = async (options: Partial<GenerateOptions>) => { const out: { type: string; text?: string }[] = []; for await (const chunk of adapter.stream({ sessionId: 'tui', provider: 'remote-cli-claude', model: 'x', messages: [], ...options } as unknown as GenerateOptions)) out.push(chunk as { type: string; text?: string }); return out; };
+  const message = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: 'sent from another client' }] });
+  const turn = await run({ messages: [message] as unknown as GenerateOptions['messages'] });
+  assert.deepEqual(turn.map(chunk => chunk.type), ['block-start', 'text-delta', 'block-end', 'finish'], 'the turn ends at once');
+  assert.equal((await run({ purpose: 'compaction', messages: [message] as unknown as GenerateOptions['messages'] })).at(-1)?.type, 'finish', 'and maintenance has nothing to do');
+  assert.equal((await run({ purpose: 'session-title', messages: [message] as unknown as GenerateOptions['messages'] })).find(chunk => chunk.type === 'text-delta')?.text, 'sent from another client', 'a title is still a title');
+});

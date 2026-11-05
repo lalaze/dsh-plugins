@@ -9,7 +9,6 @@ import type { WorkspaceAccess } from '../workspace/access.js';
 import { dshHome } from '../workspace/access.js';
 import type { RemoteWorkspaces } from '../workspace/remote-workspaces.js';
 import type { WorkspaceService } from '../workspace/service.js';
-import type { TuiCaptain } from '../workspace/tui-captain.js';
 import { SharedChatAdoption } from './adopt.js';
 import { isTeamPrompt, teamMemberOf } from './agent-teams.js';
 import { CHAT_IMAGE_LIMIT } from './images.js';
@@ -32,7 +31,7 @@ export function scheduleSessionRepair(ctx: Context, store: Store): void {
 }
 
 /** Remote CLI models in DSH's model picker and main conversation. */
-export function installChat(ctx: Context, service: RemoteAgentsService, projects: ChatProjects, workspace: { captain?: Pick<TuiCaptain, 'isTui' | 'deliver'>; access: WorkspaceAccess; files: WorkspaceService; workspaces: RemoteWorkspaces }): void {
+export function installChat(ctx: Context, service: RemoteAgentsService, projects: ChatProjects, workspace: { access: WorkspaceAccess; files: WorkspaceService; workspaces: RemoteWorkspaces }): void {
   const { access, files, workspaces } = workspace;
   ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { agents: { get(id: string): unknown; list?(): SyncAgent[] } };
@@ -47,7 +46,7 @@ export function installChat(ctx: Context, service: RemoteAgentsService, projects
       permission: id => accessOf(scoped, sessionOf(id)).permission,
       unattended: id => accessOf(scoped, sessionOf(id)).unattended,
       teamMember: id => teamMemberOf(sessionOf(id)),
-      terminal: id => (workspace.captain?.isTui(id) ? messages => workspace.captain!.deliver(id, messages) : undefined),
+      tui: id => service.store.snapshot().tuiSessions?.includes(id) === true,
       userContent: (id, messageId) => sessionOf(id)?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source)))?.content,
       attachments: {
         image: async (ref, signal) => {

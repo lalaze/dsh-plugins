@@ -46,9 +46,7 @@ export class TuiRenderChoices {
 export interface Xterm {
   loadAddon(addon: unknown): void;
   element?: HTMLElement;
-  rows: number;
   options: { theme?: { background?: string } & Record<string, unknown> };
-  buffer: { active: { viewportY: number; getLine(y: number): { translateToString(trimRight?: boolean): string } | undefined } };
 }
 interface Fiber { return?: Fiber | null; memoizedState?: unknown }
 interface Hook { memoizedState?: unknown; next?: Hook | null }
@@ -77,10 +75,6 @@ export function findXterm(container: Element): Xterm | undefined {
   }
   return undefined;
 }
-
-/** The screen's rows, top to bottom, from the terminal itself: with WebGL drawing, they are not in the page. */
-export const bufferRows = ({ rows, buffer: { active } }: Pick<Xterm, 'rows' | 'buffer'>): string[] =>
-  Array.from({ length: rows }, (_, row) => active.getLine(active.viewportY + row)?.translateToString(true) ?? '');
 
 /**
  * The theme's background with nothing to paint. The TUI's translucent background is on the terminal's parent, and WebGL paints

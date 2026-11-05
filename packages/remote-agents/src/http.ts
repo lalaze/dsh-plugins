@@ -5,7 +5,6 @@ import type { WorkspacePlacement } from './workspace/access.js';
 import type { RemoteWorkspaces } from './workspace/remote-workspaces.js';
 import { workspaceAction, worktreeAction, type WorkspaceFeatures } from './workspace/http.js';
 import type { Sharing } from './sharing/sharing.js';
-import { BUILTIN_PRESETS, PRESET_ID } from './teams/presets.js';
 
 export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Partial<Pick<RemoteWorkspaces, 'create' | 'shared' | 'publish'>>, features?: WorkspaceFeatures, sharing?: Pick<Sharing, 'catalog' | 'set' | 'status'>) {
   return async (request: Request): Promise<Response> => {
@@ -23,7 +22,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
       const hostId = () => identifier(input.hostId), agentId = () => identifier(input.agentId);
       let result: unknown;
       switch (action) {
-        case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync': case 'tuiSessions': case 'tuiStart': case 'tuiTitle': case 'tuiPrepare': case 'tuiEnd': case 'tuiTeam':
+        case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync': case 'tuiSessions': case 'tuiStart': case 'tuiTitle': case 'tuiEnd':
         case 'workspaceTunnels': case 'addWorkspaceTunnel': case 'startWorkspaceTunnel': case 'stopWorkspaceTunnel': case 'removeWorkspaceTunnel': {
           if (!features) throw new RemoteError('Remote workspaces are unavailable', 501);
           result = await workspaceAction(features, action, input, request.signal); break;
@@ -50,18 +49,6 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'discoverHost': result = await service.discoverHost(hostId()); break;
         case 'setHostProviders': result = await service.setHostProviders(hostId(), input.providers); break;
         case 'chatProjects': result = projects.list(); break;
-        case 'teamPresets': case 'saveTeamPreset': case 'removeTeamPreset': {
-          if (action === 'saveTeamPreset') await service.store.saveTeamPreset(input.preset, input.first === true);
-          else if (action === 'removeTeamPreset') {
-            const id = field(input.presetId, 'preset id', 32).toLowerCase();
-            if (!PRESET_ID.test(id)) throw new RemoteError('Invalid preset id');
-            await service.store.removeTeamPreset(id);
-          }
-          // The editor suggests the models each machine's CLIs list; a preset names them by CLI, not by machine.
-          const hosts = projects.hosts().map(project => ({ id: project.hostId, label: project.label, providers: project.providers.filter(p => p.status === 'ready').map(p => ({ id: p.id, label: p.label,
-            models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { isDefault: true } : {}), ...(m.thinkingOptions ? { thinkingOptions: m.thinkingOptions } : {}), ...(m.defaultThinkingOptionId ? { defaultThinkingOptionId: m.defaultThinkingOptionId } : {}) })) })) }));
-          result = { presets: service.store.teamPresets(), builtin: BUILTIN_PRESETS, hosts }; break;
-        }
         case 'markChatRead': await service.markChatRead(field(input.sessionId, 'session ID', 256)); result = { ok: true }; break;
         case 'chatReadMarks': {
           const ids = Array.isArray(input.sessionIds) ? input.sessionIds.slice(0, 500).map(id => field(id, 'session ID', 256)) : [];

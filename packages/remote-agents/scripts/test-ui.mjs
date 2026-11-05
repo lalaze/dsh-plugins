@@ -25,26 +25,6 @@ const chooseSsh = connection => {
   wait('!document.querySelector(".ra-ssh-menu:popover-open")');
 };
 const image = name => { if (screenshots) browser('screenshot', ...(name.startsWith('sessions-') || name.startsWith('model-groups-') ? [] : ['--full']), `${screenshots}/${name}.png`); };
-/** The settings column of the real app is about 516px in any window, so an editor must fit there, not just in a wide window. */
-const teamChecks = () => {
-  wait('document.querySelector(".ra-teams .ra-team-list .ra-host-row")');
-  evaluate('document.querySelector(".ra-teams").style.width = "516px"');
-  evaluate('[...document.querySelectorAll(".ra-teams button")].find(b => b.textContent === "新建预设" || b.textContent === "New preset").click()');
-  wait('document.querySelector(".ra-team-form .ra-team-member-fields")');
-  const inCard = fields => `[...document.querySelectorAll("${fields}")].every(g => { const c = g.closest(".ra-team-card").getBoundingClientRect(); return [...g.children].every(e => e.getBoundingClientRect().right <= c.right); })`;
-  expect(`document.querySelectorAll(".ra-team-member-fields > .ra-field").length === 5 && ${inCard('.ra-team-member-fields')}`);
-  expect(inCard('.ra-team-task-fields'));
-  // The thinking level is a choice for the default model too, before any model is picked.
-  expect('document.querySelectorAll(".ra-team-member-fields select")[2].options.length > 1');
-  // A member with no task says so, and the order follows the tasks.
-  evaluate('[...document.querySelectorAll(".ra-team-form button")].find(b => /^(添加成员|Add member)$/.test(b.textContent)).click()');
-  wait('document.querySelectorAll(".ra-team-card-member").length === 2');
-  browser('fill', '.ra-team-card-member:nth-of-type(2) input[placeholder="coder"]', 'second');
-  wait('document.querySelector(".ra-team-flow .ra-banner button")');
-  evaluate('document.querySelector(".ra-team-flow .ra-banner button").click()');
-  wait('!document.querySelector(".ra-team-flow .ra-banner") && document.querySelectorAll(".ra-team-flow-tasks > div").length === 2');
-  console.log('PASS: team preset editor fits the settings column, offers thinking levels, and shows who never starts and the run order');
-};
 const workspaceChecks = () => {
   evaluate('window.fixture.setLocale("en")');
   const entries = '.ra-ws-entries', viewing = '.ra-ws-viewer-head .ra-mono', editor = '[aria-label="Remote file contents"]';
@@ -149,8 +129,6 @@ try {
 
   if (process.argv.includes('--workspace-only')) {
     wait('window.fixture'); fixture({ seedSessions: true }); workspaceChecks();
-  } else if (process.argv.includes('--teams-only')) {
-    wait('window.fixture'); fixture({ seedSessions: true }); browser('open', `${base}?teams`); teamChecks();
   } else {
 
   if (!process.argv.includes('--custom-labels-only')) {

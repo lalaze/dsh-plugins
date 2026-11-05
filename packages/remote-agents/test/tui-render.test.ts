@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bufferRows, findXterm, TuiRenderChoices, withoutPaint } from '../src/client/workspace/tui-render.js';
+import { findXterm, TuiRenderChoices, withoutPaint } from '../src/client/workspace/tui-render.js';
 
 /** An element xterm opened in, carrying the fibers React would put on it. */
 function opened(fiber: unknown) {
@@ -31,13 +31,6 @@ test('a terminal far above is not taken for this one', () => {
   let fiber: unknown = { memoizedState: hooks({ current: xterm }), return: null };
   for (let level = 0; level < 6; level += 1) fiber = { memoizedState: null, return: fiber };
   assert.equal(findXterm(opened(fiber).container), undefined);
-});
-
-test('the rows come from the part of the buffer in view', () => {
-  const lines = ['old', '❯ /team go', 'rule'];
-  const rows = bufferRows({ rows: 2, buffer: { active: { viewportY: 1, getLine: y => (lines[y] === undefined ? undefined : { translateToString: () => lines[y] }) } } });
-  assert.deepEqual(rows, ['❯ /team go', 'rule']);
-  assert.deepEqual(bufferRows({ rows: 1, buffer: { active: { viewportY: 9, getLine: () => undefined } } }), ['']);
 });
 
 test('the background keeps its color with nothing to paint', () => {

@@ -5,7 +5,6 @@ import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from '../core/domain.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import type { CaptainBridge } from '../sharing/sharing.js';
 import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type HostConfig, type PermissionAnswer, type SharedTag, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
@@ -49,10 +48,6 @@ export class RemoteAgentsService {
   constructor(readonly store: Store, factory?: BackendFactory, private readonly readSshConfig = readSshConfigHosts) { this.factory = factory ?? (host => new SshBackend(host, store, undefined, () => this.sharing)); }
   async sshConfig() { return this.readSshConfig(); }
   /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
-  /** See Backend.captainBridge. */
-  captainBridge(hostId: string, sessionId: string, signal?: AbortSignal): Promise<CaptainBridge | undefined> {
-    return this.use(hostId, async backend => backend.captainBridge?.(sessionId, signal));
-  }
   async withWorkspace<T>(hostId: string, verify: () => Promise<void>, action: (files: WorkspaceFiles) => Promise<T>): Promise<T> {
     return this.use(hostId, async backend => {
       await verify();

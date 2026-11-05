@@ -8,12 +8,11 @@ import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type Workspac
 import { editorHandler } from './editor-route.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { tuiFilesHandler, workspaceTransferHandler, type WorkspaceFeatures } from './http.js';
-import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceTarget } from './domain.js';
+import { type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceTarget } from './domain.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync, type WorkspaceTagsService } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { endClosedTerminals, installWorkspaceTerminal, type ClosableTerminals } from './terminal.js';
-import { TuiCaptain, type CaptainTerminal, type ScreenLine } from './tui-captain.js';
 import { installTuiActivity } from './tui-activity.js';
 import { TuiFiles } from './tui-files.js';
 import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
@@ -48,7 +47,7 @@ export interface Workspaces {
   /** The verified placement of a DSH conversation, rechecked so a workspace switch during verification yields none. */
   placement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
   workspaces: RemoteWorkspaces;
-  features: WorkspaceFeatures & { tunnels: WorkspaceTunnels; worktrees: WorktreeService; captain: TuiCaptain };
+  features: WorkspaceFeatures & { tunnels: WorkspaceTunnels; worktrees: WorktreeService };
 }
 
 /**
@@ -142,37 +141,11 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
     codexThread: (id, signal) => files.codexThread(id, CODEX_THREAD_NAME, signal),
     codexTitleRecords: (id, thread, signal) => files.codexTitleRecords(id, thread, signal),
-    captainBridge: (id, signal) => files.captainBridge(id, signal),
     endHolder: (id, holder, signal) => files.endHolder(id, holder, signal),
   });
   ctx.connection.fetch.register({ path: '/api/remote-agents/tui-files', methods: ['POST'], requestBody: 'streaming',
     fetch: tuiFilesHandler(new TuiFiles({ isTui: id => tui.list().includes(id), directory: store.directory, attach: (...file) => files.attach(...file) })) });
-  const captain = new TuiCaptain(store, id => tuiTerminal(ctx.get('terminalController') as BrowserTerminals | undefined, id, store.snapshot().tuiDetails?.[id]?.cli === 'codex' ? CODEX_LAUNCHER : CLAUDE_LAUNCHER));
-  ctx.effect(() => () => captain.close());
-  return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui, captain } };
-}
-
-/** The part of DSH's terminal controller that holds a conversation's terminals. It offers no way to type into one from here. */
-interface BrowserTerminals {
-  owners?: Map<string, { terminals: Map<string, {
-    info: { state?: string; shell?: { name?: string } };
-    screen: { rows: number; buffer: { active: { viewportY: number; getLine(y: number): ScreenLine | undefined } } };
-    handle: { write(data: string): Promise<void> };
-    enqueue<T>(work: () => Promise<T>): Promise<T>;
-  }> }>;
-}
-/** A TUI conversation's running terminal: the one started from its CLI's launcher, as the conversation may have others open. */
-function tuiTerminal(controller: BrowserTerminals | undefined, sessionId: string, launcher: string): CaptainTerminal | undefined {
-  for (const terminal of controller?.owners?.get(sessionId)?.terminals.values() ?? []) {
-    if (terminal.info.state !== 'running' || terminal.info.shell?.name?.replace(/\.cmd$/i, '') !== launcher) continue;
-    return {
-      lines: () => {
-        const { active } = terminal.screen.buffer;
-        return Array.from({ length: terminal.screen.rows }, (_, row) => active.getLine(active.viewportY + row)).filter(line => !!line) as ScreenLine[];
-      },
-      write: data => terminal.enqueue(() => terminal.handle.write(data)),
-    };
-  }
+  return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };
 }
 
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */

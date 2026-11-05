@@ -16,8 +16,6 @@ import { Store } from './core/store.js';
 import { createHandler } from './http.js';
 import { installSharingHost } from './sharing/install.js';
 import { Sharing } from './sharing/sharing.js';
-import { installTeamCommand, runTeamCommand, teamUsage, type CommandAgent, type Tools } from './teams/command.js';
-import { CAPTAIN_GUIDE } from './workspace/tui-captain.js';
 import { installWorkspaces } from './workspace/install.js';
 
 declare module '@deepseek-ai/cordis' {
@@ -56,21 +54,8 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing) });
   // Sessions without a DSH conversation, such as delegated tasks, for other plugins on this host: dsh-mobile lists them.
   ctx.provide('remoteAgentsTasks', remoteTasks(service));
-  installChat(ctx, service, projects, { captain: workspace.features.captain, access: workspace.access, files: workspace.features.files, workspaces: workspace.workspaces });
+  installChat(ctx, service, projects, { access: workspace.access, files: workspace.features.files, workspaces: workspace.workspaces });
   installSharingHost(ctx, sharing);
-  // `/team`: one line starts an AgentTeams team whose members are remote CLIs of the conversation's workspace machine.
-  const teams = { presets: () => store.teamPresets(), placement: (cwd: string | undefined, signal: AbortSignal) => workspace.access.resolve(cwd, signal),
-    catalogs: (hostIds: readonly string[]) => projects.hosts().filter(project => hostIds.includes(project.hostId)).map(project => ({ projectId: project.id, hostLabel: project.label, providers: project.providers })) };
-  installTeamCommand(ctx, teams);
-  // A TUI conversation's CLI leads teams through the bridge, or from a /team line typed in its terminal.
-  const startTeam = async (sessionId: string, line: string, signal: AbortSignal) => {
-    const agent = sharing.host.agent?.(sessionId) as CommandAgent | undefined;
-    if (!agent) return { kind: 'error' as const, text: 'This conversation is not open in DSH. Open it there, then retry.' };
-    return runTeamCommand(sharing.host.tools as unknown as Tools | undefined, teams, { agent, rawInput: line, signal });
-  };
-  workspace.features.captain.startTeam = startTeam;
-  sharing.host.tuiConversation = id => workspace.features.captain.isTui(id);
-  sharing.host.team = { start: startTeam, guide: CAPTAIN_GUIDE, usage: () => teamUsage(teams.presets()) };
   // Native conversation routes and settings also work without the delegation tool registry.
   ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { tools: { register(tool: ToolDefinition): unknown } };

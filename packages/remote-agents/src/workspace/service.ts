@@ -81,11 +81,6 @@ export class WorkspaceService {
     const target = await this.target(sessionId, signal);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.claudeTitleRecords(claudeSession));
   }
-  /** The team tools for the CLI of a TUI conversation in this verified workspace. */
-  async captainBridge(sessionId: string, signal: AbortSignal): Promise<{ command: string; args: string[] } | undefined> {
-    const target = await this.target(sessionId, signal);
-    return this.machines.captainBridge?.(target.hostId, sessionId, signal);
-  }
   /** A new Codex thread in the conversation's verified remote directory. */
   async codexThread(sessionId: string, name: string, signal: AbortSignal): Promise<string> {
     const target = await this.target(sessionId, signal);

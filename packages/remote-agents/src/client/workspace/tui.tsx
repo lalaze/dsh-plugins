@@ -9,7 +9,6 @@ import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useF
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { TuiRenderChoices, TuiRenderMenu, useWebglRenderer } from './tui-render.js';
 import { KeptTerminals, type KeptTerminal } from './tui-kept.js';
-import { useTeamLine } from './tui-team.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
 const TERMINAL_TAB = '@deepseek-ai/dsh-client-ui-sidebar-terminal', SHELL_KEY = 'dsh.terminal.shell';
@@ -186,15 +185,12 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   const generation = useSyncExternalStore(kept.subscribe, () => kept.generation(sessionId));
   const root = useRef<HTMLDivElement>(null), seat = useRef<HTMLDivElement>(null);
   useFilePaste(root, picked => services.uploads.add(sessionId, picked));
-  // Typed in the terminal, /team reaches DSH rather than the CLI, which has no such command.
-  useTeamLine(root, async line => { await api('tuiTeam', { sessionId, line }); }, message => services.uploads.report(sessionId, message));
-  const [reports, setReports] = useState(0);
   // The CLI's title comes after the first exchange, and may change later.
   useEffect(() => {
     const controller = new AbortController();
     const sync = () => {
       if (document.visibilityState === 'hidden') return;
-      void api<{ waiting?: number }>('tuiTitle', { sessionId, current: services.title(sessionId) }, controller.signal).then(value => setReports(value.waiting ?? 0), () => {});
+      void api('tuiTitle', { sessionId, current: services.title(sessionId) }, controller.signal).catch(() => {});
     };
     sync();
     const timer = setInterval(sync, TITLE_INTERVAL);
@@ -226,8 +222,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   useEffect(() => {
     if (shell) return;
     const controller = new AbortController();
-    // What the launcher reads to give the CLI the team tools has to be there first. The CLI starts without them on a failure.
-    Promise.all([services.terminals.launchShells(sessionId, controller.signal), api('tuiPrepare', { sessionId }, controller.signal).catch(() => {})]).then(([{ shells: found }]) => {
+    services.terminals.launchShells(sessionId, controller.signal).then(({ shells: found }) => {
       const launcher = found.find(item => item.name.replace(/\.cmd$/i, '') === TUI_LAUNCHERS[cli]);
       if (!launcher) { setError(ui('The {shell} shell is not available in this conversation', { shell: TUI_LAUNCHERS[cli] })); return; }
       shells.set(sessionId, launcher.path);
@@ -242,7 +237,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     <style>{viewStyles}{fileStyles}</style>
     <div ref={seat} style={{ display: 'contents' }} />
     {!ready && <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
-    <TuiFileStatus sessionId={sessionId} uploads={services.uploads} notice={reports ? ui('Team messages waiting for an empty prompt: {count}', { count: reports }) : undefined} />
+    <TuiFileStatus sessionId={sessionId} uploads={services.uploads} />
     <TuiRenderMenu choices={services.render} />
   </div>;
 }
@@ -314,7 +309,7 @@ export function installTuiSessions(ctx: Client): void {
     const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title, kept, shells: new Map(), render: new TuiRenderChoices(),
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
       theme: { getSnapshot: () => themes.getTheme(), subscribe: listener => on.call(scoped, 'theme/change', listener) } };
-    // A restarted DSH has lost what was prepared, such as the forward for team tools.
+    // A restarted DSH may offer other launchers.
     scoped.effect(() => on.call(scoped, 'connection/reset', () => services.shells.clear()));
     slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'remote-agents-tui-terminals' }, () => <TuiTerminalLayer services={services} />));
     scoped.effect(() => {

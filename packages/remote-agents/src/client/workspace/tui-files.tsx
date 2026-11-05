@@ -64,7 +64,7 @@ export function pastesFor(paths: readonly string[], afterImage: boolean, cli: Tu
  * Presses Ctrl plus a letter in the terminal. It is not a trusted key, so the handlers here let it through. Both halves,
  * as xterm ignores committed input-method text until it has seen a key come back up.
  */
-export function pressControl(target: EventTarget | null, letter: string): void {
+function pressControl(target: EventTarget | null, letter: string): void {
   const init = { key: letter, code: `Key${letter.toUpperCase()}`, ctrlKey: true, keyCode: letter.toUpperCase().charCodeAt(0), which: letter.toUpperCase().charCodeAt(0), bubbles: true, cancelable: true };
   target?.dispatchEvent(new KeyboardEvent('keydown', init));
   target?.dispatchEvent(new KeyboardEvent('keyup', init));
@@ -130,8 +130,6 @@ export class TuiUploads {
     this.queues.delete(sessionId);
     this.patch(sessionId, { current: undefined, waiting: 0 });
   }
-  /** Shows a failure from outside the uploads, until dismissed. */
-  report(sessionId: string, error: string): void { this.patch(sessionId, { errors: [...this.status(sessionId).errors, error] }); }
   /** Cancels what is still uploading and clears the errors. Paths already uploaded still reach the terminal. */
   close(sessionId: string): void {
     this.queues.get(sessionId)?.controller.abort();
@@ -264,7 +262,6 @@ const dropStyles = `.ra-tui-drop{position:fixed;inset:0;z-index:1000;display:fle
 .ra-tui-drop-hint{font:var(--dsw-font-s-14,14px/1.5 system-ui);color:var(--dsw-alias-label-tertiary,#888)}`;
 export const fileStyles = `.ra-tui-files{position:absolute;top:12px;right:12px;z-index:2;box-sizing:border-box;display:flex;align-items:flex-start;gap:6px;max-width:min(440px,calc(100% - 24px));padding:6px 6px 6px 12px;border-radius:10px;background:var(--dsw-alias-bg-layer-3,#26272b);color:var(--dsw-alias-label-primary,#eee);box-shadow:var(--dsw-elevation-prominent,0 0 0 1px rgba(127,127,127,.25),0 8px 24px rgba(0,0,0,.3));font-size:13px;line-height:20px}
 .ra-tui-files-text{min-width:0;overflow-wrap:anywhere}
-.ra-tui-files-notice{padding-right:6px}
 .ra-tui-files-error{color:var(--dsw-alias-state-error-primary,#d64545)}
 .ra-tui-files-close{flex:none;width:20px;height:20px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-secondary,#aaa);font-size:15px;line-height:20px;cursor:pointer}
 .ra-tui-files-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}`;
@@ -286,18 +283,14 @@ export function TuiDropTarget({ sessionId, uploads, cli, icon }: { sessionId: st
     </div>, document.body)}
   </div>;
 }
-/**
- * What is uploading, what failed and what is waiting: the terminal itself has nowhere to say so.
- * @param notice - something to say that only ends by itself.
- */
-export function TuiFileStatus({ sessionId, uploads, notice }: { sessionId: string; uploads: TuiUploads; notice?: string }) {
+/** What is uploading and what failed: the terminal itself has nowhere to say so. */
+export function TuiFileStatus({ sessionId, uploads }: { sessionId: string; uploads: TuiUploads }) {
   useLocale();
   const { current, waiting, errors } = useSyncExternalStore(uploads.subscribe, () => uploads.status(sessionId));
-  if (!current && !errors.length) return notice ? <div className="ra-tui-files" role="status"><div className="ra-tui-files-text ra-tui-files-notice">{notice}</div></div> : null;
+  if (!current && !errors.length) return null;
   const close = ui(current ? 'Cancel upload' : 'Dismiss');
   return <div className="ra-tui-files" role={errors.length ? 'alert' : 'status'}>
     <div className="ra-tui-files-text">
-      {notice && <div>{notice}</div>}
       {current && <div>{waiting ? ui('Uploading {name} and {count} more…', { name: current, count: waiting }) : ui('Uploading {name}…', { name: current })}</div>}
       {errors.map((error, index) => <div key={index} className="ra-tui-files-error">{error}</div>)}
     </div>

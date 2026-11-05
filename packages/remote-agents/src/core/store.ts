@@ -3,7 +3,6 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from './domain.js';
-import { MAX_PRESETS, teamPresetInput, type TeamPreset } from '../teams/presets.js';
 
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup { hostId: string; relayId: string }
@@ -22,13 +21,12 @@ export interface Instance { id: string; label: string }
  * `instance` identifies this DSH to others sharing a host's sessions; `seenWorkspaces` lists, per host, the
  * shared remote workspaces already offered to DSH, so one removed from the sidebar is not added again.
  */
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord>; teamPresets?: TeamPreset[]; tuiSessions?: string[]; tuiDetails?: Record<string, TuiDetails> }
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord>; tuiSessions?: string[]; tuiDetails?: Record<string, TuiDetails> }
 /**
  * A TUI conversation's first launch of its CLI, the title the plugin last gave it, and whether DSH has been told the
- * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code. `bridge` is
- * the MCP server that gives its CLI the team tools, and `inbox` the team's messages waiting for the CLI to take them.
+ * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code.
  */
-export interface TuiDetails { cli?: 'codex'; thread?: string; model?: string; effort?: string; title?: string; modelRecorded?: boolean; bridge?: { command: string; args: string[] }; inbox?: string[] }
+export interface TuiDetails { cli?: 'codex'; thread?: string; model?: string; effort?: string; title?: string; modelRecorded?: boolean }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord { names: string[]; at?: string }
 /** A deleted shared session whose deletion has not reached its SSH host yet. */
@@ -101,13 +99,11 @@ export class Store {
       const entry = saved as Partial<TagSyncRecord> | null;
       return Array.isArray(entry?.names) && entry.names.every(name => typeof name === 'string') && (entry.at === undefined || typeof entry.at === 'string');
     })) as Record<string, TagSyncRecord>;
-    if (value.teamPresets !== undefined && !Array.isArray(value.teamPresets)) throw new Error('Invalid saved team presets');
-    const teamPresets = value.teamPresets === undefined ? undefined : (value.teamPresets as unknown[]).map(teamPresetInput);
     this.state = { version: 1, hosts: value.hosts as HostConfig[], tasks: value.tasks as Task[], ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects as ChatProject[] } : {}),
       ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
       ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}),
       ...(value.instance ? { instance: value.instance as Instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces as Record<string, string[]> } : {}),
-      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}), ...(teamPresets ? { teamPresets } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails as Record<string, TuiDetails> } : {}) };
+      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails as Record<string, TuiDetails> } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
@@ -127,26 +123,6 @@ export class Store {
     return structuredClone(this.state.instance!);
   }
   tagSync(key: string): TagSyncRecord | undefined { return structuredClone(this.state.tagSync?.[key]); }
-  /** The saved `/team` presets in order; the first is the one a line without a preset name uses. */
-  teamPresets(): TeamPreset[] { return structuredClone(this.state.teamPresets ?? []); }
-  /** Save a preset in place, or append it; `first` makes it the default. */
-  async saveTeamPreset(raw: unknown, first = false): Promise<TeamPreset[]> {
-    const preset = teamPresetInput(raw);
-    await this.update(state => {
-      const presets = (state.teamPresets ?? []).filter(saved => saved.id !== preset.id), at = (state.teamPresets ?? []).findIndex(saved => saved.id === preset.id);
-      if (presets.length >= MAX_PRESETS) throw new RemoteError(`Up to ${MAX_PRESETS} team presets can be saved`);
-      presets.splice(first ? 0 : at === -1 ? presets.length : at, 0, preset);
-      state.teamPresets = presets;
-    });
-    return this.teamPresets();
-  }
-  async removeTeamPreset(id: string): Promise<TeamPreset[]> {
-    await this.update(state => {
-      const presets = (state.teamPresets ?? []).filter(saved => saved.id !== id);
-      if (presets.length) state.teamPresets = presets; else delete state.teamPresets;
-    });
-    return this.teamPresets();
-  }
   seenWorkspaces(hostId: string): string[] { return [...(this.state.seenWorkspaces?.[hostId] ?? [])]; }
   sharedDeletions(hostId: string): string[] { return (this.state.sharedDeletions ?? []).filter(d => d.hostId === hostId).map(d => d.id); }
   relayCleanups(hostId: string): RelayCleanup[] { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }
