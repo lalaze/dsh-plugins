@@ -5,8 +5,8 @@ import { createHash } from 'node:crypto';
  * `serve <base> <instance>` answers JSON-RPC requests on stdin and reports changed sessions as
  * `changed` notifications. Each session directory holds `manifest.json` (the portable task record),
  * `events.jsonl` (its history, one timeline entry per line, appended in sequence), `head.json` (the
- * history length), `lease.json` (the DSH instance driving the CLI) and `live.json` (that instance's
- * live status). Only the lease holder may append history, so two instances can never interleave a
+ * history length), `lease.json` (the DSH instance driving the CLI), `live.json` (that instance's
+ * live status) and `read.json` (how far anyone has read the history). Only the lease holder may append history, so two instances can never interleave a
  * session's history. A deleted session leaves `deleted.json` so other instances forget it too.
  */
 export const SHARED_SCRIPT = String.raw `
@@ -60,7 +60,7 @@ function state(id) {
   if (deleted) return { id, deleted: true, ...(typeof deleted.withdrawn === 'string' ? { withdrawnBy: deleted.withdrawn } : {}) };
   const manifest = readJson(join(dir, 'manifest.json'));
   if (!manifest) return { id, missing: true };
-  return { id, manifest, lease: leaseOf(readJson(join(dir, 'lease.json'))), live: readJson(join(dir, 'live.json')), head: head(dir, false) };
+  return { id, manifest, lease: leaseOf(readJson(join(dir, 'lease.json'))), live: readJson(join(dir, 'live.json')), read: readJson(join(dir, 'read.json')), head: head(dir, false) };
 }
 const ids = () => { try { return fs.readdirSync(sessions).filter(id => ID.test(id)); } catch { return []; } };
 const workspaces = () => { const list = readJson(workspaceFile); return Array.isArray(list) ? list.filter(w => w && typeof w.path === 'string') : []; };
@@ -191,6 +191,17 @@ const methods = {
     writeJson(join(dir, 'live.json'), { ...live, instance, at: new Date().toISOString() });
     return {};
   },
+  /** How far the history has been read, on any DSH or phone. It only moves forward, and never past the history's end. */
+  markRead: ({ id, seq, label }) => locked(id, () => {
+    const dir = dirOf(id), path = join(dir, 'read.json');
+    if (fs.existsSync(join(dir, 'deleted.json')) || !fs.existsSync(join(dir, 'manifest.json'))) return { deleted: true };
+    if (!Number.isSafeInteger(seq) || seq < 0) throw new Error('Invalid history position');
+    const saved = readJson(path), through = Math.min(seq, head(dir, false).seq);
+    if (Number.isSafeInteger(saved?.seq) && saved.seq >= through) return { read: saved };
+    const next = { seq: through, by: String(label ?? '').slice(0, 100), at: new Date().toISOString() };
+    writeJson(path, next);
+    return { read: next };
+  }),
   /** Other instances forget a deleted session. One withdrawn by the instance that started it stays with that instance. */
   delete: ({ id, label, withdrawn }) => locked(id, () => {
     const dir = dirOf(id);
@@ -233,7 +244,7 @@ const seen = new Map(); let seenWorkspaces;
 function key(dir) {
   const stat = fs.statSync(dir, { bigint: true });
   if (Date.now() - Number(stat.mtimeMs) > 5000) return String(stat.mtimeNs);
-  return [stat.mtimeNs, ...['manifest.json', 'head.json', 'lease.json', 'live.json', 'deleted.json'].map(name => { try { return fs.statSync(join(dir, name), { bigint: true }).ino; } catch { return 0n; } })].join(':');
+  return [stat.mtimeNs, ...['manifest.json', 'head.json', 'lease.json', 'live.json', 'read.json', 'deleted.json'].map(name => { try { return fs.statSync(join(dir, name), { bigint: true }).ino; } catch { return 0n; } })].join(':');
 }
 function scan(report) {
   const names = ids(), changed = [];

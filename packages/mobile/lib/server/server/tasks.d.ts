@@ -70,6 +70,10 @@ export interface RemoteTasksService {
         selectedActionId?: string;
     }): Promise<void>;
     subscribe?(listener: () => void): () => void;
+    /** The conversation's read mark from every DSH and phone sharing it. An older Remote Agents has none of these three. */
+    chatReadMark?(sessionId: string): string | undefined;
+    markChatRead?(sessionId: string): Promise<void>;
+    subscribeChatRead?(listener: (sessionId: string) => void): () => void;
 }
 /** Only a version this hub understands is used; an older Remote Agents has no tasks service at all. */
 export declare const usableTasks: (service: unknown) => RemoteTasksService | undefined;

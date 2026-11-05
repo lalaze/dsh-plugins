@@ -11,6 +11,8 @@ export class RemoteAgentsService {
     sharedWorkspaceListeners = new Set();
     /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
     sharedHistoryListeners = new Set();
+    /** Called with a DSH conversation when how far it has been read changes, here or on another DSH. */
+    chatReadListeners = new Set();
     locks = new Map();
     restoring = new Map();
     catalogListeners = new Set();
@@ -93,6 +95,32 @@ export class RemoteAgentsService {
             if (!this.closed)
                 this.connection(hostId).backend.startSharing?.();
         return Promise.allSettled(tasks.map(task => this.restore(task))).then(() => { });
+    }
+    /**
+     * What marks a conversation as read as far as its shared histories go, by whichever DSH or phone. It changes with each
+     * new read, so a reader can tell a read from one made before a turn it knows of. Nothing while a turn is still unread,
+     * or for a conversation with no shared CLI.
+     */
+    chatReadMark(sessionId) {
+        const marks = [];
+        for (const task of this.store.tasks(t => t.chat?.sessionId === sessionId)) {
+            const position = this.connections.get(task.hostId)?.backend.readPosition?.(task.id);
+            if (!position)
+                continue;
+            if (!position.read || position.read < position.head)
+                return undefined;
+            marks.push(`${task.id}:${position.read}`);
+        }
+        return marks.length ? marks.join() : undefined;
+    }
+    /** The user read a conversation: tell every DSH and phone sharing its CLIs. */
+    async markChatRead(sessionId) {
+        const tasks = this.store.tasks(t => t.chat?.sessionId === sessionId);
+        if (this.closed)
+            return;
+        for (const hostId of new Set(tasks.map(task => task.hostId)))
+            this.connection(hostId).backend.startSharing?.();
+        await Promise.allSettled(tasks.map(task => this.connection(task.hostId).backend.markRead?.(task.id)));
     }
     /** Observe only this conversation's delegated CLIs, including saved/archived history.
      * Recovery attaches existing relays only; it never starts a new CLI or sends a prompt.
@@ -211,6 +239,12 @@ export class RemoteAgentsService {
                 listener(hostId); });
             connection.backend.onSharedHistory?.(taskId => { for (const listener of this.sharedHistoryListeners)
                 listener(taskId); });
+            connection.backend.onSharedRead?.(taskId => {
+                const sessionId = this.store.task(t => t.id === taskId)?.chat?.sessionId;
+                if (sessionId)
+                    for (const listener of this.chatReadListeners)
+                        listener(sessionId);
+            });
         }
         return connection;
     }

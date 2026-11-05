@@ -25,6 +25,8 @@ export interface SharedOwner {
     unload(taskId: string): void;
     /** A history another DSH drives was brought up to date here, or that DSH's live status changed. */
     followed?(taskId: string): void;
+    /** How far a session has been read changed, here or on another DSH. */
+    read?(taskId: string): void;
 }
 /**
  * The sessions of one SSH host, shared with every DSH connected to the same SSH account. The registry
@@ -140,6 +142,13 @@ export declare class SharedSessions {
     private tick;
     /** Live status reported by the DSH driving the session, when that is another one. */
     remoteLive(id: string): Partial<Agent> | undefined;
+    /** How far a session has been read and how far its history goes, in the host's history positions. */
+    readPosition(id: string): {
+        read: number;
+        head: number;
+    } | undefined;
+    /** The user read a session as far as this DSH has it: tell the other DSH instances. Failing only leaves it unread there. */
+    markRead(id: string): Promise<void>;
     /** Whether the other DSH driving a session reports a turn in it. */
     private remoteBusy;
     /** The other DSH driving a session, by name. */

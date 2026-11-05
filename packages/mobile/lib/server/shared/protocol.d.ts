@@ -59,6 +59,8 @@ export interface SessionEntry {
     updatedAt: number;
     /** Latest event sequence this machine knows of. */
     lastSeq: number;
+    /** How far the session was read on another computer or phone sharing it, in this machine's event sequence. */
+    readSeq?: number;
     archived: boolean;
     forkOf?: string;
     parentSessionId?: string;
@@ -367,6 +369,15 @@ export interface Methods {
             cursor: string;
             sessions: SessionEntry[];
             workspaces?: WorkspaceEntry[];
+        };
+    };
+    /** The user read this session on the phone. */
+    'session.read': {
+        args: {
+            sessionId: string;
+        };
+        result: {
+            ok: true;
         };
     };
     'session.events': {

@@ -82,6 +82,7 @@ export class SshBackend {
     /** Sessions shared with other DSH instances on the same SSH account; needs relays. */
     shared;
     historyListeners = new Set();
+    readListeners = new Set();
     constructor(host, store, transport, sharing = () => undefined) {
         this.host = host;
         this.store = store;
@@ -108,6 +109,12 @@ export class SshBackend {
                     }
                     catch { /* A listener must not stop the registry. */ }
                 } },
+                read: id => { for (const listener of this.readListeners) {
+                    try {
+                        listener(id);
+                    }
+                    catch { /* A listener must not stop the registry. */ }
+                } },
             });
     }
     startSharing() { if (!this.closed)
@@ -117,6 +124,12 @@ export class SshBackend {
     onSharedHistory(listener) {
         this.historyListeners.add(listener);
         return () => { this.historyListeners.delete(listener); };
+    }
+    readPosition(taskId) { return this.shared?.readPosition(taskId); }
+    async markRead(taskId) { await this.shared?.markRead(taskId); }
+    onSharedRead(listener) {
+        this.readListeners.add(listener);
+        return () => { this.readListeners.delete(listener); };
     }
     sender(instance, label) { return this.shared?.sender(instance, label) ?? { name: label }; }
     async sharedWorkspaces(timeout) { if (!this.shared)

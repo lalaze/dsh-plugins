@@ -334,7 +334,10 @@ export class SharedSessions {
         }
         if (!session.manifest)
             return;
+        const readBefore = this.sessions.get(id)?.read?.seq;
         this.sessions.set(id, session);
+        if (session.read?.seq !== readBefore)
+            this.owner.read?.(id);
         const mine = session.lease?.instance === this.me;
         if (mine)
             this.held.add(id);
@@ -719,6 +722,28 @@ export class SharedSessions {
         const { instance: _instance, ...live } = session.live;
         delete live.at;
         return structuredClone(live);
+    }
+    /** How far a session has been read and how far its history goes, in the host's history positions. */
+    readPosition(id) {
+        const session = this.sessions.get(id);
+        return session?.head ? { read: session.read?.seq ?? 0, head: session.head.seq } : undefined;
+    }
+    /** The user read a session as far as this DSH has it: tell the other DSH instances. Failing only leaves it unread there. */
+    async markRead(id) {
+        if (!await this.ready(5000))
+            return;
+        // What this DSH recorded while driving the session has to be on the host to count as read there.
+        if (this.held.has(id))
+            await this.serial(id, () => this.push(id)).catch(() => { });
+        const session = this.sessions.get(id);
+        if (!session?.head || (session.read?.seq ?? 0) >= session.head.seq)
+            return;
+        const { read } = await this.call('markRead', { id, seq: session.head.seq, label: this.instance?.label ?? '' }, 5000);
+        const current = this.sessions.get(id);
+        if (!current || !read || (current.read?.seq ?? 0) >= read.seq)
+            return;
+        current.read = read;
+        this.owner.read?.(id);
     }
     /** Whether the other DSH driving a session reports a turn in it. */
     remoteBusy(id) {

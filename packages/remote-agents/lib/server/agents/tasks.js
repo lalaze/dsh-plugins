@@ -22,5 +22,11 @@ export function remoteTasks(service) {
             service.store.changeListeners.add(listener);
             return () => { service.store.changeListeners.delete(listener); };
         },
+        chatReadMark: sessionId => service.chatReadMark(sessionId),
+        markChatRead: sessionId => service.markChatRead(sessionId),
+        subscribeChatRead: listener => {
+            service.chatReadListeners.add(listener);
+            return () => { service.chatReadListeners.delete(listener); };
+        },
     };
 }

@@ -114,6 +114,15 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     result = { presets: service.store.teamPresets(), builtin: BUILTIN_PRESETS, hosts };
                     break;
                 }
+                case 'markChatRead':
+                    await service.markChatRead(field(input.sessionId, 'session ID', 256));
+                    result = { ok: true };
+                    break;
+                case 'chatReadMarks': {
+                    const ids = Array.isArray(input.sessionIds) ? input.sessionIds.slice(0, 500).map(id => field(id, 'session ID', 256)) : [];
+                    result = { marks: Object.fromEntries(ids.flatMap(id => { const mark = service.chatReadMark(id); return mark ? [[id, mark]] : []; })) };
+                    break;
+                }
                 case 'chatSpeed':
                     result = projects.speed(field(input.sessionId, 'session ID', 256), field(input.model, 'model', 1000));
                     break;

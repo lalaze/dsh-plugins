@@ -26,5 +26,11 @@ export interface RemoteAgentsTasks {
     respond(id: string, requestId: string, answer: PermissionAnswer): Promise<void>;
     /** Called after a task is added, changed or removed. Progress within a turn is read with `detail`. */
     subscribe(listener: () => void): () => void;
+    /** What marks a DSH conversation as read as far as it goes, on any DSH or phone; see `RemoteAgentsService.chatReadMark`. */
+    chatReadMark(sessionId: string): string | undefined;
+    /** The user read a DSH conversation here: tell the others sharing it. */
+    markChatRead(sessionId: string): Promise<void>;
+    /** Called with a DSH conversation when how far it has been read changes. */
+    subscribeChatRead(listener: (sessionId: string) => void): () => void;
 }
 export declare function remoteTasks(service: RemoteAgentsService): RemoteAgentsTasks;

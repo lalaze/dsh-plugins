@@ -41,6 +41,8 @@ export declare class RemoteAgentsService {
     readonly sharedWorkspaceListeners: Set<(hostId: string) => void>;
     /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
     readonly sharedHistoryListeners: Set<(taskId: string) => void>;
+    /** Called with a DSH conversation when how far it has been read changes, here or on another DSH. */
+    readonly chatReadListeners: Set<(sessionId: string) => void>;
     private readonly locks;
     private readonly restoring;
     private readonly catalogListeners;
@@ -68,6 +70,14 @@ export declare class RemoteAgentsService {
     resume(hostId?: string): Promise<void>;
     /** Reattach only the remote tasks behind one open DSH conversation; unrelated hosts stay offline. */
     resumeConversation(sessionId: string): Promise<void>;
+    /**
+     * What marks a conversation as read as far as its shared histories go, by whichever DSH or phone. It changes with each
+     * new read, so a reader can tell a read from one made before a turn it knows of. Nothing while a turn is still unread,
+     * or for a conversation with no shared CLI.
+     */
+    chatReadMark(sessionId: string): string | undefined;
+    /** The user read a conversation: tell every DSH and phone sharing its CLIs. */
+    markChatRead(sessionId: string): Promise<void>;
     /** Observe only this conversation's delegated CLIs, including saved/archived history.
      * Recovery attaches existing relays only; it never starts a new CLI or sends a prompt.
      * Do not use snapshot/resume here: opening one conversation must not connect unrelated hosts.

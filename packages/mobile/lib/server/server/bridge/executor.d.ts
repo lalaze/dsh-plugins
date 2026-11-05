@@ -23,6 +23,11 @@ export interface ExecutorData {
         at: number;
         result: CommandResult;
     }>;
+    /** Reads made elsewhere taken into account: the read mark and how far this machine's session went at that moment. */
+    reads?: Record<string, {
+        mark: string;
+        seq: number;
+    }>;
 }
 /** Raise when the facts read from a session log change, so every session is read again. */
 export declare const EXECUTOR_DATA_VERSION = 2;
@@ -37,6 +42,8 @@ export interface ExecutorOptions {
     approvalPeers(): boolean;
     /** Whether a phone is connected, so running sessions are worth reading often. */
     watched?(): boolean;
+    /** What marks a session as read as far as it goes on another computer or phone, if it is. */
+    readMark?(sessionId: string): string | undefined;
     log?(message: string): void;
 }
 export declare class Executor {

@@ -163,6 +163,7 @@ export class Executor {
             this.put({ ...entry, removed: true, state: 'idle', pending: [] });
             changed = true;
             delete this.options.data.sessions[entry.sessionId];
+            delete this.options.data.reads?.[entry.sessionId];
         }
         if (changed) {
             this.options.save();
@@ -196,8 +197,16 @@ export class Executor {
             ...(info.approvals ?? []).filter(a => a.kind === 'approval' && ![...this.approvals.values()].some(own => own.sessionId === id && own.callId !== undefined && own.callId === a.callId)),
             ...(this.questions.get(id) ?? []),
         ];
+        const lastSeq = Math.max(info.lastSeq, hint), mark = this.options.readMark?.(id);
+        // A read counts once, at what the session shows when it is not running: later output here, also a turn of a DSH model
+        // the shared history knows nothing of, is new. A turn followed from elsewhere is read when it has fully arrived.
+        const reads = (this.options.data.reads ??= {});
+        const newRead = mark !== undefined && !summary.running && reads[id]?.mark !== mark;
+        if (newRead)
+            reads[id] = { mark, seq: lastSeq };
         const entry = {
-            sessionId: id, updatedAt: summary.updatedAt, lastSeq: Math.max(info.lastSeq, hint), archived,
+            sessionId: id, updatedAt: summary.updatedAt, lastSeq, archived,
+            ...(reads[id] ? { readSeq: reads[id].seq } : {}),
             state: pending.length > 0 && summary.running ? 'waiting' : summary.running ? 'running' : 'idle',
             pending: summary.running ? pending : [],
             ...(workspaceId ? { workspaceId } : {}),
@@ -210,7 +219,7 @@ export class Executor {
             ...(typeof permission === 'string' && permission ? { permission } : {}),
             ...(summary.blank ? { blank: true } : {}),
         };
-        return this.put(entry);
+        return this.put(entry) || newRead;
     }
     /** Store an entry; bump its revision when it differs. */
     put(entry) {

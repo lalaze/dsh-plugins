@@ -55,6 +55,15 @@ export interface Backend {
      * up to date here, or one whose CLI ran a turn by itself; returns the unsubscribe function.
      */
     onSharedHistory?(listener: (taskId: string) => void): () => void;
+    /** How far a shared session has been read and how far its history goes; nothing when it is not shared. */
+    readPosition?(taskId: string): {
+        read: number;
+        head: number;
+    } | undefined;
+    /** The user read a shared session as far as this DSH has it. */
+    markRead?(taskId: string): Promise<void>;
+    /** Called with a task whose read position changed, here or on another DSH; returns the unsubscribe function. */
+    onSharedRead?(listener: (taskId: string) => void): () => void;
     /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
     sender?(instance: string, label: string): {
         self: true;
@@ -139,11 +148,18 @@ export declare class SshBackend implements Backend {
     /** Sessions shared with other DSH instances on the same SSH account; needs relays. */
     private readonly shared?;
     private readonly historyListeners;
+    private readonly readListeners;
     constructor(host: HostConfig, store: Store, transport?: SshTransport, sharing?: () => LaunchSharing | undefined);
     startSharing(): void;
     sharingError(): string | undefined;
     controller(taskId: string): string | undefined;
     onSharedHistory(listener: (taskId: string) => void): () => void;
+    readPosition(taskId: string): {
+        read: number;
+        head: number;
+    } | undefined;
+    markRead(taskId: string): Promise<void>;
+    onSharedRead(listener: (taskId: string) => void): () => void;
     sender(instance: string, label: string): {
         self: true;
     } | {

@@ -52,6 +52,7 @@ export class Hub {
             changed: () => this.notifyChanged(),
             approvalPeers: () => Object.values(store.state.phones).some(phone => phone.grants.control && (this.online(phone.id) || phone.push !== undefined)),
             watched: () => this.connections.size > 0,
+            readMark: sessionId => usableTasks(options.tasks?.())?.chatReadMark?.(sessionId),
             log: options.log,
         });
     }
@@ -119,7 +120,7 @@ export class Hub {
      * before telling anyone; it is also checked while a phone is connected, as a finished turn saves nothing.
      */
     followTasks() {
-        let subscribed;
+        let subscribed, subscribedRead;
         const schedule = (delay) => {
             // A change only brings the next check closer: changes saved while a reply streams must not keep postponing it.
             const due = Date.now() + delay;
@@ -139,6 +140,7 @@ export class Hub {
                 return;
             }
             subscribed ??= service.subscribe?.(() => schedule(1000));
+            subscribedRead ??= service.subscribeChatRead?.(() => this.executor.schedule());
             if (this.connections.size === 0)
                 this.tasksSeen = undefined;
             else {
@@ -154,7 +156,7 @@ export class Hub {
             schedule(TASKS_CHECK_MS);
         };
         schedule(0);
-        this.stops.push(() => { clearTimeout(this.tasksTimer); subscribed?.(); });
+        this.stops.push(() => { clearTimeout(this.tasksTimer); subscribed?.(); subscribedRead?.(); });
     }
     tasks() {
         const service = usableTasks(this.options.tasks?.());
@@ -424,6 +426,9 @@ export class Hub {
             throw new CommandError('This phone may not read this machine’s sessions', 403);
         switch (method) {
             case 'sessions.changes': return this.executor.changes(typeof input.since === 'string' ? input.since : undefined);
+            case 'session.read':
+                await usableTasks(this.options.tasks?.())?.markChatRead?.(String(input.sessionId));
+                return { ok: true };
             case 'session.events': return this.executor.events(String(input.sessionId), {
                 ...(typeof input.after === 'number' ? { after: input.after } : {}), ...(typeof input.before === 'number' ? { before: input.before } : {}),
                 limit: typeof input.limit === 'number' ? input.limit : 100,
