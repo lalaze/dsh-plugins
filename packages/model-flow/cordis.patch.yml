@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-model-flow
+      name: dsh-model-flow
+      config: {}

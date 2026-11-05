@@ -9,6 +9,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.md) | Model icons and status badges on sidebar sessions, with the exact model in the hover card |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.md) | Collapsible provider groups in DSH's model picker, remembered in each browser |
+| `dsh-model-flow` | [packages/model-flow](packages/model-flow/README.md) | One command: one model plans, one implements, one reviews, and rejected work goes back |
 | `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.md) | Edit code and text files of local workspaces in VS Code's editor (Monaco), plus Markdown and SVG previews |
 | `dsh-git-view` | [packages/git-view](packages/git-view/README.md) | IDE-style Git panel ported from dsh-git-panel (overview with branch tree and commit graph, changes with commit and amend, file browser, AI commit messages, input-bar marker) for local and remote workspaces, with Monaco diffs and conflict resolution; remote support requires Remote Agents 0.2.62 or newer |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.md) | Colored workspace tags, with sidebar grouping by tag or by running status |
@@ -87,6 +88,7 @@ packages/
   remote-agents/        # dsh-remote-agents: source, tests, manifest, docs
   session-models/       # Model icons and status badges on sidebar sessions
   model-groups/         # Collapsible provider groups in the model picker
+  model-flow/           # /flow: plan, implement, review, send back
   file-editor/          # Code editor for local workspace files
   git-view/             # Git sidebar, diff editor and conflicts for local/remote workspaces
   file-view/            # Private shared code/diff editors and file previews
