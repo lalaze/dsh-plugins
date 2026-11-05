@@ -14,6 +14,7 @@ import type { CatalogSlots } from './sessions/delegated-model.js';
 import { ModelLabel } from './composer/model-label.js';
 import { installCustomModelLabels } from './composer/custom-model-label.js';
 import { installWorkspaceModels, type WorkspaceClient } from './composer/workspace-models.js';
+import { installToolStatusStyles } from './sessions/tool-status.js';
 import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './composer/usage.js';
 import { FastToggle } from './composer/fast.js';
 import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDirectories } from './workspace/flow.js';
@@ -90,6 +91,7 @@ export function apply(ctx: Client): void {
   ctx.slots.inject('conversation.input.model.label', () => ctx.slots.register({ name: 'conversation.input.model.label', id: 'remote-agents-model-label', priority: 50 }, ModelLabel));
   ctx.effect(installCustomModelLabels);
   ctx.effect(installUsageStyles);
+  ctx.effect(installToolStatusStyles);
   installWorkspaceSidebar(ctx);
   installTuiSessions(ctx);
   installTuiActivity(ctx);

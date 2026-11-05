@@ -15,6 +15,9 @@ const blockText = (content: unknown): string => Array.isArray(content)
   ? content.map(block => (asDict(block).type === 'text' ? String(asDict(block).text ?? '') : '')).filter(Boolean).join('\n')
   : typeof content === 'string' ? content : ''
 
+/** How remote-agents marks the line naming the tool a CLI is running. It is a status, not a link to open. */
+const TOOL_STATUS_URL = 'https://remote-agents.invalid/running-tool'
+
 /** Text of a node tree react-markdown rendered, for copying a code block. */
 const nodeText = (node: ReactNode): string => {
   if (typeof node === 'string' || typeof node === 'number') return String(node)
@@ -25,7 +28,9 @@ const nodeText = (node: ReactNode): string => {
 
 export const Text = memo(function Text({ text }: { text: string }) {
   return <div className="md"><Markdown remarkPlugins={[remarkGfm]} components={{
-    a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />,
+    a: ({ node: _node, ...props }) => props.href === TOOL_STATUS_URL
+      ? <span className="tool-status">{icons.sparkle}<span className="ellipsis">{props.children}</span></span>
+      : <a {...props} target="_blank" rel="noreferrer" />,
     pre: ({ node: _node, children, ...props }) => {
       const language = /language-([\w-]+)/.exec(String((React.isValidElement(children) ? (children.props as { className?: string }).className : '') ?? ''))?.[1]
       return <div className="code-block">

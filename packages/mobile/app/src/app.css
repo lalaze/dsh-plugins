@@ -231,6 +231,8 @@ p { margin: 0 0 12px; }
 .sk-tool { height: 38px; border-radius: 12px; }
 
 /* Tool calls */
+.tool-status { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; color: var(--fg-muted); }
+.tool-status svg { flex: none; color: var(--fg-faint); }
 .tool-group { border: 1px solid var(--border); border-radius: 12px; background: var(--surface1); overflow: hidden; }
 .tool-line, .tool-summary { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 7px 12px; border: 0; background: transparent; text-align: left; font-size: 13.5px; color: var(--fg-muted); }
 .tool-line:active, .tool-summary:active { background: var(--surface2); }
