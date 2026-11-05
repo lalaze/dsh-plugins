@@ -12,7 +12,7 @@ import { type TeamPreset } from './presets.js';
 export declare const TEAM_COMMAND = "team";
 export declare const CREATE_TOOL = "agent_teams_create";
 export declare const TEAM_PLUGIN = "@nanmicoder/dsh-agent-teams";
-export declare const TEAM_HINT = "[preset] [member=cli/model] [--plan] <goal>";
+export declare const TEAM_HINT = "[preset] [member=cli/model@thinking] [--plan] <goal>";
 export interface CommandAgent {
     id: string;
     session: Pick<Session, 'header'>;

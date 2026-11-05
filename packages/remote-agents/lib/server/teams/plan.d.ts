@@ -1,5 +1,5 @@
 import { type Provider } from '../core/domain.js';
-import type { MemberSpec, TeamPreset } from './presets.js';
+import { type MemberSpec, type TeamPreset } from './presets.js';
 /** The CLIs one machine of the conversation's workspace offers, as the model picker lists them. */
 export interface Catalog {
     projectId: string;

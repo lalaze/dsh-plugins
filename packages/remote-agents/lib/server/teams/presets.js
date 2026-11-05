@@ -14,6 +14,47 @@ export const BUILTIN_PRESETS = [
             { id: 'review', subject: 'Review: {goal}', description: REVIEW, assignee: 'reviewer', dependencies: ['work'] },
         ] },
 ];
+/** Names of models and thinking levels match whatever their case. */
+export const sameName = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'accent' }) === 0;
+/** The models a name can mean: the one it names exactly, else every model whose id or label contains it. */
+export function modelsNamed(models, wanted) {
+    const exact = models.find(model => model.id === wanted) ?? models.find(model => sameName(model.id, wanted) || sameName(model.label, wanted));
+    if (exact)
+        return [exact];
+    const lower = wanted.toLowerCase();
+    return models.filter(model => model.id.toLowerCase().includes(lower) || model.label.toLowerCase().includes(lower));
+}
+/**
+ * The order a preset's tasks run in, as AgentTeams' scheduler gives work out: a task waits for its dependencies, and a
+ * member does one task at a time, in list order. Tasks in one step can run together. `stuck` tasks wait on each other.
+ */
+export function taskOrder(tasks) {
+    const stepOf = new Map(), lastOf = new Map(), steps = [];
+    const known = new Set(tasks.map(task => task.id));
+    let waiting = [...tasks];
+    for (let placed = true; placed && waiting.length;) {
+        placed = false;
+        for (const task of [...waiting]) {
+            const dependencies = (task.dependencies ?? []).filter(id => known.has(id));
+            if (!dependencies.every(id => stepOf.has(id)))
+                continue;
+            const step = Math.max(0, ...dependencies.map(id => stepOf.get(id) + 1), task.assignee ? lastOf.get(task.assignee) ?? 0 : 0);
+            stepOf.set(task.id, step);
+            if (task.assignee)
+                lastOf.set(task.assignee, step + 1);
+            (steps[step] ??= []).push(task);
+            waiting = waiting.filter(other => other !== task);
+            placed = true;
+        }
+    }
+    return { steps: steps.filter(Boolean), stuck: waiting };
+}
+/** Members the scheduler never starts: nothing is assigned to them and no task is open to any member. */
+export function membersWithoutWork(preset) {
+    if (preset.tasks.some(task => !task.assignee))
+        return [];
+    return preset.members.filter(member => member.name && !preset.tasks.some(task => task.assignee === member.name));
+}
 /** Saved presets first, then the built-ins they do not replace. */
 export function allPresets(saved) {
     return [...saved, ...BUILTIN_PRESETS.filter(preset => !saved.some(own => own.id === preset.id))];

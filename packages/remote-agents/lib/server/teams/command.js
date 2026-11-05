@@ -11,7 +11,7 @@ import { allPresets, choosePreset, parseTeamCommand } from './presets.js';
 export const TEAM_COMMAND = 'team';
 export const CREATE_TOOL = 'agent_teams_create';
 export const TEAM_PLUGIN = '@nanmicoder/dsh-agent-teams';
-export const TEAM_HINT = '[preset] [member=cli/model] [--plan] <goal>';
+export const TEAM_HINT = '[preset] [member=cli/model@thinking] [--plan] <goal>';
 export function installTeamCommand(ctx, deps) {
     // Both registries are optional host services: a profile without slash commands keeps the rest of the plugin.
     ctx.inject(['commands', 'tools'], scoped => {

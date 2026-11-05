@@ -44,6 +44,23 @@ export declare const MAX_PRESETS = 32, MAX_MEMBERS = 8, MAX_TASKS = 32;
 export declare const CAPTAIN_SPEC = "captain";
 /** Presets every installation has; a saved preset with the same id replaces it. */
 export declare const BUILTIN_PRESETS: readonly TeamPreset[];
+/** Names of models and thinking levels match whatever their case. */
+export declare const sameName: (a: string, b: string) => boolean;
+/** The models a name can mean: the one it names exactly, else every model whose id or label contains it. */
+export declare function modelsNamed<M extends {
+    id: string;
+    label: string;
+}>(models: readonly M[], wanted: string): M[];
+/**
+ * The order a preset's tasks run in, as AgentTeams' scheduler gives work out: a task waits for its dependencies, and a
+ * member does one task at a time, in list order. Tasks in one step can run together. `stuck` tasks wait on each other.
+ */
+export declare function taskOrder(tasks: readonly PresetTask[]): {
+    steps: PresetTask[][];
+    stuck: PresetTask[];
+};
+/** Members the scheduler never starts: nothing is assigned to them and no task is open to any member. */
+export declare function membersWithoutWork(preset: Pick<TeamPreset, 'members' | 'tasks'>): PresetMember[];
 /** Saved presets first, then the built-ins they do not replace. */
 export declare function allPresets(saved: readonly TeamPreset[]): TeamPreset[];
 /** The CLI id for a user-typed name: `Codex`, `codex` and `claude` all resolve. */
