@@ -662,6 +662,19 @@ export class RemoteAgentsService {
       return this.summary(id);
     });
   }
+  /**
+   * Ends an idle CLI's process on its host; the session itself stays and its next message resumes it. A finished
+   * subagent would otherwise hold one of the account's relay slots until someone archives it.
+   */
+  async release(id: string): Promise<void> {
+    return this.serial(id, async () => {
+      const task = this.task(id);
+      if (!task.agentId || task.native?.resumable === false) return;
+      const live = await this.live(task);
+      if (live && busy(this.summarize(task, live))) return;
+      await this.connection(task.hostId).backend.detach(task);
+    });
+  }
   async delete(id: string): Promise<void> {
     return this.serial(id, async () => {
       const task = this.task(id);

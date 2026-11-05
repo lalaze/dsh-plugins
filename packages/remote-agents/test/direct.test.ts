@@ -699,6 +699,18 @@ test('mode changes release the idle session, and the next message resumes it wit
   assert.equal(ssh.admissions.length, 2);
 });
 
+test('releasing an idle session ends its CLI and the next message resumes it; a busy one is left alone', async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const agent = await service.create(request), cli = ssh.live;
+  await service.release(agent.id);
+  assert.equal(cli.stopped, false, 'it is still working on its first prompt');
+  cli.finish(); await tick();
+  await service.release(agent.id);
+  assert.equal(cli.stopped, true);
+  await service.send(agent.id, { id: randomUUID(), text: 'One more thing' });
+  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--resume') + 1], cli.argv[cli.argv.indexOf('--session-id') + 1]);
+});
+
 test('an unattended Claude task with workspace write runs commands in Claude Code\'s sandbox; others do not', async t => {
   const { service, ssh, request } = await fixture(t, 'claude');
   const settings = () => ssh.live.argv.includes('--settings') ? JSON.parse(ssh.live.argv[ssh.live.argv.indexOf('--settings') + 1]) : undefined;

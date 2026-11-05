@@ -76,6 +76,13 @@ export function installChat(ctx: Context, service: RemoteAgentsService, projects
     // Turns another DSH or Open sessions ran in its CLI session meanwhile are shown then too.
     const wake = (agent: SyncAgent) => { void service.resumeConversation(agent.session.id).then(() => adapter.sync(agent) || adapter.catchUp(agent)).catch(() => {}); };
     scoped.on('agent/created', ({ agent }) => { wake(agent); return undefined; }, { global: true });
+    // A subagent's agent goes away when its work is done. Its CLI on the host would stay running, one per subagent, up to
+    // the account's relay limit, and then no CLI could start. A later message to the subagent resumes the CLI.
+    scoped.on('agent/disposed' as never, (({ agent }: { agent: { id: string; session?: Session } }) => {
+      if (!agent.session?.header.parentSession) return;
+      const task = service.store.task(t => t.chat?.sessionId === agent.id);
+      if (task) void service.release(task.id).catch(error => loggerOf(scoped)?.warn?.(`remote-agents: could not release ${task.id}: ${String(error)}`));
+    }) as never, { global: true });
     for (const agent of host.agents.list?.() ?? []) wake(agent);
     // A conversation shows a turn another DSH runs in its CLI session as it goes, and one the CLI ran by itself once it
     // ends. The history changes many times during a turn: look at most once a second. A conversation without an agent,
