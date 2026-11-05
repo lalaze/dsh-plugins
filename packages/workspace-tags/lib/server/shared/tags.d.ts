@@ -16,10 +16,14 @@ export interface WorkspaceTag {
     name: string;
     color: TagColor;
 }
-/** Tags in creation order, and each Workspace's tag ids in the order they were added. */
+/**
+ * Tags, and each Workspace's tag ids in the order they were added. Tags are in creation order and show by
+ * name until the user drags one; then `manualOrder` is set and they show as stored, new tags last.
+ */
 export interface TagState {
     tags: WorkspaceTag[];
     assignments: Record<string, string[]>;
+    manualOrder?: true;
 }
 export type TagOperation = {
     op: 'create';
@@ -46,12 +50,19 @@ export type TagOperation = {
  | {
     op: 'forget';
     workspaceId: string;
+}
+/** Show tags in this order. Another client's newer tags stay, after these, and ids of tags it deleted are skipped. */
+ | {
+    op: 'order';
+    ids: string[];
 };
 /** A rejected operation; its message is shown to the user. */
 export declare class TagError extends Error {
     name: string;
 }
 export declare const emptyTagState: () => TagState;
+/** Tags as every list shows them: in the user's order once there is one, else by name. */
+export declare const orderedTags: (state: Pick<TagState, "tags" | "manualOrder">) => WorkspaceTag[];
 /** Trim and check a tag name; names are unique ignoring case. */
 export declare function tagName(value: unknown, tags: readonly WorkspaceTag[], self?: string): string;
 /**

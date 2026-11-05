@@ -18,6 +18,9 @@ export class TagError extends Error {
     name = 'TagError';
 }
 export const emptyTagState = () => ({ tags: [], assignments: {} });
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+/** Tags as every list shows them: in the user's order once there is one, else by name. */
+export const orderedTags = (state) => state.manualOrder === true ? [...state.tags] : [...state.tags].sort((a, b) => collator.compare(a.name, b.name));
 const isColor = (value) => TAG_COLORS.includes(value);
 const nameKey = (name) => name.normalize('NFC').toLowerCase();
 const workspaceId = (value) => {
@@ -46,6 +49,7 @@ export function tagName(value, tags, self) {
 export function applyTagOperation(state, operation, newId) {
     const tags = state.tags.map(tag => ({ ...tag }));
     const assignments = Object.fromEntries(Object.entries(state.assignments).map(([id, ids]) => [id, [...ids]]));
+    const order = state.manualOrder === true ? { manualOrder: true } : {};
     const find = (id) => {
         const tag = tags.find(candidate => candidate.id === id);
         if (!tag)
@@ -64,7 +68,7 @@ export function applyTagOperation(state, operation, newId) {
                 const target = workspaceId(operation.assignTo);
                 assignments[target] = [...assignments[target] ?? [], tag.id];
             }
-            return { state: { tags, assignments }, tag };
+            return { state: { tags, assignments, ...order }, tag };
         }
         case 'update': {
             const tag = find(operation.id);
@@ -75,7 +79,7 @@ export function applyTagOperation(state, operation, newId) {
                     throw new TagError('Choose a tag color');
                 tag.color = operation.color;
             }
-            return { state: { tags, assignments } };
+            return { state: { tags, assignments, ...order } };
         }
         case 'delete': {
             const tag = find(operation.id);
@@ -86,7 +90,7 @@ export function applyTagOperation(state, operation, newId) {
                 else
                     delete assignments[id];
             }
-            return { state: { tags: tags.filter(candidate => candidate !== tag), assignments } };
+            return { state: { tags: tags.filter(candidate => candidate !== tag), assignments, ...order } };
         }
         case 'assign': {
             const target = workspaceId(operation.workspaceId);
@@ -97,11 +101,18 @@ export function applyTagOperation(state, operation, newId) {
                 assignments[target] = next;
             else
                 delete assignments[target];
-            return { state: { tags, assignments } };
+            return { state: { tags, assignments, ...order } };
         }
         case 'forget': {
             delete assignments[workspaceId(operation.workspaceId)];
-            return { state: { tags, assignments } };
+            return { state: { tags, assignments, ...order } };
+        }
+        case 'order': {
+            if (!Array.isArray(operation.ids))
+                throw new TagError('Unknown tag operation');
+            const listed = new Set(operation.ids);
+            const first = [...listed].flatMap(id => tags.find(tag => tag.id === id) ?? []);
+            return { state: { tags: [...first, ...tags.filter(tag => !listed.has(tag.id))], assignments, manualOrder: true } };
         }
         default:
             throw new TagError('Unknown tag operation');
@@ -135,5 +146,5 @@ export function parseTagState(value) {
         if (valid.length > 0)
             assignments[id] = valid;
     }
-    return { tags, assignments };
+    return { tags, assignments, ...record.manualOrder === true ? { manualOrder: true } : {} };
 }

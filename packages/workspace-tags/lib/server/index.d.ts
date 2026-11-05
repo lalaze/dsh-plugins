@@ -15,7 +15,7 @@ import { type TagState } from './shared/tags.js';
 export interface WorkspaceTagsService {
     readonly version: 1;
     snapshot(): TagState;
-    /** Save a merged state; invalid entries are dropped. Open sidebars pick it up on their next refresh. */
+    /** Save a merged state; invalid entries are dropped and the user's tag order stays on. Open sidebars pick it up on their next refresh. */
     replace(state: TagState): Promise<TagState>;
     /** Called after each saved change, including those made through {@link replace}. */
     subscribe(listener: (state: TagState) => void): () => void;

@@ -54,9 +54,10 @@ export class TagStore {
     /**
      * Save a whole state at once, for host plugins that merge tags from elsewhere. The state is
      * normalized like a stored file, so invalid tags and assignments are dropped rather than saved.
+     * Plugins that only know tags and assignments send no `manualOrder`, which must not undo the user's order.
      */
     replace(next) {
-        return this.write(() => ({ state: parseTagState(next) }));
+        return this.write(state => ({ state: parseTagState({ manualOrder: state.manualOrder, ...next }) }));
     }
     write(change) {
         const task = this.queue.then(async () => {
