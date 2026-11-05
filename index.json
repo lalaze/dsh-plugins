@@ -27,12 +27,12 @@
       },
       "versions": [
         {
-          "version": "0.2.101",
-          "publishTimestamp": 1793877848,
+          "version": "0.2.102",
+          "publishTimestamp": 1793893981,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "114d3047eb6d6cf2e2d3c504babe23ae572f9116",
+            "commit": "1dcee28be3cfeaa4bf0d041821971f46244c341f",
             "path": "packages/remote-agents"
           },
           "engines": {
@@ -110,6 +110,45 @@
           },
           "engines": {
             "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-model-flow",
+      "title": {
+        "en": "DSH Model Flow",
+        "zh": "DSH 模型分工"
+      },
+      "description": {
+        "en": "One command: one model plans, one implements, one reviews, and rejected work goes back",
+        "zh": "一条命令：一个模型计划，一个实现，一个审核，不通过就打回"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/model-flow",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/model-flow"
+      },
+      "metadata": {
+        "keywords": [
+          "models",
+          "review",
+          "workflow"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793893981,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "1dcee28be3cfeaa4bf0d041821971f46244c341f",
+            "path": "packages/model-flow"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.3 <0.3.0"
           }
         }
       ]
