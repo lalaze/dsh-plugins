@@ -1,4 +1,5 @@
-import React, { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { TUI_LAUNCHERS, type TuiCli } from '../../workspace/domain.js';
 import { api } from '../api.js';
 import { useCurrentModel } from '../composer/usage.js';
@@ -6,6 +7,7 @@ import { localizeError, ui, useLocale } from '../i18n.js';
 import type { Client } from '../index.js';
 import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
+import { KeptTerminals, type KeptTerminal } from './tui-kept.js';
 import { useTeamLine } from './tui-team.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
@@ -16,6 +18,7 @@ const CLI_NAMES: Record<TuiCli, string> = { claude: 'Claude Code', codex: 'Codex
 /** Only these chat providers' models offer the TUI. */
 const PROVIDER_CLIS: Record<string, TuiCli | undefined> = { 'remote-cli-claude': 'claude', 'remote-cli-codex': 'codex' };
 const TITLE_INTERVAL = 15_000;
+const KEPT_TERMINALS = 6;
 /**
  * A terminal cell is about 0.6em wide, so a Chinese glyph (1em) leaves a gap in its two cells (1.2em) and the text reads
  * spaced out. The usual fix is a font drawn 2:1, which every machine would have to install. This scales the system's
@@ -24,6 +27,8 @@ const TITLE_INTERVAL = 15_000;
 const CJK_FONT = 'RA TUI CJK', CJK_SCALE = '112%';
 const CJK_RANGE = 'U+2E80-2FDF,U+3000-30FF,U+3100-312F,U+31A0-31BF,U+3400-4DBF,U+4E00-9FFF,U+AC00-D7AF,U+F900-FAFF,U+FE30-FE4F,U+FF00-FFEF,U+20000-2FFFF';
 const cjkFace = (weight: number, faces: string[]) => `@font-face{font-family:"${CJK_FONT}";font-weight:${weight};size-adjust:${CJK_SCALE};unicode-range:${CJK_RANGE};src:${faces.map(face => `local("${face}")`).join(',')}}`;
+const fontStyles = `${cjkFace(400, ['PingFang SC', 'PingFang SC Regular', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Hiragino Sans GB'])}
+${cjkFace(700, ['PingFang SC Semibold', 'Microsoft YaHei Bold', 'Noto Sans CJK SC Bold', 'Hiragino Sans GB W6'])}`;
 /**
  * The terminal as the conversation area: a centered column over a faint trace of whatever wallpaper the window has (more
  * than this and a busy image turns the background muddy), up to
@@ -31,13 +36,11 @@ const cjkFace = (weight: number, faces: string[]) => `@font-face{font-family:"${
  * background is a literal rgba(): DSH hands the computed color to xterm, whose parser rejects other translucent forms,
  * and xterm drops the alpha to get the opaque color it checks text contrast against.
  */
-const viewStyles = `${cjkFace(400, ['PingFang SC', 'PingFang SC Regular', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Hiragino Sans GB'])}
-${cjkFace(700, ['PingFang SC Semibold', 'Microsoft YaHei Bold', 'Noto Sans CJK SC Bold', 'Hiragino Sans GB W6'])}
-div:has(>[data-slot="conversation.session"] [data-remote-agents-tui]){scrollbar-gutter:auto;margin-right:0}
-[data-remote-agents-tui] [data-sidebar-terminal]{padding-top:0}
+const terminalStyles = `[data-remote-agents-tui] [data-sidebar-terminal]{padding-top:0}
 [data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(255,255,255,.92)!important;-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px);padding:18px max(24px,calc((100% - 900px)/2))!important}
 body[data-ds-dark-theme] [data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(21,21,23,.92)!important}
 [data-remote-agents-tui] .xterm-scrollable-element,[data-remote-agents-tui] .xterm-viewport,[data-remote-agents-tui] .xterm-screen{background:transparent!important}`;
+const viewStyles = 'div:has(>[data-slot="conversation.session"] [data-remote-agents-tui]){scrollbar-gutter:auto;margin-right:0}';
 const startStyles = `.ra-tui-start{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;cursor:pointer}
 .ra-tui-start:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
 .ra-tui-start:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe))}
@@ -51,8 +54,8 @@ interface Slots {
   entries(name: string): readonly SlotEntry[];
   subscribe(name: string, listener: () => void): () => void;
 }
-interface TerminalState { issue?: string; phase: string; writable?: boolean }
-interface TerminalModel { state: { getSnapshot(): TerminalState; subscribe(listener: () => void): () => void } }
+interface TerminalState { issue?: string; phase: string; writable?: boolean; info?: { state?: string } }
+interface TerminalModel { connect(): void; state: { getSnapshot(): TerminalState; subscribe(listener: () => void): () => void } }
 interface Terminals {
   view(sessionId: string, key: string, contentId: string, terminalId?: string, shellPath?: string): TerminalModel;
   launchShells(sessionId: string, signal: AbortSignal): Promise<{ shells: readonly { path: string; name: string }[] }>;
@@ -60,6 +63,9 @@ interface Terminals {
 }
 interface Services {
   slots: Slots; terminals: Terminals; uploads: TuiUploads; t: unknown; title(sessionId: string): string | undefined; cli(sessionId: string): TuiCli;
+  kept: KeptTerminals;
+  /** The launcher of each conversation prepared since DSH last connected: it needs preparing only once. */
+  shells: Map<string, string>;
   theme: { getSnapshot(): unknown; subscribe(listener: () => void): () => void };
 }
 type SessionList = { getSnapshot(): { byId?: Record<string, { cwd?: string; blank?: boolean; title?: string }> }; subscribe(listener: () => void): () => void };
@@ -121,16 +127,13 @@ export function tuiTheme(theme: unknown): unknown {
   return result;
 }
 
-/** A terminal that ended is replaced by a new one, so each generation names its own DSH terminal. */
-function useGeneration(sessionId: string): [number, () => void] {
-  const key = `${GENERATION_KEY}.${sessionId}`;
-  const [generation, setGeneration] = useState(() => savedGeneration(sessionId));
-  return [generation, () => setGeneration(value => { write(key, String(value + 1)); return value + 1; })];
-}
-
-function TuiTerminal({ root, sessionId, services, shell, generation, restart }: { root: React.RefObject<HTMLElement | null>; sessionId: string; services: Services; shell: string; generation: number; restart: () => void }) {
-  const { slots, terminals, theme, t } = services;
+/** One kept terminal. A terminal that ended is replaced by a new one, so each generation names its own DSH terminal. */
+function TuiTerminal({ item, services }: { item: KeptTerminal; services: Services }) {
+  const { slots, terminals, theme, t, kept } = services;
+  const { sessionId, shell, generation, visible } = item;
   const key = terminalKey(generation);
+  const restart = () => kept.restart(sessionId);
+  const root = useRef<HTMLElement>(item.host);
   const model = useMemo(() => terminals.view(sessionId, key, terminalContent(sessionId, generation), undefined, shell), [terminals, sessionId, key, generation, shell]);
   const state = useSyncExternalStore(model.state.subscribe.bind(model.state), () => model.state.getSnapshot());
   // DSH remembers the shell of every terminal it creates. Starting a TUI should not change what New terminal opens.
@@ -143,22 +146,40 @@ function TuiTerminal({ root, sessionId, services, shell, generation, restart }: 
     return off;
   }, [model]);
   // After DSH restarted the terminal is gone; a new one resumes the same CLI session.
-  useEffect(() => { if (state.issue === 'missingTerminal') restart(); }, [state.issue]);
+  useEffect(() => { if (visible && state.issue === 'missingTerminal') restart(); }, [visible, state.issue]);
+  // Coming back to a conversation means typing in it, but only the page that attached last can type. And out of view, a
+  // lost connection can end in a failure with no one to press Reconnect: DSH drops a reconnecting terminal's hold when
+  // it opens another terminal, as it holds only the sidebar's.
+  useEffect(() => {
+    if (visible && state.info?.state === 'running' && (state.phase === 'failed' || state.phase === 'connected' && !state.writable)) model.connect();
+  }, [visible]);
   useUploadedPaths(root, sessionId, services.uploads, model.state, services.cli(sessionId));
   const Body = slots.entries('sidebar.right.pane.tab').find(entry => entry.options.key === TERMINAL_TAB)?.component as React.FC<any> | undefined;
   if (!Body) return <div className="ra-empty" role="alert">{ui("DSH's terminal is not available")}</div>;
   return <Body view={() => model} t={t}
-    useTabInfo={() => ({ tab: { id: key, visible: true, actions: { openTab: restart } } })}
+    useTabInfo={() => ({ tab: { id: key, visible, actions: { openTab: restart } } })}
     useTerminal={() => useSyncExternalStore(model.state.subscribe.bind(model.state), () => model.state.getSnapshot())}
     useTheme={(select: (value: unknown) => unknown) => select(tuiTheme(useSyncExternalStore(theme.subscribe, theme.getSnapshot)))} />;
 }
+
+/** Keeps the terminals mounted, here rather than in a conversation, which is gone whenever another one or another tab is shown. */
+function TuiTerminalLayer({ services }: { services: Services }) {
+  const list = useSyncExternalStore(services.kept.subscribe, services.kept.snapshot);
+  return <>
+    <style>{fontStyles}{list.length ? terminalStyles : ''}</style>
+    {list.map(item => createPortal(<TuiTerminal key={item.generation} item={item} services={services} />, item.host, item.sessionId))}
+  </>;
+}
+
+let fontsReady = false;
 
 /** The conversation area of a TUI conversation. */
 function TuiView({ sessionId, services }: { sessionId: string; services: Services }) {
   useLocale();
   const cli = services.cli(sessionId);
-  const [generation, restart] = useGeneration(sessionId);
-  const root = useRef<HTMLDivElement>(null);
+  const { kept, shells } = services;
+  const generation = useSyncExternalStore(kept.subscribe, () => kept.generation(sessionId));
+  const root = useRef<HTMLDivElement>(null), seat = useRef<HTMLDivElement>(null);
   useFilePaste(root, picked => services.uploads.add(sessionId, picked));
   // Typed in the terminal, /team reaches DSH rather than the CLI, which has no such command.
   useTeamLine(root, async line => { await api('tuiTeam', { sessionId, line }); }, message => services.uploads.report(sessionId, message));
@@ -185,30 +206,37 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     frame = requestAnimationFrame(focus);
     return () => cancelAnimationFrame(frame);
   }, [sessionId, generation]);
-  const [shell, setShell] = useState<string>(), [error, setError] = useState('');
+  const [shell, setShell] = useState(() => shells.get(sessionId)), [error, setError] = useState('');
   // xterm measures each character once, so the font has to be there before the terminal opens. A machine without any of
   // the faces just uses its usual fallback.
-  const [fontReady, setFontReady] = useState(false);
+  const [fontReady, setFontReady] = useState(fontsReady);
   useEffect(() => {
+    if (fontsReady) return;
     let alive = true;
-    const ready = () => { if (alive) setFontReady(true); };
+    const ready = () => { fontsReady = true; if (alive) setFontReady(true); };
     const timer = setTimeout(ready, 1000);
     void Promise.all(['400', '700'].map(weight => document.fonts?.load(`${weight} 13px "${CJK_FONT}"`, '中'))).then(ready, ready);
     return () => { alive = false; clearTimeout(timer); };
   }, []);
   useEffect(() => {
+    if (shell) return;
     const controller = new AbortController();
     // What the launcher reads to give the CLI the team tools has to be there first. The CLI starts without them on a failure.
-    Promise.all([services.terminals.launchShells(sessionId, controller.signal), api('tuiPrepare', { sessionId }, controller.signal).catch(() => {})]).then(([{ shells }]) => {
-      const found = shells.find(item => item.name.replace(/\.cmd$/i, '') === TUI_LAUNCHERS[cli]);
-      if (found) setShell(found.path); else setError(ui('The {shell} shell is not available in this conversation', { shell: TUI_LAUNCHERS[cli] }));
+    Promise.all([services.terminals.launchShells(sessionId, controller.signal), api('tuiPrepare', { sessionId }, controller.signal).catch(() => {})]).then(([{ shells: found }]) => {
+      const launcher = found.find(item => item.name.replace(/\.cmd$/i, '') === TUI_LAUNCHERS[cli]);
+      if (!launcher) { setError(ui('The {shell} shell is not available in this conversation', { shell: TUI_LAUNCHERS[cli] })); return; }
+      shells.set(sessionId, launcher.path);
+      setShell(launcher.path);
     }, cause => { if (!controller.signal.aborted) setError(localizeError(cause instanceof Error ? cause.message : String(cause))); });
     return () => controller.abort();
   }, [services, sessionId]);
+  const ready = !!shell && fontReady;
+  // Before the browser paints, so the terminal is simply there.
+  useLayoutEffect(() => (ready ? kept.show(sessionId, shell, seat.current!) : undefined), [kept, sessionId, ready]);
   return <div ref={root} data-remote-agents-tui="" style={{ position: 'relative', flex: '1 1 0', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
     <style>{viewStyles}{fileStyles}</style>
-    {shell && fontReady ? <TuiTerminal key={generation} root={root} sessionId={sessionId} services={services} shell={shell} generation={generation} restart={restart} />
-      : <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
+    <div ref={seat} style={{ display: 'contents' }} />
+    {!ready && <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
     <TuiFileStatus sessionId={sessionId} uploads={services.uploads} notice={reports ? ui('Team messages waiting for an empty prompt: {count}', { count: reports }) : undefined} />
   </div>;
 }
@@ -272,9 +300,17 @@ export function installTuiSessions(ctx: Client): void {
     if (!terminals || !sessions || !themes || typeof slots.entries !== 'function' || typeof slots.subscribe !== 'function') return;
     scoped.effect(() => restoreRemoteTerminals(terminals));
     const store = new TuiStore();
-    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title,
+    const hidden = document.createElement('div');
+    hidden.dataset.remoteAgentsTui = ''; hidden.style.display = 'none';
+    scoped.effect(() => { document.body.append(hidden); return () => hidden.remove(); });
+    const kept = new KeptTerminals<HTMLElement>(KEPT_TERMINALS, hidden, () => { const host = document.createElement('div'); host.style.display = 'contents'; return host; },
+      { load: savedGeneration, save: (id, generation) => write(`${GENERATION_KEY}.${id}`, String(generation)) });
+    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title, kept, shells: new Map(),
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
       theme: { getSnapshot: () => themes.getTheme(), subscribe: listener => on.call(scoped, 'theme/change', listener) } };
+    // A restarted DSH has lost what was prepared, such as the forward for team tools.
+    scoped.effect(() => on.call(scoped, 'connection/reset', () => services.shells.clear()));
+    slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'remote-agents-tui-terminals' }, () => <TuiTerminalLayer services={services} />));
     scoped.effect(() => {
       const controller = new AbortController();
       void api<{ sessions: string[]; codex?: string[] }>('tuiSessions', {}, controller.signal).then(value => store.set(value.sessions, value.codex), () => {});
@@ -288,7 +324,7 @@ export function installTuiSessions(ctx: Client): void {
           const Own = entry.component as React.FC<any>;
           const wrapper: React.FC<any> = props => {
             const tui = useSyncExternalStore(store.subscribe, () => store.has(props.sessionId));
-            return tui ? <TuiView sessionId={props.sessionId} services={services} /> : <Own {...props} />;
+            return tui ? <TuiView key={props.sessionId} sessionId={props.sessionId} services={services} /> : <Own {...props} />;
           };
           taken.set(entry, { own: Own, wrapper });
           entry.component = wrapper;
@@ -305,6 +341,7 @@ export function installTuiSessions(ctx: Client): void {
     if (workspaces) scoped.effect(() => {
       const closed = new Set<string>();
       const sync = () => closeArchived(workspaces.getSnapshot()?.archivedSessionIds ?? [], store.has, id => {
+        kept.drop(id);
         const generation = savedGeneration(id);
         terminals.close(id, terminalKey(generation), terminalContent(id, generation));
         void api('tuiEnd', { sessionId: id }).catch(() => {});
