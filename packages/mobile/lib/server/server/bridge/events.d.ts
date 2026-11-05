@@ -42,10 +42,14 @@ export declare function openApprovals(events: readonly {
 }[]): PendingInteraction[];
 /** DSH `userQuestions.active` entries still open, in the shared form. */
 export declare function openQuestions(active: unknown, now?: number): PendingInteraction[];
-/** What a phone shows of a reply being written. `reasoning` is what the model thought since its latest text. */
+/**
+ * What a phone shows of a reply being written. `reasoning` is what the model thought since its latest text. `blocks` holds
+ * the reply by block, because a remote CLI's line about running tools comes and goes by closing a block again.
+ */
 export interface ReplyDraft {
     text: string;
     reasoning: string;
+    blocks?: Map<number, string>;
 }
-/** Add one chunk of a reply being written, or one record of the compact form DSH keeps of it, to its draft. */
+/** Add one chunk of a reply being written, or one record of the compact form DSH keeps of it, to its draft, as DSH's chat does. */
 export declare function addToDraft(draft: ReplyDraft, chunk: unknown): void;

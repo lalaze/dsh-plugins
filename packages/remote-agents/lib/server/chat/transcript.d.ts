@@ -8,6 +8,11 @@ export type TurnSource = {
 /** What the chat says at a `model_switch` item, in the language of what the user wrote. */
 export declare function modelSwitchNote(item: TimelineEntry['item'], userText: string): string;
 /**
+ * The line a reply ends with while tools run: the one started last and what it works on, in the language of what the user
+ * wrote. The target is inline code, so markdown in it stays as written; only a backtick could end the code early.
+ */
+export declare function toolStatus(running: readonly TimelineEntry['item'][], userText: string): string;
+/**
  * One markdown block of a remote CLI session's saved history: what the user asked, what the CLI answered, and which
  * tools it used. Latest turns win when the history is long; the full record stays in the sessions panel.
  * With `elsewhere` the entries are turns sent outside this conversation, headed by where they came from.
