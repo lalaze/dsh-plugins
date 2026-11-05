@@ -5,11 +5,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { Context } from '@deepseek-ai/cordis';
-import LlmRuntime, { createUserMessage, createAssistantMessage, createSystemMessage, MessageId, ReasoningEffortId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm';
+import LlmRuntime, { BlockAssembler, createUserMessage, createAssistantMessage, createSystemMessage, MessageId, ReasoningEffortId, type GenerateOptions, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import { Session, SessionId } from '@deepseek-ai/dsh-session';
 import { assertReleasedV4Relationships } from '@deepseek-ai/dsh-session-format-v3-to-v4';
 import { ChatProjects } from '../src/chat/projects.js';
 import { CHAT_PROVIDER, CHAT_PROVIDERS, SYNC_SOURCE, chatProviderId, chatModelId, RemoteCliAdapter, type ChatHost } from '../src/chat/native-chat.js';
+import { toolStatus } from '../src/chat/transcript.js';
 import { Store } from '../src/core/store.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { TaskHistory } from '../src/agents/history.js';
@@ -884,4 +885,154 @@ test('follow-ups send the CLI only what it has not seen: never its own replies, 
   const edited = user('Back to the CLI, edited');
   await collect(adapter.stream({ ...first, messages: [user('Fix the tests, edited'), own, follow, own, ...detour, own, edited] }));
   assert.equal(sent(), 'Back to the CLI, edited', 'nothing the CLI already saw is sent again');
+});
+
+/** What DSH's chat shows of a reply: `block-start` empties a block, deltas append to it and `block-end` replaces it, closed or not. */
+function shown(chunks: readonly StreamChunk[]) {
+  const blocks: { kind: string; text: string }[] = [];
+  for (const chunk of chunks) {
+    if (chunk.type === 'block-start') blocks[chunk.index] = { kind: chunk.blockType, text: '' };
+    if (chunk.type === 'text-delta') blocks[chunk.index] = { kind: 'text', text: (blocks[chunk.index]?.kind === 'text' ? blocks[chunk.index].text : '') + chunk.text };
+    if (chunk.type === 'reasoning-delta') blocks[chunk.index] = { kind: 'reasoning', text: (blocks[chunk.index]?.kind === 'reasoning' ? blocks[chunk.index].text : '') + chunk.text };
+    if (chunk.type === 'block-end') blocks[chunk.index] = { kind: chunk.block.type, text: chunk.block.type === 'text' || chunk.block.type === 'reasoning' ? chunk.block.text : '' };
+  }
+  const part = (kind: string) => blocks.filter(b => b.kind === kind && b.text.trim()).map(b => b.text.trim());
+  return { reply: part('text'), reasoning: part('reasoning') };
+}
+/** Everything DSH's chat showed as the chunks arrived, and what DSH saves of them when the turn ends or is stopped at each point. */
+function replay(chunks: readonly StreamChunk[]) {
+  const assembler = new BlockAssembler(), screens: string[] = [], stopped: string[] = [];
+  chunks.forEach((chunk, index) => {
+    assembler.push(chunk); screens.push(shown(chunks.slice(0, index + 1)).reply.join('\n\n'));
+    stopped.push(...assembler.interruptedBlocks().flatMap(b => b.type === 'text' || b.type === 'reasoning' ? [b.text] : []));
+  });
+  const saved = assembler.blocks().filter(b => b.type === 'text' || b.type === 'reasoning').map(b => ({ type: b.type, text: (b as { text: string }).text }));
+  return { screens, stopped, saved };
+}
+async function claudeSetup(t: TestContext, overrides: Partial<ChatHost> = {}) {
+  const session = Session.create(SessionId('claude-rows'));
+  session.append('turn/start', { turn: 1 }); session.append('step/start', { turn: 1, step: 1 });
+  const context = await setup(t, { step: () => ({ session, turn: 1, step: 1 }), ...overrides });
+  context.remote.catalog[1] = { id: 'claude', label: 'Claude Code', status: 'ready', models: [{ id: 'claude-model', label: 'Claude model' }], modes: [] };
+  await context.projects.refresh(context.project.id);
+  const claude = (prompt: string) => context.options(prompt, { provider: chatProviderId('claude'), model: chatModelId(context.project.id, 'claude', 'claude-model') });
+  return { ...context, claude };
+}
+
+test('Claude’s progress sentences read as the reply, each its own paragraph, while Codex’s reasoning stays folded', async t => {
+  const { adapter, remote, claude, options } = await claudeSetup(t);
+  const output = (id: string) => {
+    remote.append(id, { type: 'reasoning', text: '' });
+    remote.append(id, { type: 'assistant_message', text: 'Looking.' });
+    remote.append(id, { type: 'reasoning', text: 'Port 4174 is ' }); remote.append(id, { type: 'reasoning', text: 'idle.' });
+    // An empty delta belongs to the hidden thinking between two sentences.
+    remote.append(id, { type: 'reasoning', text: '' });
+    remote.append(id, { type: 'reasoning', text: 'The build passed.' });
+    remote.append(id, { type: 'assistant_message', text: 'All done.' });
+  };
+  remote.onCreate = agent => output(agent.id);
+  const fromClaude = replay(await collect(adapter.stream(claude('Check the port'))));
+  assert.deepEqual(fromClaude.saved, [{ type: 'text', text: 'Looking.' }, { type: 'text', text: 'Port 4174 is idle.' }, { type: 'text', text: 'The build passed.' }, { type: 'text', text: 'All done.' }]);
+  remote.onCreate = agent => output(agent.id);
+  const fromCodex = replay(await collect(adapter.stream(options('Check the port', { sessionId: SessionId('codex-conversation') }))));
+  assert.deepEqual(fromCodex.saved.filter(b => b.type === 'reasoning').map(b => b.text), ['Port 4174 is idle.The build passed.']);
+});
+
+for (const [who, overrides] of [
+  ['a delegated subagent', { unattended: () => true }],
+  ['a team member', { teamMember: () => ({ team: 'crew', name: 'coder' }) }],
+] as [string, Partial<ChatHost>][]) test(`${who}’s result holds no progress sentences, though the running tool still shows`, async t => {
+  const { adapter, remote, claude } = await claudeSetup(t, overrides);
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'reasoning', text: 'Checking the port.' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'running', detail: { command: 'ls' } });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'completed', detail: 'a.ts' });
+    remote.append(agent.id, { type: 'assistant_message', text: 'The result.' });
+  };
+  const { screens, saved } = replay(await collect(adapter.stream(claude('Check the port'))));
+  assert.ok(screens.includes('> Running Bash · `ls`'), screens.join('\n---\n'));
+  assert.deepEqual(saved.filter(block => block.type === 'text' && block.text), [{ type: 'text', text: 'The result.' }]);
+  assert.deepEqual(saved.filter(block => block.type === 'reasoning').map(block => block.text), ['Checking the port.']);
+});
+
+test('thinking too long to be a progress sentence stays folded', async t => {
+  const { adapter, remote, claude } = await claudeSetup(t);
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'reasoning', text: 'a'.repeat(900) });
+    remote.append(agent.id, { type: 'reasoning', text: 'b'.repeat(900) });
+    remote.append(agent.id, { type: 'assistant_message', text: 'Answer.' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'running', detail: { command: 'ls' } });
+    remote.append(agent.id, { type: 'reasoning', text: 'A new sentence.' });
+  };
+  assert.deepEqual(replay(await collect(adapter.stream(claude('Think')))).saved, [
+    { type: 'text', text: 'a'.repeat(900) }, { type: 'reasoning', text: 'b'.repeat(900) }, { type: 'text', text: 'Answer.' }, { type: 'text', text: 'A new sentence.' },
+  ]);
+});
+
+test('the tool Claude is running shows at the end of the reply, and DSH never saves it, even when stopped', async t => {
+  const { adapter, remote, claude } = await claudeSetup(t);
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'assistant_message', text: 'Looking.' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'running', detail: { command: 'pnpm test' } });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-2', name: 'Read', status: 'running', detail: { file_path: '/srv/a.ts' } });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'completed', detail: '42 pass' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-2', name: 'Read', status: 'completed', detail: 'code' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-3', name: 'Grep', status: 'running', detail: { pattern: 'foo' } });
+    remote.append(agent.id, { type: 'assistant_message', text: 'Done.' });
+  };
+  const { screens, stopped, saved } = replay(await collect(adapter.stream(claude('Run the tests'))));
+  const seen = [...new Set(screens)];
+  assert.ok(seen.includes('Looking.\n\n> Running Bash · `pnpm test`'), seen.join('\n---\n'));
+  assert.ok(seen.includes('Looking.\n\n> Running Read · `/srv/a.ts` (1 more running)'), seen.join('\n---\n'));
+  assert.ok(seen.includes('Looking.\n\n> Running Grep · `foo`'), seen.join('\n---\n'));
+  assert.equal(screens.at(-1), 'Looking.\n\nDone.', 'the line is gone when the reply ends');
+  assert.ok(!stopped.some(block => block.includes('Running')), 'a Stop at any moment keeps no status');
+  assert.deepEqual(saved, [{ type: 'text', text: 'Looking.' }, { type: 'text', text: 'Done.' }]);
+});
+
+test('a tool Claude runs before writing anything shows too, in the language of the message, and leaves nothing to read', async t => {
+  const { adapter, remote, claude } = await claudeSetup(t);
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'running', detail: { command: 'ls' } });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'completed', detail: 'a.ts' });
+  };
+  const { screens, stopped, saved } = replay(await collect(adapter.stream(claude('看看目录'))));
+  assert.ok(screens.includes('> 正在运行 Bash · `ls`'), screens.join('\n---\n'));
+  assert.equal(screens.at(-1), '');
+  assert.deepEqual(stopped, [], 'a Stop saves no reply at all');
+  assert.ok(saved.every(block => !block.text.trim()), 'what DSH saves shows nothing');
+});
+
+test('a failed turn does not leave the running tool on screen', async t => {
+  const { adapter, remote, claude } = await claudeSetup(t);
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'assistant_message', text: 'Looking.' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'running', detail: { command: 'ls' } });
+    remote.append(agent.id, { type: 'error', message: 'Claude turn failed' });
+  };
+  const chunks: StreamChunk[] = [];
+  await assert.rejects((async () => { for await (const chunk of adapter.stream(claude('Run'))) chunks.push(chunk); })(), /Claude turn failed/);
+  assert.equal(replay(chunks).screens.at(-1), 'Looking.');
+});
+
+test('Codex replies show no running-tool line', async t => {
+  const { adapter, remote, options } = await setup(t);
+  remote.onCreate = agent => {
+    remote.append(agent.id, { type: 'assistant_message', text: 'Looking.' });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'running', detail: { command: 'ls' } });
+    remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'completed', detail: 'a.ts' });
+  };
+  assert.deepEqual([...new Set(replay(await collect(adapter.stream(options()))).screens)], ['', 'Looking.']);
+});
+
+test('the running-tool line names the tool’s target on one short line that markdown cannot break', () => {
+  const call = (name: string, detail: unknown) => ({ type: 'tool_call' as const, callId: name, name, status: 'running', detail });
+  assert.equal(toolStatus([], 'Fix'), '');
+  assert.equal(toolStatus([call('Bash', { command: 'pnpm  test\n  --watch', description: 'Run tests' })], 'Fix'), '> Running Bash · `pnpm test --watch`');
+  assert.equal(toolStatus([call('Bash', { command: 'echo `date`' })], 'Fix'), "> Running Bash · `echo 'date'`");
+  assert.equal(toolStatus([call('Skill', {})], 'Fix'), '> Running Skill');
+  assert.equal(toolStatus([call('Other', 'not an object')], '修复'), '> 正在运行 Other');
+  assert.equal(toolStatus([call('Read', { file_path: '/a' }), call('Agent', { description: 'Look around' })], '修复'), '> 正在运行 Agent · `Look around`（另有 1 个工具在运行）');
+  const long = toolStatus([call('Bash', { command: 'x'.repeat(500) })], 'Fix');
+  assert.equal(long, `> Running Bash · \`${'x'.repeat(100)}…\``);
 });

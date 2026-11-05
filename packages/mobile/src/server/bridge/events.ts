@@ -143,18 +143,29 @@ export function openQuestions(active: unknown, now = Date.now()): PendingInterac
   return result
 }
 
-/** What a phone shows of a reply being written. `reasoning` is what the model thought since its latest text. */
-export interface ReplyDraft { text: string; reasoning: string }
+/**
+ * What a phone shows of a reply being written. `reasoning` is what the model thought since its latest text. `blocks` holds
+ * the reply by block, because a remote CLI's line about running tools comes and goes by closing a block again.
+ */
+export interface ReplyDraft { text: string; reasoning: string; blocks?: Map<number, string> }
 
-/** Add one chunk of a reply being written, or one record of the compact form DSH keeps of it, to its draft. */
+/** Add one chunk of a reply being written, or one record of the compact form DSH keeps of it, to its draft, as DSH's chat does. */
 export function addToDraft(draft: ReplyDraft, chunk: unknown): void {
   const value = asDict(chunk)
   if (value.type === 'chunk') return addToDraft(draft, value.chunk)
+  const blocks = draft.blocks ??= new Map<number, string>(), index = typeof value.index === 'number' ? value.index : -1
+  if (value.type === 'block-start') { if (value.blockType === 'text') blocks.set(index, ''); else blocks.delete(index) }
+  else if (value.type === 'block-end') {
+    const block = asDict(value.block)
+    if (block.type === 'text' && typeof block.text === 'string') blocks.set(index, block.text); else blocks.delete(index)
+  } else {
+    const { text, reasoning } = chunkText(value)
+    if (text) { blocks.set(index, (blocks.get(index) ?? '') + text); draft.reasoning = '' }
+    if (reasoning) draft.reasoning += reasoning
+    if (!text) return
+  }
   // A CLI's narration between tool calls comes as separate blocks, which read as paragraphs once the reply is saved.
-  if (value.type === 'block-start' && value.blockType === 'text' && draft.text) { draft.text += '\n\n'; return }
-  const { text, reasoning } = chunkText(value)
-  if (text) { draft.text += text; draft.reasoning = '' }
-  if (reasoning) draft.reasoning += reasoning
+  draft.text = [...blocks.entries()].sort(([a], [b]) => a - b).map(([, text]) => text).filter(Boolean).join('\n\n')
 }
 
 /** Text of an assistant stream chunk, by kind. */

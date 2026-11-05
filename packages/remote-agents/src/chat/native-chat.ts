@@ -10,7 +10,7 @@ import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Curso
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
 import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
-import { modelSwitchNote, transcript, type TurnSource } from './transcript.js';
+import { modelSwitchNote, toolStatus, transcript, type TurnSource } from './transcript.js';
 import { decidePermission, unattendedAnswer } from '../agents/tools.js';
 import { isTeamPrompt, teamMemberNote, type TeamMember } from './agent-teams.js';
 import type { ToolHost } from '../core/dsh-host.js';
@@ -46,6 +46,12 @@ const QUIET_MS = 60_000;
  * and the relay replays what it missed.
  */
 const LAPSE_MS = 120_000;
+/**
+ * Claude writes its progress between tool calls as short thinking blocks, about 100 characters and under 400 in real logs,
+ * and its real thinking stays hidden. DSH folds a step's reasoning under its first text, so those sentences go in the reply.
+ * A block longer than this is real thinking from another model or release: the rest of it stays reasoning.
+ */
+const PROGRESS_LIMIT = 1000;
 /** Finished turns this conversation did not send, ready to show: one markdown block and the last message among them. */
 /** `running`: the last turn has not ended; its output so far is in `text`, and what it writes next follows this cursor. */
 interface Elsewhere { text: string; summary: string; lastMessageId: string; turns: number; running?: Cursor }
@@ -424,11 +430,35 @@ export class RemoteCliAdapter extends LlmAdapter {
     const rows = new NativeToolRows(this.host.step(sessionId), options, `${provider.label} on ${project.label}:${cwd}`);
     const questions = new Map<string, AbortController>(); let permissionFailure: unknown, permissionNotice = false;
     let open: { type: 'text' | 'reasoning'; index: number; text: string } | undefined;
+    /** The latest closed text block, or an empty one in its place, which the line about running tools follows; and that line. */
+    let tail: { index: number; text: string } | undefined, status = '';
     const endBlock = function* (): Generator<StreamChunk> {
-      if (open) { yield { type: 'block-end', index: open.index, block: { type: open.type, text: open.text } }; open = undefined; }
+      if (!open) return;
+      yield { type: 'block-end', index: open.index, block: { type: open.type, text: open.text } };
+      if (open.type === 'text') tail = { index: open.index, text: open.text };
+      open = undefined;
+    };
+    /**
+     * Show, change or clear the line about running tools. It is never saved, even when the turn is stopped: DSH keeps a block
+     * as it closed and ignores what follows, while its chat goes on applying chunks. Text after a closed block therefore only
+     * shows, and closing that block again takes the text back.
+     */
+    const setStatus = function* (next: string): Generator<StreamChunk> {
+      if (next === status) return;
+      yield* endBlock();
+      if (status) yield { type: 'block-end', index: tail!.index, block: { type: 'text', text: tail!.text } };
+      status = next;
+      if (!next) return;
+      // Nothing is written yet, so the line gets a block of its own. It saves as empty text, which every model route leaves out.
+      if (!tail) {
+        tail = { index: index++, text: '' };
+        yield { type: 'block-start', index: tail.index, blockType: 'text' }; yield { type: 'block-end', index: tail.index, block: { type: 'text', text: '' } };
+      }
+      yield { type: 'text-delta', index: tail.index, text: `${tail.text ? '\n\n' : ''}${next}` };
     };
     const textChunk = function* (type: 'text' | 'reasoning', text: string): Generator<StreamChunk> {
       if (!text) return;
+      yield* setStatus('');
       if (open?.type !== type) { yield* endBlock(); open = { type, index: index++, text: '' }; yield { type: 'block-start', index: open.index, blockType: type }; }
       open!.text += text;
       yield type === 'text' ? { type: 'text-delta', index: open!.index, text } : { type: 'reasoning-delta', index: open!.index, text };
@@ -472,11 +502,15 @@ export class RemoteCliAdapter extends LlmAdapter {
      */
     const follow = async function* (id: string, from: Cursor | undefined, recovered: boolean, patient = false): AsyncGenerator<StreamChunk, boolean> {
       const interrupted = yield* timeline(id, from, recovered, patient);
+      yield* setStatus('');
       yield* textChunk('text', images.flush());
       return interrupted;
     };
     const timeline = async function* (this: RemoteCliAdapter, id: string, from: Cursor | undefined, recovered: boolean, patient: boolean): AsyncGenerator<StreamChunk, boolean> {
       let cursor = from, interrupted = false, lapsed: number | undefined;
+      /** Characters of the progress sentence being shown, when there is one; and the tools Claude is running. */
+      let progress = 0;
+      const running = new Map<string, TimelineEntry['item']>();
       while (true) {
         signal.throwIfAborted(); if (permissionFailure) throw permissionFailure;
         if (permissionNotice) {
@@ -489,12 +523,29 @@ export class RemoteCliAdapter extends LlmAdapter {
         if (page.entries.length) lapsed = undefined;
         for (const entry of page.entries) {
           if (showsOutput(entry)) followed = true;
+          if (progress && entry.item.type !== 'reasoning' && showsOutput(entry)) { yield* endBlock(); progress = 0; }
           if (entry.item.type === 'assistant_message') { yield* textChunk('text', await images.push(String(entry.item.text ?? ''))); continue; }
           yield* textChunk('text', images.flush());
-          if (entry.item.type === 'reasoning') yield* textChunk('reasoning', String(entry.item.text ?? ''));
+          if (entry.item.type === 'reasoning') {
+            const thought = String(entry.item.text ?? '');
+            // What a delegated CLI writes is its result for whoever delegated: sentences about its progress stay out of it.
+            if (provider.id !== 'claude' || unattended || member) yield* textChunk('reasoning', thought);
+            // A hidden block between two sentences comes as empty deltas, so each sentence reads as its own paragraph.
+            else if (!thought) { if (progress) yield* endBlock(); progress = 0; }
+            else {
+              if (!progress) yield* endBlock();
+              progress += thought.length;
+              yield* textChunk(progress <= PROGRESS_LIMIT ? 'text' : 'reasoning', thought);
+            }
+          }
           if (entry.item.type === 'tool_call') {
             yield* endBlock(); if (!rows.write(entry)) yield* textChunk('reasoning', `${entry.item.name ?? 'Tool'} · ${entry.item.status ?? ''}\n${typeof entry.item.detail === 'string' ? entry.item.detail : JSON.stringify(entry.item.detail ?? {})}\n`);
             yield* viewed(entry.item);
+            if (provider.id === 'claude') {
+              const call = String(entry.item.callId ?? entry.seqStart);
+              if (entry.item.status === 'running') running.set(call, entry.item); else running.delete(call);
+              yield* setStatus(toolStatus([...running.values()], currentPrompt));
+            }
           }
           if (entry.item.type === 'error') { if (recovered) yield* textChunk('text', `\n\n${String(entry.item.message)}\n`); else throw new LlmError(String(entry.item.message), 'REMOTE_CLI_FAILED'); }
           if (entry.item.type === 'model_switch') yield* textChunk('text', `\n\n> ${modelSwitchNote(entry.item, currentPrompt)}\n\n`);
@@ -655,6 +706,7 @@ export class RemoteCliAdapter extends LlmAdapter {
       settled = true; await delivered(messageId, undefined, true);
       yield* endBlock(); rows.close(); yield { type: 'finish', reason: interrupted ? { kind: 'aborted', failure: { code: 'ABORTED', message: 'The remote CLI turn was interrupted.' } } : { kind: 'stop' } };
     } catch (error) {
+      yield* setStatus('');
       // DSH unloads the plugin before its turn loop on quit or reload. The remote turn keeps running and its output
       // catches up once DSH reattaches (see sync), so end this turn normally instead of recording a failure.
       if (!admitted || settled || options.signal?.aborted || !this.released && !service.stopped) throw error;

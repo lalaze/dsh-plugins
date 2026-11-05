@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { decodeOffer, type LiveFrame, type SessionEntry, type TagState } from '../src/shared/protocol.js'
 import { HubClient, hubFromOffer, nobleX25519 } from '../app/src/hub-client.js'
+import { addToDraft, type ReplyDraft } from '../src/server/bridge/events.js'
 import { Hub } from '../src/server/hub.js'
 import { FakeHost, FakeRelay, startHub, waitFor, type TestHub } from './fakes.js'
 
@@ -345,4 +346,25 @@ test('facts cached by an older version are read again on start', async t => {
   assert.equal(reopened.state.executor.sessions['old'], undefined)
   assert.equal(reopened.state.executor.version, 2)
   await reopened.close()
+})
+
+test('a line a remote CLI shows after a closed block leaves the phone when that block closes again', () => {
+  const draft: ReplyDraft = { text: '', reasoning: '' }
+  const add = (...chunks: unknown[]) => { for (const chunk of chunks) addToDraft(draft, chunk) }
+  // Nothing written yet: the line has a block of its own.
+  add({ type: 'block-start', index: 0, blockType: 'text' }, { type: 'block-end', index: 0, block: { type: 'text', text: '' } })
+  assert.equal(draft.text, '')
+  add({ type: 'text-delta', index: 0, text: '> Running Bash' })
+  assert.equal(draft.text, '> Running Bash')
+  add({ type: 'block-end', index: 0, block: { type: 'text', text: '' } })
+  assert.equal(draft.text, '')
+  add({ type: 'block-start', index: 1, blockType: 'text' }, { type: 'text-delta', index: 1, text: 'Looking.' }, { type: 'block-end', index: 1, block: { type: 'text', text: 'Looking.' } })
+  add({ type: 'text-delta', index: 1, text: '\n\n> Running Read' })
+  assert.equal(draft.text, 'Looking.\n\n> Running Read')
+  add({ type: 'block-end', index: 1, block: { type: 'text', text: 'Looking.' } }, { type: 'text-delta', index: 1, text: '\n\n> Running Grep' })
+  assert.equal(draft.text, 'Looking.\n\n> Running Grep')
+  // The compact form DSH keeps replays the same way, for a phone that opens now.
+  const reopened: ReplyDraft = { text: '', reasoning: '' }
+  for (const record of [{ type: 'text-chunks', index: 1, texts: ['Looking.', ' More.'] }, { type: 'chunk', chunk: { type: 'block-end', index: 1, block: { type: 'text', text: 'Looking. More.' } } }, { type: 'text-chunks', index: 1, texts: ['\n\n> Running Read'] }, { type: 'chunk', chunk: { type: 'block-end', index: 1, block: { type: 'text', text: 'Looking. More.' } } }]) addToDraft(reopened, record)
+  assert.equal(reopened.text, 'Looking. More.')
 })

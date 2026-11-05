@@ -16,6 +16,7 @@ const LABELS = {
     you: 'You', continued: 'Continued on its own', tools: 'Tools', interrupted: 'Interrupted', attachments: (n: number) => `${n} ${n === 1 ? 'attachment' : 'attachments'}`,
     switched: (from: string, to: string) => `Switched from ${from} to ${to}`,
     switchNote: (from: string, to: string, category: string) => `**Model switched.** ${from}'s safeguards stopped this request${category}, so ${to} retried it. Later turns in this session stay on ${to}, and the model picker does not change to show it. To use another model, pick a different one; it applies to your next message.`,
+    running: (tool: string, more: number) => `Running ${tool}${more ? ` (${more} more running)` : ''}`,
   },
   zh: {
     title: (cli: string, creator: string | undefined, turns: number) => `**这段 ${cli} 会话的历史记录**${creator ? `（在 ${creator} 上开始）` : ''}，共 ${turns} 轮。在这里发消息会接着同一个会话继续。`,
@@ -25,6 +26,7 @@ const LABELS = {
     you: '你', continued: '自行继续', tools: '工具', interrupted: '已中断', attachments: (n: number) => `${n} 个附件`,
     switched: (from: string, to: string) => `从 ${from} 切换到 ${to}`,
     switchNote: (from: string, to: string, category: string) => `**模型已切换。** ${from} 的安全机制拦截了这条消息${category}，这一轮改由 ${to} 重试。这段会话后面的轮次也继续用 ${to}，模型选择器不会跟着变。要换模型，选另一个模型，发下一条消息时生效。`,
+    running: (tool: string, more: number) => `正在运行 ${tool}${more ? `（另有 ${more} 个工具在运行）` : ''}`,
   },
 };
 
@@ -32,6 +34,24 @@ const LABELS = {
 export function modelSwitchNote(item: TimelineEntry['item'], userText: string): string {
   const labels = /[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en;
   return labels.switchNote(String(item.from), String(item.to), item.category ? ` (${String(item.category)})` : '');
+}
+
+/** The input fields that name what a tool works on, most telling first. */
+const TOOL_TARGETS = ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description', 'prompt'];
+const TOOL_TARGET_LIMIT = 100;
+/**
+ * The line a reply ends with while tools run: the one started last and what it works on, in the language of what the user
+ * wrote. The target is inline code, so markdown in it stays as written; only a backtick could end the code early.
+ */
+export function toolStatus(running: readonly TimelineEntry['item'][], userText: string): string {
+  const call = running.at(-1);
+  if (!call) return '';
+  const input = typeof call.detail === 'object' && call.detail !== null ? call.detail as Record<string, unknown> : {};
+  const value = TOOL_TARGETS.map(key => input[key]).find((v): v is string => typeof v === 'string' && !!v.trim());
+  const characters = [...value?.replace(/\s+/g, ' ').replace(/`/g, "'").trim() ?? ''];
+  const target = characters.length > TOOL_TARGET_LIMIT ? `${characters.slice(0, TOOL_TARGET_LIMIT).join('')}…` : characters.join('');
+  const labels = /[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en;
+  return `> ${labels.running(`${String(call.name ?? 'Tool')}${target ? ` · \`${target}\`` : ''}`, running.length - 1)}`;
 }
 
 /** `unprompted`: the CLI started the turn itself; `user` then holds the task notices it got, if any. */
