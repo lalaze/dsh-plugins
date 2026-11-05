@@ -41,6 +41,11 @@ export const RELAY_UNAVAILABLE = {
     'install-failed': 'The remote CLI was not started: the background relay could not be installed in ~/.dsh-remote-agents on the SSH host, so the CLI could not keep running after DSH quits or SSH disconnects. Check that the directory is writable, then retry.',
 };
 export const inputModalitiesOf = (provider, model) => model.inputModalities ?? (['claude', 'codex'].includes(provider) ? ['text', 'image'] : ['text']);
+/**
+ * Marks the line naming the tool a CLI is running, which the chat receives as markdown. DSH's markdown keeps only http(s) and
+ * mailto links, so this is one. The client draws it as a tool row that takes no clicks, and `.invalid` names no site.
+ */
+export const TOOL_STATUS_URL = 'https://remote-agents.invalid/running-tool';
 export const PROVIDER_LABELS = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };
 /** Older machines retain their providers until the user explicitly changes the selection. */
 export const enabledProvidersOf = (host) => host.enabledProviders ?? Object.keys(PROVIDER_LABELS);

@@ -321,6 +321,11 @@ export interface Task extends TaskInput {
     error?: string;
 }
 export type NativeProtocol = 'codex' | 'claude' | 'acp' | 'antigravity';
+/**
+ * Marks the line naming the tool a CLI is running, which the chat receives as markdown. DSH's markdown keeps only http(s) and
+ * mailto links, so this is one. The client draws it as a tool row that takes no clicks, and `.invalid` names no site.
+ */
+export declare const TOOL_STATUS_URL = "https://remote-agents.invalid/running-tool";
 export declare const PROVIDER_LABELS: Readonly<Record<string, string>>;
 /** Older machines retain their providers until the user explicitly changes the selection. */
 export declare const enabledProvidersOf: (host: Pick<HostConfig, "enabledProviders">) => string[];

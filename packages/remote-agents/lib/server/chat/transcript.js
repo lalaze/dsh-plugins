@@ -1,3 +1,4 @@
+import { TOOL_STATUS_URL } from '../core/domain.js';
 /** Main-chat prompts carry earlier DSH messages ahead of the request; the transcript shows only what the user typed. */
 const CONTEXT = /^Conversation context \(already occurred; do not repeat completed actions\):\n[\s\S]*?\n\nCurrent user request:\n/;
 const USER_LIMIT = 4000, REPLY_LIMIT = 8000, TOTAL_LIMIT = 60_000;
@@ -10,7 +11,7 @@ const LABELS = {
         you: 'You', continued: 'Continued on its own', tools: 'Tools', interrupted: 'Interrupted', attachments: (n) => `${n} ${n === 1 ? 'attachment' : 'attachments'}`,
         switched: (from, to) => `Switched from ${from} to ${to}`,
         switchNote: (from, to, category) => `**Model switched.** ${from}'s safeguards stopped this request${category}, so ${to} retried it. Later turns in this session stay on ${to}, and the model picker does not change to show it. To use another model, pick a different one; it applies to your next message.`,
-        running: (tool, more) => `Running ${tool}${more ? ` (${more} more running)` : ''}`,
+        running: (what, more) => `Tool call · ${what}${more ? ` (${more} more running)` : ''}`,
     },
     zh: {
         title: (cli, creator, turns) => `**这段 ${cli} 会话的历史记录**${creator ? `（在 ${creator} 上开始）` : ''}，共 ${turns} 轮。在这里发消息会接着同一个会话继续。`,
@@ -20,7 +21,7 @@ const LABELS = {
         you: '你', continued: '自行继续', tools: '工具', interrupted: '已中断', attachments: (n) => `${n} 个附件`,
         switched: (from, to) => `从 ${from} 切换到 ${to}`,
         switchNote: (from, to, category) => `**模型已切换。** ${from} 的安全机制拦截了这条消息${category}，这一轮改由 ${to} 重试。这段会话后面的轮次也继续用 ${to}，模型选择器不会跟着变。要换模型，选另一个模型，发下一条消息时生效。`,
-        running: (tool, more) => `正在运行 ${tool}${more ? `（另有 ${more} 个工具在运行）` : ''}`,
+        running: (what, more) => `工具调用 · ${what}${more ? `（另有 ${more} 个工具在运行）` : ''}`,
     },
 };
 /** What the chat says at a `model_switch` item, in the language of what the user wrote. */
@@ -28,24 +29,20 @@ export function modelSwitchNote(item, userText) {
     const labels = /[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en;
     return labels.switchNote(String(item.from), String(item.to), item.category ? ` (${String(item.category)})` : '');
 }
-/** A sentence wraps with the line around it. Code does not: DSH moves code that does not fit to a line of its own, so it stays short. */
-const TOOL_SENTENCE_LIMIT = 100, TOOL_CODE_LIMIT = 60;
+const TOOL_TARGET_LIMIT = 100;
 const oneLine = (text) => text.replace(/\s+/g, ' ').trim();
-function clip(text, limit, cut = false) {
+function clip(text, cut = false) {
     const characters = [...text];
-    return characters.length > limit ? `${characters.slice(0, limit).join('').trimEnd()}…` : cut ? `${text}…` : text;
+    return characters.length > TOOL_TARGET_LIMIT ? `${characters.slice(0, TOOL_TARGET_LIMIT).join('').trimEnd()}…` : cut ? `${text}…` : text;
 }
 /** A long path keeps its end, which names the file, starting at a folder. */
 function clipPath(path) {
     const characters = [...path];
-    if (characters.length <= TOOL_CODE_LIMIT)
+    if (characters.length <= TOOL_TARGET_LIMIT)
         return path;
-    const end = characters.slice(1 - TOOL_CODE_LIMIT).join('');
+    const end = characters.slice(1 - TOOL_TARGET_LIMIT).join('');
     return `…${end.slice(Math.max(end.indexOf('/'), 0))}`;
 }
-/** Code keeps markdown in it as written, and only a backtick could end it early. It needs no separator, which DSH could leave alone on the line above. */
-const asCode = (text) => ` \`${text.replace(/`/g, "'")}\``;
-const asSentence = (text) => ` · ${clip(oneLine(text), TOOL_SENTENCE_LIMIT).replace(/[\\`*_~[\]<>|$&]/g, '\\$&')}`;
 /**
  * What a tool works on. The CLI's own sentence comes first: 90% of the commands in real sessions run past 100 characters and
  * a third are several lines, while 96% come with a sentence of about 50 characters.
@@ -54,27 +51,28 @@ function toolTarget(input) {
     const field = (...keys) => keys.map(key => input[key]).find((v) => typeof v === 'string' && !!v.trim())?.trim() ?? '';
     const description = field('description');
     if (description)
-        return asSentence(description);
+        return clip(oneLine(description));
     const [line, ...rest] = field('command').split('\n');
     if (line)
-        return asCode(clip(oneLine(line), TOOL_CODE_LIMIT, rest.length > 0));
+        return clip(oneLine(line), rest.length > 0);
     const path = field('file_path', 'path');
     if (path)
-        return asCode(clipPath(oneLine(path)));
-    const other = field('pattern', 'query', 'url');
-    if (other)
-        return asCode(clip(oneLine(other), TOOL_CODE_LIMIT));
-    const prompt = field('prompt');
-    return prompt ? asSentence(prompt) : '';
+        return clipPath(oneLine(path));
+    return clip(oneLine(field('pattern', 'query', 'url', 'prompt')));
 }
-/** The line a reply ends with while tools run: the one started last and what it works on, in the language of what the user wrote. */
+/**
+ * The line a reply ends with while tools run: what the one started last works on, or its name if that says nothing, in the
+ * language of what the user wrote. It is a link only so that the client can find it and draw it as one of DSH's tool rows; see
+ * {@link TOOL_STATUS_URL}.
+ */
 export function toolStatus(running, userText) {
     const call = running.at(-1);
     if (!call)
         return '';
     const input = typeof call.detail === 'object' && call.detail !== null ? call.detail : {};
     const labels = /[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en;
-    return `> ${labels.running(`${String(call.name ?? 'Tool')}${toolTarget(input)}`, running.length - 1)}`;
+    const line = labels.running(toolTarget(input) || String(call.name ?? 'Tool'), running.length - 1);
+    return `[${line.replace(/[\\`*_~[\]<>|$&]/g, '\\$&')}](${TOOL_STATUS_URL})`;
 }
 /** A cut keeps code fences balanced, so the rest of the transcript does not render as code. */
 const fences = (text) => (text.match(/^\s*```/gm) ?? []).length;

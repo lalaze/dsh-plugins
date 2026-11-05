@@ -1,4 +1,4 @@
-import type { TimelineEntry } from '../core/domain.js';
+import { type TimelineEntry } from '../core/domain.js';
 /** Where turns this conversation did not send came from: another DSH by name, Open sessions in this one, or not recorded. */
 export type TurnSource = {
     name: string;
@@ -7,7 +7,11 @@ export type TurnSource = {
 } | undefined;
 /** What the chat says at a `model_switch` item, in the language of what the user wrote. */
 export declare function modelSwitchNote(item: TimelineEntry['item'], userText: string): string;
-/** The line a reply ends with while tools run: the one started last and what it works on, in the language of what the user wrote. */
+/**
+ * The line a reply ends with while tools run: what the one started last works on, or its name if that says nothing, in the
+ * language of what the user wrote. It is a link only so that the client can find it and draw it as one of DSH's tool rows; see
+ * {@link TOOL_STATUS_URL}.
+ */
 export declare function toolStatus(running: readonly TimelineEntry['item'][], userText: string): string;
 /**
  * One markdown block of a remote CLI session's saved history: what the user asked, what the CLI answered, and which
