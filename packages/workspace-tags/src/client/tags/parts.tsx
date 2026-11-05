@@ -1,5 +1,5 @@
 /** Small tag pieces the sidebar rows and the overlays share. */
-import { useMemo, useState, useSyncExternalStore, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useMemo, useState, useSyncExternalStore, type ButtonHTMLAttributes, type DragEvent, type ReactNode } from 'react'
 import clsx from 'clsx'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { HostObservable } from '@deepseek-ai/dsh-client-ui-slots'
@@ -131,6 +131,14 @@ export function SpaceSwitcher({ tags, filter, activity, onPick, onReorder, onDra
   const [drag, setDrag] = useState<{ id: string; at: number | null } | null>(null)
   const endDrag = () => { setDrag(null); onDragActive(false) }
   const dropAt = drag !== null && drag.at !== null && movedTagIds(tags, drag.id, drag.at) !== undefined ? drag.at : null
+  // Entering a chip or a chip's label fires dragenter in place of that moment's dragover, and
+  // Chromium cancels a drop whose last event was not cancelled, so both have to accept it.
+  const overRow = drag === null ? undefined : (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.dataTransfer.dropEffect = 'move'
+    const at = chipDropIndex(event.currentTarget, event.clientX)
+    if (at !== drag.at) setDrag({ id: drag.id, at })
+  }
   const chip = (id: string | null, name: string, marker: ReactNode, tagChip?: ButtonHTMLAttributes<HTMLButtonElement>) => {
     const selected = id === filter
     const count = activity.get(id) ?? { waiting: 0, completed: 0, running: 0 }
@@ -161,12 +169,8 @@ export function SpaceSwitcher({ tags, filter, activity, onPick, onReorder, onDra
       className={css.switcher}
       role="group"
       aria-label={t('tags.filter.label')}
-      onDragOver={drag === null ? undefined : (event) => {
-        event.preventDefault()
-        event.dataTransfer.dropEffect = 'move'
-        const at = chipDropIndex(event.currentTarget, event.clientX)
-        if (at !== drag.at) setDrag({ id: drag.id, at })
-      }}
+      onDragEnter={overRow}
+      onDragOver={overRow}
       onDragLeave={drag === null ? undefined : (event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDrag({ id: drag.id, at: null })
       }}

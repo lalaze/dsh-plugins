@@ -686,6 +686,17 @@ describe('WorkspaceBrowser with tags', () => {
       expect(host.operations).toEqual([])
     })
 
+    it('accepts the drop on dragenter too, as a drop right after entering a chip has no dragover', async () => {
+      await mount()
+      const [client] = layOut()
+      const data = { effectAllowed: '', dropEffect: '' }
+      // fireEvent returns false when a handler cancelled the event.
+      expect(fireEvent.dragEnter(chip(/^Urgent/), { dataTransfer: data })).toBe(true)
+      fireEvent.dragStart(client!, { dataTransfer: dragData() })
+      expect(fireEvent.dragEnter(chip(/^Urgent/), { dataTransfer: data })).toBe(false)
+      expect(data.dropEffect).toBe('move')
+    })
+
     it('keeps All and Untagged in place and still picks a space on click', async () => {
       const { runtime } = await mount()
       for (const name of [/^All/, /^Untagged/]) expect(chip(name).getAttribute('draggable')).toBeNull()
