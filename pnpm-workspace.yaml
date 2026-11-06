@@ -92,7 +92,7 @@ packageExtensions:
   '@deepseek-ai/dsh-client-ui-session@0.2.2-rc.1':
     dependencies:
       '@deepseek-ai/dsh-session': 0.2.2-rc.1
-  # dsh-mobile and the other plugins that pin rc.3 packages: same reason as below.
+  # The plugins that pin rc.3 packages: same reason as below.
   '@deepseek-ai/dsh-client-store@0.2.1-rc.3':
     dependencies:
       zustand: ~4.5.7
