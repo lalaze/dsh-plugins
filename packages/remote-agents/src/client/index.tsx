@@ -15,6 +15,7 @@ import { ModelLabel } from './composer/model-label.js';
 import { installCustomModelLabels } from './composer/custom-model-label.js';
 import { installWorkspaceModels, type WorkspaceClient } from './composer/workspace-models.js';
 import { installToolStatusStyles } from './sessions/tool-status.js';
+import { installLiveImages } from './sessions/live-images.js';
 import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './composer/usage.js';
 import { FastToggle } from './composer/fast.js';
 import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDirectories } from './workspace/flow.js';
@@ -92,6 +93,7 @@ export function apply(ctx: Client): void {
   ctx.effect(installCustomModelLabels);
   ctx.effect(installUsageStyles);
   ctx.effect(installToolStatusStyles);
+  ctx.effect(installLiveImages);
   installWorkspaceSidebar(ctx);
   installTuiSessions(ctx);
   installTuiActivity(ctx);
