@@ -664,7 +664,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                         throw new LlmError('DSH approvals are unavailable. Enable approval and userQuestions services before using remote CLI chat.', 'APPROVAL_UNAVAILABLE');
                     const questionSignal = AbortSignal.any([signal, pending.signal]);
                     // DSH rejects every prompt of an unattended subagent; deny here so the CLI goes on rather than cancelling the turn.
-                    void (unattended ? Promise.resolve(unattendedAnswer(permission)) : decidePermission({ approval: this.host.approval, userQuestions: this.host.userQuestions }, permission, { agent, callId: `remote-${taskId}-${permission.id}`, signal: questionSignal }, questionSignal, `${provider.label} on ${project.label}:${cwd}`))
+                    void (unattended ? Promise.resolve(unattendedAnswer(permission, service.store.task(t => t.id === taskId)?.sandboxed === true)) : decidePermission({ approval: this.host.approval, userQuestions: this.host.userQuestions }, permission, { agent, callId: `remote-${taskId}-${permission.id}`, signal: questionSignal }, questionSignal, `${provider.label} on ${project.label}:${cwd}`))
                         .then(async (answer) => {
                         if (questionSignal.aborted)
                             return;

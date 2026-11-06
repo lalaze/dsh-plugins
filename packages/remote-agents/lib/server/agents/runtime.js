@@ -684,6 +684,8 @@ export class CliSession {
         ] : undefined;
         this.permission(`claude-${m.request_id}`, { name, kind: name === 'AskUserQuestion' ? 'question' : name === 'ExitPlanMode' ? 'plan' : 'tool',
             title: request.title, description: request.description, input: request.input,
+            ...(typeof request.decision_reason === 'string' && request.decision_reason ? { reason: request.decision_reason } : {}),
+            ...(request.decision_reason_type === 'safetyCheck' ? { safetyCheck: true } : {}),
             detail: updates.length ? { input: request.input, permissionSuggestions: updates } : request.input, ...(actions ? { actions } : {}) }, m, answer => {
             const answers = answer.answers && name === 'AskUserQuestion'
                 ? Object.fromEntries(questionsOf(request.input).map(question => [question.question, answer.answers[question.header]]))

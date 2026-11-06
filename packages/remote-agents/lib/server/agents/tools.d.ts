@@ -18,8 +18,12 @@ export interface WaitResult {
     agents: AgentReport[];
     timedOut: boolean;
 }
-/** The answer for a CLI running for an unattended DSH subagent: nobody can approve, so it is denied and the turn goes on. */
-export declare function unattendedAnswer(permission: Permission): PermissionAnswer;
+/**
+ * The answer for a CLI running for an unattended DSH subagent. Nobody can approve, so it is denied and the turn goes on,
+ * unless it is a shell command in a task whose sandbox holds it anyway: then the sandbox is the limit, not this answer.
+ * A safety check stays refused, since that one asks for a person's judgement rather than for help reading the command.
+ */
+export declare function unattendedAnswer(permission: Permission, sandboxed?: boolean): PermissionAnswer;
 export declare function decidePermission(host: ToolHost, permission: Permission, exec: ToolCall, signal: AbortSignal, subject: string): Promise<PermissionAnswer | undefined>;
 /**
  * Paseo-style delegation for the DSH agent: start remote CLI agents, message them and collect their

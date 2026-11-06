@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.115:** On macOS with Claude Code 2.1.319 or later, an unattended Claude working with workspace write, such as a `/flow` implementer, now runs the shell commands it would have asked about inside its sandbox, so loops and `$?` no longer stop it. The sandbox still blocks writes outside the workspace and network access, and Claude Code now exits rather than run without it. Safety checks stay refused, and read-only sessions and other systems work as before. A refusal now gives the CLI's reason and no longer claims a person denied it, since a conversation that never asks refuses without a prompt. A CLI already running picks this up the next time it starts. Nothing to do after upgrading.
+
 **Upgrading from 0.2.114:** When nobody can approve a shell command in an unattended session, such as a `/flow` step, the refusal now tells the model to retry it as plain separate commands. Before, a Claude reviewer could reject correct work and a Claude implementer could stop without doing anything. Every retry still goes through the same check, so permissions do not change. Nothing to do after upgrading.
 
 **Upgrading from 0.2.113:** Stopping a remote Codex turn now also ends the commands that turn started, which used to keep running. Commands left by earlier turns, such as a dev server, stay. A Codex already running picks this up the next time it starts, and with Codex 0.164's workspace sandbox on Linux the command still runs on. A read-only unattended Claude, such as a `/flow` plan or review step, can now use web search and web fetch without asking, so it may send workspace content out in a query or URL. Nothing to do after upgrading.

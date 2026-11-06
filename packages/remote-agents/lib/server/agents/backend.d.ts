@@ -108,10 +108,19 @@ export declare function codexServiceTiers(model: Record<string, unknown>): Choic
 /**
  * Nobody approves an unattended Claude task's commands. With workspace write it runs them in Claude Code's own sandbox,
  * which confines writes to the workspace like DSH's sandbox; without a sandbox on the host they are asked and denied.
- * Read-only has no such sandbox, since Claude Code's lets a command write, but searching and reading the web change
- * nothing, and research would otherwise be refused every time. Codex's read-only sandbox already allows web search.
+ * Read-only gets no sandbox, since it would have to widen what a read-only task's commands can read while it can reach
+ * the web; but searching and reading the web change nothing, and research would otherwise be refused every time.
+ * Codex's read-only sandbox already allows web search.
+ *
+ * `confined` says the sandbox is known to work on this host (see {@link confinesCommands}). Claude Code then exits rather
+ * than run without it and ignores a command's request to leave it, so its commands can be left to the sandbox.
  */
-export declare const unattendedClaude: (task: Pick<Task, "unattended" | "modeId">) => string[];
+export declare const unattendedClaude: (task: Pick<Task, "unattended" | "modeId">, confined?: boolean) => string[];
+/**
+ * Whether an unattended Claude's commands can be left to its sandbox rather than refused. Only macOS has been measured:
+ * on Linux it also needs bwrap and socat, and without them Claude Code runs commands unsandboxed.
+ */
+export declare function confinesCommands(system: string, version: string): boolean;
 /**
  * Claude Code refuses to skip permissions as root unless IS_SANDBOX says the machine is meant for it. Whoever connects as
  * root and picks Full access, or made it that account's default, has decided that, so these launches say so. The host is
@@ -129,6 +138,7 @@ export declare class SshBackend implements Backend {
     private readonly probes;
     private identity?;
     private catalogs;
+    private readonly confining;
     /** One CLI's probe for the start path, keyed by `cwd\0provider`, so `create` and `open` do not probe twice. */
     private targets;
     private sessions;
@@ -230,6 +240,8 @@ export declare class SshBackend implements Backend {
     create(task: Task, signal?: AbortSignal): Promise<Agent>;
     recover(task: Task, signal?: AbortSignal): Promise<Agent>;
     private start;
+    /** Asked once per CLI: what the host is and which Claude Code it runs. Anything unclear keeps commands refused. */
+    private confines;
     private open;
     agent(id: string): Promise<Agent | null>;
     /** A history another DSH drives is brought up to date before it is read. */

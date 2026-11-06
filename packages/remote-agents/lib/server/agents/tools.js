@@ -67,10 +67,22 @@ function denyAction(permission) {
  * measured on Claude Code, a reviewer rejected correct work and an implementer did nothing. Each retry is still checked.
  */
 const UNATTENDED_SHELL = 'Nobody can approve this, because the session runs unattended. A command often needs approval only because it could not be checked automatically, as with a subshell, a loop, a variable, `$?` or `$(...)`. Retry it as plain separate commands, or use your file reading and search tools to look at files. If it is still refused, go on without it and say in your reply what you could not run.';
-/** The answer for a CLI running for an unattended DSH subagent: nobody can approve, so it is denied and the turn goes on. */
-export function unattendedAnswer(permission) {
+const reasonOf = (permission) => permission.reason ? ` The CLI's reason: ${permission.reason}` : '';
+/** The action allowing this one request: never one that grants more than it, such as for the whole session. */
+const onceAction = (permission) => permission.actions?.find(a => a.behavior === 'allow' && (!a.scope || a.scope === 'once') && !/session|project|always|remember/i.test(`${a.id} ${a.label}`));
+/**
+ * The answer for a CLI running for an unattended DSH subagent. Nobody can approve, so it is denied and the turn goes on,
+ * unless it is a shell command in a task whose sandbox holds it anyway: then the sandbox is the limit, not this answer.
+ * A safety check stays refused, since that one asks for a person's judgement rather than for help reading the command.
+ */
+export function unattendedAnswer(permission, sandboxed = false) {
+    if (sandboxed && permission.name === 'Bash' && !permission.safetyCheck && !permission.input?.dangerouslyDisableSandbox) {
+        const once = onceAction(permission);
+        if (once || !permission.actions?.length)
+            return { behavior: 'allow', ...(once ? { selectedActionId: once.id } : {}) };
+    }
     const deny = denyAction(permission);
-    const message = permission.name === 'Bash' ? UNATTENDED_SHELL : 'Nobody can approve this: the session runs unattended. Continue without it, or report it as a blocker.';
+    const message = `${permission.name === 'Bash' ? UNATTENDED_SHELL : 'Nobody can approve this: the session runs unattended. Continue without it, or report it as a blocker.'}${reasonOf(permission)}`;
     return { behavior: 'deny', message, ...(deny ? { selectedActionId: deny.id } : {}) };
 }
 export async function decidePermission(host, permission, exec, signal, subject) {
@@ -90,12 +102,13 @@ export async function decidePermission(host, permission, exec, signal, subject) 
         reason: [`Remote agent ${subject} asks: ${permission.title ?? permission.name}`, permission.description, detail,
             permission.actions?.some(a => a.behavior === 'allow' && (a.scope === 'session' || a.scope === 'project')) ? 'To remember a matching approval, open Settings → Remote agents → Open sessions.' : undefined].filter(Boolean).join('\n') });
     const deny = denyAction(permission);
+    // A conversation that never asks gets this too, with no prompt shown, so it must not say a person decided.
     if (outcome === 'rejected')
-        return { behavior: 'deny', message: 'The user denied this request', ...(deny ? { selectedActionId: deny.id } : {}) };
+        return { behavior: 'deny', message: `DSH refused this: the user denied it, or this conversation's permissions do not ask.${reasonOf(permission)}`, ...(deny ? { selectedActionId: deny.id } : {}) };
     if (outcome !== 'allowed-once')
         return;
     // A one-time DSH approval must never silently grant a session-wide CLI permission.
-    const action = permission.actions?.find(a => a.behavior === 'allow' && (!a.scope || a.scope === 'once') && !/session|project|always|remember/i.test(`${a.id} ${a.label}`));
+    const action = onceAction(permission);
     if (permission.actions?.length && !action)
         return;
     return { behavior: 'allow', ...(action ? { selectedActionId: action.id } : {}) };
@@ -164,7 +177,7 @@ export function delegationTools(host, service, accessOf = () => ({ unattended: f
                         asking.set(key, controller);
                         mine.add(key);
                         // Nobody answers an unattended team member: deny at once so the remote CLI goes on and reports it.
-                        void (unattended ? Promise.resolve(unattendedAnswer(permission)) : decidePermission(host, permission, exec, AbortSignal.any([exec.signal, controller.signal]), subject(agent)))
+                        void (unattended ? Promise.resolve(unattendedAnswer(permission, service.store.task(t => t.id === agent.id)?.sandboxed === true)) : decidePermission(host, permission, exec, AbortSignal.any([exec.signal, controller.signal]), subject(agent)))
                             .then(answer => answer ? service.respond(agent.id, permission.id, answer) : void deferred.add(key))
                             .catch(() => { deferred.add(key); })
                             .finally(() => { if (asking.get(key) === controller)
