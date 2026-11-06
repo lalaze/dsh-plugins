@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.104:** Images a remote CLI reads or writes during a turn now appear right away, instead of showing as a file name in italics until the whole turn ends. DSH loads a local image only once its message has finished, and a remote CLI's whole turn is one message, so this plugin now draws those images while the turn runs. They stay after you switch conversations or reload the page, and DSH takes over when the turn ends. Clicking to enlarge still works only after the turn ends.
+
 **Upgrading from 0.2.103:** A new conversation that inherits a remote model its workspace cannot run now starts on one it can, instead of failing on the first message. In a local workspace that is the last local model you chose. On another machine it is the same CLI and model there. Only that conversation changes: your default stays what you last chose.
 
 **Upgrading from 0.2.102:** The line naming the tool Claude is running now looks like DSH's own tool rows, with the same gray and sparkle icon, instead of a quote with a bar. It reads like `Tool call · Run the tests`, and names the tool only when there is nothing else to show. A long line is cut to one row. Update `dsh-mobile` to 0.3.7 at the same time: an older phone app shows this line as a link to a page that does not exist.
