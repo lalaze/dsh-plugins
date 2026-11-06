@@ -1,6 +1,6 @@
 {
   "name": "dsh-model-flow",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "One command for DeepSeek Harness: one model plans, one implements, one reviews, and rejected work goes back",
   "type": "module",
   "main": "lib/server/index.js",

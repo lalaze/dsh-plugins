@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { runFlow, type ChildRequest, type ChildResult } from '../src/engine.js';
+import { flowText, runFlow, type ChildRequest, type ChildResult } from '../src/engine.js';
 import { parseLine } from '../src/line.js';
 import { parseVerdict } from '../src/prompts.js';
 import { relocate, resolveSpec, type CatalogModel, type Routes } from '../src/routes.js';
@@ -123,6 +123,22 @@ test('the line takes options first and everything after them is the goal', () =>
   assert.deepEqual(parseLine(' stop the bleeding'), { kind: 'run', goal: 'stop the bleeding', overrides: {} });
   assert.throws(() => parseLine(' impl=codex'), /Say what to do/);
   assert.throws(() => parseLine(' rounds=0 x'), /rounds must be/);
+});
+
+test('an empty goal runs only when attachments are present', () => {
+  assert.deepEqual(parseLine(''), { kind: 'status' });
+  assert.deepEqual(parseLine('', true), { kind: 'run', goal: '', overrides: {} });
+  assert.deepEqual(parseLine('impl=codex', true), { kind: 'run', goal: '', overrides: { implement: 'codex' } });
+  assert.throws(() => parseLine('impl=codex'), /Say what to do/);
+});
+
+test('the started row adds attachment counts only when present', () => {
+  const en = flowText('add csv').started, zh = flowText('加 CSV').started;
+  assert.equal(en(routes, 3), 'Started: Plan planner → Implement coder → Review checker, up to 3 review rounds');
+  assert.equal(zh(routes, 3), '已开始：计划 planner → 实现 coder → 审核 checker，最多审核 3 轮');
+  assert.equal(en(routes, 3, 0), en(routes, 3));
+  assert.equal(en(routes, 3, 2), `${en(routes, 3)}, 2 attachments`);
+  assert.equal(zh(routes, 3, 2), `${zh(routes, 3)}，2 个附件`);
 });
 
 const catalog: CatalogModel[] = [

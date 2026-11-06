@@ -11,9 +11,9 @@ export type FlowLine =
 const ROLE_WORDS: Readonly<Record<string, Role>> = { plan: 'plan', impl: 'implement', implement: 'implement', review: 'review' };
 const OPTION = /^(plan|impl|implement|review|rounds)=(\S+)(?:\s+|$)/iu;
 
-export function parseLine(raw: string): FlowLine {
+export function parseLine(raw: string, hasAttachments = false): FlowLine {
   let rest = raw.trim();
-  if (!rest) return { kind: 'status' };
+  if (!rest && !hasAttachments) return { kind: 'status' };
   if (/^stop$/iu.test(rest)) return { kind: 'stop' };
   const overrides: Partial<Record<Role, string>> = {};
   let rounds: number | undefined;
@@ -25,6 +25,6 @@ export function parseLine(raw: string): FlowLine {
     } else overrides[ROLE_WORDS[word]] = value;
     rest = rest.slice(match[0].length);
   }
-  if (!rest) throw new Error('Say what to do: /flow [plan=model] [impl=model] [review=model] [rounds=n] <goal>');
+  if (!rest && !hasAttachments) throw new Error('Say what to do: /flow [plan=model] [impl=model] [review=model] [rounds=n] <goal>');
   return { kind: 'run', goal: rest, overrides, ...(rounds === undefined ? {} : { rounds }) };
 }

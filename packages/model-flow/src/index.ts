@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-connection';
 import { brief, flowText, runFlow, type ChildRequest, type ChildResult } from './engine.js';
 import { API_PATH, createHandler } from './http.js';
 import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine } from './line.js';
+import { attachmentNote } from './prompts.js';
 import { machineOf, OFF, relocate, resolveSpec, type CatalogModel, type Role, type Route, type Routes } from './routes.js';
 import type { EffortOption, Locale } from './shared.js';
 import { FlowStore } from './store.js';
@@ -17,16 +18,18 @@ interface ChildSession {
 }
 interface LiveAgent { id: string; provider?: string; model?: string; phase?: { kind?: string; lastTurn?: number }; session: ChildSession & { deriveMessages?(): unknown[] } }
 interface Activation { childId: string; result: Promise<{ output: readonly { type: string; text?: string }[]; stopReason: string; diagnostic?: string }>; dispose(): Promise<void> }
+/** Materialized DSH blocks; all payload fields are forwarded unchanged. */
+interface Attachment { type: 'image' | 'file' }
 interface Host {
   commands: {
-    register(definition: { name: string; description: string; recordInput?: boolean; input?: { hint: string }; handler(invocation: { agent: LiveAgent; rawInput: string }): { kind: 'success' | 'error'; text?: string } | Promise<{ kind: 'success' | 'error'; text?: string }> }): () => void;
+    register(definition: { name: string; description: string; recordInput?: boolean; input?: { hint: string; attachments?: boolean }; handler(invocation: { agent: LiveAgent; rawInput: string; attachments?: readonly Attachment[] }): { kind: 'success' | 'error'; text?: string } | Promise<{ kind: 'success' | 'error'; text?: string }> }): () => void;
     execute(agent: LiveAgent, line: string, attachments: readonly never[], signal: AbortSignal): Promise<unknown>;
   };
   subagents: { list(): readonly string[]; startActivation(spec: Record<string, unknown>): Promise<Activation> };
   llm: {
     listProviders(): { id: string; name: string }[];
     listModels(provider: string): Promise<{ provider: string; id: string; name: string }[]>;
-    resolveModelInfo(provider: string, model: string): Promise<{ reasoning?: { efforts: readonly { id: string; label?: string; name?: string }[] } }>;
+    resolveModelInfo(provider: string, model: string): Promise<{ inputModalities?: readonly string[]; reasoning?: { efforts: readonly { id: string; label?: string; name?: string }[] } }>;
   };
 }
 interface Permissions { current(session: unknown): string; resolve(name: string): { sandbox: string } }
@@ -98,7 +101,7 @@ export async function apply(ctx: Context): Promise<void> {
     if (failures.has(agent.id)) failures.set(agent.id, error instanceof Error ? error.message : String(error));
   }, { global: true });
 
-  const runChild = (parent: LiveAgent) => async (request: ChildRequest): Promise<ChildResult> => {
+  const runChild = (parent: LiveAgent, attachments: readonly Attachment[]) => async (request: ChildRequest): Promise<ChildResult> => {
     const childId = randomUUID();
     if (request.readOnly) readOnly.add(childId);
     failures.set(childId, undefined);
@@ -108,7 +111,7 @@ export async function apply(ctx: Context): Promise<void> {
         provider: 'spawn', childId, delivery: 'caller', signal: request.signal,
         label: `${LABELS[request.role]}${request.round > 0 ? ` ${request.round}` : ''}`,
         request: {
-          prompt: [{ type: 'text', text: request.prompt }], parent,
+          prompt: [{ type: 'text', text: request.prompt + (attachments.length ? `\n\n${attachmentNote}` : '') }, ...attachments], parent,
           agentOptions: { provider: request.route.provider, model: request.route.model, ...(request.route.effort ? { reasoningEffort: request.route.effort } : {}) },
         },
       });
@@ -138,7 +141,7 @@ export async function apply(ctx: Context): Promise<void> {
     if (!implement || !review) throw new Error(say(`Choose the models first: Settings → Model flow, or /${COMMAND} impl=codex review=claude <goal>`, `请先选择模型：设置 → 模型分工，或者 /${COMMAND} impl=codex review=claude <目标>`));
     return { ...(plan ? { plan } : {}), implement, review };
   }
-  function start(agent: LiveAgent, goal: string, routes: Routes, rounds: number): void {
+  function start(agent: LiveAgent, goal: string, routes: Routes, rounds: number, attachments: readonly Attachment[]): void {
     const controller = new AbortController();
     running.set(agent.id, { controller, routes, goal, startedAt: Date.now() });
     const note = async (text: string) => {
@@ -147,7 +150,7 @@ export async function apply(ctx: Context): Promise<void> {
     };
     // After the handler returns, so the first step's rows follow the "started" row.
     setTimeout(() => {
-      void runFlow({ goal, routes, rounds, signal: controller.signal }, { run: runChild(agent), note })
+      void runFlow({ goal, routes, rounds, signal: controller.signal }, { run: runChild(agent, attachments), note })
         .catch(error => note(`${String(error)}`))
         .finally(() => running.delete(agent.id));
     }, 0);
@@ -162,15 +165,16 @@ export async function apply(ctx: Context): Promise<void> {
   ctx.effect(() => host.commands.register({
     name: COMMAND, recordInput: false,
     description: 'one model plans, one implements, one reviews, and rejected work goes back',
-    input: { hint: '[plan=model] [impl=model] [review=model] [rounds=n] <goal> | stop' },
-    handler: async ({ agent, rawInput }) => {
+    input: { hint: '[plan=model] [impl=model] [review=model] [rounds=n] <goal> | stop', attachments: true },
+    handler: async ({ agent, rawInput, attachments = [] }) => {
       const input = rawInput.trimStart();
       if (input.startsWith(noteMark)) return { kind: 'success', text: input.slice(noteMark.length) };
       lastCommand = { sessionId: agent.id, at: Date.now() };
       ensureConversation(agent);
       try {
-        const line = parseLine(rawInput), current = running.get(agent.id);
+        const line = parseLine(rawInput, attachments.length > 0), current = running.get(agent.id);
         if (line.kind === 'stop') {
+          if (attachments.length) return { kind: 'error', text: say('Remove the attachments before using /flow stop.', '请先移除附件，再使用 /flow stop。') };
           if (!current) return { kind: 'error', text: say('No flow is running in this conversation.', '这个对话里没有正在运行的流程。') };
           current.controller.abort();
           return { kind: 'success', text: flowText(current.goal).stopped };
@@ -189,10 +193,23 @@ export async function apply(ctx: Context): Promise<void> {
         try { if (presets && presets.resolve(presets.current(agent.session)).sandbox === 'read-only') return { kind: 'error', text: say('This conversation is read-only, so the implementing model could not change files. Switch it to Workspace Write first.', '这个对话是只读权限，实现模型改不了文件。请先切换到 Workspace Write。', line.goal) }; }
         catch { /* A custom permission has no preset to read; the implementer reports what it could not do. */ }
         const routes = await chooseRoutes(agent, line.overrides), rounds = line.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
-        await titleFor(agent, line.goal);
-        start(agent, line.goal, routes, rounds);
+        const goal = line.goal || say('Do what the attached images and files ask.', '按附件里的图片和文件的要求来做。');
+        if (attachments.some(block => block.type === 'image')) {
+          for (const role of ['plan', 'implement', 'review'] as const) {
+            const route = routes[role];
+            if (!route) continue;
+            let modalities: readonly string[] | undefined;
+            try { modalities = (await host.llm.resolveModelInfo(route.provider, route.model)).inputModalities; }
+            catch { /* Unknown capabilities: let the step report any model failure. */ }
+            if (modalities && !modalities.includes('image')) return { kind: 'error', text: say(
+              `${flowText(goal).roleName(role)} model ${route.label} (${route.model}) does not support images.`,
+              `${flowText(goal).roleName(role)}模型 ${route.label}（${route.model}）不支持图片。`, goal) };
+          }
+        }
+        await titleFor(agent, goal);
+        start(agent, goal, routes, rounds, attachments);
         // Rows show one line, so the part that changes comes first; the conversation's title carries the goal.
-        return { kind: 'success', text: `${flowText(line.goal).started(routes, rounds)}\n${brief(line.goal, 160)}` };
+        return { kind: 'success', text: `${flowText(goal).started(routes, rounds, attachments.length)}\n${brief(goal, 160)}` };
       } catch (error) {
         return { kind: 'error', text: error instanceof Error ? error.message : String(error) };
       }
