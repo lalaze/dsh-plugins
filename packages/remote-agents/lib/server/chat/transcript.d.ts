@@ -19,6 +19,7 @@ export declare function toolStatus(running: readonly TimelineEntry['item'][], us
  * One markdown block of a remote CLI session's saved history: what the user asked, what the CLI answered, and which
  * tools it used. Latest turns win when the history is long; the full record stays in the sessions panel.
  * With `elsewhere` the entries are turns sent outside this conversation, headed by where they came from.
+ * `writing` is what the CLI is still writing at the end, left out for whoever follows the turn: it still names the CLI and sets the language.
  */
 export declare function transcript(entries: readonly TimelineEntry[], options: {
     cli: string;
@@ -26,6 +27,7 @@ export declare function transcript(entries: readonly TimelineEntry[], options: {
     elsewhere?: {
         from: TurnSource;
     };
+    writing?: string;
 }): {
     text: string;
     lastMessageId?: string;

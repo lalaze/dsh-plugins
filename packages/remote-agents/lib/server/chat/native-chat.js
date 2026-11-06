@@ -276,6 +276,15 @@ export class RemoteCliAdapter extends LlmAdapter {
         const running = !finished && !!end && busy(await service.summary(taskId));
         if (!finished && !running && Date.now() - Date.parse(entries.at(-1).timestamp) <= QUIET_MS)
             entries = entries.slice(0, latest);
+        // What a running CLI is still writing would be cut where this reading ends: following the turn picks it up whole.
+        let resume = end, writing;
+        if (running) {
+            const written = entries.findLastIndex(e => e.item.type !== 'assistant_message' && e.item.type !== 'reasoning');
+            if (written < entries.length - 1)
+                writing = entries.slice(written + 1).map(e => e.item.type === 'assistant_message' ? String(e.item.text ?? '') : '').join('');
+            resume = { epoch: end.epoch, seq: entries[written].seqEnd };
+            entries = entries.slice(0, written + 1);
+        }
         const messages = entries.filter(e => e.item.type === 'user_message'), lastMessageId = messages.at(-1)?.item.clientMessageId;
         if (typeof lastMessageId !== 'string' || !lastMessageId)
             return;
@@ -288,7 +297,7 @@ export class RemoteCliAdapter extends LlmAdapter {
         const cli = CLI_NAMES[task.provider] ?? task.provider, turns = messages.length;
         const summary = sent.length ? `${cli} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}`
             : `${cli} continued on its own${turns > 1 ? `, ${turns} turns` : ''}`;
-        return { text: transcript(entries, { cli, elsewhere: { from } }).text, summary, lastMessageId, turns, ...(running ? { running: end } : {}) };
+        return { text: transcript(entries, { cli, elsewhere: { from }, ...(writing !== undefined ? { writing } : {}) }).text, summary, lastMessageId, turns, ...(running ? { running: resume } : {}), ...(writing !== undefined ? { writing: true } : {}) };
     }
     /**
      * Show turns that another DSH sharing the host, or Open sessions, ran in this conversation's CLI session; one still
@@ -759,7 +768,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                         admitted = true;
                         settled = false;
                         reached = { id: turns.lastMessageId, cursor: turns.running };
-                        yield* textChunk('text', '\n\n---\n\n');
+                        yield* textChunk('text', turns.writing ? '\n\n' : '\n\n---\n\n');
                         yield* follow(turns.lastMessageId, turns.running, true, true);
                         settled = true;
                     }
@@ -838,7 +847,10 @@ export class RemoteCliAdapter extends LlmAdapter {
                             continue;
                         }
                         yield* textChunk('text', own.text);
-                        yield* endBlock();
+                        if (own.writing)
+                            yield* textChunk('text', '\n\n');
+                        else
+                            yield* endBlock();
                         shownOwn = true;
                         reached = { id: own.lastMessageId, cursor: own.running };
                         yield* follow(own.lastMessageId, own.running, true, true);

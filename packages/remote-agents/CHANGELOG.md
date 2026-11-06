@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.111:** When a turn Claude started by itself begins to show, the sentence it is still writing no longer breaks in two. Nothing to do after upgrading.
+
 **Upgrading from 0.2.110:** Nothing changes in DSH. The `remoteAgentsTasks` service, which only `dsh-mobile` used, is gone along with that plugin, which is no longer on the market. If you still have `dsh-mobile` installed, its **Background tasks** list stays empty, so remove it.
 
 **Upgrading from 0.2.109:** A turn Claude starts by itself, as after a background task finished, now shows in the conversation as it runs rather than only once it ends, and Stop really stops it. A message you send meanwhile still waits for that turn; if you press Stop while it waits, it is not sent. A TUI conversation no longer reads as finished because Claude Code compacted by itself while idle: about 53 minutes after a turn it compacts on its own, with a title and footer that look just like a turn, so a run no longer starts while its spinner says `Compacting conversation…`. A TUI row therefore reads as running about a second later, and a `/compact` you type no longer shows as running and finished. Nothing to do after upgrading.
