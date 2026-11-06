@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.106:** The model name in the composer no longer shows the machine when another plugin that labels models, such as WorkBuddy, is installed. DSH's own model picker showed `Opus 5.5 · macmini` in that case; it now reads `Opus 5.5`, and hovering over it still shows the machine.
+
 **Upgrading from 0.2.105:** You can now click an image to enlarge it while the turn is still running, not only after it ends. It opens the same preview as DSH's own: Escape, the close button or a click outside the image closes it, and Escape there does not stop the turn. Right-clicking or dragging an image out of the preview still waits until the turn ends on DSH 0.2.2.
 
 **Upgrading from 0.2.104:** Images a remote CLI reads or writes during a turn now appear right away, instead of showing as a file name in italics until the whole turn ends. DSH loads a local image only once its message has finished, and a remote CLI's whole turn is one message, so this plugin now draws those images while the turn runs. They stay after you switch conversations or reload the page, and DSH takes over when the turn ends. Clicking to enlarge still works only after the turn ends.
