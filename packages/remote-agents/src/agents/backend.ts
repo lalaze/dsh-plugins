@@ -427,11 +427,12 @@ done`}`, 15_000, { login: false });
     }, onState, shared && (() => shared.mayAttach(taskId)));
   }
   private session(task: Task, peer: JsonlPeer, history: TaskHistory, relay?: RelayLink): CliSession {
-    // A finished turn changed the account's usage; read it again when it is next shown.
-    return new CliSession(peer, task, history, this.store, { turnEnded: ({ unprompted }) => {
+    // A turn the CLI runs by itself grows the history without a message from here: told like one another DSH runs.
+    const historyChanged = () => { for (const listener of this.historyListeners) { try { listener(task.id); } catch { /* A listener must not stop the session. */ } } };
+    return new CliSession(peer, task, history, this.store, { ownTurnStarted: historyChanged, turnEnded: ({ unprompted }) => {
+        // A finished turn changed the account's usage; read it again when it is next shown.
         this.accounts.delete(task.provider);
-        // A turn the CLI ran by itself grew the history without a message from here: told like one another DSH ran.
-        if (unprompted) for (const listener of this.historyListeners) { try { listener(task.id); } catch { /* A listener must not stop the session. */ } }
+        if (unprompted) historyChanged();
       },
       usage: (usage, turn) => { for (const listener of this.store.usageListeners) { try { listener(task.id, usage, turn); } catch { /* Statistics must not break a session. */ } } }, ...(relay ? { ended: () => void this.relayEnded(task.id, relay.id).catch(() => {}) } : {}) }, relay);
   }

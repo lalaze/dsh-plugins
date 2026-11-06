@@ -314,3 +314,84 @@ test('a message sent while the CLI runs a turn of its own waits for that turn an
   assert.deepEqual(prompts(remote.entries.get(agentId)), ['修复登录问题', 'Background command "Run Codex" completed (exit code 0)', '跑完了吗']);
   assert.deepEqual(task().chat?.delivered?.done, true);
 });
+
+/** A conversation whose CLI is running a turn it started itself, after what it wrote so far. */
+function ownTurn(remote: Awaited<ReturnType<typeof setup>>['remote'], agentId: string, taskId: string) {
+  const live = remote.live(taskId);
+  live.status = 'running'; live.activeTurn = { turnId: 'own-turn', startedAt: null, unprompted: true };
+  remote.append(agentId, { type: 'user_message', text: 'Background command "Run the checks" completed (exit code 0)', clientMessageId: 'cli-1', unprompted: true });
+  remote.append(agentId, { type: 'assistant_message', text: '检查通过，正在发布。' });
+  return live;
+}
+
+test('a turn the CLI runs by itself shows here while it runs, and Stop here stops it', async t => {
+  const { adapter, remote, task, agentId, agent, sent, messages, request } = await setup(t);
+  ownTurn(remote, agentId, task().id);
+  assert.equal(await adapter.catchUp(agent), true, 'it does not wait for the turn to end');
+  assert.equal((sent[0].source as { summary?: string }).summary, 'Codex continued on its own');
+  const sends = remote.sends, controller = new AbortController();
+  const chunks: StreamChunk[] = [], stopped = assert.rejects((async () => { for await (const chunk of adapter.stream({ ...request([...messages, sent[0]]), signal: controller.signal })) chunks.push(chunk); })(), /abort/i);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.match(text(chunks), /检查通过，正在发布。/);
+  controller.abort(); await stopped;
+  assert.equal(remote.stops, 1); assert.equal(remote.sends, sends, 'showing it sends nothing');
+  assert.equal(await adapter.catchUp(agent), false, 'what it showed is not shown again');
+});
+
+test('a message waiting for a turn the CLI runs by itself shows that turn as it goes', async t => {
+  const { adapter, remote, task, agentId, messages, request } = await setup(t);
+  const live = ownTurn(remote, agentId, task().id), sends = remote.sends;
+  let shown = '', note = '', whileRunning = false;
+  for await (const chunk of adapter.stream(request([...messages, user('跑完了吗')]))) {
+    if (chunk.type === 'reasoning-delta') note += chunk.text;
+    if (chunk.type !== 'text-delta') continue;
+    shown += chunk.text;
+    if (!whileRunning && shown.includes('检查通过，正在发布。')) {
+      whileRunning = live.status === 'running';
+      assert.equal(remote.sends, sends, 'the message waits for the turn');
+      setTimeout(() => remote.append(agentId, { type: 'assistant_message', text: '已经发布。' }), 15);
+      setTimeout(() => { remote.append(agentId, { type: 'turn_end', clientMessageId: 'cli-1', status: 'completed' }); live.status = 'idle'; live.activeTurn = null; }, 30);
+    }
+  }
+  assert.ok(whileRunning, 'its output shows before it ends');
+  assert.match(note, /Codex 正在跑它自己开始的一轮，你的消息会在这一轮结束后发送。现在按停止会中断这一轮。/);
+  assert.match(shown, /^\*\*Codex 自行继续了 1 轮\*\*[\s\S]*检查通过，正在发布。已经发布。\n\n---\n\nFollow-up completed\.$/);
+  assert.equal(shown.match(/检查通过/g)?.length, 1, 'output already shown is not repeated');
+  assert.equal(remote.sends, sends + 1); assert.equal(remote.interrupts, 0); assert.equal(remote.stops, 0, 'the turn runs to its end');
+  assert.deepEqual(prompts(remote.entries.get(agentId)), ['修复登录问题', 'Background command "Run the checks" completed (exit code 0)', '跑完了吗']);
+  assert.equal(task().chat?.delivered?.done, true);
+});
+
+test('Stop while a message waits stops the turn it waits for, and the message is not sent', async t => {
+  const { adapter, remote, task, agentId, agent, messages, request } = await setup(t);
+  ownTurn(remote, agentId, task().id);
+  const sends = remote.sends, controller = new AbortController();
+  const stopped = assert.rejects(collect(adapter.stream({ ...request([...messages, user('你别跑了')]), signal: controller.signal })), /abort/i);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  controller.abort(); await stopped;
+  assert.equal(remote.stops, 1, 'the CLI stops');
+  assert.equal(remote.sends, sends);
+  assert.ok(!prompts(remote.entries.get(agentId)).includes('你别跑了'));
+  assert.equal(await adapter.catchUp(agent), false, 'what it showed is not shown again');
+});
+
+test('Stop stops the CLI\'s own turn even when that turn cannot be shown', async t => {
+  const { adapter, remote, task, agentId, messages, request, store } = await setup(t);
+  ownTurn(remote, agentId, task().id);
+  // Nothing says where this conversation left off, so the turn has no place to show from.
+  await store.update(state => { delete state.tasks[0].chat!.delivered; });
+  const controller = new AbortController(), stopped = assert.rejects(collect(adapter.stream({ ...request([...messages, user('你别跑了')]), signal: controller.signal })), /abort/i);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  controller.abort(); await stopped;
+  assert.equal(remote.stops, 1);
+});
+
+test('a failed read while a message waits leaves the CLI\'s own turn running', async t => {
+  const { adapter, remote, task, agentId, messages, request, service } = await setup(t);
+  const live = ownTurn(remote, agentId, task().id);
+  const replying = assert.rejects(collect(adapter.stream(request([...messages, user('跑完了吗')]))), /read failed/);
+  await new Promise(resolve => setTimeout(resolve, 30));
+  service.state = async () => { throw new Error('read failed'); };
+  await replying;
+  assert.equal(remote.stops, 0); assert.equal(live.status, 'running');
+});

@@ -17,6 +17,7 @@ const LABELS = {
     switched: (from: string, to: string) => `Switched from ${from} to ${to}`,
     switchNote: (from: string, to: string, category: string) => `**Model switched.** ${from}'s safeguards stopped this request${category}, so ${to} retried it. Later turns in this session stay on ${to}, and the model picker does not change to show it. To use another model, pick a different one; it applies to your next message.`,
     running: (what: string, more: number) => `Tool call · ${what}${more ? ` (${more} more running)` : ''}`,
+    waiting: (cli: string) => `${cli} is running a turn it started itself. Your message is sent when that turn ends. Stop interrupts the turn now.`,
   },
   zh: {
     title: (cli: string, creator: string | undefined, turns: number) => `**这段 ${cli} 会话的历史记录**${creator ? `（在 ${creator} 上开始）` : ''}，共 ${turns} 轮。在这里发消息会接着同一个会话继续。`,
@@ -27,8 +28,12 @@ const LABELS = {
     switched: (from: string, to: string) => `从 ${from} 切换到 ${to}`,
     switchNote: (from: string, to: string, category: string) => `**模型已切换。** ${from} 的安全机制拦截了这条消息${category}，这一轮改由 ${to} 重试。这段会话后面的轮次也继续用 ${to}，模型选择器不会跟着变。要换模型，选另一个模型，发下一条消息时生效。`,
     running: (what: string, more: number) => `工具调用 · ${what}${more ? `（另有 ${more} 个工具在运行）` : ''}`,
+    waiting: (cli: string) => `${cli} 正在跑它自己开始的一轮，你的消息会在这一轮结束后发送。现在按停止会中断这一轮。`,
   },
 };
+
+/** What the chat says while a message waits for a turn the CLI started itself, in the language of that message. */
+export const ownTurnWaitNote = (cli: string, userText: string): string => (/[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en).waiting(cli);
 
 /** What the chat says at a `model_switch` item, in the language of what the user wrote. */
 export function modelSwitchNote(item: TimelineEntry['item'], userText: string): string {

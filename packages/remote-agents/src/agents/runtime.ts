@@ -22,6 +22,8 @@ export async function initializeAcp(peer: JsonlPeer): Promise<any> {
   return result;
 }
 export interface SessionHooks {
+  /** The CLI started a turn itself rather than for a message (see `continueUnprompted`). */
+  ownTurnStarted?(): void;
   /** A turn ended; `unprompted` when the CLI started it itself rather than for a message (see `continueUnprompted`). */
   turnEnded?(turn: { unprompted: boolean }): void;
   /** Tokens a finished turn used, with when it started, whether it succeeded and the model that ran. */
@@ -264,6 +266,7 @@ export class CliSession {
     this.append({ type: 'user_message', text: this.notices.join('\n'), clientMessageId: id, unprompted: true });
     this.notices = []; this.activeMessage = id; this.confirmed = true; this.partialText = false; this.agent.lastError = undefined;
     this.agent.status = 'running'; this.agent.activeTurn = { turnId: randomUUID(), startedAt: new Date().toISOString(), unprompted: true };
+    this.hooks.ownTurnStarted?.();
   }
   private setContext(context: ContextUsage | undefined): void { if (context) this.agent.context = context; }
   /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */

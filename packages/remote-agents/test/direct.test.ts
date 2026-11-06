@@ -1093,7 +1093,7 @@ test('Codex images are recorded: view_image by path, MCP and generated images by
   assert.equal(saved.includes(png.toString('base64')) || saved.includes(jpeg.toString('base64')), false, 'image bytes stay out of the shared history');
 });
 
-test('a turn Claude starts by itself after a background task is saved as its own turn, shown as running and announced when it ends', async t => {
+test('a turn Claude starts by itself after a background task is saved as its own turn, shown as running and announced as it starts and ends', async t => {
   const { service, ssh, request, backend } = await fixture(t, 'claude');
   const announced: string[] = [];
   const agent = await service.create(request); await tick();
@@ -1119,13 +1119,14 @@ test('a turn Claude starts by itself after a background task is saved as its own
   await tick();
   const running = await service.summary(agent.id);
   assert.equal(running.status, 'running'); assert.equal(running.unprompted, true);
+  assert.deepEqual(announced, [agent.id], 'conversations are told as it starts, to show it as it goes');
   await assert.rejects(service.send(agent.id, { id: randomUUID(), text: 'Done?' }, { interrupt: false }), /still working/);
   live.emit({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'tool-1', content: 'ok' }] } });
   live.emit({ type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: ' Done.' } } });
   live.emit({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: ' Done.' }] } });
   live.emit({ type: 'result', subtype: 'success', origin: { kind: 'task-notification' } }); await tick();
   assert.equal((await service.summary(agent.id)).status, 'idle');
-  assert.deepEqual(announced, [agent.id], 'conversations are told once the turn ends');
+  assert.deepEqual(announced, [agent.id, agent.id], 'and once it ends');
   const entries = (await service.detail(agent.id)).timeline!.entries;
   const start = entries.findLastIndex(e => e.item.type === 'user_message'), own = entries[start].item;
   assert.equal(own.unprompted, true); assert.match(String(own.clientMessageId), /^cli-/);
@@ -1139,5 +1140,5 @@ test('a turn Claude starts by itself after a background task is saved as its own
   await service.send(agent.id, { id: randomUUID(), text: 'Thanks' }); await tick();
   ssh.live.finish(); await tick();
   assert.equal((await service.summary(agent.id)).status, 'idle');
-  assert.deepEqual(announced, [agent.id]);
+  assert.deepEqual(announced, [agent.id, agent.id], 'a turn for a message is not announced');
 });

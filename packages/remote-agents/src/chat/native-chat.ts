@@ -10,7 +10,7 @@ import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Curso
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
 import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
-import { modelSwitchNote, toolStatus, transcript, type TurnSource } from './transcript.js';
+import { modelSwitchNote, ownTurnWaitNote, toolStatus, transcript, type TurnSource } from './transcript.js';
 import { decidePermission, unattendedAnswer } from '../agents/tools.js';
 import { isTeamPrompt, teamMemberNote, type TeamMember } from './agent-teams.js';
 import type { ToolHost } from '../core/dsh-host.js';
@@ -425,6 +425,8 @@ export class RemoteCliAdapter extends LlmAdapter {
     const prompt = note + (previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt);
     const taskId = task?.id ?? messageId;
     let admitted = false, settled = false, index = 0;
+    /** The message is waiting for a turn the CLI started itself, which Stop then stops. */
+    let waitingForOwnTurn = false;
     const rows = new NativeToolRows(this.host.step(sessionId), options, `${provider.label} on ${project.label}:${cwd}`);
     const questions = new Map<string, AbortController>(); let permissionFailure: unknown, permissionNotice = false;
     let open: { type: 'text' | 'reasoning'; index: number; text: string } | undefined;
@@ -685,11 +687,20 @@ export class RemoteCliAdapter extends LlmAdapter {
           const mode = presetMode(task.provider, task.modes ?? [], this.host.permission?.(sessionId));
           if (mode && mode !== service.store.task(t => t.id === task.id)?.modeId) await service.setMode(task.id, mode);
           // Claude may be running a turn it started itself, as after a background task finished. As in its terminal, the
-          // message waits for that turn to end; the turn is then shown ahead of the reply (see `elsewhere`).
+          // message waits for that turn to end. The turn shows here meanwhile (see `elsewhere`), ahead of the reply.
+          let shownOwn = false;
           for (let summary = await service.summary(task.id), noted = false; busy(summary) && summary.unprompted; summary = await service.summary(task.id)) {
-            if (!noted) { noted = true; yield* textChunk('reasoning', `${provider.label} is finishing a turn it started itself; the message is sent when it ends.\n`); yield* endBlock(); }
-            await pause(this.pollMs, undefined, { signal });
+            waitingForOwnTurn = true;
+            if (!noted) { noted = true; yield* textChunk('reasoning', `${ownTurnWaitNote(provider.label, currentPrompt)}\n`); yield* endBlock(); }
+            const own = await this.elsewhere(task.id, signal).catch(() => undefined);
+            if (!own?.running) { await pause(this.pollMs, undefined, { signal }); continue; }
+            yield* textChunk('text', own.text); yield* endBlock();
+            shownOwn = true; reached = { id: own.lastMessageId, cursor: own.running };
+            yield* follow(own.lastMessageId, own.running, true, true);
+            await delivered(own.lastMessageId, undefined, true); reached = undefined;
           }
+          waitingForOwnTurn = false;
+          if (shownOwn) yield* textChunk('text', '\n\n---\n\n');
           admitted = true; await service.send(task.id, { id: messageId, text, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
         } else admitted = true;
       }
@@ -717,7 +728,9 @@ export class RemoteCliAdapter extends LlmAdapter {
       const shutdown = this.released || service.stopped || disposal(controller.signal.reason) || disposal(options.signal?.reason);
       try {
         if (reached && !settled) await delivered(reached.id, reached.cursor, false, true);
-        if (admitted && !settled && !shutdown && service.store.task(t => t.id === taskId)) {
+        // A failed read while a message waits says nothing about the CLI's turn: only Stop ends that.
+        const stops = waitingForOwnTurn ? signal.aborted : admitted && !settled;
+        if (stops && !shutdown && service.store.task(t => t.id === taskId)) {
           await service.stop(taskId);
           // The CLI took the Stop, so this turn goes no further and nothing is left to catch up on. A CLI out of reach
           // never hears it and may still be running: what it writes then appears later, as after a disconnect.
