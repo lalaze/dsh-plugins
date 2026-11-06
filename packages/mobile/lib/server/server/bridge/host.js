@@ -14,7 +14,23 @@ export function dshHost(ctx) {
             const value = await sessions().list({}, signal);
             return asDict(value).items ?? [];
         },
-        async inspect(sessionId, signal) { return await sessions().inspect(sessionId, signal); },
+        async inspect(sessionId, signal) {
+            const service = sessions();
+            if (typeof service.inspect === 'function')
+                return await service.inspect(sessionId, signal);
+            // DSH 0.2.2 removed inspect. Its paged `events` refuses a subagent's session without the parent's address; this is
+            // the read inspect itself made, and it covers every session.
+            const query = get('sessionQuery');
+            if (typeof query?.observeSession !== 'function')
+                throw new Error('This DSH version cannot read sessions for the phone');
+            const observation = await query.observeSession(sessionId, { signal, projectionMode: 'none' });
+            try {
+                return { events: [...observation.events] };
+            }
+            finally {
+                observation[Symbol.dispose]();
+            }
+        },
         follow(sessionId, signal) {
             return sessions().follow({ address: { kind: 'session', sessionId }, assistantStream: true, maxMessages: 1 }, signal);
         },
@@ -89,8 +105,13 @@ export function dshHost(ctx) {
                         yield { sessionId, active: asDict(asDict(asDict(baseline).values).userQuestions).active };
                     }
                 }
-                else if (frame.type === 'projection' && frame.key === 'userQuestions') {
-                    yield { sessionId: String(frame.sessionId), active: asDict(frame.value).active };
+                else if (frame.type === 'projection') {
+                    // DSH 0.2.1 sends one frame per key; 0.2.2 lists every key one event changed.
+                    const changes = Array.isArray(frame.changes) ? frame.changes : [{ key: frame.key, val: frame.value }];
+                    for (const change of changes) {
+                        if (change.key === 'userQuestions')
+                            yield { sessionId: String(frame.sessionId), active: asDict(change.val).active };
+                    }
                 }
             }
         },

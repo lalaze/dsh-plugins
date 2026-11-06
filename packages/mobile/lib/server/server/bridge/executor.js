@@ -183,7 +183,7 @@ export class Executor {
             const inspection = await this.host.inspect(id, signal);
             const record = this.remember(id, inspection);
             info = { updatedAt: summary.updatedAt, running: summary.running, lastSeq: record.lastSeq,
-                title: titleOf(inspection.events), preview: firstPrompt(inspection.events), forkOf: inspection.meta.parentSession, approvals: openApprovals(inspection.events), model: modelOf(inspection.events) };
+                title: titleOf(inspection.events), preview: firstPrompt(inspection.events), forkOf: summary.parentSessionId, approvals: openApprovals(inspection.events), model: modelOf(inspection.events) };
             this.options.data.sessions[id] = info;
         }
         const values = summary.projections?.values ?? {};

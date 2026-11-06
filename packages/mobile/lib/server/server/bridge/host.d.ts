@@ -1,8 +1,8 @@
 /**
  * The narrow part of DSH this plugin uses, behind one interface so the phone code can be tested without a host.
- * {@link dshHost} adapts DSH 0.2.1-rc.3's services: `sessionController` and `workspaceController` (cold reads, live
- * follow, prompt, cancel, models, archive and rename), `permissionPresets`, `attachments`, `userQuestions`, and the
- * `approval/request` event.
+ * {@link dshHost} adapts the services of DSH 0.2.1-rc.3 and later: `sessionController` and `workspaceController` (cold
+ * reads, live follow, prompt, cancel, models, archive and rename), `sessionQuery` (cold reads from 0.2.2), `permissionPresets`,
+ * `attachments`, `userQuestions`, and the `approval/request` event.
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type { ModelChoices, ModelSelection, QuestionAnswer } from '../../shared/protocol.js';
@@ -28,13 +28,6 @@ export interface HostEvent {
     [key: string]: unknown;
 }
 export interface HostInspection {
-    meta: {
-        id: string;
-        createdAt: number;
-        cwd?: string;
-        parentSession?: string;
-        origin?: string;
-    };
     events: readonly HostEvent[];
 }
 export interface HostWorkspace {
