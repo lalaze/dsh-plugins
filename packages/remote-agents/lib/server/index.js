@@ -2,7 +2,6 @@ import Schema from '@deepseek-ai/schemastery';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { RemoteAgentsService } from './agents/service.js';
-import { remoteTasks } from './agents/tasks.js';
 import { delegationTools } from './agents/tools.js';
 import { remoteUsageRecords } from './agents/usage.js';
 import { adoptModel } from './chat/adopt-model.js';
@@ -39,8 +38,6 @@ export async function apply(ctx, config = {}) {
     });
     ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered',
         fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing, adoptModel(name => ctx.get(name))) });
-    // Sessions without a DSH conversation, such as delegated tasks, for other plugins on this host: dsh-mobile lists them.
-    ctx.provide('remoteAgentsTasks', remoteTasks(service));
     installChat(ctx, service, projects, { access: workspace.access, files: workspace.features.files, workspaces: workspace.workspaces });
     installSharingHost(ctx, sharing);
     // Native conversation routes and settings also work without the delegation tool registry.
