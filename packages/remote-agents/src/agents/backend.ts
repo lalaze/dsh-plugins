@@ -114,6 +114,17 @@ export function codexServiceTiers(model: Record<string, unknown>): Choice[] | un
  */
 export const unattendedClaude = (task: Pick<Task, 'unattended' | 'modeId'>): string[] =>
   task.unattended && task.modeId === 'acceptEdits' ? ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true } })] : [];
+/**
+ * Claude Code refuses to skip permissions as root unless IS_SANDBOX says the machine is meant for it. Whoever connects as
+ * root and picks Full access, or made it that account's default, has decided that, so these launches say so. The host is
+ * asked because any account name can have uid 0. It is set around the launch rather than by a wrapper command: the relay
+ * recognizes its CLI by the command it started.
+ */
+export const CLAUDE_ROOT_ENV = 'if [ "$(id -u)" = 0 ]; then export IS_SANDBOX=1; fi; ';
+/** Full access, or inheriting the host's settings, which can ask for it. Other modes keep Claude Code's check. */
+const maySkipPermissions = (modeId: string | undefined) => !modeId || modeId === 'inherit' || modeId === 'bypassPermissions';
+/** A short-lived CLI that only answers questions; it reads the same settings as a session. */
+const claudeProbe = (path: string) => [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'];
 
 export class SshBackend implements Backend {
   readonly workspaceFiles: WorkspaceFiles;
@@ -292,9 +303,9 @@ done`}`, 15_000, { login: false });
         const provider: Provider = { ...unavailable, status: 'ready', models, defaultModeId: 'default', modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }, { id: 'accept-edits', label: 'Accept edits' }, { id: 'auto', label: 'Auto' }] };
         return { provider, profile: { argv, protocol: definition.protocol, cwd: canonical, provider } };
       }
-      const launch = definition.protocol === 'claude' ? [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'] : argv;
+      const launch = definition.protocol === 'claude' ? claudeProbe(path) : argv;
       this.assertOpen();
-      peer = new JsonlPeer(this.transport.start(canonical, launch)); this.probes.add(peer);
+      peer = new JsonlPeer(this.transport.start(canonical, launch, definition.protocol === 'claude' ? { prefix: CLAUDE_ROOT_ENV } : undefined)); this.probes.add(peer);
       peer.onMessage(message => { if (message.method && message.id !== undefined) peer?.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Discovery does not execute tools' } }); });
       let models: Model[] = [], modes: Provider['modes'] = [], defaultModeId: string | undefined;
       if (definition.protocol === 'codex') {
@@ -553,6 +564,7 @@ done`}`, 15_000, { login: false });
         .catch(error => { signal?.throwIfAborted(); console.warn(`[remote-agents] Sharing with ${this.host.label} failed: ${String(error)}`); return undefined; });
       signal?.throwIfAborted(); this.assertOpen();
       const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : sharedArguments(profile.protocol, argv, shared);
+      const prefix = profile.protocol === 'claude' && maySkipPermissions(task.modeId) ? CLAUDE_ROOT_ENV : undefined;
       let link: RelayLink | undefined;
       if (relay) {
         // Record the relay before it exists, so an interrupted start is cleaned up rather than leaked.
@@ -567,12 +579,12 @@ done`}`, 15_000, { login: false });
         // Another DSH taking the session over must find this relay rather than resume the CLI a second time.
         await this.shared?.flush(task.id);
         this.assertOpen();
-        try { await relay.launch(relayId, profile.cwd, launch); }
+        try { await relay.launch(relayId, profile.cwd, launch, prefix); }
         catch (error) { await this.relayEnded(task.id, relayId).catch(() => {}); throw error; }
         link = this.link(relayId, 0, state => { if (this.sessions.get(task.id)?.relay === link) this.sessions.get(task.id)!.agent.reconnecting = !state.connected; }, task.id);
       }
       this.assertOpen();
-      const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch)), history, link);
+      const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch, { prefix })), history, link);
       this.sessions.set(task.id, session);
       link?.open();
       try {
@@ -714,8 +726,8 @@ done`}`, 15_000, { login: false });
     const path = await this.transport.exec(`printf '%s' "$(command -v ${quote(definition.command)} 2>/dev/null || true)"`);
     this.assertOpen();
     if (!path.startsWith('/')) throw new Error(`${definition.label} is not installed on this SSH host`);
-    const argv = definition.protocol === 'claude' ? [path, '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--no-session-persistence'] : [path, ...definition.args];
-    const peer = new JsonlPeer(this.transport.start(cwd ?? await this.homeDirectory(), argv)); this.probes.add(peer);
+    const argv = definition.protocol === 'claude' ? claudeProbe(path) : [path, ...definition.args];
+    const peer = new JsonlPeer(this.transport.start(cwd ?? await this.homeDirectory(), argv, definition.protocol === 'claude' ? { prefix: CLAUDE_ROOT_ENV } : undefined)); this.probes.add(peer);
     try {
       peer.onMessage(message => { if (message.method && message.id !== undefined) peer.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Usage checks do not execute tools' } }); });
       if (definition.protocol === 'codex') { await initializeCodex(peer); return await readAccountUsage(peer, 'codex'); }

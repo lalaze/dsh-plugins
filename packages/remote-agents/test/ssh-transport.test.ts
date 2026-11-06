@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenSshTransport, type SshTransport } from '../src/core/ssh.js';
@@ -68,6 +68,17 @@ test('connection sharing is left off where ssh could not use the socket safely',
   await new OpenSshTransport('ssh://host.test', ssh, { controlDirectory: open }).exec('true', 20_000, { login: false });
   assert.equal((await stat(open)).mode & 0o777, 0o700);
   assert.ok(options((await calls()).at(-1)!).ControlPath?.startsWith(`${open}/`));
+});
+
+test('a prefix runs before the CLI, whose command stops if its directory is missing', { skip: !supported }, async t => {
+  const { root, ssh } = await fakeSsh(t), transport = new OpenSshTransport('ssh://host.test', ssh);
+  const output = (cwd: string) => new Promise<string>(resolve => {
+    let text = '';
+    const child = transport.start(cwd, ['sh', '-c', 'printf "%s %s" "$MARK" "$(pwd -P)"'], { prefix: 'export MARK=set; ' });
+    child.onData(data => { text += data; }); child.onExit(() => resolve(text));
+  });
+  assert.equal(await output(root), `set ${await realpath(root)}`);
+  assert.equal(await output(join(root, 'missing')), '', 'a prefix does not let the CLI start somewhere else');
 });
 
 test('command output split inside a character is decoded intact', { skip: !supported }, async t => {

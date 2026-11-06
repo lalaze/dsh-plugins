@@ -398,14 +398,15 @@ export class RelayClient {
     const result = output.trim();
     return result.endsWith('ready') ? new RelayClient(transport) : result === 'missing-node' || result === 'old-node' ? result : 'install-failed';
   }
-  private async command(name: 'start' | 'remove', args: string[], timeout?: number): Promise<{ removed: string[] }> {
-    const output = await this.transport.exec(`node ${SCRIPT} ${name} ${RELAYS} ${args.map(quote).join(' ')}`, timeout);
+  private async command(name: 'start' | 'remove', args: string[], timeout?: number, prefix = ''): Promise<{ removed: string[] }> {
+    const output = await this.transport.exec(`${prefix}node ${SCRIPT} ${name} ${RELAYS} ${args.map(quote).join(' ')}`, timeout);
     const result = output.trim().split('\n').map(line => { try { return JSON.parse(line); } catch { return undefined; } }).findLast(Boolean);
     if (result?.error) throw new Error(result.error);
     if (!result?.ok) throw new Error('The remote relay did not confirm the command');
     return { removed: Array.isArray(result.removed) ? result.removed.filter((id: unknown): id is string => typeof id === 'string') : [] };
   }
-  async launch(id: string, cwd: string, argv: string[]): Promise<void> { await this.command('start', [id, cwd, ...argv], 30_000); }
+  /** `prefix` is as for `SshTransport.start`: the relay passes its environment on to the CLI. */
+  async launch(id: string, cwd: string, argv: string[], prefix?: string): Promise<void> { await this.command('start', [id, cwd, ...argv], 30_000, prefix); }
   /** Stop each CLI if it still runs and delete its saved output; returns the relays confirmed removed. */
   async remove(ids: string[], timeout = 30_000): Promise<string[]> { return ids.length ? (await this.command('remove', ids, timeout)).removed : []; }
 }

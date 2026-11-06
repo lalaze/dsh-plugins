@@ -8,6 +8,7 @@ import { relayHarness, transcript, waitFor } from './relay-harness.js';
 import { RELAY_UNAVAILABLE } from '../src/core/domain.js';
 import { REMOTE_HOME, remoteScript } from '../src/core/remote-host.js';
 import { RelayClient, RELAY_SCRIPT, RELAY_VERSION } from '../src/agents/relay.js';
+import { CLAUDE_ROOT_ENV } from '../src/agents/backend.js';
 import type { SshTransport } from '../src/core/ssh.js';
 
 /** A relay client on a host that is known to support relays. */
@@ -308,6 +309,23 @@ test('relay links deliver large payloads once, drop partial frames and keep exac
   const size = (await stat(join(h.relays, id, 'out.log'))).size;
   assert.equal(received.at(-1)!.end, size, 'frame offsets count bytes, not characters');
   link.stop(); await client.remove([id]);
+});
+
+test('a CLI started through the relay finds the root setting, which is left out for other accounts, and the relay still knows it', async t => {
+  const { writeFile, readFile } = await import('node:fs/promises');
+  const h = await relayHarness(t);
+  const cli = join(h.root, 'report env.mjs');
+  await writeFile(cli, `process.stdout.write(String(process.env.IS_SANDBOX) + '\\n'); setInterval(() => {}, 1000);`);
+  const client = await openRelay(h.first.transport);
+  for (const [uid, expected] of [['0', '1'], ['501', 'undefined']]) {
+    await writeFile(join(h.home, '.local', 'bin', 'id'), `#!/bin/sh\nprintf '%s\\n' ${uid}\n`, { mode: 0o755 });
+    const id = randomUUID();
+    await client.launch(id, h.cwd, [process.execPath, cli], CLAUDE_ROOT_ENV);
+    const output = await waitFor(() => readFile(join(h.relays, id, 'out.log'), 'utf8').catch(() => ''), 'the CLI reporting its environment');
+    assert.equal(output.trim(), expected, `uid ${uid}`);
+    assert.equal(JSON.parse(await readFile(join(h.relays, id, 'meta.json'), 'utf8')).command, process.execPath, 'stopping a CLI checks this command');
+    assert.deepEqual(await client.remove([id]), [id]);
+  }
 });
 
 test('deleting a session stops its CLI even when the relay socket path exceeds the platform limit', async t => {

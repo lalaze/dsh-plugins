@@ -4,8 +4,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SshBackend, CLI_PROVIDERS } from '../src/agents/backend.js';
-import { JsonlPeer, quote, type Child, type SshTransport, type WireMessage } from '../src/core/ssh.js';
+import { SshBackend, CLI_PROVIDERS, CLAUDE_ROOT_ENV } from '../src/agents/backend.js';
+import { JsonlPeer, quote, type Child, type SshTransport, type StartOptions, type WireMessage } from '../src/core/ssh.js';
 import { Store } from '../src/core/store.js';
 import type { FinishedTurn } from '../src/core/domain.js';
 import { TaskHistory } from '../src/agents/history.js';
@@ -19,6 +19,7 @@ class FakeCli implements Child {
   exits: ((error: Error) => void)[] = [];
   prompt?: WireMessage;
   configOptions?: any[];
+  options?: StartOptions;
   readonly conversationId: string;
   constructor(readonly provider: string, readonly argv: string[], readonly transport: FakeSsh) {
     this.conversationId = argv.includes('--conversation') ? argv[argv.indexOf('--conversation') + 1] : randomUUID();
@@ -115,9 +116,9 @@ class FakeSsh implements SshTransport {
     if (script.endsWith("' models")) return 'Fetching available models...\nagy-remote\tAntigravity remote\n';
     return '/srv/canonical\0' + CLI_PROVIDERS.map(p => `${p.id}\0${this.installed.includes(p.id) ? `/usr/bin/${p.command}` : ''}\0`).join('');
   }
-  start(_cwd: string, argv: string[]) {
+  start(_cwd: string, argv: string[], options?: StartOptions) {
     const command = argv[0] === 'node' ? argv[argv.indexOf('--') + 1] : argv[0];
-    const child = new FakeCli(command.split('/').at(-1)!, argv, this); this.children.push(child); return child;
+    const child = new FakeCli(command.split('/').at(-1)!, argv, this); child.options = options; this.children.push(child); return child;
   }
   get live() { return this.children.findLast(c => !c.stopped)!; }
 }
@@ -730,6 +731,29 @@ test('Claude Auto is available for new sessions and is explicitly passed to the 
   await service.create({ ...request, modeId: 'auto' });
   assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--permission-mode') + 1], 'auto');
   assert.equal(ssh.live.argv.includes('--dangerously-skip-permissions'), false);
+});
+
+test('only Claude launches that may skip permissions say a root account means it', async t => {
+  const { service, ssh, request, hostId, store } = await fixture(t, 'claude');
+  await service.providers(hostId, request.cwd);
+  assert.equal(ssh.children[0].options?.prefix, CLAUDE_ROOT_ENV, 'discovery reads the settings that can ask for it');
+  for (const modeId of [undefined, 'inherit', 'bypassPermissions']) {
+    const agent = await service.create({ ...request, id: randomUUID(), modeId });
+    assert.equal(ssh.live.options?.prefix, CLAUDE_ROOT_ENV, `mode ${modeId}`);
+    assert.equal(ssh.live.argv[0], '/usr/bin/claude', 'the CLI stays the command that is launched');
+    assert.equal(native(store, agent.id).argv[0], '/usr/bin/claude');
+  }
+  for (const modeId of ['default', 'plan', 'acceptEdits', 'auto']) {
+    await service.create({ ...request, id: randomUUID(), modeId });
+    assert.equal(ssh.live.options?.prefix, undefined, `mode ${modeId}`);
+  }
+});
+
+test('other CLIs are launched without it', async t => {
+  const { service, ssh, request, hostId } = await fixture(t, 'codex');
+  await service.providers(hostId, request.cwd);
+  await service.create({ ...request, modeId: 'full-access' });
+  for (const child of ssh.children) assert.equal(child.options?.prefix, undefined);
 });
 
 test('pre-upgrade Claude sessions can select Auto and retain it across messages and reconnects', async t => {

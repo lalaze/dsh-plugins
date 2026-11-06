@@ -62,7 +62,11 @@ export interface Child {
   /** Byte offset of the first output byte this child delivers. */
   readonly offset?: number;
 }
-export interface StartOptions { stderr?(data: Buffer): void }
+export interface StartOptions {
+  stderr?(data: Buffer): void;
+  /** Shell commands to run first, ending in `; `, for what the command needs in its environment. */
+  prefix?: string;
+}
 export interface SshTransport {
   /** `login: false` skips the remote login environment; for commands that need no CLI configuration. */
   exec(script: string, timeout?: number, options?: { login?: boolean }): Promise<string>;
@@ -247,7 +251,7 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); if (!ended) child.kill('SIGTERM'); }
   }
   start(cwd: string, argv: string[], options: StartOptions = {}): Child {
-    const process = this.spawn(`cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
+    const process = this.spawn(`${options.prefix ?? ''}cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
     let stderr = '', exited: Error | undefined;
     const data = new Set<(data: Buffer) => void>(), exits = new Set<(error: Error) => void>();
     const end = (error: Error) => { if (exited) return; exited = error; for (const listener of exits) listener(error); };
