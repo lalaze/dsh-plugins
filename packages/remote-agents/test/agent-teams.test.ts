@@ -65,3 +65,12 @@ test('a denial keeps the turn going: Codex cancel is chosen only when it is the 
   const rejected = await decidePermission({ approval: { request: async () => 'rejected' }, userQuestions: { ask: async () => ({}) } }, both, { callId: 'c', signal: AbortSignal.timeout(1000) }, AbortSignal.timeout(1000), 'Codex');
   assert.equal(rejected?.selectedActionId, 'decline', 'a user who denies one command does not end the CLI turn');
 });
+
+test('an unattended refusal tells a model how to go on with a shell command, and only with one', () => {
+  const asked = (name: string) => unattendedAnswer({ id: 'p', kind: 'tool', name, input: {} } as Permission);
+  assert.equal(asked('Bash').behavior, 'deny');
+  assert.match(asked('Bash').message!, /Retry it as plain separate commands/);
+  assert.match(asked('Bash').message!, /say in your reply what you could not run/, 'a retry that is refused too must not become a loop');
+  assert.doesNotMatch(asked('Edit').message!, /Retry/, 'writing another way is no answer to a refused edit');
+  assert.match(asked('Edit').message!, /report it as a blocker/);
+});

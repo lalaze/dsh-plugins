@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.114:** When nobody can approve a shell command in an unattended session, such as a `/flow` step, the refusal now tells the model to retry it as plain separate commands. Before, a Claude reviewer could reject correct work and a Claude implementer could stop without doing anything. Every retry still goes through the same check, so permissions do not change. Nothing to do after upgrading.
+
 **Upgrading from 0.2.113:** Stopping a remote Codex turn now also ends the commands that turn started, which used to keep running. Commands left by earlier turns, such as a dev server, stay. A Codex already running picks this up the next time it starts, and with Codex 0.164's workspace sandbox on Linux the command still runs on. A read-only unattended Claude, such as a `/flow` plan or review step, can now use web search and web fetch without asking, so it may send workspace content out in a query or URL. Nothing to do after upgrading.
 
 **Upgrading from 0.2.112:** A delegated subagent now shows the tool it is running whichever CLI it uses, as Claude already did, and Codex's commands read without the shell around them. With `dsh-model-flow` 0.1.3, a remote CLI conversation also learns how a `/flow` run ended, along with your next message. Nothing to do after upgrading.
