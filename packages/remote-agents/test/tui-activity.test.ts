@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { dialogOnScreen, reportActivity, titleActivity, TuiActivityWatcher, type WatchedTerminal } from '../src/workspace/tui-activity.js';
+import { compactingOnScreen, dialogOnScreen, reportActivity, titleActivity, TuiActivityWatcher, type WatchedTerminal } from '../src/workspace/tui-activity.js';
 
 /** A terminal whose title, status reports and screen a test sets by hand, as the CLI would over the wire. */
 function fakeTerminal(name = 'Remote Claude') {
@@ -82,7 +82,7 @@ test('Claude Code\'s dialogs show on its screen, as its title reads at rest', ()
   assert.equal(dialogOnScreen([]), undefined);
 });
 
-test('running reports at once, and a rest only once it has lasted', () => {
+test('running reports once its screen had a moment to arrive, and a rest only once it has lasted', () => {
   const { watcher, terminals, changes, advance, settled } = rig();
   const terminal = fakeTerminal();
   terminals.set('a', [terminal]);
@@ -91,6 +91,8 @@ test('running reports at once, and a rest only once it has lasted', () => {
   assert.deepEqual(changes(), [], 'a CLI at rest says nothing new');
   terminal.title('◐ Fix the bug');
   watcher.check();
+  assert.deepEqual(changes(), [], 'what goes with the title reaches DSH after it');
+  advance(1000);
   assert.deepEqual(changes(), [['a', true]]);
   assert.equal(watcher.isBusy('a'), true);
   // A blink between two tools does not count as finishing.
@@ -107,6 +109,72 @@ test('running reports at once, and a rest only once it has lasted', () => {
   assert.equal(watcher.isBusy('a'), false);
 });
 
+/** Claude Code 2.1.319's screen during a compaction it started by itself, as measured. */
+const COMPACTING = [
+  '✻ Worked for 2m 27s · done 3:03 AM', '', '✻ Compacting conversation… (23s · ↓ 1 tokens)',
+  '  ⎿  Tip: Running multiple Claude sessions? Use /color and /rename to tell them apart at a glance.',
+  '───────────', '❯ ', '───────────', '  ⏸ manual mode on · esc to interrupt',
+];
+const TURN = ['❯ 修复登录', '', '✽ Manifesting… (59s)', '', '───────────', '❯ ', '───────────', '  ⏸ manual mode on · esc to interrupt'];
+
+test('a compaction shows on Claude Code\'s screen, and only in its spinner', () => {
+  assert.equal(compactingOnScreen(COMPACTING), true);
+  assert.equal(compactingOnScreen(TURN), false);
+  assert.equal(compactingOnScreen(['⏺ Compacted while idle, before the prompt cache expired', '───', '❯ ', '───', '  ⏸ manual mode on · ? for shortcuts']), false, 'once it ended');
+  assert.equal(compactingOnScreen(['  ✻ Compacting conversation… is what it printed', ...TURN]), false, 'a reply quoting it');
+  assert.equal(compactingOnScreen(['✻ Compacting conversation… (23s)', 'a', 'b', 'c', 'd', 'e', 'f', 'g', '❯ ']), false, 'far above the prompt, so an old line');
+  assert.equal(compactingOnScreen(['✻ Compacting conversation… (23s)']), false, 'no prompt, so not its screen');
+  // The tip wraps on a narrow terminal.
+  assert.equal(compactingOnScreen(['✻ Compacting conversation… (1s)', '  ⎿  Tip: Running', '  multiple Claude', '  sessions? Use', '────', '❯ ', '────']), true);
+});
+
+test('a compaction Claude Code starts by itself is no run, so nothing reads as finished', () => {
+  const { watcher, terminals, emitted, advance, settled } = rig();
+  const terminal = fakeTerminal();
+  terminals.set('a', [terminal]);
+  watcher.check(); settled();
+  // The title comes first, and the screen only after it, as they reach DSH.
+  terminal.title('◐ Fix the bug');
+  advance(100);
+  terminal.rows = COMPACTING;
+  for (let second = 0; second < 60; second++) advance(1000);
+  assert.equal(watcher.isBusy('a'), false);
+  terminal.title('✳ Fix the bug');
+  terminal.rows = ['⏺ Compacted while idle, before the prompt cache expired', '───', '❯ ', '───'];
+  for (let second = 0; second < 5; second++) advance(1000);
+  assert.deepEqual(emitted, []);
+});
+
+test('a turn that follows a compaction counts from when the compaction gives way to it', () => {
+  const { watcher, terminals, changes, advance, settled } = rig();
+  const terminal = fakeTerminal();
+  terminals.set('a', [terminal]);
+  watcher.check(); settled();
+  terminal.title('◐ Fix the bug'); terminal.rows = COMPACTING;
+  advance(1000); advance(1000);
+  assert.deepEqual(changes(), []);
+  terminal.rows = TURN;
+  advance(1000);
+  assert.deepEqual(changes(), [['a', true]]);
+  terminal.title('✳ Fix the bug');
+  advance(1000); advance(2000);
+  assert.deepEqual(changes(), [['a', true], ['a', false]]);
+});
+
+test('a turn goes on running through a compaction in the middle of it', () => {
+  const { watcher, terminals, changes, advance, settled } = rig();
+  const terminal = fakeTerminal();
+  terminals.set('a', [terminal]);
+  watcher.check(); settled();
+  terminal.title('◐ Fix the bug'); terminal.rows = TURN;
+  advance(1000); advance(1000);
+  assert.deepEqual(changes(), [['a', true]]);
+  terminal.rows = COMPACTING;
+  for (let second = 0; second < 30; second++) advance(1000);
+  assert.equal(watcher.isBusy('a'), true);
+  assert.deepEqual(changes(), [['a', true]]);
+});
+
 test('a busy conversation says so again, as a DSH turn of its own can report it stopped', () => {
   const { watcher, terminals, emitted, advance, settled } = rig();
   const terminal = fakeTerminal();
@@ -114,7 +182,7 @@ test('a busy conversation says so again, as a DSH turn of its own can report it 
   watcher.check();
   settled();
   terminal.title('◐ Lead the team');
-  watcher.check();
+  watcher.check(); advance(1000);
   assert.deepEqual(emitted, [['a', true]]);
   advance(1000); advance(1000); advance(1000); advance(1000);
   assert.deepEqual(emitted, [['a', true]]);
@@ -220,7 +288,7 @@ test('a terminal going away ends the run, and only the CLI\'s own terminal is wa
   watcher.check();
   assert.deepEqual(emitted, [], 'another terminal of the conversation says nothing about its CLI');
   cli.title('◐ Fix the bug');
-  watcher.check();
+  watcher.check(); advance(1000);
   assert.deepEqual(emitted, [['a', true]]);
   cli.info.state = 'exited';
   advance(1000);
@@ -232,7 +300,7 @@ test('a terminal going away ends the run, and only the CLI\'s own terminal is wa
   advance(1000);
   settled();
   next.title('◐ Again');
-  advance(1000);
+  advance(1000); advance(1000);
   assert.deepEqual(emitted, [['a', true], ['a', false], ['a', true]]);
   watcher.close();
   assert.equal(next.disposed(), true);
@@ -240,13 +308,13 @@ test('a terminal going away ends the run, and only the CLI\'s own terminal is wa
 
 test('a conversation that is no longer a TUI one lets go of its terminal', () => {
   const ids = ['a'];
-  const { watcher, terminals, emitted, settled } = rig(ids);
+  const { watcher, terminals, emitted, advance, settled } = rig(ids);
   const terminal = fakeTerminal();
   terminals.set('a', [terminal]);
   watcher.check();
   settled();
   terminal.title('◐ Work');
-  watcher.check();
+  watcher.check(); advance(1000);
   ids.length = 0;
   watcher.check();
   assert.deepEqual(emitted, [['a', true], ['a', false]]);

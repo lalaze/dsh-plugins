@@ -27,6 +27,8 @@ const REST_MS = 2000;
 const REPEAT_MS = 5000;
 /** Codex reports working for a few seconds as it starts, with nothing asked of it. Leaving the row by then would read as a finished task. */
 const START_MS = 8000;
+/** How long a title at work waits for the screen that goes with it, which reaches DSH after the title. */
+const SCREEN_MS = 1000;
 
 /**
  * What a CLI's terminal title says, the one signal both keep up without any setup or extra connection. Measured on Claude
@@ -63,10 +65,20 @@ export function dialogOnScreen(rows: readonly string[]): 'approval' | 'question'
   return rows.slice(Math.max(0, mark - 6), mark).some(row => /\b(Do|Would) you (want|like)\b/.test(row)) ? 'approval' : 'question';
 }
 
+/**
+ * Whether Claude Code's spinner, right above its prompt, says it is compacting. Left idle for about 55 minutes it compacts by
+ * itself before its prompt cache expires, for a minute or more. Its title and footer then read exactly as in a turn (measured
+ * on 2.1.319), and this line is the one difference.
+ */
+export function compactingOnScreen(rows: readonly string[]): boolean {
+  const prompt = rows.findLastIndex(row => /^\s*❯/.test(row));
+  return prompt >= 0 && rows.slice(Math.max(0, prompt - 6), prompt).some(row => /^\S\s+Compacting conversation…/.test(row));
+}
+
 const screenRows = ({ rows, buffer: { active } }: WatchedScreen): string[] =>
   Array.from({ length: rows }, (_, row) => active.getLine(active.viewportY + row)?.translateToString(true) ?? '');
 
-interface Watch { terminal: WatchedTerminal; dispose(): void; title: string; report?: TuiActivity; shown: TuiActivity; started: number; restSince?: number; reported?: number }
+interface Watch { terminal: WatchedTerminal; dispose(): void; title: string; report?: TuiActivity; shown: TuiActivity; started: number; spinSince?: number; restSince?: number; reported?: number }
 
 /**
  * Watches TUI conversations' CLIs, so that they show as running, waiting and finished like every other conversation. DSH
@@ -142,6 +154,13 @@ export class TuiActivityWatcher {
     let next: TuiActivity = watch.report ?? titleActivity(watch.title);
     if (next === 'idle' && watch.report === undefined) next = dialogOnScreen(screenRows(watch.terminal.screen)) ?? 'idle';
     if (next === 'running' && watch.shown === 'idle' && now - watch.started < START_MS) return;
+    // A compaction nobody asked for is no run, or it would end as a finished task. Only a run's start is judged: a turn goes
+    // on running through one, and one a message waits for gives way to that turn, which then counts.
+    if (next !== 'running') watch.spinSince = undefined;
+    else if (watch.shown === 'idle' && watch.report === undefined) {
+      watch.spinSince ??= now;
+      if (now - watch.spinSince < SCREEN_MS || compactingOnScreen(screenRows(watch.terminal.screen))) return;
+    }
     if (next !== 'idle') watch.restSince = undefined;
     else if (watch.shown !== 'idle') {
       watch.restSince ??= now;
