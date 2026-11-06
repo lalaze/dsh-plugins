@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import { installLiveImages, liveImagePath } from '../src/client/sessions/live-images.js';
 
 const COPY = `/Users/me/.dsh/storages/dsh-remote-agents/chat-images/${'a'.repeat(64)}.png`;
-const globals = ['window', 'document', 'MutationObserver'] as const;
+const globals = ['window', 'document', 'MutationObserver', 'HTMLElement'] as const;
 let dispose = () => {};
 
 beforeEach(() => {
@@ -101,4 +101,62 @@ test('unloading the plugin leaves the page as DSH drew it', async () => {
   assert.equal(document.querySelector('style[data-remote-live-images]'), null);
   const later = altText(COPY); chat().append(later); await settle();
   assert.equal(shown(later), null);
+});
+
+const preview = () => document.querySelector<HTMLElement>('[role="dialog"]');
+const press = (key: string) => { const event = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); document.activeElement!.dispatchEvent(event); return event; };
+const opened = async () => {
+  dispose = installLiveImages();
+  const span = altText(COPY); chat().append(span); await settle();
+  const button = span.querySelector('button')!;
+  button.focus(); button.click();
+  return { span, button, close: preview()!.querySelector('button')! };
+};
+
+test('clicking an image opens its preview, from the same file and with the focus on closing it', async () => {
+  const { span, button, close } = await opened();
+  assert.equal(button.getAttribute('aria-label'), 'View full image: shot.png');
+  assert.equal(preview()!.getAttribute('aria-modal'), 'true');
+  assert.equal(preview()!.parentElement, document.body, 'outside the conversation, where Escape would count towards stopping the turn');
+  const image = preview()!.querySelector('img')!;
+  assert.equal(image.src, shown(span)!.src);
+  assert.equal(image.alt, 'shot.png');
+  assert.equal(document.activeElement, close);
+});
+
+test('Escape closes the preview, goes no further, and returns the focus', async () => {
+  const { button } = await opened();
+  let reached = false;
+  document.addEventListener('keydown', () => { reached = true; });
+  press('Escape');
+  assert.equal(preview(), null);
+  assert.equal(reached, false, 'the conversation must not see this Escape');
+  assert.equal(document.activeElement, button);
+  press('Escape');
+  assert.equal(reached, true, 'closed, it no longer takes the key');
+});
+
+test('Tab stays on the close button, and the close button and the mask both close the preview', async () => {
+  const { button, close } = await opened();
+  assert.equal(press('Tab').defaultPrevented, true);
+  assert.equal(document.activeElement, close);
+  close.click();
+  assert.equal(preview(), null);
+  button.click();
+  preview()!.querySelector('[aria-hidden="true"]:not(svg)')!.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true }));
+  assert.equal(preview(), null);
+});
+
+test('a preview stays open when the turn ends under it, and still closes', async () => {
+  const { span } = await opened();
+  span.remove();
+  assert.ok(preview());
+  press('Escape');
+  assert.equal(preview(), null);
+});
+
+test('unloading the plugin closes an open preview', async () => {
+  await opened();
+  dispose(); dispose = () => {};
+  assert.equal(preview(), null);
 });

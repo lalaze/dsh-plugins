@@ -633,5 +633,8 @@ export const zh: Record<string, string> = {
   "CLIs: {list}": "CLI：{list}",
   "No CLIs enabled": "未启用 CLI",
   "Machine actions": "机器操作",
-  "Add a machine": "添加机器"
+  "Add a machine": "添加机器",
+  "View full image": "查看大图",
+  "Image preview": "图片预览",
+  "Close image preview": "关闭图片预览"
 };
