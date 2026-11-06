@@ -139,12 +139,12 @@
       },
       "versions": [
         {
-          "version": "0.1.0",
-          "publishTimestamp": 1793893981,
+          "version": "0.1.1",
+          "publishTimestamp": 1793950369,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "1dcee28be3cfeaa4bf0d041821971f46244c341f",
+            "commit": "e37f02ac4af0d9380350d0b97fbecc234a1488b2",
             "path": "packages/model-flow"
           },
           "engines": {
