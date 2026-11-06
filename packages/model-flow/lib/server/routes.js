@@ -14,11 +14,34 @@ export function nativeModel(model) {
     const parts = model.id.split('/');
     return parts.length >= 3 ? decode(parts[2]) : model.id;
 }
+/** A remote CLI's name ends with its machine, `Opus 5.5 · mac-mini`; the two parts show separately. */
+export function nameParts(provider, name) {
+    const at = provider.startsWith(REMOTE_PREFIX) ? name.lastIndexOf(' · ') : -1;
+    return at > 0 ? { name: name.slice(0, at), machine: name.slice(at + 3) } : { name };
+}
 export function machineOf(route) {
     if (!route?.provider?.startsWith(REMOTE_PREFIX) || !route.model)
         return undefined;
     const parts = route.model.split('/');
     return parts.length >= 3 ? parts[0] : undefined;
+}
+export function routeFrom(value) {
+    if (!value || typeof value !== 'object')
+        return undefined;
+    const { provider, model, effort, label } = value;
+    if (typeof provider !== 'string' || !provider || typeof model !== 'string' || !model)
+        return undefined;
+    return { provider, model, label: typeof label === 'string' && label ? label : model, ...(typeof effort === 'string' && effort ? { effort } : {}) };
+}
+/** The machine with the most models: where a first choice has the best chance of finding the others. */
+export function mainMachine(catalog) {
+    const counts = new Map();
+    for (const model of catalog) {
+        const machine = machineOf({ provider: model.provider, model: model.id });
+        if (machine)
+            counts.set(machine, (counts.get(machine) ?? 0) + 1);
+    }
+    return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
 }
 const onMachine = (model, machine) => machine !== undefined && machineOf({ provider: model.provider, model: model.id }) === machine;
 const providerMatches = (model, word) => same(model.provider, word) || same(model.provider, `${REMOTE_PREFIX}${word}`) || same(model.providerName ?? '', word);

@@ -1,9 +1,7 @@
-import type { Route } from './routes.js';
-export interface FlowConfig {
-    plan?: Route;
-    implement?: Route;
-    review?: Route;
-    rounds: number;
+import { type Combo, type Setup } from './combos.js';
+/** `combos` stays absent until the first ones are saved, so an emptied list is not filled again. */
+export interface FlowConfig extends Setup {
+    combos?: Combo[];
 }
 export declare function configFrom(value: unknown): FlowConfig;
 export declare class FlowStore {

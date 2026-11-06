@@ -1,0 +1,61 @@
+/** Named sets of models to switch between. Used on both sides, so it must not import anything from Node. */
+import { DEFAULT_ROUNDS, MAX_ROUNDS } from './line.js';
+import { mainMachine, nameParts, nativeModel, resolveSpec, routeFrom } from './routes.js';
+export const MAX_COMBO_NAME = 40;
+const ROLES = ['plan', 'implement', 'review'];
+export function roundsFrom(value) {
+    const rounds = Number(value);
+    return Number.isSafeInteger(rounds) && rounds >= 1 && rounds <= MAX_ROUNDS ? rounds : DEFAULT_ROUNDS;
+}
+export function combosFrom(values) {
+    const combos = new Map();
+    for (const value of values) {
+        if (!value || typeof value !== 'object')
+            continue;
+        const raw = value;
+        const name = typeof raw.name === 'string' ? [...raw.name.trim()].slice(0, MAX_COMBO_NAME).join('') : '';
+        const plan = routeFrom(raw.plan), implement = routeFrom(raw.implement), review = routeFrom(raw.review);
+        if (name && implement && review && !combos.has(name))
+            combos.set(name, { name, ...(plan ? { plan } : {}), implement, review, rounds: roundsFrom(raw.rounds) });
+    }
+    return [...combos.values()];
+}
+const nativeOf = (route) => `${route.provider}/${nativeModel({ provider: route.provider, id: route.model })}`;
+const sameRoute = (a, b) => a === b || (!!a && !!b && nativeOf(a) === nativeOf(b) && a.effort === b.effort);
+/** The machine does not count: a flow moves to the conversation's machine anyway. */
+export const sameSetup = (a, b) => a.rounds === b.rounds && ROLES.every(role => sameRoute(a[role], b[role]));
+/** A combo's routes in today's models: the saved machine when it still has the model, otherwise another one that does. */
+export function placeCombo(combo, catalog) {
+    const setup = { rounds: combo.rounds }, missing = [];
+    for (const role of ROLES) {
+        const route = combo[role];
+        if (!route)
+            continue;
+        const found = catalog.find(model => model.provider === route.provider && model.id === route.model)
+            ?? catalog.find(model => nativeOf({ provider: model.provider, model: model.id, label: model.name }) === nativeOf(route));
+        if (found)
+            setup[role] = { provider: found.provider, model: found.id, label: found.name, ...(route.effort ? { effort: route.effort } : {}) };
+        else
+            missing.push(nameParts(route.provider, route.label).name);
+    }
+    return { setup, missing: [...new Set(missing)] };
+}
+export const STARTERS = [
+    { name: 'Codex builds, Claude reviews', plan: 'claude/opus', implement: 'codex', review: 'claude/opus' },
+    { name: 'Claude builds, Codex reviews', plan: 'claude/opus', implement: 'claude/sonnet', review: 'codex' },
+    { name: 'Claude only', plan: 'claude/opus', implement: 'claude/sonnet', review: 'claude/opus' },
+    { name: 'Quick, no plan', implement: 'codex', review: 'claude/sonnet', rounds: 2 },
+];
+/** The first combos on offer: only those whose models this DSH has, all on one machine where it can. */
+export function startersFor(catalog, translate = name => name) {
+    const machine = mainMachine(catalog), resolve = (spec) => resolveSpec(spec, catalog, machine);
+    return STARTERS.flatMap(starter => {
+        try {
+            const plan = starter.plan ? resolve(starter.plan) : undefined;
+            return [{ name: translate(starter.name), ...(plan ? { plan } : {}), implement: resolve(starter.implement), review: resolve(starter.review), rounds: starter.rounds ?? DEFAULT_ROUNDS }];
+        }
+        catch {
+            return [];
+        }
+    });
+}

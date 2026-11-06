@@ -1,21 +1,16 @@
 /** The models chosen in settings. Nothing about a running flow is saved: it ends with DSH. */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { DEFAULT_ROUNDS, MAX_ROUNDS } from './line.js';
-function routeFrom(value) {
-    if (!value || typeof value !== 'object')
-        return undefined;
-    const { provider, model, effort, label } = value;
-    if (typeof provider !== 'string' || !provider || typeof model !== 'string' || !model)
-        return undefined;
-    return { provider, model, label: typeof label === 'string' && label ? label : model, ...(typeof effort === 'string' && effort ? { effort } : {}) };
-}
+import { combosFrom, roundsFrom } from './combos.js';
+import { DEFAULT_ROUNDS } from './line.js';
+import { routeFrom } from './routes.js';
 export function configFrom(value) {
     const raw = value && typeof value === 'object' ? value : {};
-    const rounds = Number(raw.rounds), plan = routeFrom(raw.plan), implement = routeFrom(raw.implement), review = routeFrom(raw.review);
+    const plan = routeFrom(raw.plan), implement = routeFrom(raw.implement), review = routeFrom(raw.review);
     return {
         ...(plan ? { plan } : {}), ...(implement ? { implement } : {}), ...(review ? { review } : {}),
-        rounds: Number.isSafeInteger(rounds) && rounds >= 1 && rounds <= MAX_ROUNDS ? rounds : DEFAULT_ROUNDS,
+        rounds: roundsFrom(raw.rounds),
+        ...(Array.isArray(raw.combos) ? { combos: combosFrom(raw.combos) } : {}),
     };
 }
 export class FlowStore {

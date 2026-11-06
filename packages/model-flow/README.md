@@ -30,6 +30,10 @@ Or change the models for one run:
 
 Each step's result shows in the conversation. For the whole text, open the subagent list at the top: every step is a conversation you can open.
 
+## Common combinations
+
+**Settings → Model flow** keeps named sets of models, thinking levels and rounds. Click one to use it; **Save current** adds what the rows show now, and using a name again replaces that one. A few to start from appear the first time, made from the models you have, and you can delete them.
+
 ## The flow
 
 1. **Plan** (read-only): the steps and the acceptance criteria.
