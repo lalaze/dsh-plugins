@@ -130,7 +130,7 @@ test('a rejected approval denies through the native deny action; a dismissed one
   scripted(remote, '', agent => { agent.pendingPermissions = [structuredClone(permission)]; });
   const rejected = run('remote_agent_create', { host: 'build-box', cwd: '/srv/project', provider: 'codex', prompt: 'Edit files' });
   await until(() => remote.answers.length === 1);
-  assert.deepEqual(remote.answers[0].answer, { behavior: 'deny', message: 'The user denied this request', selectedActionId: 'no' });
+  assert.deepEqual(remote.answers[0].answer, { behavior: 'deny', message: "DSH refused this: the user denied it, or this conversation's permissions do not ask.", selectedActionId: 'no' });
   const first = [...remote.agents.values()][0]; first.status = 'idle'; first.activeTurn = null;
   await rejected;
   decision = 'cancelled';

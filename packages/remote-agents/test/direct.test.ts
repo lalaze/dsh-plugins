@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SshBackend, CLI_PROVIDERS, CLAUDE_ROOT_ENV } from '../src/agents/backend.js';
+import { SshBackend, CLI_PROVIDERS, CLAUDE_ROOT_ENV, confinesCommands, unattendedClaude } from '../src/agents/backend.js';
 import { JsonlPeer, quote, type Child, type SshTransport, type StartOptions, type WireMessage } from '../src/core/ssh.js';
 import { Store } from '../src/core/store.js';
 import type { FinishedTurn } from '../src/core/domain.js';
@@ -101,7 +101,7 @@ class FakeSsh implements SshTransport {
   children: FakeCli[] = [];
   scripts: string[] = [];
   admissions: { provider: string; binding: unknown }[] = [];
-  model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; dropPrompt = false; claudeInterruptError = false; noBackgroundTerminals = false;
+  model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; dropPrompt = false; claudeInterruptError = false; noBackgroundTerminals = false; hostInfo = 'Linux\n2.1.319 (Claude Code)\n';
   configOptions?: any[];
   speeds: Record<string, unknown> = {};
   claudeContext?: unknown; claudeUsage?: unknown;
@@ -114,6 +114,7 @@ class FakeSsh implements SshTransport {
     this.scripts.push(script); this.execs.push({ script, login: options.login });
     if (this.missingPath && script.startsWith(`cd ${quote(this.missingPath)} &&`)) throw new Error(`Remote directory does not exist: ${this.missingPath}`);
     if (script === 'printf \'%s\' "$HOME"') return '/home/builder';
+    if (script.startsWith('uname -s;')) return this.hostInfo;
     if (script.includes('uname -n')) return 'machine\0builder\0machine-id-1\0';
     if (script === 'node --version') return 'v22.23.2\n';
     if (script.endsWith("' models")) return 'Fetching available models...\nagy-remote\tAntigravity remote\n';
@@ -755,6 +756,57 @@ test('an unattended Claude task with workspace write runs commands in Claude Cod
   assert.equal(settings(), undefined, 'someone answers an ordinary conversation');
   await service.create({ ...request, id: 'read-only-member', modeId: 'default' }, { unattended: true });
   assert.equal(settings(), undefined, 'the sandbox would let a read-only member write');
+});
+
+test('commands are left to the sandbox only on a host and version where it has been measured', () => {
+  assert.equal(confinesCommands('Darwin', '2.1.319 (Claude Code)'), true);
+  assert.equal(confinesCommands('Darwin\n', '2.2.0 (Claude Code)'), true);
+  assert.equal(confinesCommands('Darwin', '3.0.1'), true);
+  assert.equal(confinesCommands('Darwin', '2.1.318 (Claude Code)'), false, 'older settings may be ignored without a word');
+  assert.equal(confinesCommands('Darwin', '2.0.999'), false);
+  assert.equal(confinesCommands('Linux', '2.1.319 (Claude Code)'), false, 'without bwrap and socat its commands run unsandboxed');
+  assert.equal(confinesCommands('Darwin', ''), false);
+  assert.equal(confinesCommands('', 'command not found'), false);
+});
+
+test('confined settings make Claude Code refuse to run unsandboxed, and only workspace write gets them', () => {
+  const settings = (argv: string[]) => JSON.parse(argv[argv.indexOf('--settings') + 1]).sandbox;
+  const write = settings(unattendedClaude({ unattended: true, modeId: 'acceptEdits' }, true));
+  assert.equal(write.failIfUnavailable, true);
+  assert.equal(write.allowUnsandboxedCommands, false);
+  assert.equal(write.autoAllowBashIfSandboxed, true);
+  const plain = settings(unattendedClaude({ unattended: true, modeId: 'acceptEdits' }));
+  assert.equal(plain.failIfUnavailable, undefined, 'no promise of a sandbox without one');
+  assert.deepEqual(unattendedClaude({ unattended: true, modeId: 'default' }, true), ['--allowedTools', 'WebSearch,WebFetch'], 'read-only stays as it was');
+  assert.deepEqual(unattendedClaude({ unattended: true, modeId: 'bypassPermissions' }, true), []);
+  assert.deepEqual(unattendedClaude({ modeId: 'acceptEdits' }, true), []);
+});
+
+test('a task is marked sandboxed only when its CLI was started with the confined settings', async t => {
+  const { service, ssh, request, store } = await fixture(t, 'claude');
+  ssh.hostInfo = 'Darwin\n2.1.319 (Claude Code)\n';
+  const sandbox = () => ssh.live.argv.includes('--settings') ? JSON.parse(ssh.live.argv[ssh.live.argv.indexOf('--settings') + 1]).sandbox : undefined;
+  const marked = (id: string) => store.task(task => task.id === id)?.sandboxed;
+  const reviewer = await service.create({ ...request, id: 'reviewer', modeId: 'default' }, { unattended: true });
+  assert.equal(sandbox(), undefined, 'read-only stays as it was');
+  assert.equal(marked(reviewer.id), undefined);
+  const implementer = await service.create({ ...request, id: 'implementer', modeId: 'acceptEdits' }, { unattended: true });
+  assert.equal(sandbox().failIfUnavailable, true);
+  assert.equal(marked(implementer.id), true);
+  const attended = await service.create({ ...request, id: 'attended', modeId: 'acceptEdits' });
+  assert.equal(sandbox(), undefined, 'someone answers an ordinary conversation');
+  assert.equal(marked(attended.id), undefined);
+  const inherit = await service.create({ ...request, id: 'inherit-mode', modeId: 'inherit' }, { unattended: true });
+  assert.equal(sandbox(), undefined);
+  assert.equal(marked(inherit.id), undefined, 'no settings, so an allowed command would run outside any sandbox');
+  assert.equal(ssh.execs.filter(e => e.script.startsWith('uname -s;')).length, 1, 'the host is asked once');
+});
+
+test('on a host where the sandbox is not relied on, nothing changes', async t => {
+  const { service, ssh, request, store } = await fixture(t, 'claude');
+  const agent = await service.create({ ...request, id: 'implementer', modeId: 'acceptEdits' }, { unattended: true });
+  assert.deepEqual(JSON.parse(ssh.live.argv[ssh.live.argv.indexOf('--settings') + 1]), { sandbox: { enabled: true, autoAllowBashIfSandboxed: true } });
+  assert.equal(store.task(task => task.id === agent.id)?.sandboxed, undefined);
 });
 
 test('only an unattended read-only Claude task gets web search and web fetch without asking', async t => {

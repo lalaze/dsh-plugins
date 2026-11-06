@@ -66,6 +66,28 @@ test('a denial keeps the turn going: Codex cancel is chosen only when it is the 
   assert.equal(rejected?.selectedActionId, 'decline', 'a user who denies one command does not end the CLI turn');
 });
 
+test('in a sandboxed task a shell command the CLI could not read runs, and everything else stays refused', () => {
+  const asked = (over: Partial<Permission> = {}) => unattendedAnswer({ id: 'p', kind: 'tool', name: 'Bash', input: { command: 'x=1; echo "$x"' }, ...over } as Permission, true);
+  assert.deepEqual(asked(), { behavior: 'allow' });
+  const actions: Permission['actions'] = [{ id: 'once', label: 'Allow once', behavior: 'allow', scope: 'once' }, { id: 'remember-session', label: 'Allow matching requests for this session', behavior: 'allow', scope: 'session' }, { id: 'deny', label: 'Deny', behavior: 'deny' }];
+  assert.deepEqual(asked({ actions }), { behavior: 'allow', selectedActionId: 'once' }, 'a CLI offering actions needs one chosen, and never one wider than this request');
+  assert.equal(asked({ actions: actions.filter(a => a.id !== 'once') }).behavior, 'deny', 'nothing here allows just this one');
+  assert.equal(asked({ name: 'Edit' }).behavior, 'deny', 'the sandbox does not cover file tools');
+  assert.equal(asked({ name: 'WebFetch' }).behavior, 'deny');
+  assert.equal(asked({ input: { command: 'x', dangerouslyDisableSandbox: true } }).behavior, 'deny', 'this one asks to leave the sandbox');
+  assert.equal(asked({ safetyCheck: true }).behavior, 'deny', 'a safety check wants a person, not the sandbox');
+  assert.equal(unattendedAnswer({ id: 'p', kind: 'tool', name: 'Bash', input: {} } as Permission).behavior, 'deny', 'without a sandbox nobody can approve');
+});
+
+test('a refusal passes on why the CLI asked, and does not claim a person decided', async () => {
+  const permission = { id: 'p', kind: 'tool', name: 'Bash', input: {}, reason: 'Dangerous rm on a possibly empty variable', safetyCheck: true } as Permission;
+  assert.match(unattendedAnswer(permission, true).message!, /Dangerous rm on a possibly empty variable/);
+  const refused = await decidePermission({ approval: { request: async () => 'rejected' }, userQuestions: { ask: async () => ({}) } }, permission, { callId: 'c', signal: AbortSignal.timeout(1000) }, AbortSignal.timeout(1000), 'subject');
+  assert.match(refused!.message!, /Dangerous rm on a possibly empty variable/);
+  assert.match(refused!.message!, /permissions do not ask/);
+  assert.doesNotMatch(refused!.message!, /^The user denied/);
+});
+
 test('an unattended refusal tells a model how to go on with a shell command, and only with one', () => {
   const asked = (name: string) => unattendedAnswer({ id: 'p', kind: 'tool', name, input: {} } as Permission);
   assert.equal(asked('Bash').behavior, 'deny');

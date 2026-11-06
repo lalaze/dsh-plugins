@@ -109,6 +109,10 @@ export interface Permission {
   input?: Record<string, unknown>;
   detail?: unknown;
   actions?: { id: string; label: string; behavior: 'allow' | 'deny'; scope?: 'once' | 'session' | 'project' }[];
+  /** Why the CLI asks, in its own words, when it says. A model that hears it can often fix the command itself. */
+  reason?: string;
+  /** Claude Code's `safetyCheck` asks are for a person, even in full access; the others come from what it could not read. */
+  safetyCheck?: true;
 }
 export interface PermissionAnswer {
   behavior: 'allow' | 'deny';
@@ -201,6 +205,8 @@ export interface Task extends TaskInput {
   owner?: { sessionId: string };
   /** Runs for a DSH subagent nobody answers: the CLI is started so it does not ask (Codex approval policy `never`). */
   unattended?: true;
+  /** This task's CLI was started so that it refuses to run without its sandbox, so its shell commands are confined whoever approves them. */
+  sandboxed?: true;
   agentId?: string;
   executionCwd?: string;
   native?: { protocol: NativeProtocol; sessionId: string; argv: string[]; resumable?: boolean; initialSent: boolean; imageInput?: boolean };

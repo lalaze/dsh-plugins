@@ -111,14 +111,31 @@ export function codexServiceTiers(model: Record<string, unknown>): Choice[] | un
 /**
  * Nobody approves an unattended Claude task's commands. With workspace write it runs them in Claude Code's own sandbox,
  * which confines writes to the workspace like DSH's sandbox; without a sandbox on the host they are asked and denied.
- * Read-only has no such sandbox, since Claude Code's lets a command write, but searching and reading the web change
- * nothing, and research would otherwise be refused every time. Codex's read-only sandbox already allows web search.
+ * Read-only gets no sandbox, since it would have to widen what a read-only task's commands can read while it can reach
+ * the web; but searching and reading the web change nothing, and research would otherwise be refused every time.
+ * Codex's read-only sandbox already allows web search.
+ *
+ * `confined` says the sandbox is known to work on this host (see {@link confinesCommands}). Claude Code then exits rather
+ * than run without it and ignores a command's request to leave it, so its commands can be left to the sandbox.
  */
-export const unattendedClaude = (task: Pick<Task, 'unattended' | 'modeId'>): string[] => {
+export const unattendedClaude = (task: Pick<Task, 'unattended' | 'modeId'>, confined = false): string[] => {
   if (!task.unattended) return [];
-  if (task.modeId === 'acceptEdits') return ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true } })];
+  if (task.modeId === 'acceptEdits') return ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true, ...(confined ? { failIfUnavailable: true, allowUnsandboxedCommands: false } : {}) } })];
   return task.modeId === 'default' ? ['--allowedTools', 'WebSearch,WebFetch'] : [];
 };
+/** The oldest Claude Code measured to keep every command in the sandbox with these settings. */
+const CONFINED_CLAUDE = [2, 1, 319] as const;
+/**
+ * Whether an unattended Claude's commands can be left to its sandbox rather than refused. Only macOS has been measured:
+ * on Linux it also needs bwrap and socat, and without them Claude Code runs commands unsandboxed.
+ */
+export function confinesCommands(system: string, version: string): boolean {
+  if (system.trim() !== 'Darwin') return false;
+  const parts = /(\d+)\.(\d+)\.(\d+)/.exec(version)?.slice(1).map(Number);
+  if (!parts) return false;
+  for (const [index, floor] of CONFINED_CLAUDE.entries()) if (parts[index] !== floor) return parts[index] > floor;
+  return true;
+}
 /**
  * Claude Code refuses to skip permissions as root unless IS_SANDBOX says the machine is meant for it. Whoever connects as
  * root and picks Full access, or made it that account's default, has decided that, so these launches say so. The host is
@@ -138,6 +155,7 @@ export class SshBackend implements Backend {
   private readonly probes = new Set<JsonlPeer>();
   private identity?: { id: string; at: number };
   private catalogs = new Map<string, { at: number; selection: string; providers: Provider[] }>();
+  private readonly confining = new Map<string, Promise<boolean>>();
   /** One CLI's probe for the start path, keyed by `cwd\0provider`, so `create` and `open` do not probe twice. */
   private targets = new Map<string, { at: number; provider: Provider; profile?: Profile }>();
   private sessions = new Map<string, CliSession>();
@@ -524,6 +542,16 @@ done`}`, 15_000, { login: false });
     const operation = this.open(task, resume, signal); this.starting.set(task.id, operation);
     try { return await operation; } finally { this.starting.delete(task.id); }
   }
+  /** Asked once per CLI: what the host is and which Claude Code it runs. Anything unclear keeps commands refused. */
+  private confines(cli: string): Promise<boolean> {
+    let known = this.confining.get(cli);
+    if (!known) {
+      known = this.transport.exec(`uname -s; ${quote(cli)} --version`, 20_000, { login: false })
+        .then(output => { const [system = '', version = ''] = output.split('\n'); return confinesCommands(system, version); }, () => false);
+      this.confining.set(cli, known);
+    }
+    return known;
+  }
   private async open(task: Task, resume: boolean, signal?: AbortSignal): Promise<Agent> {
     if (!CLI_PROVIDERS.some(provider => provider.id === task.provider)) throw new Error('This CLI provider is no longer supported. Saved output remains available.');
     await this.control(task);
@@ -551,8 +579,15 @@ done`}`, 15_000, { login: false });
       if (!resolved.profile) throw new Error('The selected CLI is not ready on this SSH host'); profile = resolved.profile;
     }
     let argv = [...profile.argv];
+    // Only this mode gets the sandbox settings; the task's record must never say more than its CLI was told.
+    const confined = profile.protocol === 'claude' && task.unattended === true && task.modeId === 'acceptEdits' && await this.confines(argv[0]);
+    signal?.throwIfAborted();
+    if (!!this.store.task(t => t.id === task.id)?.sandboxed !== !!confined) await this.store.update(state => {
+      const saved = state.tasks.find(t => t.id === task.id);
+      if (saved && confined) saved.sandboxed = true; else if (saved) delete saved.sandboxed;
+    });
     if (profile.protocol === 'antigravity') argv = antigravityArguments(argv[0], task, resume);
-    if (profile.protocol === 'claude') argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native!.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : []), ...unattendedClaude(task)];
+    if (profile.protocol === 'claude') argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native!.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : []), ...unattendedClaude(task, confined)];
     const relay = await this.relays();
     this.assertOpen(); signal?.throwIfAborted();
     // A direct pipe would end silently with DSH; refuse and say why before touching the host.
