@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.108:** Text you select in a Claude Code TUI now reaches your clipboard. Claude Code draws its own selection and copies it by asking the terminal to set the clipboard, which DSH's terminal ignored, so nothing was copied and Cmd+C did nothing. It is now copied when you release the mouse, with no Cmd+C needed, including Chinese text and several lines. Pressing on text after the mouse has rested for a while also no longer copies only the first few characters. The terminal can write the clipboard but never read it, and a TUI out of view or a window without focus leaves it alone. Remote Claude opened in a sidebar terminal does not have this yet.
+
 **Upgrading from 0.2.107:** On hosts you connect to as root, Claude no longer fails to start with `--dangerously-skip-permissions cannot be used with root/sudo privileges`. In **Full access** or **Remote CLI settings** the plugin sets `IS_SANDBOX=1` on a root account so that Claude starts normally; other permission modes do not set it. Claude can then run any command as root without asking, so choose **Full access** only on machines where you accept that. TUI conversations do not set it: if the root account's Claude settings make `bypassPermissions` the default, Claude in a TUI still shows this error.
 
 **Upgrading from 0.2.106:** The model name in the composer no longer shows the machine when another plugin that labels models, such as WorkBuddy, is installed. DSH's own model picker showed `Opus 5.5 · macmini` in that case; it now reads `Opus 5.5`, and hovering over it still shows the machine.

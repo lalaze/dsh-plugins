@@ -47,6 +47,11 @@ export interface Xterm {
   loadAddon(addon: unknown): void;
   element?: HTMLElement;
   options: { theme?: { background?: string } & Record<string, unknown> };
+  modes: { mouseTrackingMode: string };
+  parser: {
+    registerOscHandler(ident: number, handler: (data: string) => boolean): { dispose(): void };
+    registerCsiHandler(id: { prefix?: string; final: string }, handler: (params: Array<number | number[]>) => boolean): { dispose(): void };
+  };
 }
 interface Fiber { return?: Fiber | null; memoizedState?: unknown }
 interface Hook { memoizedState?: unknown; next?: Hook | null }
@@ -74,6 +79,26 @@ export function findXterm(container: Element): Xterm | undefined {
     }
   }
   return undefined;
+}
+
+/**
+ * Waits for the terminal in an element, as DSH's terminal code loads late.
+ * @param found - called once with the terminal, at once if it is already there.
+ * @param missing - called if it never comes.
+ * @returns stops waiting.
+ */
+export function lookForXterm(host: Element, found: (xterm: Xterm) => void, missing?: () => void): () => void {
+  const present = findXterm(host);
+  if (present) { found(present); return () => {}; }
+  const until = Date.now() + LOOK_LIMIT_MS;
+  const timer = setInterval(() => {
+    const xterm = findXterm(host);
+    if (xterm) found(xterm);
+    else if (Date.now() > until) missing?.();
+    else return;
+    clearInterval(timer);
+  }, LOOK_MS);
+  return () => clearInterval(timer);
 }
 
 /**
@@ -138,16 +163,7 @@ export function useWebglRenderer(host: HTMLElement, visible: boolean, choices: T
         choices.report(undefined);
       } catch { choices.report('unavailable'); }
     };
-    const found = findXterm(host);
-    if (found) { load(found); return; }
-    const until = Date.now() + LOOK_LIMIT_MS;
-    const timer = setInterval(() => {
-      const xterm = findXterm(host);
-      if (xterm) load(xterm);
-      if (xterm || Date.now() > until) clearInterval(timer);
-      if (!xterm && Date.now() > until) choices.report('unavailable');
-    }, LOOK_MS);
-    return () => clearInterval(timer);
+    return lookForXterm(host, load, () => choices.report('unavailable'));
   }, [webgl, visible, host]);
   // After DSH's own effect for the same theme, which ran during the commit.
   useEffect(clearPaint, [theme]);

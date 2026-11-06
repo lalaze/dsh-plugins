@@ -4,6 +4,8 @@
 
 按版本从新到旧列出变化及升级后需要做的事。
 
+**从 0.2.108 升级：** 在 Claude Code 的 TUI 里选中的文字现在能进剪贴板了。Claude Code 自己绘制选区，并请求终端写入剪贴板，而 DSH 的终端会忽略这个请求，所以一直复制不到，按 Cmd+C 也没用。现在松开鼠标就已复制，不用再按 Cmd+C，中文和多行都可以。鼠标静止一会儿后直接按下拖选，也不会再只复制到开头几个字。终端只能写入剪贴板，不能读取；切到后台的 TUI 和没有焦点的窗口不会改写剪贴板。在侧边栏终端里打开的 Remote Claude 暂时还没有这个修复。
+
 **从 0.2.107 升级：** 以 root 连接的机器上，Claude 不再因为 `--dangerously-skip-permissions cannot be used with root/sudo privileges` 启动失败。选“完全访问”或“沿用远端 CLI 设置”时，插件会在 root 账户上设置 `IS_SANDBOX=1` 让 Claude 正常启动，选其他权限模式时不设置。这样 Claude 能以 root 身份不经询问执行任何命令，所以请只在你能接受这一点的机器上选“完全访问”。TUI 对话不设置这个变量：如果 root 账户的 Claude 设置把默认模式设成了 `bypassPermissions`，TUI 里的 Claude 仍会报这个错。
 
 **从 0.2.106 升级：** 装了 WorkBuddy 这类也给模型加标签的插件时，输入框里的模型名不再带机器名。DSH 自带的模型选择器之前显示 `Opus 5.5 · macmini`，现在显示 `Opus 5.5`，鼠标悬停时仍能看到机器名。

@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { useCurrentModel } from '../composer/usage.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 import type { Client } from '../index.js';
+import { useTerminalCopy } from './tui-copy.js';
 import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { TuiRenderChoices, TuiRenderMenu, useWebglRenderer } from './tui-render.js';
@@ -157,6 +158,7 @@ function TuiTerminal({ item, services }: { item: KeptTerminal; services: Service
   }, [visible]);
   useUploadedPaths(root, sessionId, services.uploads, model.state, services.cli(sessionId));
   useWebglRenderer(item.host, visible, services.render, useSyncExternalStore(theme.subscribe, theme.getSnapshot));
+  useTerminalCopy(item.host, visible);
   const Body = slots.entries('sidebar.right.pane.tab').find(entry => entry.options.key === TERMINAL_TAB)?.component as React.FC<any> | undefined;
   if (!Body) return <div className="ra-empty" role="alert">{ui("DSH's terminal is not available")}</div>;
   return <Body view={() => model} t={t}
