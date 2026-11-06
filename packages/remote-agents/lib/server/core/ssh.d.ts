@@ -15,6 +15,8 @@ export interface Child {
 }
 export interface StartOptions {
     stderr?(data: Buffer): void;
+    /** Shell commands to run first, ending in `; `, for what the command needs in its environment. */
+    prefix?: string;
 }
 export interface SshTransport {
     /** `login: false` skips the remote login environment; for commands that need no CLI configuration. */

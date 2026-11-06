@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.107:** On hosts you connect to as root, Claude no longer fails to start with `--dangerously-skip-permissions cannot be used with root/sudo privileges`. In **Full access** or **Remote CLI settings** the plugin sets `IS_SANDBOX=1` on a root account so that Claude starts normally; other permission modes do not set it. Claude can then run any command as root without asking, so choose **Full access** only on machines where you accept that. TUI conversations do not set it: if the root account's Claude settings make `bypassPermissions` the default, Claude in a TUI still shows this error.
+
 **Upgrading from 0.2.106:** The model name in the composer no longer shows the machine when another plugin that labels models, such as WorkBuddy, is installed. DSH's own model picker showed `Opus 5.5 · macmini` in that case; it now reads `Opus 5.5`, and hovering over it still shows the machine.
 
 **Upgrading from 0.2.105:** You can now click an image to enlarge it while the turn is still running, not only after it ends. It opens the same preview as DSH's own: Escape, the close button or a click outside the image closes it, and Escape there does not stop the turn. Right-clicking or dragging an image out of the preview still waits until the turn ends on DSH 0.2.2.

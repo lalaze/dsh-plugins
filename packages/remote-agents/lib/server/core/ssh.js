@@ -280,7 +280,7 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
         }
     }
     start(cwd, argv, options = {}) {
-        const process = this.spawn(`cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
+        const process = this.spawn(`${options.prefix ?? ''}cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
         let stderr = '', exited;
         const data = new Set(), exits = new Set();
         const end = (error) => { if (exited)

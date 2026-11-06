@@ -4,6 +4,8 @@
 
 按版本从新到旧列出变化及升级后需要做的事。
 
+**从 0.2.107 升级：** 以 root 连接的机器上，Claude 不再因为 `--dangerously-skip-permissions cannot be used with root/sudo privileges` 启动失败。选“完全访问”或“沿用远端 CLI 设置”时，插件会在 root 账户上设置 `IS_SANDBOX=1` 让 Claude 正常启动，选其他权限模式时不设置。这样 Claude 能以 root 身份不经询问执行任何命令，所以请只在你能接受这一点的机器上选“完全访问”。TUI 对话不设置这个变量：如果 root 账户的 Claude 设置把默认模式设成了 `bypassPermissions`，TUI 里的 Claude 仍会报这个错。
+
 **从 0.2.106 升级：** 装了 WorkBuddy 这类也给模型加标签的插件时，输入框里的模型名不再带机器名。DSH 自带的模型选择器之前显示 `Opus 5.5 · macmini`，现在显示 `Opus 5.5`，鼠标悬停时仍能看到机器名。
 
 **从 0.2.105 升级：** 现在回合运行中也能点击图片放大，不用等回合结束。打开的预览和 DSH 自己的一样：按 Esc、点关闭按钮或点图片外面都能关闭，在预览里按 Esc 不会停止回合。在 DSH 0.2.2 上，右键菜单和把图片拖出去仍要等回合结束。

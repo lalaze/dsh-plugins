@@ -110,6 +110,13 @@ export declare function codexServiceTiers(model: Record<string, unknown>): Choic
  * which confines writes to the workspace like DSH's sandbox; without a sandbox on the host they are asked and denied.
  */
 export declare const unattendedClaude: (task: Pick<Task, "unattended" | "modeId">) => string[];
+/**
+ * Claude Code refuses to skip permissions as root unless IS_SANDBOX says the machine is meant for it. Whoever connects as
+ * root and picks Full access, or made it that account's default, has decided that, so these launches say so. The host is
+ * asked because any account name can have uid 0. It is set around the launch rather than by a wrapper command: the relay
+ * recognizes its CLI by the command it started.
+ */
+export declare const CLAUDE_ROOT_ENV = "if [ \"$(id -u)\" = 0 ]; then export IS_SANDBOX=1; fi; ";
 export declare class SshBackend implements Backend {
     private readonly host;
     private readonly store;

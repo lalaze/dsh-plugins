@@ -92,7 +92,8 @@ export declare class RelayClient {
     /** Install the relay script once per version; unavailable without Node.js 18 or newer on the host. */
     static open(transport: SshTransport): Promise<RelayClient | RelayUnavailable | undefined>;
     private command;
-    launch(id: string, cwd: string, argv: string[]): Promise<void>;
+    /** `prefix` is as for `SshTransport.start`: the relay passes its environment on to the CLI. */
+    launch(id: string, cwd: string, argv: string[], prefix?: string): Promise<void>;
     /** Stop each CLI if it still runs and delete its saved output; returns the relays confirmed removed. */
     remove(ids: string[], timeout?: number): Promise<string[]>;
 }

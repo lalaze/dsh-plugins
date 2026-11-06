@@ -76,6 +76,8 @@ dsh-remote 创建的工作区可继续使用。
 
 新建会话时或已有会话空闲时，可以选择**权限模式**，从下一条消息起生效。主对话的下一条消息会改用 DSH 权限对应的模式。Claude 默认**沿用远端 CLI 设置**，保留远端账号和项目的权限配置，不再强制指定 `default`。已有会话保留原来的显式模式，可切回“沿用远端 CLI 设置”。DSH 工作区授权与远端 CLI 权限独立；“自动允许文件编辑”仍会询问需要审批的命令，“完全访问”会自动允许执行命令和编辑文件。
 
+**以 root 连接的机器：** Claude Code 默认不允许 root 跳过权限检查，会直接报错退出。插件在“完全访问”和“沿用远端 CLI 设置”启动 Claude 时，如果发现账户是 root，会设置 `IS_SANDBOX=1` 让它正常启动；选其他权限模式时不设置。这样 Claude 能以 root 身份不经询问执行任何命令，所以请只在你能接受这一点的机器上选“完全访问”。TUI 对话不设置这个变量：如果 root 账户的 Claude 设置把默认模式设成了 `bypassPermissions`，TUI 里的 Claude 仍会报这个错。
+
 **Claude Auto：**选择 **Auto（自动安全审查）**，启动或恢复时会明确传入 `--permission-mode auto`，升级前保存的已有会话也可选择。该模式保留 Claude 自身的分类器审查。“沿用远端 CLI 设置”使用非交互 `claude -p` 的默认值，可能与交互终端不同：Claude Code 2.1.302 起，未指定权限模式的 `-p` 默认进入手动审批，即使终端默认是 Auto。插件不会自动改变已保存的模式。Auto 需要远端 CLI、模型和账号支持。参见 [Claude 权限模式说明](https://code.claude.com/docs/en/permission-modes#tool-calls-denied-in-claude--p-and-agent-sdk-runs)。
 
 DSH 原生审批仍是“允许一次”。当 Claude 返回匹配规则建议时，本面板的待审批请求还会提供会话或项目授权选项。选择前可在**详情**中查看规则；项目授权只将这些原生规则写入远端 `.claude/settings.local.json`，以后匹配的请求可自动通过。插件不会生成全局放行规则，也不会将单次审批保存为持续授权。没有合适规则建议的请求仍只提供单次授权。
