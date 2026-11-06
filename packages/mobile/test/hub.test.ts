@@ -45,6 +45,17 @@ test('a phone pairs through the relay once the computer confirms the matching co
   assert.equal((await client.call('sessions.changes', { since: changes.cursor })).sessions.length, 0)
 })
 
+test('a forked session names the session it came from, as the session list reports it', async t => {
+  const setup = await startHub(t)
+  setup.host.addWorkspace('w1', 'project')
+  setup.host.addSession('s1', 'w1', 'First task')
+  setup.host.addSession('s2', 'w1', 'Forked task').parent = 's1'
+  setup.host.append('s2', 'session/title', { title: 'Forked task', messageSeqs: [], source: { kind: 'user' } })
+  setup.host.emit('s2')
+  const { client } = await pairedPhone(t, setup)
+  await waitFor(async () => (await client.call('sessions.changes', {})).sessions.some(s => s.sessionId === 's2' && s.forkOf === 's1'), 5000, 'fork listed')
+})
+
 test('the pairing code works once and only for its own phone', async t => {
   const setup = await startHub(t)
   const { url } = await setup.hub.action({ action: 'offer' }) as { url: string }

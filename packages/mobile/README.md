@@ -68,7 +68,7 @@ Change either at any time; **Unpair** disconnects the phone at once and refuses 
 
 ## How it uses DSH
 
-- Sessions are read through DSH’s session controller (`list`, `inspect` and `follow`), which reads logs without starting agents, and steered through its `prompt`, `cancel`, `create`, `selectModel` and `rename`. Archiving goes through the workspace controller, questions through `userQuestions`, permission presets through `permissionPresets`.
+- Sessions are read through DSH’s session controller (`list` and `follow`) and, for a whole log, `inspect` before DSH 0.2.2 or `sessionQuery` from it. These read logs without starting agents. Sessions are steered through its `prompt`, `cancel`, `create`, `selectModel` and `rename`. Archiving goes through the workspace controller, questions through `userQuestions`, permission presets through `permissionPresets`.
 - Background tasks come from Remote Agents' `remoteAgentsTasks` service on the same machine; without it the section is not shown.
 - DSH has no interface for answering tool approvals from another device. The plugin joins DSH’s `approval/request` chain: the question goes to the phone and to this machine’s browsers, and whichever answers first wins; any failure leaves DSH’s own chain unchanged.
 
@@ -76,6 +76,7 @@ Change either at any time; **Unpair** disconnects the phone at once and refuses 
 
 - Notifications work for one paired machine at a time per phone, because a browser holds one push key.
 - Background tasks take text only and send no notifications, and their questions are answered on the computer.
+- A question reaches the phone only when DSH’s `ask_user_question` runs with `mode: timed`, not in its default blocking mode. Answering one from the phone fails for now, so answer questions on the computer.
 - Attachments over 16 MB do not open on the phone.
 - An existing session's permission preset is shown but cannot be changed from the phone; DSH changes it only on a running session.
 

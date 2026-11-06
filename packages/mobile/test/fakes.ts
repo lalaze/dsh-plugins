@@ -75,12 +75,12 @@ export class FakeHost implements HostApi {
   }
 
   async listSessions(): Promise<HostSessionSummary[]> {
-    return [...this.sessions.values()].map(s => ({ sessionId: s.id, updatedAt: s.updatedAt, running: s.running, blank: s.events.length === 0, cwd: s.cwd }))
+    return [...this.sessions.values()].map(s => ({ sessionId: s.id, updatedAt: s.updatedAt, running: s.running, blank: s.events.length === 0, cwd: s.cwd, ...(s.parent ? { parentSessionId: s.parent } : {}) }))
   }
   async inspect(id: string) {
     const session = this.sessions.get(id)
     if (!session) throw new Error('no session')
-    return { meta: { id, createdAt: 0, cwd: session.cwd, ...(session.parent ? { parentSession: session.parent } : {}) }, events: [...session.events] }
+    return { events: [...session.events] }
   }
   follow(id: string, signal: AbortSignal): AsyncIterable<HostFollowFrame> {
     const queue = new AsyncQueue<HostFollowFrame>()
