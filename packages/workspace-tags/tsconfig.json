@@ -6,7 +6,7 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     // Published DSH packages omit their DSH type dependencies; without this the
-    // repo's hoisted 0.2.1-rc.2 copies would mix with this package's rc.3 ones.
+    // repo's hoisted 0.2.1-rc.2 copies would mix with this package's own release.
     "paths": {
       "@deepseek-ai/*": ["./node_modules/@deepseek-ai/*"],
       // Unpublished DSH source the specs import; vitest.config.ts aliases it the same way.

@@ -11,7 +11,7 @@ Under the sidebar header, **All** and one chip per tag pick which workspaces the
 - **Tag**: one section per tag, in the chips' order, then **Untagged**. A workspace with several tags appears under each of them.
 - **Status**: **Waiting for you** (an agent is waiting for an approval, a plan review or an answer), **Finished, your turn** (a session finished and you have not opened it yet; once opened it stays until you leave it or send the next message), **Running** (an agent is executing, itself or through a subagent), then **Idle**. The two sections that need you have a tinted header and a solid badge, and list their sessions even while another session of the same workspace runs. **Running** shows the running sessions and the open one; the workspace's other resting sessions wait behind **Show more** and stay out of **Idle**, and the section badge counts only running sessions. A workspace with nothing running lists its resting sessions in **Idle**. **Idle** also holds workspaces without sessions, counts workspaces where the others count sessions, and starts folded. Each status has its own icon, and the sections follow live as agents start and stop.
 
-A folded workspace row shows what its sessions would: a badge counting those that need you, or a spinner when one is only running. Right-click a workspace, or choose **Tags…** in its **⋯** menu, to tick its tags, create a tag (name and color) that is added to that workspace, or open **Manage tags…** to rename, recolor or delete tags. A workspace’s tags show as small dots at the end of its row in every grouping mode. Sections fold, and the Group by choice, folded sections and the chosen tag chip are remembered per browser. Inside a section, workspaces keep the sidebar’s order; drag workspaces into order under Workspace grouping, since a workspace can appear in several sections. Sessions drag into order inside any section, Running, Waiting and Completed included. A drop saves that workspace’s session order (switching **Order by** to **Manual**, as a drag does under Workspace grouping), so the order holds in every grouping and after a restart.
+A folded workspace row shows what its sessions would: a badge counting those that need you, or a spinner when one is only running. Choose **Tags…** in a workspace's right-click or **⋯** menu to tick its tags, create a tag (name and color) that is added to that workspace, or open **Manage tags…** to rename, recolor or delete tags. A workspace’s tags show as small dots at the end of its row in every grouping mode. Sections fold, and the Group by choice, folded sections and the chosen tag chip are remembered per browser. Inside a section, workspaces keep the sidebar’s order; drag workspaces into order under Workspace grouping, since a workspace can appear in several sections. Sessions drag into order inside any section, Running, Waiting and Completed included. A drop saves that workspace’s session order (switching **Order by** to **Manual**, as a drag does under Workspace grouping), so the order holds in every grouping and after a restart.
 
 Tags are stored on the DSH host in `~/.dsh/storages/dsh-workspace-tags/tags.json` (under `DSH_HOME` when set), so the desktop app and remote web clients of the same host share them; open clients pick up changes from others within 3 seconds while visible, or when their window regains focus. Other host plugins can read and replace the tags through the `workspaceTags` service; [Device Sync](../device-sync/README.md) uses it to share tags with a paired machine. Deleting a workspace in the sidebar removes its tags.
 
@@ -23,7 +23,13 @@ pnpm --filter dsh-workspace-tags pack:plugin
 dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.2.0.tgz"
 ```
 
-Requires DSH 0.2.1-rc.3 or a later 0.2 release.
+Requires DSH 0.2.2-rc.1 or a later 0.2 release. On DSH 0.2.1, stay on 0.2.4: DSH refuses to install this version there.
+
+## 0.3.0 The sidebar of DSH 0.2.2
+
+- The sidebar is now built on DSH 0.2.2-rc.1's, so it has that release's improvements: the right-click menu on sessions and workspaces, **Show in folder**, the official worktree and pull request icons on session rows, the working directory in a session's hover card, and better keyboard and touch use.
+- **Tags…** is an item in DSH's own workspace menu, from a right-click or **⋯**. A right-click no longer opens the tag menu directly.
+- Update DSH first, then this plugin. Version 0.2.4 keeps working on DSH 0.2.2 until you do, without those improvements.
 
 ## 0.2.4 Tag chip drops no longer get lost
 
@@ -97,7 +103,7 @@ Automated tests cover swapped-owner collection/order, identity collisions, nativ
 
 ## How it replaces the sidebar
 
-DSH’s sidebar workspace browser (`@deepseek-ai/dsh-client-ui-workspace`) offers no extension point for workspace rows or grouping modes, so this package contains a copy of it from DSH 0.2.1-rc.3 with the tag features added, and its bundle patch disables the stock browser. Everything else in the browser, including search, pinning, archiving, drag ordering, shortcuts, and plugins’ **Add workspace** flows such as dsh-remote-agents’ remote workspaces, works as in DSH. Uninstalling the package restores the stock browser.
+DSH’s sidebar workspace browser (`@deepseek-ai/dsh-client-ui-workspace`) offers no extension point for workspace rows or grouping modes, so this package contains a copy of it from DSH 0.2.2-rc.1 with the tag features added, and its bundle patch disables the stock browser. Everything else in the browser, including search, pinning, archiving, drag ordering, shortcuts, and plugins’ **Add workspace** flows such as dsh-remote-agents’ remote workspaces, works as in DSH. Uninstalling the package restores the stock browser.
 
 The copy follows the DSH release it was taken from. After a DSH update the sidebar keeps that release’s browser behavior until the package is updated; see [docs/upstream.md](docs/upstream.md) for how the copy is kept in step and what to do if DSH refuses the plugin.
 

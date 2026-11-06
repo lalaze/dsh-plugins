@@ -2,7 +2,7 @@
  * Compare src/client/upstream with DeepSeek Harness's ui-workspace at a ref.
  *
  *   node scripts/upstream-diff.mjs              # this fork's changes (against the vendored commit)
- *   node scripts/upstream-diff.mjs dsh-v0.2.2   # what moving to another release involves
+ *   node scripts/upstream-diff.mjs dsh-v0.2.3   # what moving to another release involves
  *
  * Needs the GitHub CLI (`gh`). The fetched files go to a new temporary directory.
  */
@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
-const VENDORED = '1f81c047fc48fa190a683e469daa699857e9afe8' // dsh-v0.2.1-rc.3
+const VENDORED = '66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db' // dsh-v0.2.2-rc.1
 const ref = process.argv[2] ?? VENDORED
 const repo = 'repos/deepseek-ai/deepseek-harness'
 const prefix = 'packages/client/ui-workspace/src/client/'

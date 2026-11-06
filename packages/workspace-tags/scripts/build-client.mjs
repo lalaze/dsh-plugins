@@ -12,14 +12,14 @@ import { build } from 'esbuild'
 const packageDir = process.cwd()
 const { name } = JSON.parse(await readFile(resolve(packageDir, 'package.json'), 'utf8'))
 
-// DSH 0.2.1-rc.3 packages/client/web/src/platform.ts (PLATFORM_MODULES).
+// DSH 0.2.2-rc.1 packages/client/web/src/platform.ts (PLATFORM_MODULES).
 const PLATFORM_MODULES = new Set([
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', '@deepseek-ai/cordis',
   'zod', '@tanstack/react-virtual',
   '@deepseek-ai/dsh-client-store', '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-ui-primitives', '@deepseek-ai/dsh-client-ui-dockkit',
 ])
-// DSH 0.2.1-rc.3 packages/client/tsdown.client.ts (INLINE_SAFE): browser-safe values with no shared identity.
+// The part of DSH 0.2.2-rc.1's INLINE_SAFE (packages/client/tsdown.client.ts) this copy imports: browser-safe values with no shared identity.
 const INLINE_SAFE = /^@deepseek-ai\/dsh-(?:util-values|util-workspace-path)(?:\/|$)|^@deepseek-ai\/dsh-api-workspace-controller\/default-workspace$/
 
 const modules = {

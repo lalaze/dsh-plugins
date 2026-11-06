@@ -3,14 +3,15 @@ import { useSyncExternalStore } from 'react'
 import type { GlobalStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { allowAllAccess, bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { allowAllAccess, bindSnapshotSelector, contextMenuHook, makeTranslate } from '@deepseek-ai/dsh-client-test-runtime'
+import { createSnapshotStore } from '@deepseek-ai/dsh-client-store'
 import type { SessionListState, SessionSummary } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { WorkspaceId, WorkspaceSnapshot, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionPendingInteraction, SessionStatus, SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import { applyTagOperation, emptyTagState, TAGS_ROUTE, type TagOperation, type TagState } from '../../src/shared/tags.ts'
-import type { WorkspaceBrowserProps } from '../../src/client/upstream/contract/slots.ts'
+import type { WorkspaceActionRequest, WorkspaceBrowserProps } from '../../src/client/upstream/contract/slots.ts'
 import { createWorkspaceShortcutControls } from '../../src/client/upstream/shortcuts.ts'
 import { createWorkspaceViewStore } from '../../src/client/upstream/stores.ts'
 import { UNGROUPED_KEY, type GroupNode, type SessionNode } from '../../src/client/upstream/tree.ts'
@@ -264,7 +265,14 @@ describe('WorkspaceBrowser with tags', () => {
     await waitFor(() => { expect(runtime.tags.getSnapshot().phase).toBe('ready') })
     const controls = createWorkspaceShortcutControls()
     const store = createWorkspaceViewStore().create()
+    const actionRequest = createSnapshotStore<WorkspaceActionRequest | null>(null)
     const props: WorkspaceBrowserProps = {
+      openWorkspaceMenu: vi.fn(),
+      useWorkspaceActionRequest: bindSnapshotSelector(actionRequest),
+      settleWorkspaceAction: () => { actionRequest.set(null) },
+      openSessionMenu: vi.fn(),
+      useContextMenuTarget: selector => selector(null),
+      useContextMenu: contextMenuHook(),
       useShortcuts: select => select([]),
       useWorkspaceShortcuts: bindSnapshotSelector(controls.state),
       requestSearch: controls.search, requestAddWorkspace: controls.add, closeAddWorkspace: controls.closeAdd,
@@ -709,16 +717,13 @@ describe('WorkspaceBrowser with tags', () => {
     })
   })
 
-  it('shows tag dots and opens the tag menu from a right-click or the row menu', async () => {
-    const { runtime } = await mount()
+  it('shows tag dots, and a right-click or the row menu opens DSH’s Workspace menu, which carries the tags action', async () => {
+    const { props } = await mount()
     expect(within(workspaceRow('alpha')[0]!).getByRole('img').getAttribute('aria-label')).toBe('Tags: Urgent, Client')
     expect(within(workspaceRow('gamma')[0]!).queryByRole('img', { name: /^Tags/ })).toBeNull()
-    fireEvent.contextMenu(workspaceRow('beta')[0]!, { clientX: 40, clientY: 90 })
-    expect(runtime.menu.getSnapshot()).toEqual({ workspaceId: 'beta', anchor: { x: 40, y: 90, width: 0, height: 0 } })
-    act(() => { runtime.openMenu(null) })
+    expect(workspaceRow('beta')[0]!.getAttribute('data-tag-workspace')).toBe('beta')
     fireEvent.click(within(workspaceRow('gamma')[0]!).getByRole('button', { name: 'Workspace actions for gamma' }))
-    fireEvent.click(await screen.findByRole('menuitem', { name: /^Tags…/ }))
-    expect(runtime.menu.getSnapshot()?.workspaceId).toBe('gamma')
+    expect(props.openWorkspaceMenu).toHaveBeenCalledWith('gamma', expect.any(String), 'gamma', expect.anything(), 'toggle')
   })
 })
 

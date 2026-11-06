@@ -36,11 +36,14 @@ export function clientBundles(): Plugin {
         '__window.__ModuleLoader__ = { load: registration => { __registration = registration } };',
         code,
         '__window.__ModuleLoader__ = __previous;',
-        'const __exports = __registration.factory(request => {',
+        'const __require = request => {',
         '  const external = __externals.get(request);',
         '  if (external === undefined) throw new Error(`client bundle requested unknown module ${request}`);',
         '  return external;',
-        '});',
+        '};',
+        // DSH 0.2.2 bundles resolve their own files through the loader; the specs never fetch them.
+        '__require.asset = path => path;',
+        'const __exports = __registration.factory(__require);',
         'export default __exports;',
         ...names.map(name => `export const ${name} = __exports.${name};`),
       ].join('\n')

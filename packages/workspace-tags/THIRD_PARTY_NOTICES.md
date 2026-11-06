@@ -1,6 +1,6 @@
 # Third-party notices
 
-`src/client/upstream/` is DeepSeek Harness's `packages/client/ui-workspace/src/client` at tag `dsh-v0.2.1-rc.3` (commit `1f81c047fc48fa190a683e469daa699857e9afe8`), with the changes listed in [docs/upstream.md](docs/upstream.md). `test/upstream/` holds that package's specs, and `test/fixtures/upstream-src/` and `test/fixtures/dsh-client-locale/` hold DeepSeek Harness sources the specs need; none of the test files are part of the installed package.
+`src/client/upstream/` is DeepSeek Harness's `packages/client/ui-workspace/src/client` at tag `dsh-v0.2.2-rc.1` (commit `66491b05e3f05ad35bcdd4f6cd7ed26041d9e3db`), with the changes listed in [docs/upstream.md](docs/upstream.md). `test/upstream/` holds that package's specs, and `test/fixtures/upstream-src/` and `test/fixtures/dsh-client-locale/` hold DeepSeek Harness sources the specs need; none of the test files are part of the installed package.
 
 ```text
 MIT License
