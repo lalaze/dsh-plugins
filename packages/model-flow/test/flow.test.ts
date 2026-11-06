@@ -93,6 +93,14 @@ test('stopping during a step ends the flow with no further steps', async () => {
   assert.ok(!notes.some(note => /Stopped/.test(note)), 'the stop command says so itself');
   assert.match(rows.at(-1)!.closed!.title, /^Round 1: Implement stopped/);
 });
+test('a step stopped in its own view ends the flow as stopped, not as failed', async () => {
+  const { outcome, order, rows, reports } = await play(request => request.role === 'implement' ? { text: 'Starting the tests.', stopReason: 'aborted' } : done('x'));
+  assert.deepEqual(outcome, { status: 'stopped' });
+  assert.deepEqual(order, ['plan', 'implement1']);
+  assert.equal(rows.at(-1)!.closed!.kind, 'success');
+  assert.match(rows.at(-1)!.closed!.title, /^Round 1: Implement stopped/);
+  assert.match(reports.at(-1)!, /the user stopped it during the implement step/);
+});
 test('notes follow the language of the goal', async () => {
   const { notes } = await play(reviewing(['FLOW_VERDICT: pass']), { goal: '给导出加 CSV' });
   assert.match(notes.at(-1)!, /^完成：第 1 轮审核通过/);

@@ -96,7 +96,8 @@ export async function runFlow(input: FlowInput, host: FlowHost): Promise<FlowOut
     let result: ChildResult;
     try { result = await host.run({ role, round, route, prompt, readOnly, signal, row }); }
     catch (error) { return signal.aborted ? halted() : fail(error instanceof Error ? error.message : String(error)); }
-    if (signal.aborted) return halted();
+    // Stopped from the step's own view: the flow's signal knows nothing about that, and there is nothing to go on with.
+    if (signal.aborted || result.stopReason === 'aborted') return halted();
     if (result.stopReason !== 'completed') return fail(result.diagnostic || result.text.trim() || result.stopReason);
     await row.close({ kind: 'success', ...(describe?.(result, now() - at) ?? { title: text.finished(role, round, now() - at), body: result.closing ?? result.text }) });
     return result;

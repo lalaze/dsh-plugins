@@ -18,6 +18,7 @@ export const flowRowStyles = `
 .mf-flow-elapsed{flex:none;margin-left:6px;font-size:12px;line-height:20px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
 .mf-flow-open{flex:none;border:0;background:none;padding:0 6px;margin-left:4px;border-radius:4px;font:inherit;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);cursor:pointer}
 .mf-flow-open:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover,#8882)}
+.mf-flow-open:disabled{color:var(--dsw-alias-label-tertiary);background:none;cursor:default}
 .mf-flow-activity{margin-left:22px;font-size:12px;line-height:20px;color:var(--dsw-alias-label-tertiary);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .mf-flow-body{margin:4px 0 8px 4px;padding:12px 16px;max-height:480px;overflow:auto;border:.5px solid var(--dsw-alias-border-l1);border-radius:var(--dsw-radius-lg,8px);color:var(--dsw-alias-label-primary)}
 .mf-flow-body[data-report]{max-height:none}
@@ -58,6 +59,11 @@ export function FlowRow({ node, openStep }: { node: CommandNode; openStep(parent
   const [folded, setFolded] = useState<boolean | undefined>(undefined);
   const expanded = folded === undefined ? parts.open === true : !folded;
   const toggle = useCallback(() => setFolded(expanded), [expanded]);
+  const [stopping, setStopping] = useState(false);
+  const stop = useCallback(() => {
+    setStopping(true);
+    post({ action: 'stop', commandId: node.commandId }).catch(() => setStopping(false));
+  }, [node.commandId]);
   // A row with no result that this DSH knows nothing about was running when DSH last stopped.
   const interrupted = running && live.gone, active = running && !interrupted;
   const failed = node.outcome?.kind === 'error' || interrupted;
@@ -78,6 +84,7 @@ export function FlowRow({ node, openStep }: { node: CommandNode; openStep(parent
       headerAccessory={<>
         {active && live.step ? <span className="mf-flow-elapsed">{live.step.elapsed}</span> : undefined}
         {parentId && childId ? <button type="button" className="mf-flow-open" onClick={() => openStep(parentId, childId)}>{ui('Open')}</button> : undefined}
+        {active && live.step ? <button type="button" className="mf-flow-open" disabled={stopping} onClick={stop}>{ui(stopping ? 'Stopping' : 'Stop')}</button> : undefined}
       </>}>
       {open ? <div className="mf-flow-body" data-report={parts.open || undefined}><MarkdownText text={body} labels={labels} /></div> : undefined}
     </DisclosureRow>

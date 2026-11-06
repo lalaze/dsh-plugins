@@ -13,6 +13,8 @@ export interface SettingsHost {
   setLocale(locale: Locale): void;
   /** The step a row shows while it runs. None means it is not running in this DSH, for example after a restart. */
   step(commandId: string): LiveStep | undefined;
+  /** Stop the flow a running row belongs to. False when that row is not running in this DSH. */
+  stop(commandId: string): boolean;
 }
 export function createHandler(store: FlowStore, host: SettingsHost) {
   return async (request: Request): Promise<Response> => {
@@ -24,6 +26,7 @@ export function createHandler(store: FlowStore, host: SettingsHost) {
       const input = await request.json() as { action?: unknown; config?: unknown; provider?: unknown; model?: unknown; locale?: unknown; commandId?: unknown };
       if (input.action === 'lastCommand') return Response.json({ sessionId: host.lastCommand(LAST_COMMAND_AGE) ?? null }, { headers });
       if (input.action === 'step' && typeof input.commandId === 'string') return Response.json({ step: host.step(input.commandId) ?? null }, { headers });
+      if (input.action === 'stop' && typeof input.commandId === 'string') return Response.json({ stopped: host.stop(input.commandId) }, { headers });
       if (input.action === 'locale') { host.setLocale(input.locale === 'zh' ? 'zh' : 'en'); return Response.json({}, { headers }); }
       if (input.action === 'save') {
         await store.save(configFrom(input.config));

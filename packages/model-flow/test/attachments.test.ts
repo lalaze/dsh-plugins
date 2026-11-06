@@ -13,7 +13,7 @@ const attachments = [
   { type: 'file' as const, attachment: { attachmentId: `sha256:${'b'.repeat(64)}`, name: 'goal.txt', bytes: 10 } },
 ];
 type Block = { type: string; text?: string };
-interface Invocation { agent: typeof agent; rawInput: string; attachments?: readonly { type: 'image' | 'file' }[] }
+interface Invocation { commandId?: string; agent: typeof agent; rawInput: string; attachments?: readonly { type: 'image' | 'file' }[] }
 interface Reply { kind: 'success' | 'error'; text?: string }
 interface Command { input: { attachments?: boolean }; handler(input: Invocation): Promise<Reply> }
 interface ActivationSpec { label: string; signal: AbortSignal; request: { prompt: Block[]; agentOptions: { model: string } } }
@@ -21,9 +21,9 @@ const agent = { id: 'parent', phase: { kind: 'idle', lastTurn: 1 }, session: { h
 const options = 'plan=planner impl=coder review=checker';
 const models = ['planner', 'coder', 'checker'].map(id => ({ provider: 'p', id, name: id }));
 
-async function until(predicate: () => boolean): Promise<void> {
+async function until(predicate: () => boolean | Promise<boolean>): Promise<void> {
   for (let i = 0; i < 400; i++) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await delay(5);
   }
   assert.fail('flow did not reach the expected state');
@@ -48,7 +48,7 @@ async function setup(t: TestContext, settings: {
   const directory = join(home, 'storages', 'dsh-model-flow');
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, 'config.json'), JSON.stringify({ plan: route('planner'), implement: route('coder'), review: route('checker'), rounds: 3 }));
-  let command!: Command, fetch!: (request: Request) => Promise<Response>, reviews = 0, disposed = 0;
+  let command!: Command, fetch!: (request: Request) => Promise<Response>, reviews = 0, disposed = 0, commands = 0;
   const calls: ActivationSpec[] = [], notes: string[] = [], resolved: string[] = [];
   const ctx = {
     connection: { fetch: { register(definition: { fetch: typeof fetch }) { fetch = definition.fetch; } } },
@@ -57,7 +57,8 @@ async function setup(t: TestContext, settings: {
     commands: {
       register(definition: Command) { command = definition; return () => {}; },
       async execute(parent: typeof agent, line: string) {
-        const reply = await command.handler({ agent: parent, rawInput: line.slice('/flow '.length) });
+        const commandId = `command-${++commands}`;
+        const reply = await command.handler({ commandId, agent: parent, rawInput: line.slice('/flow '.length) });
         notes.push(reply.text ?? '');
         return reply;
       },
@@ -86,6 +87,11 @@ async function setup(t: TestContext, settings: {
   return {
     command, calls, notes, resolved, disposed: () => disposed,
     run: (rawInput: string, blocks: Invocation['attachments'] = attachments) => command.handler({ agent, rawInput, attachments: blocks }),
+    async post(body: Record<string, unknown>) {
+      const response = await fetch(new Request('http://test/flow', { method: 'POST', headers: { 'content-type': 'application/json', 'X-DSH-Model-Flow': '1' }, body: JSON.stringify(body) }));
+      assert.equal(response.status, 200);
+      return response.json();
+    },
     async locale(locale: string) {
       const response = await fetch(new Request('http://test/flow', { method: 'POST', headers: { 'content-type': 'application/json', 'X-DSH-Model-Flow': '1' }, body: JSON.stringify({ action: 'locale', locale }) }));
       assert.equal(response.status, 200);
@@ -141,6 +147,24 @@ test('stop with attachments and a duplicate flow fail without stopping the runni
   assert.equal((await host.run('stop', [])).kind, 'success');
   assert.equal(host.calls[0].signal.aborted, true);
   assert.equal(host.disposed(), 1);
+});
+
+test('the stop button on a running row ends its flow and nothing else', async t => {
+  const host = await setup(t, { pending: true });
+  await host.run(`${options} do it`, []);
+  await until(() => host.calls.length === 1);
+  // The first command the flow runs itself is the plan step's row.
+  const row = 'command-1';
+  await until(async () => !!(await host.post({ action: 'step', commandId: row }) as { step: unknown }).step);
+  assert.deepEqual(await host.post({ action: 'stop', commandId: 'no-such-row' }), { stopped: false });
+  assert.equal(host.calls[0].signal.aborted, false);
+  assert.deepEqual(await host.post({ action: 'stop', commandId: row }), { stopped: true });
+  assert.equal(host.calls[0].signal.aborted, true);
+  assert.equal(host.disposed(), 1);
+  await until(async () => !(await host.post({ action: 'step', commandId: row }) as { step: unknown }).step);
+  assert.deepEqual(await host.post({ action: 'stop', commandId: row }), { stopped: false }, 'the flow is over');
+  assert.equal(host.calls.length, 1, 'no further step starts');
+  assert.equal((await host.run('stop', [])).kind, 'error', 'nothing is left to stop');
 });
 
 for (const model of ['planner', 'coder', 'checker']) {
