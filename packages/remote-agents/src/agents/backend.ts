@@ -111,9 +111,14 @@ export function codexServiceTiers(model: Record<string, unknown>): Choice[] | un
 /**
  * Nobody approves an unattended Claude task's commands. With workspace write it runs them in Claude Code's own sandbox,
  * which confines writes to the workspace like DSH's sandbox; without a sandbox on the host they are asked and denied.
+ * Read-only has no such sandbox, since Claude Code's lets a command write, but searching and reading the web change
+ * nothing, and research would otherwise be refused every time. Codex's read-only sandbox already allows web search.
  */
-export const unattendedClaude = (task: Pick<Task, 'unattended' | 'modeId'>): string[] =>
-  task.unattended && task.modeId === 'acceptEdits' ? ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true } })] : [];
+export const unattendedClaude = (task: Pick<Task, 'unattended' | 'modeId'>): string[] => {
+  if (!task.unattended) return [];
+  if (task.modeId === 'acceptEdits') return ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true } })];
+  return task.modeId === 'default' ? ['--allowedTools', 'WebSearch,WebFetch'] : [];
+};
 /**
  * Claude Code refuses to skip permissions as root unless IS_SANDBOX says the machine is meant for it. Whoever connects as
  * root and picks Full access, or made it that account's default, has decided that, so these launches say so. The host is

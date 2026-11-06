@@ -63,7 +63,7 @@ function denyAction(permission: Permission) {
 /** The answer for a CLI running for an unattended DSH subagent: nobody can approve, so it is denied and the turn goes on. */
 export function unattendedAnswer(permission: Permission): PermissionAnswer {
   const deny = denyAction(permission);
-  return { behavior: 'deny', message: 'Nobody can approve this: the session runs unattended for a DSH team. Continue without it, or report it as a blocker.', ...(deny ? { selectedActionId: deny.id } : {}) };
+  return { behavior: 'deny', message: 'Nobody can approve this: the session runs unattended. Continue without it, or report it as a blocker.', ...(deny ? { selectedActionId: deny.id } : {}) };
 }
 
 export async function decidePermission(host: ToolHost, permission: Permission, exec: ToolCall, signal: AbortSignal, subject: string): Promise<PermissionAnswer | undefined> {

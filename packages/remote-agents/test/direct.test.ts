@@ -14,6 +14,7 @@ import { decodeAntigravityModels } from '../src/agents/antigravity.js';
 
 class FakeCli implements Child {
   sent: WireMessage[] = [];
+  terminals: { itemId: string; processId: string }[] = [];
   stopped = false;
   data: ((data: Buffer) => void)[] = [];
   exits: ((error: Error) => void)[] = [];
@@ -71,6 +72,8 @@ class FakeCli implements Child {
     if (m.method === 'session/set_model' || m.method === 'session/set_mode') this.reply(m, {});
     if (m.method === 'session/close') this.reply(m, {});
     if (m.method === 'turn/interrupt') { this.reply(m, {}); this.emit({ method: 'turn/completed', params: { turn: { id: 'turn-remote', status: 'interrupted' } } }); }
+    if (m.method === 'thread/backgroundTerminals/list') { if (this.transport.noBackgroundTerminals) this.emit({ jsonrpc: '2.0', id: m.id, error: { code: -32600, message: 'unknown method' } }); else this.reply(m, { data: this.terminals, nextCursor: null }); }
+    if (m.method === 'thread/backgroundTerminals/terminate') { this.terminals = this.terminals.filter(t => t.processId !== m.params.processId); this.reply(m, { terminated: true }); }
     if (m.method === 'session/cancel') this.finish();
   }
   finish() {
@@ -98,7 +101,7 @@ class FakeSsh implements SshTransport {
   children: FakeCli[] = [];
   scripts: string[] = [];
   admissions: { provider: string; binding: unknown }[] = [];
-  model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; dropPrompt = false; claudeInterruptError = false;
+  model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; dropPrompt = false; claudeInterruptError = false; noBackgroundTerminals = false;
   configOptions?: any[];
   speeds: Record<string, unknown> = {};
   claudeContext?: unknown; claudeUsage?: unknown;
@@ -474,6 +477,36 @@ test('Codex binding is durable before inference; permissions, output, follow-ups
   assert.equal(native(store, agent.id).sessionId, 'thread-remote');
 });
 
+test('stopping a Codex turn ends the commands it started and leaves those of earlier turns', async t => {
+  const { service, ssh, request } = await fixture(t);
+  const agent = await service.create(request), cli = ssh.live;
+  assert.deepEqual(cli.sent.find(m => m.method === 'initialize')!.params.capabilities, { experimentalApi: true }, 'the terminal calls are refused without it');
+  const command = (id: string) => ({ type: 'commandExecution', id, command: 'pnpm check', status: 'inProgress' });
+  cli.terminals = [{ itemId: 'earlier', processId: '1' }, { itemId: 'finished', processId: '2' }, { itemId: 'running', processId: '3' }];
+  cli.emit({ method: 'item/started', params: { item: command('finished') } });
+  cli.emit({ method: 'item/completed', params: { item: { ...command('finished'), status: 'completed' } } });
+  cli.emit({ method: 'item/started', params: { item: command('running') } });
+  await tick();
+  await service.stop(agent.id);
+  assert.deepEqual(cli.sent.filter(m => m.method === 'thread/backgroundTerminals/terminate').map(m => m.params), [{ threadId: 'thread-remote', processId: '2' }, { threadId: 'thread-remote', processId: '3' }]);
+  assert.deepEqual(cli.terminals, [{ itemId: 'earlier', processId: '1' }]);
+  const methods = cli.sent.map(m => m.method);
+  assert.ok(methods.indexOf('turn/interrupt') < methods.indexOf('thread/backgroundTerminals/terminate'), 'the model must not see its command end while it can still act');
+  assert.equal((await service.summary(agent.id)).status, 'idle');
+});
+
+test('a Codex without the terminal calls is still stopped', async t => {
+  const { service, ssh, request } = await fixture(t);
+  ssh.noBackgroundTerminals = true;
+  const agent = await service.create(request), cli = ssh.live;
+  cli.emit({ method: 'item/started', params: { item: { type: 'commandExecution', id: 'running', command: 'pnpm check', status: 'inProgress' } } });
+  await tick();
+  await service.stop(agent.id);
+  assert.ok(cli.sent.some(m => m.method === 'thread/backgroundTerminals/list'));
+  assert.equal((await service.summary(agent.id)).status, 'idle');
+  assert.ok(types((await service.detail(agent.id)).timeline!.entries).includes('interrupted'));
+});
+
 test('a message to a running Codex agent interrupts its turn natively before starting the next one', async t => {
   const { service, ssh, request } = await fixture(t);
   const agent = await service.create(request), cli = ssh.live;
@@ -722,6 +755,17 @@ test('an unattended Claude task with workspace write runs commands in Claude Cod
   assert.equal(settings(), undefined, 'someone answers an ordinary conversation');
   await service.create({ ...request, id: 'read-only-member', modeId: 'default' }, { unattended: true });
   assert.equal(settings(), undefined, 'the sandbox would let a read-only member write');
+});
+
+test('only an unattended read-only Claude task gets web search and web fetch without asking', async t => {
+  const { service, ssh, request } = await fixture(t, 'claude');
+  const allowed = () => ssh.live.argv.includes('--allowedTools') ? ssh.live.argv[ssh.live.argv.indexOf('--allowedTools') + 1] : undefined;
+  await service.create({ ...request, modeId: 'default' }, { unattended: true });
+  assert.equal(allowed(), 'WebSearch,WebFetch');
+  await service.create({ ...request, id: 'attended', modeId: 'default' });
+  assert.equal(allowed(), undefined, 'someone answers an ordinary conversation');
+  await service.create({ ...request, id: 'implementer', modeId: 'acceptEdits' }, { unattended: true });
+  assert.equal(allowed(), undefined);
 });
 
 test('Claude Auto is available for new sessions and is explicitly passed to the non-interactive CLI', async t => {
