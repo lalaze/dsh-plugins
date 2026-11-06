@@ -338,6 +338,28 @@ test('a turn the CLI runs by itself shows here while it runs, and Stop here stop
   assert.equal(await adapter.catchUp(agent), false, 'what it showed is not shown again');
 });
 
+test('a sentence still being written when a running turn is first read stays whole', async t => {
+  const { adapter, remote, task, agentId, agent, sent, messages, request } = await setup(t);
+  const live = remote.live(task().id);
+  live.status = 'running'; live.activeTurn = { turnId: 'own-turn', startedAt: null, unprompted: true };
+  remote.append(agentId, { type: 'user_message', text: 'Background command completed', clientMessageId: 'cli-1', unprompted: true });
+  remote.append(agentId, { type: 'tool_call', callId: 'early', name: 'Bash', status: 'completed' });
+  remote.append(agentId, { type: 'assistant_message', text: '检查通过，' });
+  assert.equal(await adapter.catchUp(agent), true);
+  const blocks: string[] = [];
+  let finishing = false;
+  for await (const chunk of adapter.stream(request([...messages, sent[0]]))) {
+    if (chunk.type === 'block-end' && chunk.block.type === 'text') blocks.push(chunk.block.text);
+    if (chunk.type === 'text-delta' && chunk.text.includes('检查通过') && !finishing) {
+      finishing = true;
+      remote.append(agentId, { type: 'assistant_message', text: '正在发布。' });
+      setTimeout(() => { remote.append(agentId, { type: 'turn_end', clientMessageId: 'cli-1', status: 'completed' }); live.status = 'idle'; live.activeTurn = null; }, 20);
+    }
+  }
+  assert.ok(blocks.some(block => block.includes('检查通过，正在发布。')), `one block holds the sentence: ${JSON.stringify(blocks)}`);
+  assert.equal(blocks.join('').match(/检查通过/g)?.length, 1);
+});
+
 test('a message waiting for a turn the CLI runs by itself shows that turn as it goes', async t => {
   const { adapter, remote, task, agentId, messages, request } = await setup(t);
   const live = ownTurn(remote, agentId, task().id), sends = remote.sends;

@@ -110,8 +110,9 @@ function stamp(value: string | undefined): string {
  * One markdown block of a remote CLI session's saved history: what the user asked, what the CLI answered, and which
  * tools it used. Latest turns win when the history is long; the full record stays in the sessions panel.
  * With `elsewhere` the entries are turns sent outside this conversation, headed by where they came from.
+ * `writing` is what the CLI is still writing at the end, left out for whoever follows the turn: it still names the CLI and sets the language.
  */
-export function transcript(entries: readonly TimelineEntry[], options: { cli: string; creator?: string; elsewhere?: { from: TurnSource } }): { text: string; lastMessageId?: string } {
+export function transcript(entries: readonly TimelineEntry[], options: { cli: string; creator?: string; elsewhere?: { from: TurnSource }; writing?: string }): { text: string; lastMessageId?: string } {
   const turns: Turn[] = [];
   let turn: Turn | undefined, replying = false, lastMessageId: string | undefined;
   const current = () => turn ??= (turns.push({ attachments: 0, replies: [], tools: new Map(), errors: [], switches: [], interrupted: false }), turns.at(-1)!);
@@ -147,7 +148,7 @@ export function transcript(entries: readonly TimelineEntry[], options: { cli: st
     else if (item.type === 'interrupted' || item.type === 'turn_end' && item.status === 'canceled') target.interrupted = true;
   }
   // The user's language decides; a turn the CLI started itself has no user text, so its replies stand in.
-  const labels = /[㐀-鿿]/.test(turns.map(t => t.unprompted ? t.replies.join('') : t.user ?? '').join('')) ? LABELS.zh : LABELS.en;
+  const labels = /[㐀-鿿]/.test(turns.map(t => t.unprompted ? t.replies.join('') : t.user ?? '').join('') + (options.writing ?? '')) ? LABELS.zh : LABELS.en;
   const blocks = turns.map(t => {
     const parts: string[] = [];
     if (t.unprompted) parts.push(`**${labels.continued}**${stamp(t.at)}${t.user ? `\n\n${closed(head(t.user, USER_LIMIT))}` : ''}`);
@@ -163,6 +164,7 @@ export function transcript(entries: readonly TimelineEntry[], options: { cli: st
       ...(t.interrupted ? [labels.interrupted] : []),
     ];
     if (reply || notes.length) parts.push(`**${options.cli}**${reply ? `\n\n${closed(tail(reply, REPLY_LIMIT))}` : ''}${notes.length ? `\n\n_${notes.join(' · ').replace(/_/g, '\\_')}_` : ''}`);
+    else if (options.writing !== undefined && t === turns.at(-1)) parts.push(`**${options.cli}**`);
     return parts.join('\n\n');
   });
   // Newest first until the budget is spent; the latest turn is always shown.

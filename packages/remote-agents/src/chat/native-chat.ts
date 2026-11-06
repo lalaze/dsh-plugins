@@ -54,7 +54,7 @@ const LAPSE_MS = 120_000;
 const PROGRESS_LIMIT = 1000;
 /** Finished turns this conversation did not send, ready to show: one markdown block and the last message among them. */
 /** `running`: the last turn has not ended; its output so far is in `text`, and what it writes next follows this cursor. */
-interface Elsewhere { text: string; summary: string; lastMessageId: string; turns: number; running?: Cursor }
+interface Elsewhere { text: string; summary: string; lastMessageId: string; turns: number; writing?: boolean; running?: Cursor }
 const CLI_NAMES: Readonly<Record<string, string>> = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
 export const chatProviderId = (cli: string) => `remote-cli-${cli}`;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
@@ -274,6 +274,14 @@ export class RemoteCliAdapter extends LlmAdapter {
     const finished = !!until || entries.some(e => e.item.type === 'turn_end' && e.item.clientMessageId === latestId);
     const running = !finished && !!end && busy(await service.summary(taskId));
     if (!finished && !running && Date.now() - Date.parse(entries.at(-1)!.timestamp) <= QUIET_MS) entries = entries.slice(0, latest);
+    // What a running CLI is still writing would be cut where this reading ends: following the turn picks it up whole.
+    let resume = end, writing: string | undefined;
+    if (running) {
+      const written = entries.findLastIndex(e => e.item.type !== 'assistant_message' && e.item.type !== 'reasoning');
+      if (written < entries.length - 1) writing = entries.slice(written + 1).map(e => e.item.type === 'assistant_message' ? String(e.item.text ?? '') : '').join('');
+      resume = { epoch: end!.epoch, seq: entries[written].seqEnd };
+      entries = entries.slice(0, written + 1);
+    }
     const messages = entries.filter(e => e.item.type === 'user_message'), lastMessageId = messages.at(-1)?.item.clientMessageId;
     if (typeof lastMessageId !== 'string' || !lastMessageId) return;
     // Messages name the DSH that sent them since 0.2.75; a mix, or one without, reads as sent elsewhere. Turns the CLI
@@ -285,7 +293,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     const cli = CLI_NAMES[task.provider] ?? task.provider, turns = messages.length;
     const summary = sent.length ? `${cli} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}`
       : `${cli} continued on its own${turns > 1 ? `, ${turns} turns` : ''}`;
-    return { text: transcript(entries, { cli, elsewhere: { from } }).text, summary, lastMessageId, turns, ...(running ? { running: end } : {}) };
+    return { text: transcript(entries, { cli, elsewhere: { from }, ...(writing !== undefined ? { writing } : {}) }).text, summary, lastMessageId, turns, ...(running ? { running: resume } : {}), ...(writing !== undefined ? { writing: true } : {}) };
   }
   /**
    * Show turns that another DSH sharing the host, or Open sessions, ran in this conversation's CLI session; one still
@@ -633,7 +641,7 @@ export class RemoteCliAdapter extends LlmAdapter {
           // A turn still running streams on after what it wrote so far. Stop here stops it, as it does any turn shown here.
           if (turns.running) {
             admitted = true; settled = false; reached = { id: turns.lastMessageId, cursor: turns.running };
-            yield* textChunk('text', '\n\n---\n\n');
+            yield* textChunk('text', turns.writing ? '\n\n' : '\n\n---\n\n');
             yield* follow(turns.lastMessageId, turns.running, true, true);
             settled = true;
           }
@@ -694,7 +702,8 @@ export class RemoteCliAdapter extends LlmAdapter {
             if (!noted) { noted = true; yield* textChunk('reasoning', `${ownTurnWaitNote(provider.label, currentPrompt)}\n`); yield* endBlock(); }
             const own = await this.elsewhere(task.id, signal).catch(() => undefined);
             if (!own?.running) { await pause(this.pollMs, undefined, { signal }); continue; }
-            yield* textChunk('text', own.text); yield* endBlock();
+            yield* textChunk('text', own.text);
+            if (own.writing) yield* textChunk('text', '\n\n'); else yield* endBlock();
             shownOwn = true; reached = { id: own.lastMessageId, cursor: own.running };
             yield* follow(own.lastMessageId, own.running, true, true);
             await delivered(own.lastMessageId, undefined, true); reached = undefined;
