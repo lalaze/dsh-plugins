@@ -2,6 +2,9 @@ import { currentWallpaper } from '../domain.js';
 import type { GalleryController } from './controller.js';
 
 // Use DSH's public slot markers and shell attributes, independent of CSS module hashes.
+// The plugin page header (DSH 0.2.2) paints a solid strip so scrolled content cannot show through it.
+// Nothing sits under it at rest, so it stays clear there and frosts only once content passes beneath.
+// The automation page paints its own solid page, and its detail panel solid strips, none of them overlapping anything.
 export const backgroundStyles = `
 body[data-dsh-gallery-active]{isolation:isolate}
 [data-dsh-gallery-background]{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:var(--dsw-alias-bg-base,Canvas)}
@@ -14,6 +17,11 @@ body[data-dsh-gallery-active] [data-slot="main"],
 body[data-dsh-gallery-active] [data-slot="main"]>[data-phase],
 body[data-dsh-gallery-active] [data-slot="main.conversation"]>[data-phase]{background:transparent!important}
 body[data-dsh-gallery-active] [data-slot="sidebar"]>*{background:color-mix(in srgb,var(--dsw-specific-sidebar-fill,Canvas) 55%,transparent)!important}
+body[data-dsh-gallery-active] [data-plugin-bar][data-natural]::before{background:transparent!important;transition:background-color .15s ease,backdrop-filter .15s ease}
+body[data-dsh-gallery-active] [data-plugin-bar][data-natural][data-scrolled]::before{background:color-mix(in srgb,var(--dsw-alias-bg-base,Canvas) 70%,transparent)!important;backdrop-filter:blur(20px)}
+body[data-dsh-gallery-active] [data-testid="task-manager-page"],
+body[data-dsh-gallery-active] [data-testid="task-manager-page"] aside :is([class*="_saveFooter"],[class*="_saveFailure"],[class*="_detailNotice"]){background:transparent!important}
+body[data-dsh-gallery-active] [data-testid="task-manager-page"] aside{background:color-mix(in srgb,var(--dsw-alias-bg-base,Canvas) 55%,transparent)!important}
 `;
 
 export function installBackground(controller: GalleryController): () => void {

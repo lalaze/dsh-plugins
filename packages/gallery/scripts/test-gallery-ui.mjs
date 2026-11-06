@@ -26,6 +26,11 @@ const snapshot = 'window.fixture.controller.getSnapshot()';
 const ready = `!${snapshot}.loading && !${snapshot}.busy`;
 const count = n => `${snapshot}.entries.length === ${n} && ${ready}`;
 const current = 'document.querySelector("[data-dsh-gallery-background] img")';
+const pluginBar = 'document.querySelector(".fixture-plugin-bar")';
+const pluginBarPaint = `getComputedStyle(${pluginBar}, "::before")`;
+const paintOf = selector => `getComputedStyle(document.querySelector('${selector}')).backgroundColor`;
+const taskPage = '[data-testid=task-manager-page]';
+const taskStrips = ['_saveFooter', '_saveFailure', '_detailNotice'].map(name => paintOf(`${taskPage} [class*=${name}]`));
 try {
   browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', url);
   wait(ready); browser('snapshot', '-i');
@@ -35,6 +40,8 @@ try {
   evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".gg-heading h2").textContent === "图库"');
   browser('set', 'viewport', '1120', '900');
   expect('!document.body.hasAttribute("data-dsh-gallery-active")');
+  expect(`${pluginBarPaint}.backgroundColor !== "rgba(0, 0, 0, 0)" && ${pluginBarPaint}.backdropFilter === "none"`);
+  expect(`[${[paintOf(taskPage), paintOf(`${taskPage} aside`), ...taskStrips]}].every(paint => paint !== "rgba(0, 0, 0, 0)")`);
   browser('click', 'button:text-is("获取 Bing 壁纸")'); wait(count(8));
   expect('document.querySelectorAll(".gg-card").length === 8 && !document.body.hasAttribute("data-dsh-gallery-active")');
   // A narrow desktop settings column must retain photo-only cards and hover overlays.
@@ -50,6 +57,14 @@ try {
   browser('click', '[role=switch]'); wait(`${current}?.naturalWidth === 960`);
   expect('getComputedStyle(document.querySelector(".fixture-frame")).backgroundColor === "rgba(0, 0, 0, 0)"');
   expect('getComputedStyle(document.querySelector(".fixture-page")).backgroundColor === "rgba(0, 0, 0, 0)"');
+  // The plugin page header shows the wallpaper at rest and frosts only once content scrolls under it.
+  wait(`${pluginBarPaint}.backgroundColor === "rgba(0, 0, 0, 0)" && ${pluginBarPaint}.backdropFilter === "none"`);
+  evaluate(`${pluginBar}.toggleAttribute("data-scrolled", true)`);
+  wait(`/ 0\\.\\d+\\)$/.test(${pluginBarPaint}.backgroundColor) && ${pluginBarPaint}.backdropFilter.includes("blur")`);
+  evaluate(`${pluginBar}.toggleAttribute("data-scrolled", false)`);
+  // The automation page shows the wallpaper; its detail panel keeps a tint so the form stays readable, with no solid strips.
+  expect(`${paintOf(taskPage)} === "rgba(0, 0, 0, 0)" && [${taskStrips}].every(paint => paint === "rgba(0, 0, 0, 0)")`);
+  expect(`/ 0\\.\\d+\\)$/.test(${paintOf(`${taskPage} aside`)})`);
   browser('click', 'button:text-is("固定这张")'); wait(`${snapshot}.preferences.selectedId === 'OHR.Fixture20261023_1920x1080.jpg' && ${ready}`);
   browser('click', 'button:text-is("恢复每日")'); wait(`${snapshot}.preferences.selectedId === null && ${ready}`);
   browser('click', '[aria-label="预览 静谧海岸"]'); wait('document.querySelector("dialog[open]")');

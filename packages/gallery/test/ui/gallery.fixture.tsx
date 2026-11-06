@@ -50,6 +50,8 @@ const style = document.createElement('style'); style.textContent = `
 @media(prefers-color-scheme:dark){:root{color-scheme:dark;--dsw-alias-bg-base:#17181c;--dsw-alias-bg-layer-2:#1d1e23;--dsw-specific-sidebar-fill:#191a1f;--dsw-alias-bg-module-platform:#ffffff08;--dsw-alias-border-l2:#ffffff12;--dsw-alias-label-primary:#e5e7ed;--dsw-alias-label-tertiary:#8d919f;--dsw-alias-state-business-primary:#83a6f4}}
 html,body,#root,#root>[data-slot=root]{height:100%;margin:0;color:var(--dsw-alias-label-primary);font:14px system-ui}body{background:var(--dsw-alias-bg-base)}
 .fixture-frame{height:100%;display:grid;grid-template-columns:210px 1fr;background:var(--dsw-alias-bg-base)}.fixture-frame>aside>[data-slot=sidebar]{height:100%}.fixture-sidebar{background:var(--dsw-specific-sidebar-fill);border-right:1px solid var(--dsw-alias-border-l2);padding:26px 14px;display:flex;flex-direction:column;gap:20px}.fixture-sidebar strong{font-size:15px;letter-spacing:.03em;padding:0 10px}.fixture-sidebar small{font-size:10px;letter-spacing:.08em;color:var(--dsw-alias-label-tertiary);padding:0 10px}.fixture-sidebar button{border:0;padding:10px 12px;border-radius:7px;background:none;color:inherit;text-align:left;cursor:pointer;font:inherit;font-size:13px}.fixture-sidebar button[aria-pressed=true]{background:var(--dsw-alias-bg-module-platform)}.fixture-nav{display:flex;flex-direction:column;gap:4px}.fixture-foot{margin-top:auto;color:var(--dsw-alias-label-tertiary);font-size:10px;line-height:1.7;padding:0 10px}.fixture-main{min-width:0;overflow:auto}.fixture-page{min-height:100%;background:var(--dsw-alias-bg-base);padding:28px 28px 0}.fixture-page>.dsh-gallery{max-width:1600px;margin:auto}.fixture-chat{max-width:720px;margin:20vh auto;padding:24px;text-align:center}.fixture-chat h1{font-size:28px;font-weight:500}.fixture-composer{padding:18px;text-align:left;border:1px solid var(--dsw-alias-border-l2);border-radius:14px;background:var(--dsw-alias-bg-layer-2);margin-top:40px;color:var(--dsw-alias-label-tertiary)}
+.fixture-task-page,.fixture-task-page aside,.fixture-task-page aside p{background:var(--dsw-alias-bg-base)}.fixture-task-page{position:absolute;width:0;height:0;overflow:hidden}
+.fixture-plugin-bar{position:absolute;width:0;height:0}.fixture-plugin-bar[data-natural]::before{content:"";position:absolute;background:var(--dsw-alias-bg-base)}
 @media(max-width:700px){.fixture-frame{grid-template-columns:1fr}.fixture-sidebar{display:none}.fixture-page{padding:18px 2px 0}}
 `; document.head.append(style);
 function Preview() {
@@ -63,6 +65,10 @@ function Preview() {
     <main className="fixture-main"><div data-slot="main"><div data-slot="main.conversation"><div data-phase="hero" className="fixture-page">
       {page === 'gallery' ? <GalleryPage controller={controller} /> : <div className="fixture-chat"><h1>今天，想做点什么？</h1><p>你的背景会出现在聊天和侧栏。</p><div className="fixture-composer">向 DeepSeek 发送消息…</div></div>}
     </div></div></div></main>
+    {/* Same markers and solid paint as the sticky header on DSH 0.2.2's plugin page. */}
+    <div className="fixture-plugin-bar" data-plugin-bar="true" data-natural="" />
+    {/* Same marker, panel and solid strips as DSH's automation page. */}
+    <section className="fixture-task-page" data-testid="task-manager-page"><aside><p className="hash_saveFooter" /><p className="hash_saveFailure" /><p className="hash_detailNotice" /></aside></section>
     <div data-shell-overlay style={{ display: 'none' }} />
   </div></div>;
 }
