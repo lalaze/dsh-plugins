@@ -47,6 +47,11 @@ function clipPath(path) {
     const end = characters.slice(1 - TOOL_TARGET_LIMIT).join('');
     return `…${end.slice(Math.max(end.indexOf('/'), 0))}`;
 }
+/** Codex reports a command with the shell it runs it in, which says nothing about what it does. */
+const shellBody = (command) => {
+    const wrapped = /^(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+(['"])([\s\S]*)\1$/u.exec(command);
+    return wrapped ? wrapped[2] : command;
+};
 /**
  * What a tool works on. The CLI's own sentence comes first: 90% of the commands in real sessions run past 100 characters and
  * a third are several lines, while 96% come with a sentence of about 50 characters.
@@ -56,10 +61,12 @@ function toolTarget(input) {
     const description = field('description');
     if (description)
         return clip(oneLine(description));
-    const [line, ...rest] = field('command').split('\n');
+    const [line, ...rest] = shellBody(field('command')).split('\n');
     if (line)
         return clip(oneLine(line), rest.length > 0);
-    const path = field('file_path', 'path');
+    // Codex lists what a file change touches.
+    const changes = Array.isArray(input.changes) ? input.changes : [];
+    const path = field('file_path', 'path') || (typeof changes[0]?.path === 'string' ? changes[0].path : '');
     if (path)
         return clipPath(oneLine(path));
     return clip(oneLine(field('pattern', 'query', 'url', 'prompt')));

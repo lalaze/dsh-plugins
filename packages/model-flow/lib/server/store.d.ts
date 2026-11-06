@@ -11,3 +11,15 @@ export declare class FlowStore {
     open(): Promise<void>;
     save(next: FlowConfig): Promise<void>;
 }
+export declare class ReportStore {
+    private readonly file;
+    private reports;
+    constructor(file: string);
+    open(): Promise<void>;
+    /** Writes run one at a time, so an earlier one cannot land after a later one. */
+    flush: () => Promise<void>;
+    private writes;
+    private persist;
+    put(sessionId: string, report: string): void;
+    take(sessionId: string): string | undefined;
+}

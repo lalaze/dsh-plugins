@@ -36,3 +36,48 @@ export class FlowStore {
         this.config = next;
     }
 }
+/** Flow results waiting for a conversation's next message, which can come after DSH restarts. */
+const MAX_REPORTS = 50;
+export class ReportStore {
+    file;
+    reports = new Map();
+    constructor(file) {
+        this.file = file;
+    }
+    async open() {
+        try {
+            this.reports = new Map(Object.entries(JSON.parse(await readFile(this.file, 'utf8'))));
+        }
+        catch { /* None yet, or unreadable: a missed result only costs context. */ }
+    }
+    /** Writes run one at a time, so an earlier one cannot land after a later one. */
+    flush = () => this.writes;
+    writes = Promise.resolve();
+    persist() {
+        const content = JSON.stringify(Object.fromEntries(this.reports));
+        this.writes = this.writes.then(async () => {
+            await mkdir(dirname(this.file), { recursive: true });
+            const temporary = `${this.file}.${process.pid}.tmp`;
+            await writeFile(temporary, content, { mode: 0o600 });
+            await rename(temporary, this.file);
+        }).catch(() => undefined); // The result still holds until DSH stops.
+    }
+    put(sessionId, report) {
+        this.reports.delete(sessionId);
+        this.reports.set(sessionId, report);
+        for (const oldest of this.reports.keys()) {
+            if (this.reports.size <= MAX_REPORTS)
+                break;
+            this.reports.delete(oldest);
+        }
+        this.persist();
+    }
+    take(sessionId) {
+        const report = this.reports.get(sessionId);
+        if (report !== undefined) {
+            this.reports.delete(sessionId);
+            this.persist();
+        }
+        return report;
+    }
+}

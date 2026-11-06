@@ -15,6 +15,8 @@ export function createHandler(store, host) {
             const input = await request.json();
             if (input.action === 'lastCommand')
                 return Response.json({ sessionId: host.lastCommand(LAST_COMMAND_AGE) ?? null }, { headers });
+            if (input.action === 'step' && typeof input.commandId === 'string')
+                return Response.json({ step: host.step(input.commandId) ?? null }, { headers });
             if (input.action === 'locale') {
                 host.setLocale(input.locale === 'zh' ? 'zh' : 'en');
                 return Response.json({}, { headers });

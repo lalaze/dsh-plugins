@@ -28,7 +28,7 @@ Or change the models for one run:
 | `/flow stop` | End the flow running in this conversation |
 | `/flow` | Show the current models |
 
-Each step's result shows in the conversation. For the whole text, open the subagent list at the top: every step is a conversation you can open.
+Each step is one row in the conversation. While it runs, the row shows the model, the time so far and the latest thing it is doing; afterwards click it for the whole result, or **Open** to read that step's conversation beside the chat. The last row is the report: what was built and what the review found, open without a click.
 
 Attach images and files to `/flow`, with or without a written goal. Every step receives the attachments, including later rounds and a review asked again for its missing verdict. If any selected model declares that it does not support images, a flow with images will not start.
 
@@ -48,12 +48,12 @@ A review with no verdict is asked once more. If there is still none the flow sto
 ## Worth knowing
 
 - Each implementation and review round is a new session. It picks up from the prompt and the changes in the working tree, not the previous round's conversation.
-- The flow does not run inside the conversation's model, so that model does not know the result.
+- The flow does not run inside the conversation's model. That model hears how the flow ended with your next message, so "release it" means something to it.
 - A flow does not continue after DSH restarts.
 - Read-only is enforced by DSH's sandbox. A Codex reviewer can run tests; a Claude Code reviewer can read code and git state, but its test commands are refused.
 - A remote CLI only works in workspaces of its own machine. When the conversation itself uses a CLI on a machine, the same model on that machine is used.
 - With remote CLIs, each step uploads its own copy of the attachments to the remote workspace. These copies are not cleaned up automatically.
-- Needs DSH 0.2.1-rc.3 or later (tested on rc.5). With remote CLIs, use dsh-remote-agents 0.2.102 or later: older versions leave each finished subagent's process running on the remote machine.
+- Needs DSH 0.2.1-rc.3 or later (tested on rc.5 and 0.2.2-rc.1). With remote CLIs, use dsh-remote-agents 0.2.113 or later: older versions do not pass the flow's result to a remote CLI conversation or show which tool a delegated Codex is running, and those before 0.2.102 leave each finished subagent's process running on the remote machine.
 
 ## License
 

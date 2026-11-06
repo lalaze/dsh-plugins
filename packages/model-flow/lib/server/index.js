@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { Activity } from './activity.js';
 import { brief, flowText, runFlow } from './engine.js';
 import { API_PATH, createHandler } from './http.js';
 import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine } from './line.js';
 import { attachmentNote } from './prompts.js';
 import { machineOf, OFF, relocate, resolveSpec } from './routes.js';
-import { FlowStore } from './store.js';
+import { rowText } from './shared.js';
+import { FlowStore, ReportStore } from './store.js';
 export const name = 'dsh-model-flow';
 export const inject = ['connection', 'commands', 'subagents', 'llm'];
 const COMMAND = 'flow';
@@ -23,16 +25,21 @@ function ensureConversation(agent) {
     agent.session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
     agent.phase.lastTurn = 1;
 }
+/** remote-agents passes messages of this kind on to a remote CLI as context. */
+const REPORT_SOURCE = 'model-flow';
 const LABELS = { plan: 'flow · plan', implement: 'flow · implement', review: 'flow · review' };
 export async function apply(ctx) {
     const host = ctx;
     const store = new FlowStore(join(stateDir(), 'config.json'));
     await store.open();
+    const reports = new ReportStore(join(stateDir(), 'reports.json'));
+    await reports.open();
     const running = new Map();
     const readOnly = new Set();
     const failures = new Map();
     // Rows in the chat are command results: the one way to add to a conversation without a model turn. Only this process knows the mark.
-    const noteMark = `⁣${randomUUID()}`;
+    const noteMark = `⁣${randomUUID()}`, stepMark = `⁣${randomUUID()}`;
+    const openSteps = new Map(), stepByCommand = new Map(), stepByChild = new Map();
     /** The newest typed /flow: the new-session page stays where it is after a command, so the client opens this conversation. */
     let lastCommand;
     /** Replies outside a flow have no goal to take their language from; the client says which one it shows. */
@@ -58,6 +65,10 @@ export async function apply(ctx) {
             catalog, efforts,
             lastCommand: maxAge => lastCommand && Date.now() - lastCommand.at <= maxAge ? lastCommand.sessionId : undefined,
             setLocale: value => { locale = value; },
+            step: commandId => {
+                const step = stepByCommand.get(commandId);
+                return step && { title: step.title(), elapsed: step.elapsed(), activity: step.activity.current(), parentId: step.parentId, ...(step.childId ? { childId: step.childId } : {}) };
+            },
         }) });
     // Runs before the child's first turn and is durable in its log, so a child reopened later stays read-only.
     ctx.on('agent/created', ({ agent }) => {
@@ -71,8 +82,29 @@ export async function apply(ctx) {
         if (failures.has(agent.id))
             failures.set(agent.id, error instanceof Error ? error.message : String(error));
     }, { global: true });
+    ctx.on('agent/assistant-stream', ({ agent, frame }) => {
+        const step = stepByChild.get(agent.id);
+        if (!step)
+            return;
+        if (frame.type === 'start')
+            step.activity.restart();
+        else if (frame.type === 'chunk' && frame.chunk)
+            step.activity.push(frame.chunk);
+    }, { global: true });
+    // The conversation's model took no part in a flow. It hears how it ended with the next message, ahead of that message.
+    ctx.on('agent/pre-step', async ({ agent }, next) => {
+        const decision = await next();
+        if (decision.kind !== 'enter')
+            return decision;
+        const report = reports.take(agent.id);
+        if (!report)
+            return decision;
+        const message = { id: randomUUID(), role: 'user', source: { kind: REPORT_SOURCE, form: 'notice', summary: flowText(report).reportSummary }, content: [{ type: 'text', text: report }] };
+        return { ...decision, messages: [message, ...decision.messages] };
+    }, { global: true });
     const runChild = (parent, attachments) => async (request) => {
         const childId = randomUUID();
+        request.row.attach(childId);
         if (request.readOnly)
             readOnly.add(childId);
         failures.set(childId, undefined);
@@ -137,9 +169,30 @@ export async function apply(ctx) {
                 ctx.logger?.warn?.(`model flow: could not add a note: ${String(error)}`);
             }
         };
+        const openRow = (title) => {
+            const id = randomUUID(), startedAt = Date.now(), words = flowText(goal);
+            let settle = () => undefined;
+            const step = { title: () => title, elapsed: () => words.time(Date.now() - startedAt), activity: new Activity(), parentId: agent.id, done: new Promise(resolve => { settle = resolve; }) };
+            openSteps.set(id, step);
+            // The command logs its start before it first waits, so rows keep the order of the steps.
+            const executed = host.commands.execute(agent, `/${COMMAND} ${stepMark}${id}`, [], new AbortController().signal)
+                .catch(error => { ctx.logger?.warn?.(`model flow: could not add a row: ${String(error)}`); });
+            return {
+                attach(childId) { step.childId = childId; stepByChild.set(childId, step); },
+                async close({ kind, title: done, body }) {
+                    openSteps.delete(id);
+                    if (step.commandId)
+                        stepByCommand.delete(step.commandId);
+                    if (step.childId)
+                        stepByChild.delete(step.childId);
+                    settle({ kind, text: rowText({ title: done, ...(body ? { body } : {}), parentId: agent.id, ...(step.childId ? { childId: step.childId } : {}) }) });
+                    await executed;
+                },
+            };
+        };
         // After the handler returns, so the first step's rows follow the "started" row.
         setTimeout(() => {
-            void runFlow({ goal, routes, rounds, signal: controller.signal }, { run: runChild(agent, attachments), note })
+            void runFlow({ goal, routes, rounds, signal: controller.signal }, { run: runChild(agent, attachments), note, openRow, report: text => reports.put(agent.id, text) })
                 .catch(error => note(`${String(error)}`))
                 .finally(() => running.delete(agent.id));
         }, 0);
@@ -156,10 +209,18 @@ export async function apply(ctx) {
         name: COMMAND, recordInput: false,
         description: 'one model plans, one implements, one reviews, and rejected work goes back',
         input: { hint: '[plan=model] [impl=model] [review=model] [rounds=n] <goal> | stop', attachments: true },
-        handler: async ({ agent, rawInput, attachments = [] }) => {
+        handler: async ({ commandId, agent, rawInput, attachments = [] }) => {
             const input = rawInput.trimStart();
             if (input.startsWith(noteMark))
                 return { kind: 'success', text: input.slice(noteMark.length) };
+            if (input.startsWith(stepMark)) {
+                const step = openSteps.get(input.slice(stepMark.length));
+                if (!step)
+                    return { kind: 'error' };
+                step.commandId = commandId;
+                stepByCommand.set(commandId, step);
+                return step.done;
+            }
             lastCommand = { sessionId: agent.id, at: Date.now() };
             ensureConversation(agent);
             try {
