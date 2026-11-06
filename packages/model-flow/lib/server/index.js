@@ -69,6 +69,11 @@ export async function apply(ctx) {
                 const step = stepByCommand.get(commandId);
                 return step && { title: step.title(), elapsed: step.elapsed(), activity: step.activity.current(), parentId: step.parentId, ...(step.childId ? { childId: step.childId } : {}) };
             },
+            stop: commandId => {
+                const step = stepByCommand.get(commandId), flow = step && running.get(step.parentId);
+                flow?.controller.abort();
+                return !!flow;
+            },
         }) });
     // Runs before the child's first turn and is durable in its log, so a child reopened later stays read-only.
     ctx.on('agent/created', ({ agent }) => {

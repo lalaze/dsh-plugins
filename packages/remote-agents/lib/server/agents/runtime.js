@@ -8,8 +8,8 @@ import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, 
 /** The file name an image is shown with, from the remote path it was read from. */
 const imageName = (path) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
 const contentText = (content) => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
-export async function initializeCodex(peer) {
-    await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.1.0' }, capabilities: {} });
+export async function initializeCodex(peer, capabilities = {}) {
+    await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.1.0' }, capabilities });
     peer.send({ method: 'initialized', params: {} });
 }
 export async function initializeAcp(peer) {
@@ -177,7 +177,8 @@ export class CliSession {
     async initialize(protocol, argv, resume = false, mcpServers = []) {
         this.agent.resumable = protocol !== 'acp';
         if (protocol === 'codex') {
-            await initializeCodex(this.peer);
+            // Stop needs the background terminal calls, which Codex only accepts from a client asking for experimental ones.
+            await initializeCodex(this.peer, { experimentalApi: true });
             const mode = this.task.modeId ?? 'workspace-write';
             // Without a selected tier, Codex applies its configured one; a resumed thread does not restore an earlier tier.
             // Auto review routes approval requests to Codex's reviewer subagent; other modes route them back to the user,
@@ -698,6 +699,8 @@ export class CliSession {
         this.stopping = true;
         try {
             const protocol = this.protocol();
+            // Read now: the turn's end clears them.
+            const commands = protocol === 'codex' ? [...this.tools.values()].filter(tool => tool.name === 'Bash').map(tool => String(tool.callId)) : [];
             if (protocol === 'codex')
                 await this.peer.request('turn/interrupt', { threadId: this.nativeId, turnId: this.agent.activeTurn?.turnId }, 5000);
             else if (protocol === 'acp')
@@ -715,6 +718,7 @@ export class CliSession {
             finally {
                 clearTimeout(timer);
             }
+            await this.endCommands(commands);
         }
         finally {
             this.stopping = false;
@@ -724,6 +728,20 @@ export class CliSession {
             }
             this.append({ type: 'interrupted' });
         }
+    }
+    /**
+     * An interrupted Codex turn leaves its commands running, so Stop ends them too. Only the ones this turn started:
+     * what an earlier turn left running, such as a dev server, stays.
+     */
+    async endCommands(itemIds) {
+        if (!itemIds.length)
+            return;
+        try {
+            const running = await this.peer.request('thread/backgroundTerminals/list', { threadId: this.nativeId, limit: 100 }, 3000);
+            await Promise.all(list(running?.data).filter(terminal => itemIds.includes(String(terminal?.itemId)))
+                .map(terminal => this.peer.request('thread/backgroundTerminals/terminate', { threadId: this.nativeId, processId: terminal.processId }, 3000)));
+        }
+        catch { /* A Codex release without these calls leaves them running, as every Stop did before. */ }
     }
     /** End the CLI process and the turn. */
     close() {

@@ -3,7 +3,7 @@ import { JsonlPeer } from '../core/ssh.js';
 import { type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
-export declare function initializeCodex(peer: JsonlPeer): Promise<void>;
+export declare function initializeCodex(peer: JsonlPeer, capabilities?: Record<string, unknown>): Promise<void>;
 export declare function initializeAcp(peer: JsonlPeer): Promise<any>;
 export interface SessionHooks {
     /** The CLI started a turn itself rather than for a message (see `continueUnprompted`). */
@@ -129,6 +129,11 @@ export declare class CliSession {
     private request;
     private claudeRequest;
     stop(): Promise<void>;
+    /**
+     * An interrupted Codex turn leaves its commands running, so Stop ends them too. Only the ones this turn started:
+     * what an earlier turn left running, such as a dev server, stays.
+     */
+    private endCommands;
     /** End the CLI process and the turn. */
     close(): void;
     private ended;

@@ -108,6 +108,8 @@ export declare function codexServiceTiers(model: Record<string, unknown>): Choic
 /**
  * Nobody approves an unattended Claude task's commands. With workspace write it runs them in Claude Code's own sandbox,
  * which confines writes to the workspace like DSH's sandbox; without a sandbox on the host they are asked and denied.
+ * Read-only has no such sandbox, since Claude Code's lets a command write, but searching and reading the web change
+ * nothing, and research would otherwise be refused every time. Codex's read-only sandbox already allows web search.
  */
 export declare const unattendedClaude: (task: Pick<Task, "unattended" | "modeId">) => string[];
 /**

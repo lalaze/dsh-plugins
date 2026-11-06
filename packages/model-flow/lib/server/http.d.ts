@@ -11,5 +11,7 @@ export interface SettingsHost {
     setLocale(locale: Locale): void;
     /** The step a row shows while it runs. None means it is not running in this DSH, for example after a restart. */
     step(commandId: string): LiveStep | undefined;
+    /** Stop the flow a running row belongs to. False when that row is not running in this DSH. */
+    stop(commandId: string): boolean;
 }
 export declare function createHandler(store: FlowStore, host: SettingsHost): (request: Request) => Promise<Response>;
