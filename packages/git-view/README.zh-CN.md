@@ -14,7 +14,7 @@ DeepSeek Harness 对话的 IDE 风格 Git 面板，移植自 [`@xbzbing/dsh-git-
 
 ```sh
 pnpm --filter dsh-git-view pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-git-view-0.2.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-git-view-0.2.1.tgz"
 ```
 
 使用远程功能时，还需在同一份 checkout 中执行 `pnpm --filter dsh-remote-agents pack:plugin`，将新构建的压缩包安装到**同一个 DSH profile**。文件名中的版本以 [Remote Agents 清单](../remote-agents/package.json)为准，不要使用之前下载的旧包。替换已安装插件时请遵循[仓库安装说明](../../README.zh-CN.md#安装插件)。
@@ -44,7 +44,7 @@ Web 端重启更新的 profile 并刷新浏览器。Desktop 端先完全退出 D
 | AI 生成提交信息 | 参照仓库既有提交风格，用当前会话的模型或设置中固定的模型生成。**生成会把 diff 发送给该模型的供应商。** |
 | 文件浏览 | 懒加载目录树，按文件类型显示图标，忽略项半透明；预览代码、Markdown（含 mermaid 图表）、HTML 与图片；以项目根为根，也可跟随所选仓库 |
 | 差异 | 统一、并排、变更前、变更后四种视图；语法高亮、词级强调、按需展开上下文、Ctrl/⌘+F 就地查找；图片可缩放、拖拽与全屏 |
-| 多仓库 | 识别工作区中的 worktree 与子目录中的独立仓库；总览、变更记录和输入框标记跟随所选仓库 |
+| 多仓库 | 识别工作区中的 worktree 与子目录中的独立仓库；总览、变更记录和输入框标记跟随所选仓库。已进入 worktree 的对话默认打开该 worktree；文件上的改动标记和对话旁的差异仍对应 DSH 文件树显示的目录 |
 | 布局 | 按面板宽度切换三栏、上下堆叠或单栏钻取布局，侧边栏和窄窗口都能用 |
 | 对话旁的改动文件 | HEAD 与工作树文件的 Monaco 差异、编辑与保存、合并冲突处理（见下文） |
 | 文件列表 | 为本地工作区文件树、Remote Agents 远程文件列表添加改动字母、文件名颜色和目录改动圆点 |

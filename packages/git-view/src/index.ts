@@ -12,20 +12,11 @@ import { editorHandler } from './editor-route.js';
 import { GitView } from './git.js';
 import { createHandler } from './http.js';
 import { gitExecutable, isRemoteAnchor, LocalRunner, type RemoteWorkspaces, type Subprocess } from './runner.js';
+import { sessionCwd, workingDirectoryOf } from './session-cwd.js';
 
 export const name = 'dsh-git-view';
 export const inject = ['connection', 'subprocess'];
 
-/** A conversation's working directory, from the live session or, before it is opened, from saved sessions. */
-async function sessionCwd(ctx: Context, sessionId: string): Promise<string | undefined> {
-  const sessions = ctx.get('sessions') as { get?(id: string): { header: { cwd?: string } } | undefined } | undefined;
-  const live = sessions?.get?.(sessionId);
-  if (live) return live.header.cwd;
-  const persistence = ctx.get('sessionPersistence') as { list(): Promise<({ id: string; cwd?: string } | { header: { id: string; cwd?: string } })[]> } | undefined;
-  const stored = (await persistence?.list() ?? []).map(row => 'header' in row ? row.header : row).find(row => row.id === sessionId);
-  // A session activated meanwhile is the authority.
-  return sessions?.get?.(sessionId)?.header.cwd ?? stored?.cwd;
-}
 /**
  * The Git panel's settings, as dsh-git-panel offers them on the plugin's detail page: volatile fields apply at once; the
  * limits stay in the profile.
@@ -75,8 +66,10 @@ const stateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.ds
 
 export function apply(ctx: Context, config: unknown = {}): void {
   const subprocess = ctx.get('subprocess') as Subprocess, git = gitExecutable(subprocess), credentials = new Credentials(join(stateDir(), 'git-credentials'));
+  const get = (name: string) => ctx.get(name as never) as unknown;
   const view = new GitView({
-    cwdOf: id => sessionCwd(ctx, id),
+    // File marks and diffs pair with DSH's file tree and session list, which name the directory a conversation started in.
+    cwdOf: id => sessionCwd(get, id),
     isRemoteCwd: isRemoteAnchor,
     local: cwd => new LocalRunner(subprocess, git, cwd, () => credentials.config()),
     // Remote Agents runs Git in its remote workspaces; read it per request, as it may load, reload or leave at any time.
@@ -87,8 +80,9 @@ export function apply(ctx: Context, config: unknown = {}): void {
   ctx.connection.fetch.register({ path: '/api/git-view', methods: ['POST'], requestBody: 'buffered', fetch: createHandler(view, log) });
   try { setVersion(JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version); } catch { /* the panel shows 0.0.0 */ }
   const panel = new PanelHost({
-    cwdOf: id => sessionCwd(ctx, id), isRemoteCwd: isRemoteAnchor, subprocess: subprocess as unknown as SubprocessLike, git, gitConfig: () => credentials.config(),
-    remote: () => ctx.get('remoteAgentsWorkspaces') as RemoteWorkspaces | undefined, get: name => ctx.get(name as never), config,
+    // The Git panel shows the checkout the conversation is working in, such as its worktree.
+    cwdOf: id => workingDirectoryOf(get, id), isRemoteCwd: isRemoteAnchor, subprocess: subprocess as unknown as SubprocessLike, git, gitConfig: () => credentials.config(),
+    remote: () => ctx.get('remoteAgentsWorkspaces') as RemoteWorkspaces | undefined, get, config,
   });
   ctx.connection.fetch.register({ path: '/api/git-view/gp', methods: ['POST'], requestBody: 'buffered', fetch: panelHandler(panel, log) });
   // The client's EDITOR_SRC; the build writes the bundle next to lib/server.

@@ -14,7 +14,7 @@ From the workspace root, build an installable archive:
 
 ```sh
 pnpm --filter dsh-git-view pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-git-view-0.2.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-git-view-0.2.1.tgz"
 ```
 
 For remote support, also build `pnpm --filter dsh-remote-agents pack:plugin` from this checkout and install that newly built archive into the **same DSH profile**. Choose the archive matching the version in the [Remote Agents manifest](../remote-agents/package.json), not an older download. Follow the [repository installation instructions](../../README.md#installation) when replacing an already installed plugin.
@@ -44,7 +44,7 @@ The UI follows DSH's English/Simplified Chinese locale and supports light and da
 | AI commit message | Generates a message in the style of the repository's history with the conversation's model, or a model fixed in the settings. **This sends the diff to that model's provider.** |
 | File browser | Lazy directory tree with file-type icons, ignored entries dimmed; previews of code, Markdown (with mermaid diagrams), HTML and images; rooted at the project, or following the selected repository |
 | Diffs | Unified, side by side, before and after; syntax highlighting, word-level emphasis, context expanded on demand, Ctrl/⌘+F find in place; images zoom, pan and go full screen |
-| Repositories | Worktrees and nested repositories of the workspace are detected; the overview, changes and marker follow the one selected |
+| Repositories | Worktrees and nested repositories of the workspace are detected; the overview, changes and marker follow the one selected. A conversation that moved into a worktree opens on it; change marks and diffs beside the conversation stay with the folder DSH's file tree shows |
 | Layout | Adapts to the panel's width: three columns, stacked, or one column that drills in, for the sidebar and narrow windows |
 | Changed files beside the conversation | Monaco diff of HEAD and the working file, edit and save, merge-conflict resolution (see below) |
 | File lists | Colored change letters on files and dots on affected folders in the local workspace tree and the Remote Agents file list |

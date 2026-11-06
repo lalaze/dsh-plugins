@@ -1,6 +1,8 @@
 import { cwdOf } from './sessions.js';
 import { STATUS_COLORS, statusLetter, type StatusCache } from './status.js';
 
+/** A file tree row's own label: directly in the row, or in the wrapper DSH 0.2.2 adds. An open folder's files nest below it. */
+const ROW_LABEL = ':scope > button, :scope > span, :scope > div > button, :scope > div > span';
 /** A workspace path relative to the tree's root, or undefined outside it. */
 function relativeTo(root: string, absolute: string): string | undefined {
   const base = root.replace(/\\/g, '/').replace(/\/+$/, ''), target = absolute.replace(/\\/g, '/');
@@ -38,7 +40,7 @@ export function installDecorations(cache: StatusCache, ensure: (root: string) =>
       if (!root) continue;
       ensure(root);
       for (const row of tree.querySelectorAll('li[data-files-entry][data-files-path]')) {
-        const path = relativeTo(root, row.getAttribute('data-files-path')!), button = row.querySelector(':scope > button') ?? row.querySelector(':scope > span');
+        const path = relativeTo(root, row.getAttribute('data-files-path')!), button = row.querySelector(ROW_LABEL);
         const name = (button?.querySelector('span') ?? button) as HTMLElement | null;
         if (path && name) paint(name, letterFor(cache, root, path, row.getAttribute('data-files-entry')), false);
       }

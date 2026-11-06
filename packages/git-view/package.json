@@ -1,6 +1,6 @@
 {
   "name": "dsh-git-view",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "IDE-style Git panel for DeepSeek Harness, ported from dsh-git-panel, for local and Remote Agents workspaces: branch tree and commit graph, changes with commit and amend, file browser, AI commit messages, Monaco diffs, merge-conflict resolution and change marks on files",
   "type": "module",
   "main": "lib/server/index.js",

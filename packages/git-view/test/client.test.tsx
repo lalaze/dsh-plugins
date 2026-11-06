@@ -192,6 +192,27 @@ test('change marks follow DSH’s file tree and Remote Agents’ remote list, an
   off();
 });
 
+test('change marks find the file names in the rows of DSH 0.2.2, which wrap each row’s button and nest open folders', async () => {
+  const { installDecorations } = await import('../src/client/decorations.js');
+  sessions({ s1: { cwd: '/repo' } });
+  container.innerHTML = `<div data-files-state="tree" data-files-root="/repo"><ul>
+    <li data-files-entry="directory" data-files-path="/repo/src"><div><button><svg></svg><span>src</span></button><div></div></div><ul>
+      <li data-files-entry="file" data-files-path="/repo/src/a.ts"><div><button><svg></svg><span>a.ts</span></button><div></div></div></li>
+      <li data-files-entry="file" data-files-path="/repo/src/same.ts"><div><span>same.ts</span></div></li>
+    </ul></li>
+    <li data-files-entry="file" data-files-path="/repo/b.ts"><div><button><svg></svg><span>b.ts</span></button><div></div></div></li></ul></div>`;
+  const cache = new StatusCache(async () => { throw new Error('offline'); });
+  cache.set('/repo', { prefix: '', changes: [{ code: ' M', path: 'src/a.ts', local: 'src/a.ts' }, { code: '??', path: 'src/same.ts', local: 'src/same.ts' }] });
+  const off = installDecorations(cache, () => {});
+  await act(async () => { await new Promise(resolve => requestAnimationFrame(() => resolve(undefined))); });
+  const name = (path: string) => container.querySelector(`[data-files-path="${path}"] span`)!;
+  assert.equal(name('/repo/src').textContent, 'src•', 'an open folder keeps its own mark, not one of its files');
+  assert.equal(name('/repo/src/a.ts').textContent, 'a.tsM');
+  assert.equal(name('/repo/src/same.ts').textContent, 'same.tsU');
+  assert.equal(name('/repo/b.ts').textContent, 'b.ts');
+  off();
+});
+
 /** DSH's client context as the plugin uses it: services, effects, slots and the locale service of the ported panel. */
 function fakeContext(services: Record<string, unknown>, slots: ReturnType<typeof fakeSlots>) {
   const disposers: (() => void)[] = [];
