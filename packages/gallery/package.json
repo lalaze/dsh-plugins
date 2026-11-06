@@ -1,6 +1,6 @@
 {
   "name": "dsh-gallery",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A local wallpaper gallery with Bing daily backgrounds for DeepSeek Harness",
   "type": "module",
   "icon": "icon.svg",
