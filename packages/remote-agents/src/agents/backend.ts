@@ -117,10 +117,12 @@ export function codexServiceTiers(model: Record<string, unknown>): Choice[] | un
  *
  * `confined` says the sandbox is known to work on this host (see {@link confinesCommands}). Claude Code then exits rather
  * than run without it and ignores a command's request to leave it, so its commands can be left to the sandbox.
+ * Temporary files are allowed too: without them most real test suites fail with EPERM, which a model takes for a bug in
+ * the code (measured on this repository: 8 of 20 and 4 of 71 tests passed, then all of them).
  */
 export const unattendedClaude = (task: Pick<Task, 'unattended' | 'modeId'>, confined = false): string[] => {
   if (!task.unattended) return [];
-  if (task.modeId === 'acceptEdits') return ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true, ...(confined ? { failIfUnavailable: true, allowUnsandboxedCommands: false } : {}) } })];
+  if (task.modeId === 'acceptEdits') return ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true, ...(confined ? { failIfUnavailable: true, allowUnsandboxedCommands: false, filesystem: { allowWrite: ['/tmp', '/private/tmp'] } } : {}) } })];
   return task.modeId === 'default' ? ['--allowedTools', 'WebSearch,WebFetch'] : [];
 };
 /** The oldest Claude Code measured to keep every command in the sandbox with these settings. */

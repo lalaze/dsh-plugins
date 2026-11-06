@@ -775,8 +775,10 @@ test('confined settings make Claude Code refuse to run unsandboxed, and only wor
   assert.equal(write.failIfUnavailable, true);
   assert.equal(write.allowUnsandboxedCommands, false);
   assert.equal(write.autoAllowBashIfSandboxed, true);
+  assert.deepEqual(write.filesystem, { allowWrite: ['/tmp', '/private/tmp'] }, 'real test suites need temporary files, and macOS has both names for them');
   const plain = settings(unattendedClaude({ unattended: true, modeId: 'acceptEdits' }));
   assert.equal(plain.failIfUnavailable, undefined, 'no promise of a sandbox without one');
+  assert.equal(plain.filesystem, undefined);
   assert.deepEqual(unattendedClaude({ unattended: true, modeId: 'default' }, true), ['--allowedTools', 'WebSearch,WebFetch'], 'read-only stays as it was');
   assert.deepEqual(unattendedClaude({ unattended: true, modeId: 'bypassPermissions' }, true), []);
   assert.deepEqual(unattendedClaude({ modeId: 'acceptEdits' }, true), []);

@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.116:** An unattended Claude working with workspace write on macOS can now write temporary files in its sandbox, so test suites using `/tmp` pass instead of failing with `EPERM`, which a model could take for a bug in the code. Other writes outside the workspace and network access stay blocked, so tests that need the network or local sockets still fail there. A CLI already running picks this up the next time it starts. Nothing to do after upgrading.
+
 **Upgrading from 0.2.115:** On macOS with Claude Code 2.1.319 or later, an unattended Claude working with workspace write, such as a `/flow` implementer, now runs the shell commands it would have asked about inside its sandbox, so loops and `$?` no longer stop it. The sandbox still blocks writes outside the workspace and network access, and Claude Code now exits rather than run without it. Safety checks stay refused, and read-only sessions and other systems work as before. A refusal now gives the CLI's reason and no longer claims a person denied it, since a conversation that never asks refuses without a prompt. A CLI already running picks this up the next time it starts. Nothing to do after upgrading.
 
 **Upgrading from 0.2.114:** When nobody can approve a shell command in an unattended session, such as a `/flow` step, the refusal now tells the model to retry it as plain separate commands. Before, a Claude reviewer could reject correct work and a Claude implementer could stop without doing anything. Every retry still goes through the same check, so permissions do not change. Nothing to do after upgrading.
