@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.112:** A delegated subagent now shows the tool it is running whichever CLI it uses, as Claude already did, and Codex's commands read without the shell around them. With `dsh-model-flow` 0.1.3, a remote CLI conversation also learns how a `/flow` run ended, along with your next message. Nothing to do after upgrading.
+
 **Upgrading from 0.2.111:** When a turn Claude started by itself begins to show, the sentence it is still writing no longer breaks in two. Nothing to do after upgrading.
 
 **Upgrading from 0.2.110:** Nothing changes in DSH. The `remoteAgentsTasks` service, which only `dsh-mobile` used, is gone along with that plugin, which is no longer on the market. If you still have `dsh-mobile` installed, its **Background tasks** list stays empty, so remove it.

@@ -87,6 +87,8 @@ const showsOutput = ({ item }: TimelineEntry) => item.type === 'assistant_messag
 const RELEASED = { kind: 'released' } as const;
 /** What the CLI is asked to do: human messages and AgentTeams assignments, never context DSH injects. */
 const prompted = (m: GenerateOptions['messages'][number]) => m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source));
+/** How a /flow run ended, from dsh-model-flow: the one injected context the CLI needs, since other models did that work. */
+const flowReport = (m: GenerateOptions['messages'][number]) => m.role === 'user' && (m.source as { kind?: string } | undefined)?.kind === 'model-flow';
 const blockText = (content: readonly { type: string; text?: string }[]) => content.filter(b => b.type === 'text').map(b => b.text ?? '').join('\n');
 /**
  * DSH frames title input as an instruction line followed by a JSON array of `{ text }` human
@@ -425,7 +427,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     const previousIndex = task?.chat?.lastUserId ? options.messages.findIndex(m => m.id === task.chat?.lastUserId) : -1;
     const lastOwn = task ? options.messages.slice(0, Math.max(currentIndex, 0)).findLastIndex(own) : -1;
     const contextStart = Math.max(previousIndex + 1, lastOwn + 1);
-    const previous = options.messages.slice(contextStart, currentIndex).filter(m => m.role === 'assistant' ? !own(m) : prompted(m))
+    const previous = options.messages.slice(contextStart, currentIndex).filter(m => m.role === 'assistant' ? !own(m) : prompted(m) || flowReport(m))
       .map(m => `${m.role}: ${blockText(m.role === 'user' ? contentOf(m) : m.content)}`).filter(t => t.trim() !== 'user:' && t.trim() !== 'assistant:').join('\n\n');
     const unattended = this.host.unattended?.(sessionId) === true, member = this.host.teamMember?.(sessionId);
     // A team member's new CLI session learns once how the team tools replace the DSH tools it does not have.
@@ -549,7 +551,8 @@ export class RemoteCliAdapter extends LlmAdapter {
           if (entry.item.type === 'tool_call') {
             yield* endBlock(); if (!rows.write(entry)) yield* textChunk('reasoning', `${entry.item.name ?? 'Tool'} · ${entry.item.status ?? ''}\n${typeof entry.item.detail === 'string' ? entry.item.detail : JSON.stringify(entry.item.detail ?? {})}\n`);
             yield* viewed(entry.item);
-            if (provider.id === 'claude') {
+            // Whoever follows a delegated CLI has no other sign of what it does, whichever CLI it is.
+            if (provider.id === 'claude' || unattended) {
               const call = String(entry.item.callId ?? entry.seqStart);
               if (entry.item.status === 'running') running.set(call, entry.item); else running.delete(call);
               yield* setStatus(toolStatus([...running.values()], currentPrompt));

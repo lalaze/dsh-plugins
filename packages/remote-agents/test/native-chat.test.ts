@@ -1004,6 +1004,36 @@ test('a tool Claude runs before writing anything shows too, in the language of t
   assert.ok(saved.every(block => !block.text.trim()), 'what DSH saves shows nothing');
 });
 
+test('a delegated Codex shows the tool it is running too, without the shell around the command, while a Codex chat does not', async t => {
+  const codexRun = async (overrides: Partial<ChatHost>) => {
+    const { adapter, remote, options } = await setup(t, overrides);
+    remote.onCreate = agent => {
+      remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'running', detail: { command: "/bin/zsh -lc 'pnpm test'" } });
+      remote.append(agent.id, { type: 'tool_call', callId: 'tool-1', name: 'Bash', status: 'completed', detail: 'ok' });
+      remote.append(agent.id, { type: 'tool_call', callId: 'tool-2', name: 'Edit', status: 'running', detail: { changes: [{ path: '/srv/src/a.ts', kind: 'update' }] } });
+      remote.append(agent.id, { type: 'tool_call', callId: 'tool-2', name: 'Edit', status: 'completed', detail: 'ok' });
+      remote.append(agent.id, { type: 'assistant_message', text: 'Done.' });
+    };
+    return replay(await collect(adapter.stream(options('Run the tests'))));
+  };
+  const delegated = await codexRun({ unattended: () => true });
+  assert.ok(delegated.screens.includes(`[Tool call · pnpm test](${TOOL_STATUS_URL})`), delegated.screens.join('\n---\n'));
+  assert.ok(delegated.screens.some(screen => screen.includes('src/a.ts')), delegated.screens.join('\n---\n'));
+  assert.deepEqual(delegated.saved.filter(block => block.type === 'text' && block.text.trim()), [{ type: 'text', text: 'Done.' }]);
+  const chat = await codexRun({});
+  assert.ok(!chat.screens.some(screen => screen.includes('Tool call')), chat.screens.join('\n---\n'));
+});
+
+test('a remote CLI hears how a flow ended with the next message, as context and not as the request', async t => {
+  const { adapter, remote, options } = await setup(t);
+  const base = options('发布吧');
+  const report = createUserMessage({ source: { kind: 'model-flow', form: 'notice', summary: 'Flow result' } as never, content: [{ type: 'text', text: 'A /flow run ended: review passed.' }] });
+  let prompt = '';
+  remote.onCreate = (agent, task) => { prompt = task.prompt; remote.append(agent.id, { type: 'assistant_message', text: 'ok' }); };
+  await collect(adapter.stream({ ...base, messages: [report, ...base.messages] }));
+  assert.match(prompt, /Conversation context[\s\S]*A \/flow run ended: review passed\.[\s\S]*Current user request:\n发布吧$/);
+});
+
 test('a failed turn does not leave the running tool on screen', async t => {
   const { adapter, remote, claude } = await claudeSetup(t);
   remote.onCreate = agent => {
