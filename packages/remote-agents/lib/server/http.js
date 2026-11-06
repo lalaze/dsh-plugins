@@ -1,7 +1,7 @@
 import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './core/domain.js';
 import { ChatProjects } from './chat/projects.js';
 import { workspaceAction, worktreeAction } from './workspace/http.js';
-export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing) {
+export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing, adopt) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
         try {
@@ -109,6 +109,14 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'setChatSpeed':
                     result = await projects.setFast(field(input.sessionId, 'session ID', 256), input.fast === true);
                     break;
+                case 'adoptChatModel': {
+                    const effort = input.reasoningEffort === undefined ? {} : { reasoningEffort: field(input.reasoningEffort, 'thinking level', 200) };
+                    if (!adopt)
+                        throw new RemoteError('Remote workspaces are unavailable', 501);
+                    await adopt(field(input.sessionId, 'session ID', 256), { provider: field(input.provider, 'provider', 200), model: field(input.model, 'model', 1000), ...effort });
+                    result = { ok: true };
+                    break;
+                }
                 case 'setChatEffort':
                     await projects.setEffort(field(input.provider, 'provider', 200), field(input.model, 'model', 1000), field(input.reasoningEffort, 'reasoning effort', 200));
                     result = { ok: true };

@@ -40,7 +40,7 @@ export declare function openApprovals(events: readonly {
     time: number;
     data: unknown;
 }[]): PendingInteraction[];
-/** DSH `userQuestions.active` entries still open, in the shared form. */
+/** DSH `userQuestions.active` entries still waiting for an answer, also those past their foreground wait, in the shared form. */
 export declare function openQuestions(active: unknown, now?: number): PendingInteraction[];
 /**
  * What a phone shows of a reply being written. `reasoning` is what the model thought since its latest text. `blocks` holds

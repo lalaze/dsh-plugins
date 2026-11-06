@@ -122,14 +122,14 @@ export function openApprovals(events) {
     }
     return [...open.values()];
 }
-/** DSH `userQuestions.active` entries still open, in the shared form. */
+/** DSH `userQuestions.active` entries still waiting for an answer, also those past their foreground wait, in the shared form. */
 export function openQuestions(active, now = Date.now()) {
     if (!Array.isArray(active))
         return [];
     const result = [];
     for (const item of active) {
         const call = asDict(item);
-        if (typeof call.callId !== 'string' || !Array.isArray(call.questions) || (call.state !== undefined && call.state !== 'open'))
+        if (typeof call.callId !== 'string' || !Array.isArray(call.questions) || (call.state !== undefined && call.state !== 'open' && call.state !== 'continued'))
             continue;
         const questions = call.questions.map(asDict).filter(q => typeof q.id === 'string' && typeof q.question === 'string').map(q => ({
             id: String(q.id), question: String(q.question),

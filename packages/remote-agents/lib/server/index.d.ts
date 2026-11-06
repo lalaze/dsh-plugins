@@ -16,11 +16,11 @@ declare module '@deepseek-ai/cordis' {
 }
 export declare const name = "dsh-remote-agents";
 export declare const inject: string[];
-export declare const Config: Schema<Schemastery.ObjectS<NoInfer<{
-    stateDir: Schema<string, string, "defined">;
-}>>, Schemastery.ObjectT<NoInfer<{
-    stateDir: Schema<string, string, "defined">;
-}>>, "plain">;
+export declare const Config: Schema<{
+    stateDir?: string;
+}, {
+    stateDir: string;
+}>;
 export declare function apply(ctx: Context, config?: {
     stateDir?: string;
 }): Promise<void>;

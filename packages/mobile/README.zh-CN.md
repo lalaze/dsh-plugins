@@ -68,15 +68,15 @@
 
 ## 如何使用 DSH
 
-- 会话通过 DSH 的会话控制器读取（`list`、`follow`；读取完整日志时，DSH 0.2.2 之前用 `inspect`，之后用 `sessionQuery`。读取日志时不会启动智能体），并通过它的 `prompt`、`cancel`、`create`、`selectModel` 和 `rename` 指挥。归档通过工作区控制器，回答问题通过 `userQuestions`，权限预设通过 `permissionPresets`。
+- 会话通过 DSH 的会话控制器读取（`list`、`follow`；读取完整日志时，DSH 0.2.2 之前用 `inspect`，之后用 `sessionQuery`。读取日志时不会启动智能体），并通过它的 `prompt`、`cancel`、`create`、`selectModel` 和 `rename` 指挥。归档通过工作区控制器，问题的迟到回答通过 `userQuestions`，权限预设通过 `permissionPresets`。
 - 后台任务来自同一台机器上 Remote Agents 的 `remoteAgentsTasks` 服务；没有它时不显示这一栏。
-- DSH 没有供其他设备回答工具审批的接口。插件加入 DSH 的 `approval/request` 链：审批同时发给手机和本机的浏览器，先回答的一方生效；任何失败都不会改变 DSH 自己的审批链。
+- DSH 没有供其他设备回答工具审批或模型提问的接口。插件加入 DSH 的 `approval/request` 和 `user-questions/request` 链：两者都同时发给手机和本机的浏览器，先回答的一方生效；任何失败都不会改变 DSH 自己的链。没有打开的浏览器时，只要手机可以回答，就会等待手机。
 
 ## 限制
 
 - 每台手机同一时间只能接收一台已配对机器的通知，因为浏览器只能持有一个推送密钥。
 - 后台任务只能发送文字，不发通知，其中的提问需要在电脑上回答。
-- 只有 DSH 的 `ask_user_question` 开启 `mode: timed` 时，问题才会显示到手机，默认的阻塞模式不会。目前也无法在手机上回答，请在电脑上回答。
+- `ask_user_question` 开启 `mode: timed` 时，超过等待时间的问题只在回合运行期间才能从手机回答。
 - 超过 16 MB 的附件无法在手机上打开。
 - 已有会话的权限预设只显示、不能在手机上修改；DSH 只能在会话运行时修改它。
 

@@ -35,6 +35,8 @@ export class Executor {
     epoch = randomUUID().slice(0, 8);
     approvals = new Map();
     questions = new Map();
+    /** Questions DSH is waiting on right now, by tool call. */
+    asked = new Map();
     inspected = new Map();
     inflight = new Map();
     entryListeners = new Map();
@@ -195,7 +197,8 @@ export class Executor {
             ...[...this.approvals.values()].filter(a => a.sessionId === id).map(a => ({ kind: 'approval', id: a.id, toolName: a.toolName, askedAt: a.askedAt, answerable: true,
                 ...(a.callId ? { callId: a.callId } : {}), ...(a.reason ? { reason: a.reason } : {}) })),
             ...(info.approvals ?? []).filter(a => a.kind === 'approval' && ![...this.approvals.values()].some(own => own.sessionId === id && own.callId !== undefined && own.callId === a.callId)),
-            ...(this.questions.get(id) ?? []),
+            ...[...this.asked.values()].filter(question => question.sessionId === id).map(question => question.item),
+            ...(this.questions.get(id) ?? []).filter(question => !this.asked.has(question.id)),
         ];
         const lastSeq = Math.max(info.lastSeq, hint), mark = this.options.readMark?.(id);
         // A read counts once, at what the session shows when it is not running: later output here, also a turn of a DSH model
@@ -523,6 +526,13 @@ export class Executor {
                 if (!Array.isArray(command.answers))
                     throw new CommandError('Invalid answer');
                 const answers = command.answers.map(a => ({ id: String(a.id), selected: Array.isArray(a.selected) ? a.selected.map(String) : [], ...(typeof a.custom === 'string' ? { custom: a.custom } : {}) }));
+                const asked = this.asked.get(String(command.callId));
+                if (asked?.sessionId === sessionId) {
+                    asked.resolve(answers);
+                    // Withdraw it now rather than when DSH's chain finishes, so it cannot be answered twice.
+                    this.asked.delete(String(command.callId));
+                    break;
+                }
                 if (!await this.host.answerQuestion(sessionId, String(command.callId), answers))
                     throw new CommandError('This question is no longer open', 409);
                 break;
@@ -541,6 +551,18 @@ export class Executor {
             this.approvals.set(id, { id, sessionId: ask.sessionId, toolName: ask.toolName, callId: ask.callId, reason: ask.reason, askedAt: Date.now(), resolve });
         });
         signal.addEventListener('abort', () => { this.approvals.delete(id); this.schedule(); }, { once: true });
+        this.schedule();
+        return { answer, wait: true };
+    };
+    /** The question bridge: offer the model's questions to paired machines that may answer them. */
+    questionBridge = (ask, signal) => {
+        if (!this.options.approvalPeers())
+            return undefined;
+        const [item] = openQuestions([{ callId: ask.callId, questions: ask.questions }]);
+        if (!item)
+            return undefined;
+        const answer = new Promise(resolve => { this.asked.set(ask.callId, { sessionId: ask.sessionId, item, resolve }); });
+        signal.addEventListener('abort', () => { this.asked.delete(ask.callId); this.schedule(); }, { once: true });
         this.schedule();
         return { answer, wait: true };
     };

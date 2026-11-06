@@ -1,3 +1,10 @@
+/**
+ * The narrow part of DSH this plugin uses, behind one interface so the phone code can be tested without a host.
+ * {@link dshHost} adapts the services of DSH 0.2.1-rc.3 and later: `sessionController` and `workspaceController` (cold
+ * reads, live follow, prompt, cancel, models, archive and rename), `sessionQuery` (cold reads from 0.2.2), `permissionPresets`,
+ * `attachments`, `userQuestions`, and the `approval/request` event.
+ */
+import { randomUUID } from 'node:crypto';
 const asDict = (value) => (typeof value === 'object' && value !== null ? value : {});
 /** Adapt the running DSH host. Services are looked up on each call, so they may arrive after this plugin. */
 export function dshHost(ctx) {
@@ -96,7 +103,9 @@ export function dshHost(ctx) {
             const service = get('userQuestions');
             if (typeof service?.answer !== 'function')
                 throw new Error('This DSH version cannot answer questions from another machine');
-            return await service.answer(sessionId, callId, { answers }) !== false;
+            // A late answer reaches the running agent; a session with none has no question to answer.
+            const agent = get('agents')?.get?.(sessionId);
+            return agent ? await service.answer(agent, callId, { answers }) !== false : false;
         },
         async *questions(signal) {
             for await (const frame of sessions().control(signal)) {
@@ -165,6 +174,7 @@ export function dshHost(ctx) {
                 dispose(); };
         },
         bridgeApprovals(bridge) { return bridgeApprovalEvent(ctx, bridge); },
+        bridgeQuestions(bridge) { return bridgeQuestionEvent(ctx, bridge); },
     };
 }
 /**
@@ -214,4 +224,55 @@ export function bridgeApprovalEvent(ctx, bridge) {
         }
     };
     return ctx.on('approval/request', listener, true);
+}
+/**
+ * Take part in DSH's `user-questions/request` waterfall without taking it over, as {@link bridgeApprovalEvent} does for
+ * approvals. DSH's default, blocking questions name no tool call, so they get an ID here. With no browser open, the
+ * question waits for the phone when one will answer, and otherwise fails as it would without this plugin.
+ */
+export function bridgeQuestionEvent(ctx, bridge) {
+    const copies = new WeakSet();
+    const listener = async function (request, next) {
+        if (copies.has(request))
+            return next();
+        const agent = asDict(request.agent), sessionId = typeof agent.id === 'string' ? agent.id : undefined;
+        if (!sessionId)
+            return next();
+        const waiting = asDict(request.wait).callId, callId = typeof waiting === 'string' ? waiting : randomUUID();
+        const withdraw = new AbortController();
+        const upstream = request.signal instanceof AbortSignal ? request.signal : undefined;
+        const signal = upstream ? AbortSignal.any([upstream, withdraw.signal]) : withdraw.signal;
+        let remote;
+        try {
+            remote = bridge({ sessionId, callId, questions: request.questions }, signal);
+        }
+        catch {
+            remote = undefined;
+        }
+        if (!remote)
+            return next();
+        const copy = { ...request, signal };
+        copies.add(copy);
+        const waterfall = ctx.waterfall;
+        const local = Promise.resolve().then(() => waterfall.call(ctx, this, 'user-questions/request', copy, next));
+        const answered = remote.answer.then(answers => ({ answers }));
+        try {
+            return await Promise.race([local, answered]).catch(async (error) => {
+                // No browser could answer here: wait for the other machine only when it is there to answer.
+                if (asDict(error).code !== 'NO_PROVIDER' || !remote.wait)
+                    throw error;
+                // Made only here, where the race below handles it: an unhandled rejection would take DSH down.
+                return await Promise.race([answered, new Promise((_resolve, reject) => {
+                        const stop = () => { if (upstream?.aborted)
+                            reject(upstream.reason); };
+                        upstream?.addEventListener('abort', stop, { once: true });
+                        stop();
+                    })]);
+            });
+        }
+        finally {
+            withdraw.abort();
+        }
+    };
+    return ctx.on('user-questions/request', listener, true);
 }

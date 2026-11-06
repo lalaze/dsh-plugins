@@ -1,9 +1,3 @@
-/**
- * The narrow part of DSH this plugin uses, behind one interface so the phone code can be tested without a host.
- * {@link dshHost} adapts the services of DSH 0.2.1-rc.3 and later: `sessionController` and `workspaceController` (cold
- * reads, live follow, prompt, cancel, models, archive and rename), `sessionQuery` (cold reads from 0.2.2), `permissionPresets`,
- * `attachments`, `userQuestions`, and the `approval/request` event.
- */
 import type { Context } from '@deepseek-ai/cordis';
 import type { ModelChoices, ModelSelection, QuestionAnswer } from '../../shared/protocol.js';
 export interface HostSessionSummary {
@@ -102,6 +96,17 @@ export type ApprovalBridge = (ask: ApprovalAsk, signal: AbortSignal) => {
     answer: Promise<'allowed-once' | 'rejected'>;
     wait: boolean;
 } | undefined;
+export interface QuestionAsk {
+    sessionId: string;
+    callId: string;
+    /** The questions as DSH holds them. */
+    questions: unknown;
+}
+/** Answers a question from elsewhere while DSH's own answerers (open browsers) also get it; see {@link ApprovalBridge}. */
+export type QuestionBridge = (ask: QuestionAsk, signal: AbortSignal) => {
+    answer: Promise<QuestionAnswer[]>;
+    wait: boolean;
+} | undefined;
 export interface HostApi {
     /** Whether the session services are present yet. */
     ready(): boolean;
@@ -135,6 +140,8 @@ export interface HostApi {
     onSessionChange(listener: (sessionId: string) => void): () => void;
     /** Route approval questions through `bridge`; DSH keeps asking its own answerers too. */
     bridgeApprovals(bridge: ApprovalBridge): () => void;
+    /** Route the model's questions through `bridge`; DSH keeps asking its own answerers too. */
+    bridgeQuestions(bridge: QuestionBridge): () => void;
 }
 /** Adapt the running DSH host. Services are looked up on each call, so they may arrive after this plugin. */
 export declare function dshHost(ctx: Context): HostApi;
@@ -147,3 +154,9 @@ export declare function dshHost(ctx: Context): HostApi;
  * so it passes straight through when it reaches this listener. Any failure falls back to the unchanged chain.
  */
 export declare function bridgeApprovalEvent(ctx: Context, bridge: ApprovalBridge): () => void;
+/**
+ * Take part in DSH's `user-questions/request` waterfall without taking it over, as {@link bridgeApprovalEvent} does for
+ * approvals. DSH's default, blocking questions name no tool call, so they get an ID here. With no browser open, the
+ * question waits for the phone when one will answer, and otherwise fails as it would without this plugin.
+ */
+export declare function bridgeQuestionEvent(ctx: Context, bridge: QuestionBridge): () => void;

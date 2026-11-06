@@ -1,5 +1,5 @@
-import type { Command, CommandResult, LiveFrame, ModelSelection, PendingInteraction, SessionEntry, SyncedEvent, WorkspaceEntry } from '../../shared/protocol.js';
-import type { ApprovalAsk, HostApi, HostAttachmentRef } from './host.js';
+import type { Command, CommandResult, LiveFrame, ModelSelection, PendingInteraction, QuestionAnswer, SessionEntry, SyncedEvent, WorkspaceEntry } from '../../shared/protocol.js';
+import type { ApprovalAsk, HostApi, HostAttachmentRef, QuestionAsk } from './host.js';
 export declare class CommandError extends Error {
     readonly status: number;
     name: string;
@@ -57,6 +57,8 @@ export declare class Executor {
     readonly epoch: string;
     private readonly approvals;
     private readonly questions;
+    /** Questions DSH is waiting on right now, by tool call. */
+    private readonly asked;
     private readonly inspected;
     private readonly inflight;
     private readonly entryListeners;
@@ -127,6 +129,11 @@ export declare class Executor {
     /** The approval bridge: offer each question to paired machines that may answer it. */
     readonly approvalBridge: (ask: ApprovalAsk, signal: AbortSignal) => {
         answer: Promise<"allowed-once" | "rejected">;
+        wait: boolean;
+    } | undefined;
+    /** The question bridge: offer the model's questions to paired machines that may answer them. */
+    readonly questionBridge: (ask: QuestionAsk, signal: AbortSignal) => {
+        answer: Promise<QuestionAnswer[]>;
         wait: boolean;
     } | undefined;
 }

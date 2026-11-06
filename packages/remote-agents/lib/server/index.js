@@ -5,6 +5,7 @@ import { RemoteAgentsService } from './agents/service.js';
 import { remoteTasks } from './agents/tasks.js';
 import { delegationTools } from './agents/tools.js';
 import { remoteUsageRecords } from './agents/usage.js';
+import { adoptModel } from './chat/adopt-model.js';
 import { installChat, scheduleSessionRepair } from './chat/install.js';
 import { ChatProjects } from './chat/projects.js';
 import { accessOf, loggerOf } from './core/dsh-host.js';
@@ -37,7 +38,7 @@ export async function apply(ctx, config = {}) {
                 ctx.emit('remote-agents/usage', record);
     });
     ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered',
-        fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing) });
+        fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing, adoptModel(name => ctx.get(name))) });
     // Sessions without a DSH conversation, such as delegated tasks, for other plugins on this host: dsh-mobile lists them.
     ctx.provide('remoteAgentsTasks', remoteTasks(service));
     installChat(ctx, service, projects, { access: workspace.access, files: workspace.features.files, workspaces: workspace.workspaces });
