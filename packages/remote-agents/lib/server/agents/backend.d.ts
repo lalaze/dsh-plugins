@@ -114,6 +114,8 @@ export declare function codexServiceTiers(model: Record<string, unknown>): Choic
  *
  * `confined` says the sandbox is known to work on this host (see {@link confinesCommands}). Claude Code then exits rather
  * than run without it and ignores a command's request to leave it, so its commands can be left to the sandbox.
+ * Temporary files are allowed too: without them most real test suites fail with EPERM, which a model takes for a bug in
+ * the code (measured on this repository: 8 of 20 and 4 of 71 tests passed, then all of them).
  */
 export declare const unattendedClaude: (task: Pick<Task, "unattended" | "modeId">, confined?: boolean) => string[];
 /**
