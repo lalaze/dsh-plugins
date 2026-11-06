@@ -28,6 +28,8 @@ const count = n => `${snapshot}.entries.length === ${n} && ${ready}`;
 const current = 'document.querySelector("[data-dsh-gallery-background] img")';
 const pluginBar = 'document.querySelector(".fixture-plugin-bar")';
 const pluginBarPaint = `getComputedStyle(${pluginBar}, "::before")`;
+const mirrorImage = 'document.querySelector("[data-dsh-gallery-mirror] img")';
+const mirrorAligned = `(()=>{const a=document.querySelector("[data-dsh-gallery-background]").getBoundingClientRect(),b=document.querySelector("[data-dsh-gallery-mirror]>div").getBoundingClientRect();return a.left===b.left&&a.top===b.top&&a.width===b.width&&a.height===b.height})()`;
 const paintOf = selector => `getComputedStyle(document.querySelector('${selector}')).backgroundColor`;
 const taskPage = '[data-testid=task-manager-page]';
 const taskStrips = ['_saveFooter', '_saveFailure', '_detailNotice'].map(name => paintOf(`${taskPage} [class*=${name}]`));
@@ -57,11 +59,13 @@ try {
   browser('click', '[role=switch]'); wait(`${current}?.naturalWidth === 960`);
   expect('getComputedStyle(document.querySelector(".fixture-frame")).backgroundColor === "rgba(0, 0, 0, 0)"');
   expect('getComputedStyle(document.querySelector(".fixture-page")).backgroundColor === "rgba(0, 0, 0, 0)"');
-  // The plugin page header shows the wallpaper at rest and frosts only once content scrolls under it.
-  wait(`${pluginBarPaint}.backgroundColor === "rgba(0, 0, 0, 0)" && ${pluginBarPaint}.backdropFilter === "none"`);
-  evaluate(`${pluginBar}.toggleAttribute("data-scrolled", true)`);
-  wait(`/ 0\\.\\d+\\)$/.test(${pluginBarPaint}.backgroundColor) && ${pluginBarPaint}.backdropFilter.includes("blur")`);
-  evaluate(`${pluginBar}.toggleAttribute("data-scrolled", false)`);
+  // The plugin page header hides what scrolls under it without showing as a band: no tint, no line, the same wallpaper aligned.
+  wait(`${mirrorImage}?.src === ${current}.src && ${pluginBar}.contains(${mirrorImage})`);
+  wait(mirrorAligned);
+  evaluate(`${pluginBar}.toggleAttribute("data-scrolled", true); ${pluginBar}.toggleAttribute("data-compact", true)`);
+  expect(`${pluginBarPaint}.backgroundColor === "rgba(0, 0, 0, 0)" && ${pluginBarPaint}.backdropFilter === "none"`);
+  expect(`getComputedStyle(${pluginBar}, "::after").borderBottomColor === "rgba(0, 0, 0, 0)"`);
+  evaluate(`${pluginBar}.toggleAttribute("data-scrolled", false); ${pluginBar}.toggleAttribute("data-compact", false)`);
   // The automation page shows the wallpaper; its detail panel keeps a tint so the form stays readable, with no solid strips.
   expect(`${paintOf(taskPage)} === "rgba(0, 0, 0, 0)" && [${taskStrips}].every(paint => paint === "rgba(0, 0, 0, 0)")`);
   expect(`/ 0\\.\\d+\\)$/.test(${paintOf(`${taskPage} aside`)})`);
@@ -82,6 +86,7 @@ try {
   browser('press', 'ArrowRight'); wait('document.querySelector("dialog").getAttribute("aria-label").includes("秋日森林")');
   browser('press', 'ArrowLeft'); wait('document.querySelector("dialog").getAttribute("aria-label").includes("静谧海岸")');
   browser('click', 'button:text-is("设为 DSH 背景")'); wait(`${snapshot}.preferences.selectedId === 'OHR.Fixture20261022_1920x1080.jpg' && ${ready}`);
+  wait(`${mirrorImage}.src === ${current}.src`);
   browser('press', 'Tab'); expect('document.querySelector("dialog").contains(document.activeElement)');
   browser('press', 'Escape'); wait('!document.querySelector("dialog")');
   const leakedKeys = evaluate('window.fixture.hostKeys');
@@ -135,16 +140,20 @@ try {
   wait(`${snapshot}.preferences.opacity === 1 && ${ready}`);
   browser('click', '[aria-label="背景模糊"]'); browser('press', 'End'); wait(`${snapshot}.preferences.blur === 24 && ${ready}`);
   expect(`${current}.style.opacity === '1' && ${current}.style.filter === 'blur(24px)'`);
+  expect(`${mirrorImage}.style.opacity === '1' && ${mirrorImage}.style.filter === 'blur(24px)'`);
   // Read/modify/write transactions must preserve concurrent changes from other tabs.
   evaluate(`(async()=>{const s=window.fixture.controller.storage;await Promise.all([s.update({opacity:0.4}),s.update({blur:2})]);await window.fixture.controller.reload();return true})()`);
   expect(`${snapshot}.preferences.opacity === 0.4 && ${snapshot}.preferences.blur === 2`);
   browser('select', '[aria-label="Bing 图片地区"]', 'en-US'); wait(`${snapshot}.preferences.market === 'en-US' && ${ready}`);
   expect(`${snapshot}.entries.some(e=>e.market === 'en-US')`);
   browser('click', '[role=switch]'); wait('!document.body.hasAttribute("data-dsh-gallery-active")');
+  expect('!document.querySelector("[data-dsh-gallery-mirror]")');
   expect('getComputedStyle(document.querySelector(".fixture-frame")).backgroundColor !== "rgba(0, 0, 0, 0)"');
   browser('click', '[role=switch]'); wait(`${current}?.naturalWidth === 960`);
+  wait(`${mirrorImage}?.src === ${current}.src`);
   browser('click', '.gg-appearance summary');
   browser('set', 'viewport', '1440', '1000'); browser('set', 'media', 'dark');
+  wait(mirrorAligned);
   if (process.env.DSH_GALLERY_SCREENSHOT_DIR) browser('screenshot', '--full', join(process.env.DSH_GALLERY_SCREENSHOT_DIR, 'gallery-dark.png'));
   browser('set', 'media', 'light');
   if (process.env.DSH_GALLERY_SCREENSHOT_DIR) browser('screenshot', '--full', join(process.env.DSH_GALLERY_SCREENSHOT_DIR, 'gallery-light.png'));
@@ -156,7 +165,7 @@ try {
   browser('click', '.gg-card:first-child .gg-card-preview'); wait('document.querySelector("dialog[open]")');
   expect('document.querySelector("dialog").scrollWidth <= 390'); browser('press', 'Escape');
   evaluate('window.fixture.dispose()');
-  expect('!document.querySelector("[data-dsh-gallery-background]") && !document.querySelector("[data-dsh-gallery-style]") && !document.body.hasAttribute("data-dsh-gallery-active")');
+  expect('!document.querySelector("[data-dsh-gallery-background]") && !document.querySelector("[data-dsh-gallery-mirror]") && !document.querySelector("[data-dsh-gallery-style]") && !document.body.hasAttribute("data-dsh-gallery-active")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors));
   console.log('PASS: hover-only overlays in narrow desktop columns, click-to-preview, JPEG/PNG downloads, preview keyboard isolation, archive persistence, daily/pinned backgrounds, failure recovery, uploads, search, deletion guards, zoom/focus, regions, effects, light/dark/mobile layouts and cleanup');
 } finally {
