@@ -30,6 +30,8 @@ Or change the models for one run:
 
 Each step's result shows in the conversation. For the whole text, open the subagent list at the top: every step is a conversation you can open.
 
+Attach images and files to `/flow`, with or without a written goal. Every step receives the attachments, including later rounds and a review asked again for its missing verdict. If any selected model declares that it does not support images, a flow with images will not start.
+
 ## Common combinations
 
 **Settings → Model flow** keeps named sets of models, thinking levels and rounds. Click one to use it; **Save current** adds what the rows show now, and using a name again replaces that one. A few to start from appear the first time, made from the models you have, and you can delete them.
@@ -50,6 +52,7 @@ A review with no verdict is asked once more. If there is still none the flow sto
 - A flow does not continue after DSH restarts.
 - Read-only is enforced by DSH's sandbox. A Codex reviewer can run tests; a Claude Code reviewer can read code and git state, but its test commands are refused.
 - A remote CLI only works in workspaces of its own machine. When the conversation itself uses a CLI on a machine, the same model on that machine is used.
+- With remote CLIs, each step uploads its own copy of the attachments to the remote workspace. These copies are not cleaned up automatically.
 - Needs DSH 0.2.1-rc.3 or later (tested on rc.5). With remote CLIs, use dsh-remote-agents 0.2.102 or later: older versions leave each finished subagent's process running on the remote machine.
 
 ## License

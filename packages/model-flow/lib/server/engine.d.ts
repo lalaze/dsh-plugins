@@ -42,7 +42,7 @@ export declare function flowText(goal: string): {
     roleName: (role: Role) => string;
     time: (ms: number) => string;
     roundLabel: (round: number) => string;
-    started: (routes: Routes, rounds: number) => string;
+    started: (routes: Routes, rounds: number, attachments?: number) => string;
     finished: (role: Role, round: number, ms: number) => string;
     sentBack: (round: number, findings: string) => string;
     passed: (round: number, ms: number, summary: string) => string;

@@ -1,5 +1,6 @@
 /** What each model is told. The goal's own language is kept in every reply. */
 export declare const VERDICT_MARK = "FLOW_VERDICT";
+export declare const attachmentNote = "The images and files attached to this message are part of the goal; use them in this step.";
 export declare const planPrompt: (goal: string) => string;
 export declare const implementPrompt: (input: {
     goal: string;

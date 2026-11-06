@@ -15,9 +15,9 @@ export function flowText(goal) {
     const roundLabel = (round) => zh ? `第 ${round} 轮` : `Round ${round}`;
     return {
         roleName, time, roundLabel,
-        started: (routes, rounds) => {
+        started: (routes, rounds, attachments = 0) => {
             const steps = ['plan', 'implement', 'review'].flatMap(role => routes[role] ? [`${roleName(role)} ${routes[role].label}`] : []);
-            return `${zh ? '已开始' : 'Started'}${colon}${steps.join(' → ')}${zh ? `，最多审核 ${rounds} 轮` : `, up to ${rounds} review round${rounds === 1 ? '' : 's'}`}`;
+            return `${zh ? '已开始' : 'Started'}${colon}${steps.join(' → ')}${zh ? `，最多审核 ${rounds} 轮` : `, up to ${rounds} review round${rounds === 1 ? '' : 's'}`}${attachments > 0 ? zh ? `，${attachments} 个附件` : `, ${attachments} attachment${attachments === 1 ? '' : 's'}` : ''}`;
         },
         finished: (role, round, ms) => {
             const done = zh ? `${roleName(role)}完成` : `${roleName(role)} done`;

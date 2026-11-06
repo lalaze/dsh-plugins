@@ -1,5 +1,6 @@
 /** What each model is told. The goal's own language is kept in every reply. */
 export const VERDICT_MARK = 'FLOW_VERDICT';
+export const attachmentNote = 'The images and files attached to this message are part of the goal; use them in this step.';
 const language = 'Write in the language of the goal.';
 const section = (title, body) => body?.trim() ? `\n\n## ${title}\n${body.trim()}` : '';
 export const planPrompt = (goal) => `You are the planner. Another model will implement your plan and a third will review the result. Read what you need, but do not change anything.

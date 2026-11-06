@@ -2,9 +2,9 @@ export const DEFAULT_ROUNDS = 3;
 export const MAX_ROUNDS = 10;
 const ROLE_WORDS = { plan: 'plan', impl: 'implement', implement: 'implement', review: 'review' };
 const OPTION = /^(plan|impl|implement|review|rounds)=(\S+)(?:\s+|$)/iu;
-export function parseLine(raw) {
+export function parseLine(raw, hasAttachments = false) {
     let rest = raw.trim();
-    if (!rest)
+    if (!rest && !hasAttachments)
         return { kind: 'status' };
     if (/^stop$/iu.test(rest))
         return { kind: 'stop' };
@@ -21,7 +21,7 @@ export function parseLine(raw) {
             overrides[ROLE_WORDS[word]] = value;
         rest = rest.slice(match[0].length);
     }
-    if (!rest)
+    if (!rest && !hasAttachments)
         throw new Error('Say what to do: /flow [plan=model] [impl=model] [review=model] [rounds=n] <goal>');
     return { kind: 'run', goal: rest, overrides, ...(rounds === undefined ? {} : { rounds }) };
 }

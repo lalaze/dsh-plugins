@@ -12,4 +12,4 @@ export type FlowLine = {
     overrides: Partial<Record<Role, string>>;
     rounds?: number;
 };
-export declare function parseLine(raw: string): FlowLine;
+export declare function parseLine(raw: string, hasAttachments?: boolean): FlowLine;
