@@ -1,12 +1,13 @@
 import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './core/domain.js';
 import type { RemoteAgentsService } from './agents/service.js';
+import type { adoptModel } from './chat/adopt-model.js';
 import { ChatProjects } from './chat/projects.js';
 import type { WorkspacePlacement } from './workspace/access.js';
 import type { RemoteWorkspaces } from './workspace/remote-workspaces.js';
 import { workspaceAction, worktreeAction, type WorkspaceFeatures } from './workspace/http.js';
 import type { Sharing } from './sharing/sharing.js';
 
-export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Partial<Pick<RemoteWorkspaces, 'create' | 'shared' | 'publish'>>, features?: WorkspaceFeatures, sharing?: Pick<Sharing, 'catalog' | 'set' | 'status'>) {
+export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Partial<Pick<RemoteWorkspaces, 'create' | 'shared' | 'publish'>>, features?: WorkspaceFeatures, sharing?: Pick<Sharing, 'catalog' | 'set' | 'status'>, adopt?: ReturnType<typeof adoptModel>) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
     try {
@@ -57,6 +58,12 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         }
         case 'chatSpeed': result = projects.speed(field(input.sessionId, 'session ID', 256), field(input.model, 'model', 1000)); break;
         case 'setChatSpeed': result = await projects.setFast(field(input.sessionId, 'session ID', 256), input.fast === true); break;
+        case 'adoptChatModel': {
+          const effort = input.reasoningEffort === undefined ? {} : { reasoningEffort: field(input.reasoningEffort, 'thinking level', 200) };
+          if (!adopt) throw new RemoteError('Remote workspaces are unavailable', 501);
+          await adopt(field(input.sessionId, 'session ID', 256), { provider: field(input.provider, 'provider', 200), model: field(input.model, 'model', 1000), ...effort });
+          result = { ok: true }; break;
+        }
         case 'setChatEffort': await projects.setEffort(field(input.provider, 'provider', 200), field(input.model, 'model', 1000), field(input.reasoningEffort, 'reasoning effort', 200)); result = { ok: true }; break;
         case 'addChatProject': result = await projects.add(input.project); break;
         case 'refreshChatProject': result = await projects.refresh(identifier(input.projectId)); break;

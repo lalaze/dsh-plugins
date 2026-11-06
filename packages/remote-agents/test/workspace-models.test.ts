@@ -120,3 +120,101 @@ for (const change of ['workspace', 'dispose'] as const) test(`a ${change} change
   complete({ ok: true }); await pending;
   assert.deepEqual(remembered, []); wrapped.dispose();
 });
+
+/** A new conversation in a workspace whose machine cannot run the model it inherited. */
+function inherited(current: { provider: string; model: string; reasoningEffort?: string }, hostIds: string[], groups = [
+  { id: 'deepseek', models: [{ id: 'deepseek-chat' }, { id: 'deepseek-reasoner' }] },
+  { id: 'remote-cli-claude', models: [{ id: 'machine-one/claude/opus' }, { id: 'machine-two/claude/haiku' }, { id: 'machine-two/claude/opus' }] },
+  { id: 'remote-cli-codex', models: [{ id: 'machine-two/codex/gpt' }] },
+]) {
+  const adopted: unknown[] = [];
+  const listeners = new Set<() => void>();
+  const state = { snapshot: { current, routable: true, status: 'ready', groups } };
+  const directory: Directory = { store: { getSnapshot: () => state.snapshot, subscribe: listener => { listeners.add(listener); return () => { listeners.delete(listener); }; } },
+    load: async () => state.snapshot, select: async () => ({ ok: true }) };
+  const options = { key: () => 'workspace', check: async () => ({ hostIds }), blank: () => true,
+    adopt: async (selection: unknown) => { adopted.push(selection); } };
+  return { directory, options, adopted, state, tell: () => { for (const listener of listeners) listener(); } };
+}
+const settled = () => new Promise(resolve => setTimeout(resolve, 5));
+const opus = { provider: 'remote-cli-claude', model: 'machine-one/claude/opus', reasoningEffort: 'high' };
+
+test('a new conversation in a local workspace takes the last local model instead of a remote one it cannot run', async () => {
+  const { directory, options, adopted } = inherited(opus, []);
+  const wrapped = workspaceDirectory(directory, { ...options, lastLocal: () => ({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'max' }) });
+  await wrapped.view.load(); await settled();
+  assert.deepEqual(adopted, [{ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'max' }]);
+  wrapped.dispose();
+});
+
+test('with no usable last local model it takes the first local one, and never a model the catalog dropped', async () => {
+  const { directory, options, adopted } = inherited(opus, []);
+  const wrapped = workspaceDirectory(directory, { ...options, lastLocal: () => ({ provider: 'gone', model: 'gone' }) });
+  await wrapped.view.load(); await settled();
+  assert.deepEqual(adopted, [{ provider: 'deepseek', model: 'deepseek-chat' }]);
+  wrapped.dispose();
+});
+
+test('on another machine it takes the same CLI and model there, keeping the thinking level', async () => {
+  const { directory, options, adopted } = inherited(opus, ['machine-two']);
+  const wrapped = workspaceDirectory(directory, options);
+  await wrapped.view.load(); await settled();
+  assert.deepEqual(adopted, [{ provider: 'remote-cli-claude', model: 'machine-two/claude/opus', reasoningEffort: 'high' }]);
+  wrapped.dispose();
+});
+
+test('on another machine without that model it takes that CLI’s first, then any CLI there', async () => {
+  const sonnet = inherited({ provider: 'remote-cli-claude', model: 'machine-one/claude/sonnet' }, ['machine-two']);
+  const first = workspaceDirectory(sonnet.directory, sonnet.options);
+  await first.view.load(); await settled();
+  assert.deepEqual(sonnet.adopted, [{ provider: 'remote-cli-claude', model: 'machine-two/claude/haiku' }]);
+  first.dispose();
+  const grok = inherited({ provider: 'remote-cli-grok', model: 'machine-one/grok/fast' }, ['machine-two']);
+  const second = workspaceDirectory(grok.directory, grok.options);
+  await second.view.load(); await settled();
+  assert.deepEqual(grok.adopted, [{ provider: 'remote-cli-claude', model: 'machine-two/claude/haiku' }]);
+  second.dispose();
+});
+
+test('a conversation that has started, or a model its machine can run, is left alone', async () => {
+  const started = inherited(opus, []);
+  const first = workspaceDirectory(started.directory, { ...started.options, blank: () => false });
+  await first.view.load(); await settled();
+  assert.deepEqual(started.adopted, []);
+  assert.equal(first.view.store.getSnapshot().current, null, 'it still asks for a model rather than choosing one');
+  first.dispose();
+  const allowed = inherited(opus, ['machine-one']);
+  const second = workspaceDirectory(allowed.directory, allowed.options);
+  await second.view.load(); await settled();
+  assert.deepEqual(allowed.adopted, []);
+  second.dispose();
+});
+
+test('it tries once per inherited model, also when that fails or nothing fits, and waits for the catalog', async () => {
+  const failing = inherited(opus, []);
+  let tries = 0;
+  const first = workspaceDirectory(failing.directory, { ...failing.options, adopt: async () => { tries++; throw new Error('refused'); } });
+  await first.view.load(); await settled();
+  failing.tell(); failing.tell(); await settled();
+  assert.equal(tries, 1);
+  first.dispose();
+  const empty = inherited(opus, [], []);
+  const second = workspaceDirectory(empty.directory, empty.options);
+  await second.view.load(); await settled();
+  assert.deepEqual(empty.adopted, []);
+  empty.state.snapshot = { ...empty.state.snapshot, groups: [{ id: 'deepseek', models: [{ id: 'deepseek-chat' }] }] };
+  empty.tell(); await settled();
+  assert.deepEqual(empty.adopted, [{ provider: 'deepseek', model: 'deepseek-chat' }], 'a catalog that arrives later is used');
+  second.dispose();
+});
+
+test('a local model the user picks becomes the next fallback; a remote one does not', async () => {
+  const { directory, options } = inherited({ provider: 'deepseek', model: 'deepseek-chat' }, ['machine-two']);
+  const remembered: unknown[] = [];
+  const wrapped = workspaceDirectory(directory, { ...options, rememberLocal: selection => { remembered.push(selection); } });
+  await wrapped.view.load();
+  await wrapped.view.select({ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'max' });
+  await wrapped.view.select({ provider: 'remote-cli-claude', model: 'machine-two/claude/opus' });
+  assert.deepEqual(remembered, [{ provider: 'deepseek', model: 'deepseek-reasoner', reasoningEffort: 'max' }]);
+  wrapped.dispose();
+});

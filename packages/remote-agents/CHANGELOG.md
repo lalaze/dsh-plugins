@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.103:** A new conversation that inherits a remote model its workspace cannot run now starts on one it can, instead of failing on the first message. In a local workspace that is the last local model you chose. On another machine it is the same CLI and model there. Only that conversation changes: your default stays what you last chose.
+
 **Upgrading from 0.2.102:** The line naming the tool Claude is running now looks like DSH's own tool rows, with the same gray and sparkle icon, instead of a quote with a bar. It reads like `Tool call · Run the tests`, and names the tool only when there is nothing else to show. A long line is cut to one row. Update `dsh-mobile` to 0.3.7 at the same time: an older phone app shows this line as a link to a page that does not exist.
 
 **Upgrading from 0.2.101:** `/team`, its settings section **Team presets** and a TUI conversation as team captain are gone, because arranging a team belongs to AgentTeams. Start teams with `/agent-teams`; remote CLIs still work as its members, and saved presets are dropped. A finished subagent no longer leaves its CLI running on the remote machine, which could use up the account's 32 slots until no CLI could start; a later message to that subagent resumes it. Local tunnels no longer listen on every network: they listen on this machine, plus the address your browser used to reach DSH, and a tunnel started from this computer does not open from a phone until you stop it and start it again from there. Setup commands a new worktree brings that the form did not show now wait for your choice instead of running. Only a failed connection now marks a host as failed.
