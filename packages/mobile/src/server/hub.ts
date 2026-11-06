@@ -93,6 +93,7 @@ export class Hub {
   async start(): Promise<void> {
     this.executor.start()
     this.stops.push(this.options.host.bridgeApprovals(this.executor.approvalBridge))
+    this.stops.push(this.options.host.bridgeQuestions(this.executor.questionBridge))
     this.stops.push(this.executor.onEntry((entry, previous) => this.observe(entry, previous)))
     this.followTags()
     this.followTasks()

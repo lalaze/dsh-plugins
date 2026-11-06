@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import type { TestContext } from 'node:test'
 import { WebSocketServer, type WebSocket as Ws } from 'ws'
 import type { ModelChoices, ModelSelection, QuestionAnswer } from '../src/shared/protocol.js'
-import type { ApprovalBridge, HostApi, HostAttachmentRef, HostEvent, HostFollowFrame, HostSessionSummary, HostWorkspaceState } from '../src/server/bridge/host.js'
+import type { ApprovalBridge, QuestionBridge, HostApi, HostAttachmentRef, HostEvent, HostFollowFrame, HostSessionSummary, HostWorkspaceState } from '../src/server/bridge/host.js'
 import { AsyncQueue } from '../src/server/bridge/queue.js'
 import { Hub } from '../src/server/hub.js'
 
@@ -23,6 +23,7 @@ export class FakeHost implements HostApi {
   readonly created: { workspaceId: string; permission?: string }[] = []
   readonly images = new Map<string, Uint8Array>()
   bridge?: ApprovalBridge
+  questionBridge?: QuestionBridge
   autoReply = true
   /** The reply being written in a session, as DSH reports it to a follower that joins during it. */
   readonly activeAttempts = new Map<string, { attemptId: string; stream: unknown[] }>()
@@ -137,6 +138,7 @@ export class FakeHost implements HostApi {
   async *readFile(ref: HostAttachmentRef) { yield this.images.get(ref.attachmentId) ?? new Uint8Array() }
   onSessionChange(listener: (id: string) => void) { this.changes.add(listener); return () => { this.changes.delete(listener) } }
   bridgeApprovals(bridge: ApprovalBridge) { this.bridge = bridge; return () => { this.bridge = undefined } }
+  bridgeQuestions(bridge: QuestionBridge) { this.questionBridge = bridge; return () => { this.questionBridge = undefined } }
 }
 
 /**

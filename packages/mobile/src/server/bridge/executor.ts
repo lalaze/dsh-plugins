@@ -3,9 +3,9 @@
  * module reaches DSH's session API; nothing here writes a session log directly.
  */
 import { randomUUID } from 'node:crypto'
-import type { Command, CommandResult, LiveFrame, ModelSelection, PendingInteraction, PromptPart, SessionEntry, SyncedEvent, WorkspaceEntry } from '../../shared/protocol.js'
+import type { Command, CommandResult, LiveFrame, ModelSelection, PendingInteraction, PromptPart, QuestionAnswer, SessionEntry, SyncedEvent, WorkspaceEntry } from '../../shared/protocol.js'
 import { addToDraft, attachmentRefs, firstPrompt, modelOf, openApprovals, openQuestions, shareEvent, titleOf } from './events.js'
-import type { ApprovalAsk, HostApi, HostAttachmentRef, HostInspection, HostSessionSummary, HostWorkspaceState } from './host.js'
+import type { ApprovalAsk, HostApi, HostAttachmentRef, HostInspection, HostSessionSummary, HostWorkspaceState, QuestionAsk } from './host.js'
 import { AsyncQueue, sleep } from './queue.js'
 
 export class CommandError extends Error {
@@ -63,6 +63,8 @@ export class Executor {
   readonly epoch = randomUUID().slice(0, 8)
   private readonly approvals = new Map<string, Approval>()
   private readonly questions = new Map<string, PendingInteraction[]>()
+  /** Questions DSH is waiting on right now, by tool call. */
+  private readonly asked = new Map<string, { sessionId: string; item: PendingInteraction; resolve(answers: QuestionAnswer[]): void }>()
   private readonly inspected = new Map<string, { at: number; lastSeq: number; events: SyncedEvent[]; attachments: Set<string> }>()
   private readonly inflight = new Map<string, Promise<CommandResult>>()
   private readonly entryListeners = new Map<string, Set<(entry: SessionEntry) => void>>()
@@ -195,7 +197,8 @@ export class Executor {
       ...[...this.approvals.values()].filter(a => a.sessionId === id).map(a => ({ kind: 'approval' as const, id: a.id, toolName: a.toolName, askedAt: a.askedAt, answerable: true,
         ...(a.callId ? { callId: a.callId } : {}), ...(a.reason ? { reason: a.reason } : {}) })),
       ...(info!.approvals ?? []).filter(a => a.kind === 'approval' && ![...this.approvals.values()].some(own => own.sessionId === id && own.callId !== undefined && own.callId === a.callId)),
-      ...(this.questions.get(id) ?? []),
+      ...[...this.asked.values()].filter(question => question.sessionId === id).map(question => question.item),
+      ...(this.questions.get(id) ?? []).filter(question => !this.asked.has(question.id)),
     ]
     const lastSeq = Math.max(info!.lastSeq, hint), mark = this.options.readMark?.(id)
     // A read counts once, at what the session shows when it is not running: later output here, also a turn of a DSH model
@@ -463,6 +466,13 @@ export class Executor {
       case 'answer': {
         if (!Array.isArray(command.answers)) throw new CommandError('Invalid answer')
         const answers = command.answers.map(a => ({ id: String(a.id), selected: Array.isArray(a.selected) ? a.selected.map(String) : [], ...(typeof a.custom === 'string' ? { custom: a.custom } : {}) }))
+        const asked = this.asked.get(String(command.callId))
+        if (asked?.sessionId === sessionId) {
+          asked.resolve(answers)
+          // Withdraw it now rather than when DSH's chain finishes, so it cannot be answered twice.
+          this.asked.delete(String(command.callId))
+          break
+        }
         if (!await this.host.answerQuestion(sessionId, String(command.callId), answers)) throw new CommandError('This question is no longer open', 409)
         break
       }
@@ -480,6 +490,17 @@ export class Executor {
       this.approvals.set(id, { id, sessionId: ask.sessionId, toolName: ask.toolName, callId: ask.callId, reason: ask.reason, askedAt: Date.now(), resolve })
     })
     signal.addEventListener('abort', () => { this.approvals.delete(id); this.schedule() }, { once: true })
+    this.schedule()
+    return { answer, wait: true }
+  }
+
+  /** The question bridge: offer the model's questions to paired machines that may answer them. */
+  readonly questionBridge = (ask: QuestionAsk, signal: AbortSignal) => {
+    if (!this.options.approvalPeers()) return undefined
+    const [item] = openQuestions([{ callId: ask.callId, questions: ask.questions }])
+    if (!item) return undefined
+    const answer = new Promise<QuestionAnswer[]>(resolve => { this.asked.set(ask.callId, { sessionId: ask.sessionId, item, resolve }) })
+    signal.addEventListener('abort', () => { this.asked.delete(ask.callId); this.schedule() }, { once: true })
     this.schedule()
     return { answer, wait: true }
   }

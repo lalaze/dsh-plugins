@@ -179,6 +179,43 @@ test('a phone starts a session with a model and permission, renames and archives
   }, 5000, 'renamed and archived')
 })
 
+test('a phone answers a question DSH’s model asks, once, and a read-only phone cannot', async t => {
+  const setup = await startHub(t)
+  setup.host.addWorkspace('w1', 'project')
+  const session = setup.host.addSession('s1', 'w1', 'Asks something')
+  assert.equal(setup.host.questionBridge!({ sessionId: 's1', callId: 'c0', questions: [{ id: 'q1', question: 'Nobody here?' }] }, new AbortController().signal), undefined, 'no phone is paired yet')
+  const { client } = await pairedPhone(t, setup)
+  session.running = true
+  setup.host.emit('s1')
+  const asked = setup.host.questionBridge!({ sessionId: 's1', callId: 'c1', questions: [{ id: 'q1', question: 'Which one?', options: [{ label: 'Alpha' }, { label: 'Beta' }] }] }, new AbortController().signal)!
+  assert.ok(asked)
+  let entry: SessionEntry | undefined
+  await waitFor(async () => {
+    entry = (await client.call('sessions.changes', {})).sessions.find(s => s.sessionId === 's1')
+    return entry?.state === 'waiting'
+  }, 5000, 'waiting')
+  const question = entry!.pending.find(p => p.kind === 'question')!
+  assert.equal(question.kind === 'question' && question.questions[0].question, 'Which one?')
+  await client.call('command', { kind: 'answer', requestId: requestId(), sessionId: 's1', callId: 'c1', answers: [{ id: 'q1', selected: ['Beta'] }] })
+  assert.deepEqual(await asked.answer, [{ id: 'q1', selected: ['Beta'] }])
+  assert.equal(setup.host.answers.length, 0, 'an open question is answered through the bridge')
+  await waitFor(async () => (await client.call('sessions.changes', {})).sessions.find(s => s.sessionId === 's1')?.pending.length === 0, 5000, 'question withdrawn')
+  // Past the bridge, a question DSH still lists goes to its late-answer path.
+  await client.call('command', { kind: 'answer', requestId: requestId(), sessionId: 's1', callId: 'c1', answers: [{ id: 'q1', selected: ['Alpha'] }] })
+  assert.deepEqual(setup.host.answers.map(a => a.callId), ['c1'])
+
+  const stop = new AbortController()
+  setup.host.questionBridge!({ sessionId: 's1', callId: 'c2', questions: [{ id: 'q1', question: 'Still there?' }] }, stop.signal)
+  await waitFor(async () => (await client.call('sessions.changes', {})).sessions.find(s => s.sessionId === 's1')?.pending.length === 1, 5000, 'second question')
+  stop.abort()
+  await waitFor(async () => (await client.call('sessions.changes', {})).sessions.find(s => s.sessionId === 's1')?.pending.length === 0, 5000, 'question taken back')
+
+  const phoneId = setup.hub.status().phones[0].id
+  await setup.hub.action({ action: 'grants', phoneId, grants: { view: true, control: false } })
+  await assert.rejects(client.call('command', { kind: 'answer', requestId: requestId(), sessionId: 's1', callId: 'c2', answers: [] }), /only read/)
+  assert.equal(setup.host.questionBridge!({ sessionId: 's1', callId: 'c3', questions: [{ id: 'q1', question: 'Anyone?' }] }, new AbortController().signal), undefined, 'a read-only phone is not asked')
+})
+
 test('a phone answers an approval DSH asks, and a read-only phone cannot', async t => {
   const setup = await startHub(t)
   setup.host.addWorkspace('w1', 'project')

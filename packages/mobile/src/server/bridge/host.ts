@@ -4,6 +4,7 @@
  * reads, live follow, prompt, cancel, models, archive and rename), `sessionQuery` (cold reads from 0.2.2), `permissionPresets`,
  * `attachments`, `userQuestions`, and the `approval/request` event.
  */
+import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ModelChoices, ModelSelection, QuestionAnswer } from '../../shared/protocol.js'
 
@@ -41,6 +42,15 @@ export interface ApprovalAsk {
  */
 export type ApprovalBridge = (ask: ApprovalAsk, signal: AbortSignal) => { answer: Promise<'allowed-once' | 'rejected'>; wait: boolean } | undefined
 
+export interface QuestionAsk {
+  sessionId: string
+  callId: string
+  /** The questions as DSH holds them. */
+  questions: unknown
+}
+/** Answers a question from elsewhere while DSH's own answerers (open browsers) also get it; see {@link ApprovalBridge}. */
+export type QuestionBridge = (ask: QuestionAsk, signal: AbortSignal) => { answer: Promise<QuestionAnswer[]>; wait: boolean } | undefined
+
 export interface HostApi {
   /** Whether the session services are present yet. */
   ready(): boolean
@@ -66,6 +76,8 @@ export interface HostApi {
   onSessionChange(listener: (sessionId: string) => void): () => void
   /** Route approval questions through `bridge`; DSH keeps asking its own answerers too. */
   bridgeApprovals(bridge: ApprovalBridge): () => void
+  /** Route the model's questions through `bridge`; DSH keeps asking its own answerers too. */
+  bridgeQuestions(bridge: QuestionBridge): () => void
 }
 
 type Dict = Record<string, unknown>
@@ -154,7 +166,9 @@ export function dshHost(ctx: Context): HostApi {
     async answerQuestion(sessionId, callId, answers) {
       const service = get('userQuestions')
       if (typeof service?.answer !== 'function') throw new Error('This DSH version cannot answer questions from another machine')
-      return await service.answer(sessionId, callId, { answers }) !== false
+      // A late answer reaches the running agent; a session with none has no question to answer.
+      const agent = get('agents')?.get?.(sessionId)
+      return agent ? await service.answer(agent, callId, { answers }) !== false : false
     },
     async *questions(signal) {
       for await (const frame of sessions().control(signal) as AsyncIterable<Dict>) {
@@ -213,6 +227,7 @@ export function dshHost(ctx: Context): HostApi {
       return () => { for (const dispose of disposers) dispose() }
     },
     bridgeApprovals(bridge) { return bridgeApprovalEvent(ctx, bridge) },
+    bridgeQuestions(bridge) { return bridgeQuestionEvent(ctx, bridge) },
   }
 }
 
@@ -254,4 +269,43 @@ export function bridgeApprovalEvent(ctx: Context, bridge: ApprovalBridge): () =>
     } finally { withdraw.abort() }
   }
   return ctx.on('approval/request' as never, listener as never, true as never) as unknown as () => void
+}
+
+/**
+ * Take part in DSH's `user-questions/request` waterfall without taking it over, as {@link bridgeApprovalEvent} does for
+ * approvals. DSH's default, blocking questions name no tool call, so they get an ID here. With no browser open, the
+ * question waits for the phone when one will answer, and otherwise fails as it would without this plugin.
+ */
+export function bridgeQuestionEvent(ctx: Context, bridge: QuestionBridge): () => void {
+  const copies = new WeakSet<object>()
+  const listener = async function (this: unknown, request: Dict, next: () => Promise<unknown>): Promise<unknown> {
+    if (copies.has(request)) return next()
+    const agent = asDict(request.agent), sessionId = typeof agent.id === 'string' ? agent.id : undefined
+    if (!sessionId) return next()
+    const waiting = asDict(request.wait).callId, callId = typeof waiting === 'string' ? waiting : randomUUID()
+    const withdraw = new AbortController()
+    const upstream = request.signal instanceof AbortSignal ? request.signal : undefined
+    const signal = upstream ? AbortSignal.any([upstream, withdraw.signal]) : withdraw.signal
+    let remote: ReturnType<QuestionBridge>
+    try { remote = bridge({ sessionId, callId, questions: request.questions }, signal) } catch { remote = undefined }
+    if (!remote) return next()
+    const copy = { ...request, signal }
+    copies.add(copy)
+    const waterfall = ctx.waterfall as unknown as (...args: unknown[]) => Promise<unknown>
+    const local = Promise.resolve().then(() => waterfall.call(ctx, this, 'user-questions/request', copy, next))
+    const answered = remote.answer.then(answers => ({ answers }))
+    try {
+      return await Promise.race([local, answered]).catch(async (error: unknown) => {
+        // No browser could answer here: wait for the other machine only when it is there to answer.
+        if (asDict(error).code !== 'NO_PROVIDER' || !remote.wait) throw error
+        // Made only here, where the race below handles it: an unhandled rejection would take DSH down.
+        return await Promise.race([answered, new Promise<never>((_resolve, reject) => {
+          const stop = () => { if (upstream?.aborted) reject(upstream.reason) }
+          upstream?.addEventListener('abort', stop, { once: true })
+          stop()
+        })])
+      })
+    } finally { withdraw.abort() }
+  }
+  return ctx.on('user-questions/request' as never, listener as never, true as never) as unknown as () => void
 }
