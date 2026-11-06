@@ -41,4 +41,12 @@ export const zh: Record<string, string> = {
   'Claude only': '只用 Claude',
   'Quick, no plan': '快速，跳过计划',
   'Planning and review run read-only, so those models cannot change your files.': '计划和审核都是只读的，这两个模型改不了你的文件。',
+  'Open': '打开',
+  'Starting': '正在开始',
+  'Stopped when DSH closed': '这一步在 DSH 关闭时中断了',
+  'Failed': '失败',
+  'Done': '已完成',
+  'Copy': '复制',
+  'Copied': '已复制',
+  'Footnotes': '脚注',
 };

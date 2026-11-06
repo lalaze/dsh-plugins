@@ -1,18 +1,15 @@
-import { createI18n, type LocaleContext } from '@dsh-plugins/i18n';
-import { useLocale as useI18n } from '@dsh-plugins/i18n/react';
+import type { LocaleContext } from '@dsh-plugins/i18n';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MAX_COMBO_NAME, placeCombo, sameSetup, startersFor, type Combo, type Setup } from '../combos.js';
 import { API_PATH, type EffortOption } from '../shared.js';
 import { MAX_ROUNDS } from '../line.js';
 import { machineOf, mainMachine, nameParts, nativeModel, type CatalogModel, type Role, type Route } from '../routes.js';
 import type { FlowConfig } from '../store.js';
-import { zh } from './locales.js';
+import { post } from './api.js';
+import { FlowRow, flowRowStyles } from './flow-row.js';
+import { i18n, ui, useLocale } from './i18n.js';
 import { machineName, modelGroups, modelKey, preferredModel, routeKey } from './model-list.js';
 import { Select, useEscape } from './select.js';
-
-const i18n = createI18n('dsh-model-flow', zh);
-const { ui } = i18n;
-const useLocale = () => useI18n(i18n);
 
 const styles = `
 .mf-settings{container-type:inline-size;display:flex;flex-direction:column;gap:12px;font-size:13px}
@@ -87,12 +84,6 @@ const ROLES: readonly { role: Role; label: string; optional?: boolean }[] = [
 const shortName = (route: Route) => nameParts(route.provider, route.label).name;
 const withoutCombos = ({ combos: _combos, ...setup }: FlowConfig): Setup => setup;
 
-async function post<T>(body: Record<string, unknown>): Promise<T> {
-  const response = await fetch(API_PATH, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', 'X-DSH-Model-Flow': '1' }, body: JSON.stringify(body) });
-  const result = await response.json();
-  if (!response.ok) throw new Error(typeof result.error === 'string' ? result.error : ui('Could not save.'));
-  return result as T;
-}
 function RoleRow({ label, optional, route, models, machines, change }: { label: string; optional?: boolean; route?: Route; models: CatalogModel[]; machines: readonly (string | undefined)[]; change(route: Route | undefined): void }) {
   const [efforts, setEfforts] = useState<EffortOption[]>([]);
   useEffect(() => {
@@ -267,5 +258,19 @@ export function apply(ctx: Client): void {
     return i18n.subscribe(send);
   });
   ctx.effect(() => installOpenAfterCommand(ctx));
+  ctx.effect(() => {
+    const style = document.createElement('style');
+    style.dataset.plugin = 'dsh-model-flow'; style.textContent = flowRowStyles;
+    document.head.appendChild(style);
+    return () => style.remove();
+  });
+  const openStep = (parentSessionId: string, childSessionId: string) => {
+    const address = { parentSessionId, childSessionId, mode: 'continuable' };
+    const sidebar = ctx.get?.('sidebarRight') as { openResource?(resource: string, options: { kind: string; preferNewPane: boolean }): unknown } | undefined;
+    if (sidebar?.openResource) sidebar.openResource(`dsh-resource://subagentchat/session/${encodeURIComponent(childSessionId)}?${new URLSearchParams({ parent: parentSessionId, mode: address.mode })}`, { kind: 'subagentchat', preferNewPane: true });
+    else (ctx.get?.('uiWorkspace') as { openSession?(target: typeof address): void } | undefined)?.openSession?.(address);
+  };
+  const Row: React.FC<{ node: React.ComponentProps<typeof FlowRow>['node'] }> = ({ node }) => <FlowRow node={node} openStep={openStep} />;
+  ctx.slots.inject('conversation.chat.commandview', () => ctx.slots.register({ name: 'conversation.chat.commandview', key: 'flow' }, Row as React.FC));
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'model-flow', order: 75, label: () => ui('Model flow') }, Settings));
 }

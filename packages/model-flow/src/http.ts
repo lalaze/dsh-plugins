@@ -1,6 +1,6 @@
 /** Settings data: the models to choose from, their thinking levels, and saving the choice. */
 import type { CatalogModel } from './routes.js';
-import { API_PATH, type EffortOption, type Locale } from './shared.js';
+import { API_PATH, type EffortOption, type LiveStep, type Locale } from './shared.js';
 import { configFrom, type FlowStore } from './store.js';
 
 export { API_PATH };
@@ -11,6 +11,8 @@ export interface SettingsHost {
   /** The conversation of a /flow typed within the last `maxAge` milliseconds. */
   lastCommand(maxAge: number): string | undefined;
   setLocale(locale: Locale): void;
+  /** The step a row shows while it runs. None means it is not running in this DSH, for example after a restart. */
+  step(commandId: string): LiveStep | undefined;
 }
 export function createHandler(store: FlowStore, host: SettingsHost) {
   return async (request: Request): Promise<Response> => {
@@ -19,8 +21,9 @@ export function createHandler(store: FlowStore, host: SettingsHost) {
       if (request.method === 'GET') return Response.json({ config: store.config, models: await host.catalog() }, { headers });
       if (request.method !== 'POST') return new Response(null, { status: 405, headers: { ...headers, Allow: 'GET, POST' } });
       if (request.headers.get('X-DSH-Model-Flow') !== '1' || !request.headers.get('content-type')?.startsWith('application/json')) return Response.json({ error: 'Use the settings page.' }, { status: 403, headers });
-      const input = await request.json() as { action?: unknown; config?: unknown; provider?: unknown; model?: unknown; locale?: unknown };
+      const input = await request.json() as { action?: unknown; config?: unknown; provider?: unknown; model?: unknown; locale?: unknown; commandId?: unknown };
       if (input.action === 'lastCommand') return Response.json({ sessionId: host.lastCommand(LAST_COMMAND_AGE) ?? null }, { headers });
+      if (input.action === 'step' && typeof input.commandId === 'string') return Response.json({ step: host.step(input.commandId) ?? null }, { headers });
       if (input.action === 'locale') { host.setLocale(input.locale === 'zh' ? 'zh' : 'en'); return Response.json({}, { headers }); }
       if (input.action === 'save') {
         await store.save(configFrom(input.config));
