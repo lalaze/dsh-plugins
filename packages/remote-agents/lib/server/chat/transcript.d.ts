@@ -5,6 +5,8 @@ export type TurnSource = {
 } | {
     self: true;
 } | undefined;
+/** What the chat says while a message waits for a turn the CLI started itself, in the language of that message. */
+export declare const ownTurnWaitNote: (cli: string, userText: string) => string;
 /** What the chat says at a `model_switch` item, in the language of what the user wrote. */
 export declare function modelSwitchNote(item: TimelineEntry['item'], userText: string): string;
 /**

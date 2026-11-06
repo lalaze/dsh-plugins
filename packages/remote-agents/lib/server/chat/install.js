@@ -82,8 +82,8 @@ export function installChat(ctx, service, projects, workspace) {
         }), { global: true });
         for (const agent of host.agents.list?.() ?? [])
             wake(agent);
-        // A conversation shows a turn another DSH runs in its CLI session as it goes, and one the CLI ran by itself once it
-        // ends. The history changes many times during a turn: look at most once a second. A conversation without an agent,
+        // A conversation shows a turn another DSH runs in its CLI session as it goes, and one the CLI runs by itself too.
+        // The history changes many times during a turn: look at most once a second. A conversation without an agent,
         // as after DSH restarted, gets one when such a turn runs, which shows it through `wake`.
         const followed = new Map();
         const historyChanged = (taskId) => {

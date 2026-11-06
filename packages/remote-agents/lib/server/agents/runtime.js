@@ -361,6 +361,7 @@ export class CliSession {
         this.agent.lastError = undefined;
         this.agent.status = 'running';
         this.agent.activeTurn = { turnId: randomUUID(), startedAt: new Date().toISOString(), unprompted: true };
+        this.hooks.ownTurnStarted?.();
     }
     setContext(context) { if (context)
         this.agent.context = context; }

@@ -6,6 +6,8 @@ import type { Store } from '../core/store.js';
 export declare function initializeCodex(peer: JsonlPeer): Promise<void>;
 export declare function initializeAcp(peer: JsonlPeer): Promise<any>;
 export interface SessionHooks {
+    /** The CLI started a turn itself rather than for a message (see `continueUnprompted`). */
+    ownTurnStarted?(): void;
     /** A turn ended; `unprompted` when the CLI started it itself rather than for a message (see `continueUnprompted`). */
     turnEnded?(turn: {
         unprompted: boolean;

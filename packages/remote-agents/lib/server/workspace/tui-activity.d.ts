@@ -49,6 +49,12 @@ export declare function reportActivity(report: string): TuiActivity | undefined;
  */
 export declare function dialogOnScreen(rows: readonly string[]): 'approval' | 'question' | undefined;
 /**
+ * Whether Claude Code's spinner, right above its prompt, says it is compacting. Left idle for about 55 minutes it compacts by
+ * itself before its prompt cache expires, for a minute or more. Its title and footer then read exactly as in a turn (measured
+ * on 2.1.319), and this line is the one difference.
+ */
+export declare function compactingOnScreen(rows: readonly string[]): boolean;
+/**
  * Watches TUI conversations' CLIs, so that they show as running, waiting and finished like every other conversation. DSH
  * runs no turn for these: their work happens in a terminal it knows nothing about, and it would list them as idle for good.
  */
