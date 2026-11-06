@@ -1,7 +1,27 @@
 import type { ChatProject } from '../../core/domain.js';
 import { api } from '../api.js';
 
-/** Some composer plugins render their own picker without calling the native model-label slot. */
+/** A custom picker's own caption, or the cell DSH's picker wraps around a remote model's label. */
+const CAPTIONS = '.codexModelSelectLabel, [data-provider-id^="remote-cli"]';
+
+/** The caption's text node, however deep its owner nested it. A caption holding anything more is not ours to edit. */
+function onlyText(caption: Element): Text | undefined {
+  const walker = document.createTreeWalker(caption, NodeFilter.SHOW_TEXT);
+  const text = walker.nextNode() as Text | null;
+  return text && !walker.nextNode() ? text : undefined;
+}
+
+/** The trigger's tooltip is the catalog name, followed by the effort in DSH's own picker. */
+const namedBy = (button: Element, full: string) => {
+  const title = button.getAttribute('title');
+  return title === full || !!title?.startsWith(`${full} · `);
+};
+
+/**
+ * The native label slot cannot always drop the host: some composer plugins render their own picker
+ * without calling it, and in a single slot the lowest priority wins, so another plugin's label
+ * (dsh-connect-workbuddy sits at -0.5) shadows ours and prints the full catalog name.
+ */
 export function installCustomModelLabels(
   load: (signal: AbortSignal) => Promise<ChatProject[]> = signal => api<ChatProject[]>('hostCatalogs', {}, signal),
 ): () => void {
@@ -10,7 +30,7 @@ export function installCustomModelLabels(
   let names = new Map<string, string>(), stopped = false, scheduled = false, request: AbortController | undefined;
   const restore = () => {
     for (const [node, value] of changed) {
-      if (node.isConnected && node.data === value.short && value.button.getAttribute('title') === value.full) node.data = value.full;
+      if (node.isConnected && node.data === value.short && namedBy(value.button, value.full)) node.data = value.full;
     }
     changed.clear();
   };
@@ -18,13 +38,12 @@ export function installCustomModelLabels(
     scheduled = false;
     if (stopped) return;
     for (const node of changed.keys()) if (!node.isConnected) changed.delete(node);
-    for (const button of Array.from(document.querySelectorAll('.codexModelSelectTrigger[aria-haspopup="menu"]'))) {
-      const full = button.getAttribute('title'), short = full ? names.get(full) : undefined;
-      const label = button.querySelector('.codexModelSelectLabel'), node = label?.firstChild;
-      // Edit only an existing plain text node. Preserve React's child structure, effort, tooltip and controls.
-      if (!full || !short || label?.childNodes.length !== 1 || node?.nodeType !== Node.TEXT_NODE) continue;
-      const text = node as Text;
-      if (text.data !== full) continue;
+    for (const caption of Array.from(document.querySelectorAll(CAPTIONS))) {
+      // Menu rows are not inside a trigger: they keep the host that tells saved hosts apart.
+      const button = caption.closest('[aria-haspopup="menu"]'), text = onlyText(caption);
+      const full = text?.data, short = full ? names.get(full) : undefined;
+      // Edit only the existing text node. Preserve React's child structure, effort, tooltip and controls.
+      if (!button || !text || !full || !short || !namedBy(button, full)) continue;
       changed.set(text, { full, short, button }); text.data = short;
     }
   };
