@@ -1,9 +1,11 @@
 import { TERMINAL_LAUNCHER } from '../../workspace/domain.js';
+import { affectsElements } from '../dom-mutations.js';
 
 // DSH's New terminal shell menu ends at its chevron and spreads left over the card's icon and text.
 // Recognized by its chevron in the guide card, or else by the Remote workspace item, it opens below the chevron instead;
 // other DSH menus keep their placement. The chevron matters: the menu first opens with only a loading row.
 const MARK = 'data-ra-shell-menu', GAP = 4, MARGIN = 8;
+const MENUS = '[role="menu"][data-menu-material]';
 // A stylesheet !important outranks the inline left/top DSH keeps writing, without fighting its renders.
 // An opening animation grows from the corner at the trigger, not the one DSH chose for its own placement.
 const styles = `[${MARK}]{left:var(--ra-shell-menu-left)!important;top:var(--ra-shell-menu-top)!important;right:auto!important;bottom:auto!important;transform-origin:var(--ra-shell-menu-origin)!important}`;
@@ -47,12 +49,17 @@ export function installShellMenu(): () => void {
   const update = () => {
     frame = undefined;
     for (const menu of open) if (!menu.isConnected) open.delete(menu);
-    for (const menu of document.querySelectorAll<HTMLElement>('[role="menu"][data-menu-material]')) if (!open.has(menu) && isShellMenu(menu, triggerOf(menu))) open.add(menu);
+    for (const menu of document.querySelectorAll<HTMLElement>(MENUS)) if (!open.has(menu) && isShellMenu(menu, triggerOf(menu))) open.add(menu);
     for (const menu of open) { const trigger = triggerOf(menu); if (trigger) placeShellMenu(menu, trigger); }
   };
   const schedule = () => { if (frame === undefined) frame = requestAnimationFrame(update); };
   // A new menu is placed in the observer's microtask, before the browser first paints it where DSH put it.
-  const observer = new MutationObserver(() => { if (frame !== undefined) { cancelAnimationFrame(frame); } update(); });
+  // Terminal row replacements must not scan the page or force menu layout on every output frame.
+  const observer = new MutationObserver(records => {
+    if (!affectsElements(records, `${MENUS}, [data-sidebar-right-guide-entry], [aria-haspopup]`)) return;
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    update();
+  });
   observer.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('resize', schedule); window.addEventListener('scroll', schedule, true);
   schedule();

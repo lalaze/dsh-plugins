@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { TUI_LAUNCHERS, type TuiCli } from '../../workspace/domain.js';
 import { api } from '../api.js';
@@ -131,14 +131,21 @@ export function tuiTheme(theme: unknown): unknown {
 }
 
 /** One kept terminal. A terminal that ended is replaced by a new one, so each generation names its own DSH terminal. */
-function TuiTerminal({ item, services }: { item: KeptTerminal; services: Services }) {
+export function TuiTerminal({ item, services }: { item: KeptTerminal; services: Services }) {
   const { slots, terminals, theme, t, kept } = services;
   const { sessionId, shell, generation, visible } = item;
   const key = terminalKey(generation);
-  const restart = () => kept.restart(sessionId);
+  const restart = useCallback(() => kept.restart(sessionId), [kept, sessionId]);
   const root = useRef<HTMLElement>(item.host);
   const model = useMemo(() => terminals.view(sessionId, key, terminalContent(sessionId, generation), undefined, shell), [terminals, sessionId, key, generation, shell]);
-  const state = useSyncExternalStore(model.state.subscribe.bind(model.state), () => model.state.getSnapshot());
+  const subscribe = useMemo(() => model.state.subscribe.bind(model.state), [model]);
+  const snapshot = useCallback(() => model.state.getSnapshot(), [model]);
+  // Output and ACK snapshots belong to DSH's body, not this lifecycle wrapper.
+  const issue = useSyncExternalStore(subscribe, useCallback(() => model.state.getSnapshot().issue, [model]));
+  const view = useCallback(() => model, [model]);
+  const useTabInfo = useCallback(() => ({ tab: { id: key, visible, actions: { openTab: restart } } }), [key, visible, restart]);
+  const useTerminal = useCallback(() => useSyncExternalStore(subscribe, snapshot), [subscribe, snapshot]);
+  const useTheme = useCallback((select: (value: unknown) => unknown) => select(tuiTheme(useSyncExternalStore(theme.subscribe, theme.getSnapshot))), [theme]);
   // DSH remembers the shell of every terminal it creates. Starting a TUI should not change what New terminal opens.
   useEffect(() => {
     const remembered = read(SHELL_KEY);
@@ -149,11 +156,12 @@ function TuiTerminal({ item, services }: { item: KeptTerminal; services: Service
     return off;
   }, [model]);
   // After DSH restarted the terminal is gone; a new one resumes the same CLI session.
-  useEffect(() => { if (visible && state.issue === 'missingTerminal') restart(); }, [visible, state.issue]);
+  useEffect(() => { if (visible && issue === 'missingTerminal') restart(); }, [visible, issue, restart]);
   // Coming back to a conversation means typing in it, but only the page that attached last can type. And out of view, a
   // lost connection can end in a failure with no one to press Reconnect: DSH drops a reconnecting terminal's hold when
   // it opens another terminal, as it holds only the sidebar's.
   useEffect(() => {
+    const state = model.state.getSnapshot();
     if (visible && state.info?.state === 'running' && (state.phase === 'failed' || state.phase === 'connected' && !state.writable)) model.connect();
   }, [visible]);
   useUploadedPaths(root, sessionId, services.uploads, model.state, services.cli(sessionId));
@@ -161,10 +169,7 @@ function TuiTerminal({ item, services }: { item: KeptTerminal; services: Service
   useTerminalCopy(item.host, visible);
   const Body = slots.entries('sidebar.right.pane.tab').find(entry => entry.options.key === TERMINAL_TAB)?.component as React.FC<any> | undefined;
   if (!Body) return <div className="ra-empty" role="alert">{ui("DSH's terminal is not available")}</div>;
-  return <Body view={() => model} t={t}
-    useTabInfo={() => ({ tab: { id: key, visible, actions: { openTab: restart } } })}
-    useTerminal={() => useSyncExternalStore(model.state.subscribe.bind(model.state), () => model.state.getSnapshot())}
-    useTheme={(select: (value: unknown) => unknown) => select(tuiTheme(useSyncExternalStore(theme.subscribe, theme.getSnapshot)))} />;
+  return <Body view={view} t={t} useTabInfo={useTabInfo} useTerminal={useTerminal} useTheme={useTheme} />;
 }
 
 /** Keeps the terminals mounted, here rather than in a conversation, which is gone whenever another one or another tab is shown. */

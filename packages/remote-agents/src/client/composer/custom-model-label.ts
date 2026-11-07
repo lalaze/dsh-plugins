@@ -1,5 +1,6 @@
 import type { ChatProject } from '../../core/domain.js';
 import { api } from '../api.js';
+import { affectsElements } from '../dom-mutations.js';
 
 /** A custom picker's own caption, or the cell DSH's picker wraps around a remote model's label. */
 const CAPTIONS = '.codexModelSelectLabel, [data-provider-id^="remote-cli"]';
@@ -48,7 +49,10 @@ export function installCustomModelLabels(
     }
   };
   const schedule = () => { if (!scheduled && !stopped) { scheduled = true; queueMicrotask(scan); } };
-  const observer = new MutationObserver(schedule);
+  const observer = new MutationObserver(records => {
+    // Tooltip changes belong to the enclosing trigger; plain terminal/chat output belongs to neither selector.
+    if (affectsElements(records, `${CAPTIONS}, [aria-haspopup="menu"]`)) schedule();
+  });
   observer.observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['title'] });
   const refresh = () => {
     request?.abort(); const controller = new AbortController(); request = controller;
