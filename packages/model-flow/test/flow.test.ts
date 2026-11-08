@@ -8,7 +8,7 @@ import { flowText, runFlow, type ChildRequest, type ChildResult, type FlowEnd } 
 import { parseLine } from '../src/line.js';
 import { parseVerdict } from '../src/prompts.js';
 import { relocate, resolveSpec, type CatalogModel, type Role, type Routes } from '../src/routes.js';
-import { cardWords, parseRow, rowText, type CardState } from '../src/shared.js';
+import { cardWords, clock, parseRow, rowText, type CardState } from '../src/shared.js';
 import { ReportStore } from '../src/store.js';
 
 const route = (label: string) => ({ provider: 'p', model: label, label });
@@ -222,12 +222,26 @@ test('a card speaks the goal\'s language: steps, tags and how it ended', () => {
   assert.equal(en.running('implement', 1), 'Implementing, round 1');
   assert.equal(zh.tag('sentBack'), '打回');
   assert.equal(zh.tag('done'), '');
-  assert.equal(zh.summary({ kind: 'passed', round: 2, sentBack: 1, ms: 255_000 }), '第 2 轮审核通过 · 打回 1 次 · 4 分 15 秒');
-  assert.equal(zh.summary({ kind: 'passed', round: 1, sentBack: 0, ms: 30_000 }), '第 1 轮审核通过 · 30 秒');
-  assert.equal(en.summary({ kind: 'passed', round: 3, sentBack: 2, ms: 61_000 }), 'Review passed in round 3 · sent back 2 times · 1m 1s');
-  assert.equal(zh.summary({ kind: 'rejected', rounds: 3, ms: 360_000 }), '审核 3 轮仍未通过，交给你决定 · 6 分钟');
-  assert.equal(en.summary({ kind: 'failed', role: 'implement', reason: 'quota', ms: 1 }), 'Implement failed: quota');
-  assert.equal(zh.summary({ kind: 'stopped', ms: 60_000 }), '已停止 · 1 分钟');
+  assert.equal(zh.title({ kind: 'passed', round: 2, sentBack: 1, ms: 255_000 }), '第 2 轮审核通过');
+  assert.equal(zh.detail({ kind: 'passed', round: 2, sentBack: 1, ms: 255_000 }), '打回 1 次 · 共 4 分 15 秒');
+  assert.equal(zh.detail({ kind: 'passed', round: 1, sentBack: 0, ms: 30_000 }), '共 30 秒');
+  assert.equal(en.detail({ kind: 'passed', round: 3, sentBack: 2, ms: 61_000 }), 'sent back 2 times · 1m 1s in all');
+  assert.equal(zh.title({ kind: 'rejected', rounds: 3, ms: 360_000 }), '审核 3 轮仍未通过');
+  assert.equal(zh.detail({ kind: 'rejected', rounds: 3, ms: 360_000 }), '交给你决定 · 共 6 分钟');
+  assert.equal(en.title({ kind: 'failed', role: 'implement', reason: 'quota', ms: 1 }), 'Implement failed');
+  assert.equal(en.detail({ kind: 'failed', role: 'implement', reason: 'quota', ms: 1 }), 'quota');
+  const stoppedAt = { role: 'implement' as const, round: 1, model: 'GPT', status: 'stopped' as const };
+  assert.equal(zh.detail({ kind: 'stopped', ms: 85_000 }, stoppedAt), '停在第 1 轮实现 · 共 1 分 25 秒');
+  const running = { role: 'review' as const, round: 2, model: 'Opus 5.5', status: 'running' as const };
+  assert.equal(zh.doing(running, 1, 3), 'Opus 5.5 正在审核 · 打回 1 次 · 最多审核 3 轮');
+  assert.equal(en.doing({ ...running, role: 'implement' }, 0, 1), 'Opus 5.5 is implementing · up to 1 review round');
+  assert.equal(zh.showSteps(5), '查看 5 个步骤');
+});
+test('a card clock counts minutes, and hours past an hour', () => {
+  assert.equal(clock(0), '0:00');
+  assert.equal(clock(78_400), '1:18');
+  assert.equal(clock(96_600), '1:37', 'the same second as formatTime');
+  assert.equal(clock(3_725_000), '1:02:05');
 });
 test('a card survives being saved as text, line separators in a result included', () => {
   const card: CardState = { parentId: 'p', zh: true, rounds: 3, steps: [

@@ -241,6 +241,8 @@ test('a finished flow is one card with every step, its results and the report', 
   ]);
   assert.deepEqual(row.card!.steps.map(step => step.childId), host.calls.map(call => call.childId), 'each step opens its own conversation');
   assert.deepEqual({ ...row.card!.end!, ms: 0 }, { kind: 'passed', round: 2, sentBack: 1, ms: 0 });
+  assert.equal(row.card!.planned, true);
+  assert.deepEqual(row.card!.steps.map(step => step.note), [undefined, undefined, 'fix it', undefined, undefined], 'only a sent-back step carries a note');
   assert.equal(row.card!.parentId, 'parent');
 });
 
