@@ -15,8 +15,10 @@ export function createHandler(store, host) {
             const input = await request.json();
             if (input.action === 'lastCommand')
                 return Response.json({ sessionId: host.lastCommand(LAST_COMMAND_AGE) ?? null }, { headers });
-            if (input.action === 'step' && typeof input.commandId === 'string')
-                return Response.json({ step: host.step(input.commandId) ?? null }, { headers });
+            if (input.action === 'card' && typeof input.commandId === 'string')
+                return Response.json(host.card(input.commandId), { headers });
+            if (input.action === 'stepBody' && typeof input.commandId === 'string' && Number.isSafeInteger(input.index))
+                return Response.json({ body: host.stepBody(input.commandId, input.index) ?? null }, { headers });
             if (input.action === 'stop' && typeof input.commandId === 'string')
                 return Response.json({ stopped: host.stop(input.commandId) }, { headers });
             if (input.action === 'locale') {

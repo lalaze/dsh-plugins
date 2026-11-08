@@ -25,10 +25,10 @@ Or change the models for one run:
 | `plan=` `impl=` `review=` | The model for this run: `codex`, `claude/haiku`, `qwen`, optionally `@thinking` |
 | `plan=off` | Skip planning |
 | `rounds=n` | Review rounds at most: 3 by default, up to 10 |
-| `/flow stop` | End the flow running in this conversation, like the Stop button on the running row |
+| `/flow stop` | End the flow running in this conversation, like the Stop button on its card |
 | `/flow` | Show the current models |
 
-Each step is one row in the conversation. While it runs, the row shows the model, the time so far and the latest thing it is doing; afterwards click it for the whole result, or **Open** to read that step's conversation beside the chat. The last row is the report: what was built and what the review found, open without a click.
+A flow is one card in the conversation. While it runs, the card lists its steps, each with its model and time, and the latest thing the running step is doing; **Stop** ends it. When it ends, the card shows the outcome (passed in which round, sent back how often, or why it stopped), the steps fold away under it, and the report is shown below: what was built and what the review found. Click the card to see the steps again, a step for its whole result, and **Open** to read that step's conversation beside the chat. Passed is green, sent back orange, failed red.
 
 Attach images and files to `/flow`, with or without a written goal. Every step receives the attachments, including later rounds and a review asked again for its missing verdict. If any selected model declares that it does not support images, a flow with images will not start.
 
@@ -49,7 +49,7 @@ A review with no verdict is asked once more. If there is still none the flow sto
 
 - Each implementation and review round is a new session. It picks up from the prompt and the changes in the working tree, not the previous round's conversation.
 - The flow does not run inside the conversation's model. That model hears how the flow ended with your next message, so "release it" means something to it.
-- A flow does not continue after DSH restarts.
+- A flow does not continue after DSH restarts. Its card then says so, with the steps it got through.
 - Read-only is enforced by DSH's sandbox. A Codex reviewer can run tests; a Claude Code reviewer can read code and git state, but its test commands are refused.
 - With remote Claude Code or Codex, planning and review can search the web, and Claude Code can read pages too, so a model may send workspace content out in a search query or URL.
 - Stopping interrupts the step's model at once, and the commands it started in that step end too. The exception is Codex 0.164's workspace sandbox on Linux, where a command runs on to its end.

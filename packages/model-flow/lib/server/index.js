@@ -2,13 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Activity } from './activity.js';
-import { brief, flowText, runFlow } from './engine.js';
+import { brief, flowText, hasCjk, runFlow } from './engine.js';
 import { API_PATH, createHandler } from './http.js';
 import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine } from './line.js';
 import { attachmentNote } from './prompts.js';
-import { machineOf, OFF, relocate, resolveSpec } from './routes.js';
-import { rowText } from './shared.js';
-import { FlowStore, ReportStore } from './store.js';
+import { machineOf, nameParts, OFF, relocate, resolveSpec } from './routes.js';
+import { cut, MARK, MAX_STEP_BODY, rowText } from './shared.js';
+import { CardStore, FlowStore, ReportStore } from './store.js';
 export const name = 'dsh-model-flow';
 export const inject = ['connection', 'commands', 'subagents', 'llm'];
 const COMMAND = 'flow';
@@ -37,9 +37,29 @@ export async function apply(ctx) {
     const running = new Map();
     const readOnly = new Set();
     const failures = new Map();
+    const saved = new CardStore(join(stateDir(), 'cards.json'));
+    await saved.open();
     // Rows in the chat are command results: the one way to add to a conversation without a model turn. Only this process knows the mark.
-    const noteMark = `⁣${randomUUID()}`, stepMark = `⁣${randomUUID()}`;
-    const openSteps = new Map(), stepByCommand = new Map(), stepByChild = new Map();
+    const cardMark = `${MARK}${randomUUID()}`;
+    const cards = new Map(), cardByCommand = new Map(), stepByChild = new Map();
+    /** Typed /flow lines still being handled: while they run, their row draws nothing. */
+    const typed = new Set();
+    const stepsOf = (card, bodyLimit, now = Date.now()) => card.state.steps.map(({ startedAt, activity: _activity, body, ...step }) => ({
+        ...step, ...(step.ms === undefined && step.status === 'running' ? { ms: now - startedAt } : {}), ...(bodyLimit > 0 && body ? { body: cut(body, bodyLimit) } : {}),
+    }));
+    /** What a card can still show if DSH stops before the flow ends. */
+    const snapshot = (card) => {
+        const { parentId, zh, rounds } = card.state;
+        return { parentId, zh, rounds, steps: stepsOf(card, 4000).map(step => step.status === 'running' ? { ...step, ms: undefined } : step) };
+    };
+    const view = (card) => {
+        const now = Date.now(), { parentId, zh, rounds, end } = card.state, steps = card.state.steps;
+        let activity = '';
+        for (let index = steps.length - 1; index >= 0 && !activity; index--)
+            if (steps[index].status === 'running')
+                activity = steps[index].activity.current();
+        return { parentId, zh, rounds, ...(end ? { end } : {}), steps: stepsOf(card, 0, now), elapsed: (end ? card.startedAt + end.ms : now) - card.startedAt, ...(activity ? { activity } : {}) };
+    };
     /** The newest typed /flow: the new-session page stays where it is after a command, so the client opens this conversation. */
     let lastCommand;
     /** Replies outside a flow have no goal to take their language from; the client says which one it shows. */
@@ -65,14 +85,22 @@ export async function apply(ctx) {
             catalog, efforts,
             lastCommand: maxAge => lastCommand && Date.now() - lastCommand.at <= maxAge ? lastCommand.sessionId : undefined,
             setLocale: value => { locale = value; },
-            step: commandId => {
-                const step = stepByCommand.get(commandId);
-                return step && { title: step.title(), elapsed: step.elapsed(), activity: step.activity.current(), parentId: step.parentId, ...(step.childId ? { childId: step.childId } : {}) };
+            card: commandId => {
+                if (typed.has(commandId))
+                    return { start: true };
+                const live = cardByCommand.get(commandId);
+                if (live)
+                    return { card: view(live) };
+                const stale = saved.get(commandId);
+                return stale ? { card: { ...stale, elapsed: 0, interrupted: true } } : {};
             },
+            stepBody: (commandId, index) => cardByCommand.get(commandId)?.state.steps[index]?.body ?? saved.get(commandId)?.steps[index]?.body,
             stop: commandId => {
-                const step = stepByCommand.get(commandId), flow = step && running.get(step.parentId);
-                flow?.controller.abort();
-                return !!flow;
+                const card = cardByCommand.get(commandId);
+                if (!card || card.state.end)
+                    return false;
+                card.controller.abort();
+                return true;
             },
         }) });
     // Runs before the child's first turn and is durable in its log, so a child reopened later stays read-only.
@@ -164,42 +192,61 @@ export async function apply(ctx) {
         return { ...(plan ? { plan } : {}), implement, review };
     }
     function start(agent, goal, routes, rounds, attachments) {
-        const controller = new AbortController();
-        running.set(agent.id, { controller, routes, goal, startedAt: Date.now() });
-        const note = async (text) => {
-            try {
-                await host.commands.execute(agent, `/${COMMAND} ${noteMark}${text}`, [], new AbortController().signal);
-            }
-            catch (error) {
-                ctx.logger?.warn?.(`model flow: could not add a note: ${String(error)}`);
-            }
-        };
-        const openRow = (title) => {
-            const id = randomUUID(), startedAt = Date.now(), words = flowText(goal);
-            let settle = () => undefined;
-            const step = { title: () => title, elapsed: () => words.time(Date.now() - startedAt), activity: new Activity(), parentId: agent.id, done: new Promise(resolve => { settle = resolve; }) };
-            openSteps.set(id, step);
-            // The command logs its start before it first waits, so rows keep the order of the steps.
-            const executed = host.commands.execute(agent, `/${COMMAND} ${stepMark}${id}`, [], new AbortController().signal)
-                .catch(error => { ctx.logger?.warn?.(`model flow: could not add a row: ${String(error)}`); });
+        const controller = new AbortController(), startedAt = Date.now();
+        running.set(agent.id, { controller, routes, goal, startedAt });
+        let settle = () => undefined;
+        const card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, steps: [] }, done: new Promise(resolve => { settle = resolve; }) };
+        cards.set(card.id, card);
+        const persist = () => { if (card.commandId && !card.state.end)
+            saved.put(card.commandId, snapshot(card)); };
+        const openRow = ({ role, round, route }) => {
+            const names = nameParts(route.provider, route.label);
+            const step = { role, round, model: names.name, ...(names.machine ? { machine: names.machine } : {}), status: 'running', startedAt: Date.now(), activity: new Activity() };
+            card.state.steps.push(step);
+            persist();
             return {
-                attach(childId) { step.childId = childId; stepByChild.set(childId, step); },
-                async close({ kind, title: done, body }) {
-                    openSteps.delete(id);
-                    if (step.commandId)
-                        stepByCommand.delete(step.commandId);
+                attach(childId) { step.childId = childId; stepByChild.set(childId, step); persist(); },
+                async close({ status, body }) {
+                    step.status = status;
+                    step.ms = Date.now() - step.startedAt;
+                    const kept = cut(body, MAX_STEP_BODY);
+                    if (kept)
+                        step.body = kept;
                     if (step.childId)
                         stepByChild.delete(step.childId);
-                    settle({ kind, text: rowText({ title: done, ...(body ? { body } : {}), parentId: agent.id, ...(step.childId ? { childId: step.childId } : {}) }) });
-                    await executed;
+                    persist();
                 },
             };
         };
-        // After the handler returns, so the first step's rows follow the "started" row.
+        let executed = Promise.resolve(), ended = false;
+        const finish = async ({ report, ...end }) => {
+            if (ended)
+                return;
+            ended = true;
+            card.state.end = end;
+            const { parentId, zh } = card.state;
+            settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, steps: stepsOf(card, MAX_STEP_BODY), end } }) });
+            await executed;
+            cards.delete(card.id);
+            for (const step of card.state.steps)
+                if (step.childId)
+                    stepByChild.delete(step.childId);
+            const commandId = card.commandId;
+            if (commandId) {
+                // Kept, ended, in case DSH stops before the chat has saved the result: the card can still say how the flow ended.
+                saved.put(commandId, { ...snapshot(card), end });
+                // A poll may still be on its way: it should find the finished card rather than nothing.
+                setTimeout(() => cardByCommand.delete(commandId), 10_000).unref?.();
+            }
+        };
+        // After the handler returns, so the card follows the /flow line.
         setTimeout(() => {
-            void runFlow({ goal, routes, rounds, signal: controller.signal }, { run: runChild(agent, attachments), note, openRow, report: text => reports.put(agent.id, text) })
-                .catch(error => note(`${String(error)}`))
-                .finally(() => running.delete(agent.id));
+            executed = host.commands.execute(agent, `/${COMMAND} ${cardMark}${card.id}`, [], new AbortController().signal)
+                .catch(error => { ctx.logger?.warn?.(`model flow: could not add the card: ${String(error)}`); });
+            void runFlow({ goal, routes, rounds, signal: controller.signal }, { run: runChild(agent, attachments), openRow, finish, report: text => reports.put(agent.id, text) })
+                .catch(error => finish({ kind: 'failed', role: card.state.steps.at(-1)?.role ?? 'plan', reason: error instanceof Error ? error.message : String(error), ms: Date.now() - startedAt }))
+                // Whatever happened, the card must not stay running.
+                .finally(() => { running.delete(agent.id); void finish({ kind: 'stopped', ms: Date.now() - startedAt }); });
         }, 0);
     }
     const titleFor = async (agent, goal) => {
@@ -216,71 +263,81 @@ export async function apply(ctx) {
         input: { hint: '[plan=model] [impl=model] [review=model] [rounds=n] <goal> | stop', attachments: true },
         handler: async ({ commandId, agent, rawInput, attachments = [] }) => {
             const input = rawInput.trimStart();
-            if (input.startsWith(noteMark))
-                return { kind: 'success', text: input.slice(noteMark.length) };
-            if (input.startsWith(stepMark)) {
-                const step = openSteps.get(input.slice(stepMark.length));
-                if (!step)
-                    return { kind: 'error' };
-                step.commandId = commandId;
-                stepByCommand.set(commandId, step);
-                return step.done;
+            if (input.startsWith(cardMark)) {
+                const card = cards.get(input.slice(cardMark.length));
+                if (!card)
+                    return { kind: 'error', text: say('This flow is no longer running.', '这个流程已经不在运行。') };
+                card.commandId = commandId;
+                cardByCommand.set(commandId, card);
+                saved.put(commandId, snapshot(card));
+                return card.done;
             }
-            lastCommand = { sessionId: agent.id, at: Date.now() };
-            ensureConversation(agent);
+            if (commandId)
+                typed.add(commandId);
             try {
-                const line = parseLine(rawInput, attachments.length > 0), current = running.get(agent.id);
-                if (line.kind === 'stop') {
-                    if (attachments.length)
-                        return { kind: 'error', text: say('Remove the attachments before using /flow stop.', '请先移除附件，再使用 /flow stop。') };
-                    if (!current)
-                        return { kind: 'error', text: say('No flow is running in this conversation.', '这个对话里没有正在运行的流程。') };
-                    current.controller.abort();
-                    return { kind: 'success', text: flowText(current.goal).stopped };
-                }
-                if (line.kind === 'status') {
-                    if (current)
-                        return { kind: 'success', text: `${flowText(current.goal).started(current.routes, store.config.rounds)}. ${brief(current.goal, 120)}` };
-                    const { plan, implement, review, rounds } = store.config;
-                    const usage = `/${COMMAND} [plan=model] [impl=model] [review=model] [rounds=1-${MAX_ROUNDS}] <goal>`;
-                    return { kind: 'success', text: say(`Plan: ${plan?.label ?? 'skipped'}. Implement: ${implement?.label ?? 'not chosen'}. Review: ${review?.label ?? 'not chosen'}. Up to ${rounds} review rounds. ${usage}`, `计划：${plan?.label ?? '跳过'}。实现：${implement?.label ?? '未选择'}。审核：${review?.label ?? '未选择'}。最多审核 ${rounds} 轮。${usage}`) };
-                }
-                if (current)
-                    return { kind: 'error', text: say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, line.goal) };
-                if (!host.subagents.list().includes('spawn'))
-                    return { kind: 'error', text: 'This DSH has no subagent provider "spawn".' };
-                const presets = ctx.get('permissionPresets');
-                try {
-                    if (presets && presets.resolve(presets.current(agent.session)).sandbox === 'read-only')
-                        return { kind: 'error', text: say('This conversation is read-only, so the implementing model could not change files. Switch it to Workspace Write first.', '这个对话是只读权限，实现模型改不了文件。请先切换到 Workspace Write。', line.goal) };
-                }
-                catch { /* A custom permission has no preset to read; the implementer reports what it could not do. */ }
-                const routes = await chooseRoutes(agent, line.overrides), rounds = line.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
-                const goal = line.goal || say('Do what the attached images and files ask.', '按附件里的图片和文件的要求来做。');
-                if (attachments.some(block => block.type === 'image')) {
-                    for (const role of ['plan', 'implement', 'review']) {
-                        const route = routes[role];
-                        if (!route)
-                            continue;
-                        let modalities;
-                        try {
-                            modalities = (await host.llm.resolveModelInfo(route.provider, route.model)).inputModalities;
-                        }
-                        catch { /* Unknown capabilities: let the step report any model failure. */ }
-                        if (modalities && !modalities.includes('image'))
-                            return { kind: 'error', text: say(`${flowText(goal).roleName(role)} model ${route.label} (${route.model}) does not support images.`, `${flowText(goal).roleName(role)}模型 ${route.label}（${route.model}）不支持图片。`, goal) };
-                    }
-                }
-                await titleFor(agent, goal);
-                start(agent, goal, routes, rounds, attachments);
-                // Rows show one line, so the part that changes comes first; the conversation's title carries the goal.
-                return { kind: 'success', text: `${flowText(goal).started(routes, rounds, attachments.length)}\n${brief(goal, 160)}` };
+                return await typedCommand(agent, rawInput, attachments);
             }
-            catch (error) {
-                return { kind: 'error', text: error instanceof Error ? error.message : String(error) };
+            finally {
+                if (commandId)
+                    typed.delete(commandId);
             }
         },
     }));
+    async function typedCommand(agent, rawInput, attachments) {
+        lastCommand = { sessionId: agent.id, at: Date.now() };
+        ensureConversation(agent);
+        try {
+            const line = parseLine(rawInput, attachments.length > 0), current = running.get(agent.id);
+            if (line.kind === 'stop') {
+                if (attachments.length)
+                    return { kind: 'error', text: say('Remove the attachments before using /flow stop.', '请先移除附件，再使用 /flow stop。') };
+                if (!current)
+                    return { kind: 'error', text: say('No flow is running in this conversation.', '这个对话里没有正在运行的流程。') };
+                current.controller.abort();
+                return { kind: 'success', text: flowText(current.goal).stopped };
+            }
+            if (line.kind === 'status') {
+                if (current)
+                    return { kind: 'success', text: `${flowText(current.goal).started(current.routes, store.config.rounds)}. ${brief(current.goal, 120)}` };
+                const { plan, implement, review, rounds } = store.config;
+                const usage = `/${COMMAND} [plan=model] [impl=model] [review=model] [rounds=1-${MAX_ROUNDS}] <goal>`;
+                return { kind: 'success', text: say(`Plan: ${plan?.label ?? 'skipped'}. Implement: ${implement?.label ?? 'not chosen'}. Review: ${review?.label ?? 'not chosen'}. Up to ${rounds} review rounds. ${usage}`, `计划：${plan?.label ?? '跳过'}。实现：${implement?.label ?? '未选择'}。审核：${review?.label ?? '未选择'}。最多审核 ${rounds} 轮。${usage}`) };
+            }
+            if (current)
+                return { kind: 'error', text: say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, line.goal) };
+            if (!host.subagents.list().includes('spawn'))
+                return { kind: 'error', text: 'This DSH has no subagent provider "spawn".' };
+            const presets = ctx.get('permissionPresets');
+            try {
+                if (presets && presets.resolve(presets.current(agent.session)).sandbox === 'read-only')
+                    return { kind: 'error', text: say('This conversation is read-only, so the implementing model could not change files. Switch it to Workspace Write first.', '这个对话是只读权限，实现模型改不了文件。请先切换到 Workspace Write。', line.goal) };
+            }
+            catch { /* A custom permission has no preset to read; the implementer reports what it could not do. */ }
+            const routes = await chooseRoutes(agent, line.overrides), rounds = line.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
+            const goal = line.goal || say('Do what the attached images and files ask.', '按附件里的图片和文件的要求来做。');
+            if (attachments.some(block => block.type === 'image')) {
+                for (const role of ['plan', 'implement', 'review']) {
+                    const route = routes[role];
+                    if (!route)
+                        continue;
+                    let modalities;
+                    try {
+                        modalities = (await host.llm.resolveModelInfo(route.provider, route.model)).inputModalities;
+                    }
+                    catch { /* Unknown capabilities: let the step report any model failure. */ }
+                    if (modalities && !modalities.includes('image'))
+                        return { kind: 'error', text: say(`${flowText(goal).roleName(role)} model ${route.label} (${route.model}) does not support images.`, `${flowText(goal).roleName(role)}模型 ${route.label}（${route.model}）不支持图片。`, goal) };
+                }
+            }
+            await titleFor(agent, goal);
+            start(agent, goal, routes, rounds, attachments);
+            // The card that follows is the flow, so this row draws nothing; the text is for DSH without this plugin.
+            return { kind: 'success', text: rowText({ title: flowText(goal).started(routes, rounds, attachments.length), body: brief(goal, 160), start: true }) };
+        }
+        catch (error) {
+            return { kind: 'error', text: error instanceof Error ? error.message : String(error) };
+        }
+    }
     ctx.effect(() => () => { for (const flow of running.values())
         flow.controller.abort(); });
 }

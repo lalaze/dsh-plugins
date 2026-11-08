@@ -1,4 +1,4 @@
-/** The models chosen in settings. Nothing about a running flow is saved: it ends with DSH. */
+/** The models chosen in settings, results waiting to be told, and the cards of flows still running. */
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { combosFrom, roundsFrom } from './combos.js';
@@ -36,48 +36,60 @@ export class FlowStore {
         this.config = next;
     }
 }
-/** Flow results waiting for a conversation's next message, which can come after DSH restarts. */
-const MAX_REPORTS = 50;
-export class ReportStore {
+/** A small map kept in one JSON file, oldest entries dropped first. Writes run one at a time, so an earlier one cannot land after a later one. */
+class JsonMap {
     file;
-    reports = new Map();
-    constructor(file) {
+    limit;
+    entries = new Map();
+    constructor(file, limit) {
         this.file = file;
+        this.limit = limit;
     }
     async open() {
         try {
-            this.reports = new Map(Object.entries(JSON.parse(await readFile(this.file, 'utf8'))));
+            this.entries = new Map(Object.entries(JSON.parse(await readFile(this.file, 'utf8'))));
         }
-        catch { /* None yet, or unreadable: a missed result only costs context. */ }
+        catch { /* None yet, or unreadable: only something shown or told is lost. */ }
     }
-    /** Writes run one at a time, so an earlier one cannot land after a later one. */
     flush = () => this.writes;
     writes = Promise.resolve();
     persist() {
-        const content = JSON.stringify(Object.fromEntries(this.reports));
+        const content = JSON.stringify(Object.fromEntries(this.entries));
         this.writes = this.writes.then(async () => {
             await mkdir(dirname(this.file), { recursive: true });
             const temporary = `${this.file}.${process.pid}.tmp`;
             await writeFile(temporary, content, { mode: 0o600 });
             await rename(temporary, this.file);
-        }).catch(() => undefined); // The result still holds until DSH stops.
+        }).catch(() => undefined); // What is in memory still holds until DSH stops.
     }
-    put(sessionId, report) {
-        this.reports.delete(sessionId);
-        this.reports.set(sessionId, report);
-        for (const oldest of this.reports.keys()) {
-            if (this.reports.size <= MAX_REPORTS)
+    get(key) { return this.entries.get(key); }
+    put(key, value) {
+        this.entries.delete(key);
+        this.entries.set(key, value);
+        for (const oldest of this.entries.keys()) {
+            if (this.entries.size <= this.limit)
                 break;
-            this.reports.delete(oldest);
+            this.entries.delete(oldest);
         }
         this.persist();
     }
+    delete(key) { if (this.entries.delete(key))
+        this.persist(); }
+}
+/** Flow results waiting for a conversation's next message, which can come after DSH restarts. */
+export class ReportStore extends JsonMap {
+    constructor(file) { super(file, 50); }
     take(sessionId) {
-        const report = this.reports.get(sessionId);
-        if (report !== undefined) {
-            this.reports.delete(sessionId);
-            this.persist();
-        }
+        const report = this.get(sessionId);
+        if (report !== undefined)
+            this.delete(sessionId);
         return report;
     }
+}
+/**
+ * The card of a flow that is still running, by its command. A finished card is saved in the chat itself; a card whose
+ * DSH stopped never finishes, so this is what it can still show afterwards: the steps it got through.
+ */
+export class CardStore extends JsonMap {
+    constructor(file) { super(file, 50); }
 }
