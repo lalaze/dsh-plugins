@@ -44,8 +44,6 @@ export const zh: Record<string, string> = {
   'Open': '打开',
   'Stop': '停止',
   'Stopping': '正在停止',
-  'Starting': '正在开始',
-  'Stopped when DSH closed': '这一步在 DSH 关闭时中断了',
   'Failed': '失败',
   'Done': '已完成',
   'Copy': '复制',

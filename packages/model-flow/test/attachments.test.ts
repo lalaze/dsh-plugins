@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { Context } from '@deepseek-ai/cordis';
 import { apply } from '../src/index.js';
 import { attachmentNote, implementPrompt, planPrompt, reviewPrompt } from '../src/prompts.js';
+import { parseRow, type LiveCard } from '../src/shared.js';
 
 const attachments = [
   { type: 'image' as const, attachment: { attachmentId: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png', width: 16, height: 16, bytes: 97, name: 'image.png' } },
@@ -16,7 +17,7 @@ type Block = { type: string; text?: string };
 interface Invocation { commandId?: string; agent: typeof agent; rawInput: string; attachments?: readonly { type: 'image' | 'file' }[] }
 interface Reply { kind: 'success' | 'error'; text?: string }
 interface Command { input: { attachments?: boolean }; handler(input: Invocation): Promise<Reply> }
-interface ActivationSpec { label: string; signal: AbortSignal; request: { prompt: Block[]; agentOptions: { model: string } } }
+interface ActivationSpec { childId: string; label: string; signal: AbortSignal; request: { prompt: Block[]; agentOptions: { model: string } } }
 const agent = { id: 'parent', phase: { kind: 'idle', lastTurn: 1 }, session: { header: {}, append() {}, deriveMessages: () => [] } };
 const options = 'plan=planner impl=coder review=checker';
 const models = ['planner', 'coder', 'checker'].map(id => ({ provider: 'p', id, name: id }));
@@ -33,8 +34,10 @@ async function setup(t: TestContext, settings: {
   verdicts?: string[];
   info?: (model: string) => Promise<{ inputModalities?: readonly string[] }>;
   pending?: boolean;
+  /** Boot again in an earlier setup's home, as DSH does after a restart. */
+  home?: string;
 } = {}) {
-  const home = await mkdtemp(join(tmpdir(), 'model-flow-attachments-'));
+  const home = settings.home ?? await mkdtemp(join(tmpdir(), 'model-flow-attachments-'));
   const oldHome = process.env.DSH_HOME;
   process.env.DSH_HOME = home;
   const disposers: (() => void)[] = [];
@@ -42,7 +45,7 @@ async function setup(t: TestContext, settings: {
     for (const dispose of disposers.reverse()) dispose();
     await delay(10);
     if (oldHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = oldHome;
-    await rm(home, { recursive: true, force: true });
+    if (!settings.home) await rm(home, { recursive: true, force: true });
   });
   const route = (model: string) => ({ provider: 'p', model, label: model });
   const directory = join(home, 'storages', 'dsh-model-flow');
@@ -85,7 +88,7 @@ async function setup(t: TestContext, settings: {
   };
   await apply(ctx as unknown as Context);
   return {
-    command, calls, notes, resolved, disposed: () => disposed,
+    command, calls, notes, resolved, home, disposed: () => disposed,
     run: (rawInput: string, blocks: Invocation['attachments'] = attachments) => command.handler({ agent, rawInput, attachments: blocks }),
     async post(body: Record<string, unknown>) {
       const response = await fetch(new Request('http://test/flow', { method: 'POST', headers: { 'content-type': 'application/json', 'X-DSH-Model-Flow': '1' }, body: JSON.stringify(body) }));
@@ -149,19 +152,21 @@ test('stop with attachments and a duplicate flow fail without stopping the runni
   assert.equal(host.disposed(), 1);
 });
 
-test('the stop button on a running row ends its flow and nothing else', async t => {
+test('the stop button on a running card ends its flow and nothing else', async t => {
   const host = await setup(t, { pending: true });
   await host.run(`${options} do it`, []);
   await until(() => host.calls.length === 1);
-  // The first command the flow runs itself is the plan step's row.
+  // The one command the flow runs itself is its card.
   const row = 'command-1';
-  await until(async () => !!(await host.post({ action: 'step', commandId: row }) as { step: unknown }).step);
+  const card = async () => (await host.post({ action: 'card', commandId: row }) as { card?: LiveCard }).card;
+  await until(async () => (await card())?.steps.length === 1);
   assert.deepEqual(await host.post({ action: 'stop', commandId: 'no-such-row' }), { stopped: false });
   assert.equal(host.calls[0].signal.aborted, false);
   assert.deepEqual(await host.post({ action: 'stop', commandId: row }), { stopped: true });
   assert.equal(host.calls[0].signal.aborted, true);
   assert.equal(host.disposed(), 1);
-  await until(async () => !(await host.post({ action: 'step', commandId: row }) as { step: unknown }).step);
+  await until(async () => (await card())?.end?.kind === 'stopped');
+  assert.equal((await card())!.steps[0].status, 'stopped');
   assert.deepEqual(await host.post({ action: 'stop', commandId: row }), { stopped: false }, 'the flow is over');
   assert.equal(host.calls.length, 1, 'no further step starts');
   assert.equal((await host.run('stop', [])).kind, 'error', 'nothing is left to stop');
@@ -202,7 +207,7 @@ for (const locale of ['en', 'zh']) {
     const reply = await host.run('');
     assert.equal(reply.kind, 'success');
     assert.ok(reply.text!.split('\n')[0].endsWith(locale === 'zh' ? '，2 个附件' : ', 2 attachments'));
-    assert.ok(reply.text!.endsWith(goal));
+    assert.equal(parseRow(reply.text!).body, goal);
     await host.finished();
     assert.match(host.calls[0].request.prompt[0].text!, new RegExp(goal));
     assertAttachments(host.calls);
@@ -212,7 +217,7 @@ for (const locale of ['en', 'zh']) {
 test('without attachments child prompts and the started row keep their original text', async t => {
   const host = await setup(t);
   const reply = await host.run(`${options} do it`, []);
-  assert.equal(reply.text, 'Started: Plan planner → Implement coder → Review checker, up to 3 review rounds\ndo it');
+  assert.deepEqual(parseRow(reply.text!), { title: 'Started: Plan planner → Implement coder → Review checker, up to 3 review rounds', body: 'do it', start: true });
   await host.finished();
   assert.deepEqual(host.calls.map(call => call.request.prompt), [
     [{ type: 'text', text: planPrompt('do it') }],
@@ -220,4 +225,54 @@ test('without attachments child prompts and the started row keep their original 
     [{ type: 'text', text: reviewPrompt({ goal: 'do it', plan: 'planner output', round: 1, summary: 'coder output' }) }],
   ]);
   assert.deepEqual(host.resolved, []);
+});
+
+test('a finished flow is one card with every step, its results and the report', async t => {
+  const host = await setup(t, { verdicts: ['fix it\nFLOW_VERDICT: needs_revision', 'all good\nFLOW_VERDICT: pass'] });
+  await host.run(`${options} do it`, []);
+  await host.finished();
+  assert.equal(host.notes.length, 1, 'the flow adds one row, its card');
+  const row = parseRow(host.notes[0]);
+  assert.match(row.title, /^Done: review passed in round 2/);
+  assert.match(row.body!, /coder output[\s\S]*all good/);
+  assert.deepEqual(row.card!.steps.map(step => `${step.role}${step.round} ${step.model} ${step.status} ${step.body}`), [
+    'plan0 planner done planner output', 'implement1 coder done coder output', 'review1 checker sentBack fix it',
+    'implement2 coder done coder output', 'review2 checker passed all good',
+  ]);
+  assert.deepEqual(row.card!.steps.map(step => step.childId), host.calls.map(call => call.childId), 'each step opens its own conversation');
+  assert.deepEqual({ ...row.card!.end!, ms: 0 }, { kind: 'passed', round: 2, sentBack: 1, ms: 0 });
+  assert.equal(row.card!.parentId, 'parent');
+});
+
+test('a running card sends its steps without results, which come one at a time', async t => {
+  const host = await setup(t, { pending: true });
+  await host.run(`${options} do it`, []);
+  await until(() => host.calls.length === 1);
+  const { card } = await host.post({ action: 'card', commandId: 'command-1' }) as { card: LiveCard };
+  assert.deepEqual(card.steps.map(step => [step.role, step.status, step.childId, step.body]), [['plan', 'running', host.calls[0].childId, undefined]]);
+  assert.equal(typeof card.elapsed, 'number');
+  assert.deepEqual(await host.post({ action: 'stepBody', commandId: 'command-1', index: 0 }), { body: null });
+  assert.deepEqual(await host.post({ action: 'card', commandId: 'no-such-row' }), {});
+});
+
+test('after a restart a running card shows the steps it got through, as stopped', async t => {
+  const first = await setup(t, { pending: true });
+  await first.run(`${options} do it`, []);
+  await until(() => first.calls.length === 1);
+  await until(async () => {
+    try { return (JSON.parse(await readFile(join(first.home, 'storages', 'dsh-model-flow', 'cards.json'), 'utf8')) as Record<string, { steps: { childId?: string }[] }>)['command-1']?.steps[0]?.childId === first.calls[0].childId; }
+    catch { return false; }
+  });
+  // The first DSH is never told to stop, as when it is killed.
+  const again = await setup(t, { home: first.home });
+  const { card } = await again.post({ action: 'card', commandId: 'command-1' }) as { card: LiveCard };
+  assert.equal(card.interrupted, true);
+  assert.deepEqual(card.steps.map(step => [step.role, step.status, step.childId]), [['plan', 'running', first.calls[0].childId]]);
+  assert.deepEqual(await again.post({ action: 'stop', commandId: 'command-1' }), { stopped: false });
+});
+
+test('a typed /flow being handled is known as the line that starts a card', async t => {
+  const host = await setup(t, { info: () => new Promise(() => {}) });
+  void host.command.handler({ commandId: 'typed-1', agent, rawInput: `${options} do it`, attachments });
+  await until(async () => (await host.post({ action: 'card', commandId: 'typed-1' }) as { start?: boolean }).start === true);
 });

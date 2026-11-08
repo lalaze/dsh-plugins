@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Activity, lastLine } from '../src/activity.js';
-import { flowText, runFlow, type ChildRequest, type ChildResult } from '../src/engine.js';
+import { flowText, runFlow, type ChildRequest, type ChildResult, type FlowEnd } from '../src/engine.js';
 import { parseLine } from '../src/line.js';
 import { parseVerdict } from '../src/prompts.js';
-import { relocate, resolveSpec, type CatalogModel, type Routes } from '../src/routes.js';
-import { parseRow, rowText } from '../src/shared.js';
+import { relocate, resolveSpec, type CatalogModel, type Role, type Routes } from '../src/routes.js';
+import { cardWords, parseRow, rowText, type CardState } from '../src/shared.js';
 import { ReportStore } from '../src/store.js';
 
 const route = (label: string) => ({ provider: 'p', model: label, label });
@@ -17,18 +17,19 @@ const done = (text: string): ChildResult => ({ text, stopReason: 'completed' });
 
 /** Runs the flow against scripted model replies and records the order of the steps. */
 async function play(script: ((request: ChildRequest) => ChildResult | Promise<ChildResult>), input: Partial<Parameters<typeof runFlow>[0]> = {}) {
-  const calls: ChildRequest[] = [], notes: string[] = [], reports: string[] = [], rows: { running: string; closed?: { kind: string; title: string; body?: string } }[] = [];
+  const calls: ChildRequest[] = [], ends: FlowEnd[] = [], reports: string[] = [], rows: { role: Role; round: number; model: string; closed?: { status: string; body?: string } }[] = [];
   const outcome = await runFlow({ goal: 'add csv', routes, rounds: 3, signal: new AbortController().signal, ...input }, {
     run: async request => { calls.push(request); return script(request); },
-    note: async text => { notes.push(text); },
+    finish: async end => { ends.push(end); },
     report: text => { reports.push(text); },
-    openRow: running => {
-      const row: (typeof rows)[number] = { running };
+    openRow: ({ role, round, route }) => {
+      const row: (typeof rows)[number] = { role, round, model: route.label };
       rows.push(row);
       return { attach: () => undefined, close: async result => { row.closed = result; } };
     },
   });
-  return { outcome, calls, notes, rows, reports, order: calls.map(call => `${call.role}${call.round || ''}`) };
+  assert.equal(ends.length, 1, 'a flow ends exactly once');
+  return { outcome, calls, ends, end: ends[0], rows, reports, order: calls.map(call => `${call.role}${call.round || ''}`) };
 }
 const reviewing = (verdicts: string[]) => {
   let index = 0;
@@ -51,13 +52,15 @@ test('rejected work goes back with the findings and is reviewed again', async ()
   assert.doesNotMatch(calls[3].prompt, /FLOW_VERDICT/);
   assert.match(calls[3].prompt, /do not start over/);
   assert.match(calls[4].prompt, /no header row/);
-  assert.ok(rows.some(row => /sent it back/.test(row.closed!.title) && /no header row/.test(row.closed!.body!)));
+  assert.ok(rows.some(row => row.closed!.status === 'sentBack' && /no header row/.test(row.closed!.body!)));
 });
 test('the rounds run out and the last findings go to the user', async () => {
-  const { outcome, order, notes } = await play(reviewing(Array(9).fill('still broken\nFLOW_VERDICT: needs_revision')), { rounds: 2 });
+  const { outcome, order, end } = await play(reviewing(Array(9).fill('still broken\nFLOW_VERDICT: needs_revision')), { rounds: 2 });
   assert.deepEqual(outcome, { status: 'rejected', rounds: 2, findings: 'still broken' });
   assert.deepEqual(order, ['plan', 'implement1', 'review1', 'implement2', 'review2']);
-  assert.match(notes.at(-1)!, /did not pass after 2 rounds[\s\S]*still broken/);
+  assert.equal(end.kind, 'rejected');
+  assert.match(flowText('add csv').ended(end), /did not pass after 2 rounds/);
+  assert.match(end.report!, /still broken/);
 });
 test('planning can be skipped', async () => {
   const { order } = await play(reviewing(['FLOW_VERDICT: pass']), { routes: { implement: routes.implement, review: routes.review } });
@@ -70,40 +73,43 @@ test('a review with no verdict is asked again without redoing the work', async (
   assert.match(calls[3].prompt, /left that line out/);
 });
 test('two reviews with no verdict stop the flow rather than counting as a pass', async () => {
-  const { outcome, order } = await play(reviewing(['fine', 'fine']));
+  const { outcome, order, end } = await play(reviewing(['fine', 'fine']));
   assert.deepEqual(outcome, { status: 'failed', reason: 'no verdict' });
+  assert.equal(end.kind, 'noVerdict');
   assert.deepEqual(order, ['plan', 'implement1', 'review1', 'review1']);
 });
 test('a failed step ends the flow and says why', async () => {
-  const { outcome, order, rows } = await play(request => request.role === 'implement' ? { text: '', stopReason: 'error', diagnostic: 'quota' } : done('x'));
+  const { outcome, order, rows, end } = await play(request => request.role === 'implement' ? { text: '', stopReason: 'error', diagnostic: 'quota' } : done('x'));
   assert.deepEqual(outcome, { status: 'failed', reason: 'quota' });
   assert.deepEqual(order, ['plan', 'implement1']);
-  assert.deepEqual(rows.at(-1)!.closed, { kind: 'error', title: 'Implement failed: quota' });
+  assert.deepEqual(rows.at(-1)!.closed, { status: 'failed', body: 'quota' });
+  assert.deepEqual({ ...end, ms: 0 }, { kind: 'failed', role: 'implement', reason: 'quota', ms: 0 });
 });
 test('a thrown error from starting a child is reported', async () => {
   const { outcome, rows } = await play(() => { throw new Error('limit reached'); });
   assert.deepEqual(outcome, { status: 'failed', reason: 'limit reached' });
-  assert.match(rows.at(-1)!.closed!.title, /limit reached/);
+  assert.equal(rows.at(-1)!.closed!.status, 'failed');
+  assert.match(rows.at(-1)!.closed!.body!, /limit reached/);
 });
 test('stopping during a step ends the flow with no further steps', async () => {
   const controller = new AbortController();
-  const { outcome, order, notes, rows } = await play(request => { if (request.role === 'implement') controller.abort(); return done('x'); }, { signal: controller.signal });
+  const { outcome, order, rows, end } = await play(request => { if (request.role === 'implement') controller.abort(); return done('x'); }, { signal: controller.signal });
   assert.deepEqual(outcome, { status: 'stopped' });
   assert.deepEqual(order, ['plan', 'implement1']);
-  assert.ok(!notes.some(note => /Stopped/.test(note)), 'the stop command says so itself');
-  assert.match(rows.at(-1)!.closed!.title, /^Round 1: Implement stopped/);
+  assert.equal(end.kind, 'stopped');
+  assert.deepEqual(rows.at(-1)!.closed, { status: 'stopped' });
 });
 test('a step stopped in its own view ends the flow as stopped, not as failed', async () => {
-  const { outcome, order, rows, reports } = await play(request => request.role === 'implement' ? { text: 'Starting the tests.', stopReason: 'aborted' } : done('x'));
+  const { outcome, order, rows, reports, end } = await play(request => request.role === 'implement' ? { text: 'Starting the tests.', stopReason: 'aborted' } : done('x'));
   assert.deepEqual(outcome, { status: 'stopped' });
   assert.deepEqual(order, ['plan', 'implement1']);
-  assert.equal(rows.at(-1)!.closed!.kind, 'success');
-  assert.match(rows.at(-1)!.closed!.title, /^Round 1: Implement stopped/);
+  assert.equal(end.kind, 'stopped');
+  assert.deepEqual(rows.at(-1)!.closed, { status: 'stopped' });
   assert.match(reports.at(-1)!, /the user stopped it during the implement step/);
 });
-test('notes follow the language of the goal', async () => {
-  const { notes } = await play(reviewing(['FLOW_VERDICT: pass']), { goal: '给导出加 CSV' });
-  assert.match(notes.at(-1)!, /^完成：第 1 轮审核通过/);
+test('the saved first line follows the language of the goal', async () => {
+  const { end } = await play(reviewing(['FLOW_VERDICT: pass']), { goal: '给导出加 CSV' });
+  assert.match(flowText('给导出加 CSV').ended(end), /^完成：第 1 轮审核通过/);
 });
 
 test('a sent-back row shows the closing message, while the implementer gets the whole review', async () => {
@@ -115,15 +121,15 @@ test('a sent-back row shows the closing message, while the implementer gets the 
       : done('FLOW_VERDICT: pass');
   });
   assert.match(calls.find(call => call.role === 'implement' && call.round === 2)!.prompt, /csv\.js:3 is wrong/);
-  const row = rows.find(row => /sent it back/.test(row.closed!.title))!.closed!;
+  const row = rows.find(row => row.closed!.status === 'sentBack')!.closed!;
   assert.equal(row.body, 'Fix csv.js.');
 });
-test('the closing note leaves out the progress sentences and the verdict', async () => {
-  const { notes } = await play(request => request.role === 'review'
+test('the report leaves out the progress sentences and the verdict', async () => {
+  const { end } = await play(request => request.role === 'review'
     ? { text: 'Checking the diff.\n\nAll criteria met.\nFLOW_VERDICT: pass', closing: 'All criteria met.\nFLOW_VERDICT: pass', stopReason: 'completed' }
     : done('x'));
-  assert.match(parseRow(notes.at(-1)!).body!, /All criteria met\.$/);
-  assert.doesNotMatch(notes.at(-1)!, /Checking the diff|FLOW_VERDICT/);
+  assert.match(end.report!, /All criteria met\.$/);
+  assert.doesNotMatch(end.report!, /Checking the diff|FLOW_VERDICT/);
 });
 
 test('the last verdict line decides and Markdown around it is ignored', () => {
@@ -189,25 +195,49 @@ test('a saved model moves to the conversation\'s machine only when that machine 
   const terra = { ...saved, model: 'mini/codex/gpt-terra' };
   assert.equal(relocate(terra, catalog, 'air').model, 'mini/codex/gpt-terra');
 });
-test('every step is one row, from what is running to its result', async () => {
-  const clock = { at: 0 };
+test('every step is one entry in the card, from running to how it ended', async () => {
   const { rows } = await play(request => {
-    clock.at += 125_000;
     if (request.role === 'review') return { text: 'Looks right.\n\nFine.\nFLOW_VERDICT: pass', closing: 'Fine.\nFLOW_VERDICT: pass', stopReason: 'completed' };
     return { text: 'progress\n\nthe result', closing: 'the result', stopReason: 'completed' };
-  }, { goal: '给导出加 CSV' });
-  assert.deepEqual(rows.map(row => row.running), ['计划中 · planner', '第 1 轮：实现中 · coder', '第 1 轮：审核中 · checker']);
-  assert.deepEqual(rows.map(row => row.closed!.kind), ['success', 'success', 'success']);
-  assert.match(rows[0].closed!.title, /^计划完成（/);
+  });
+  assert.deepEqual(rows.map(row => `${row.role}${row.round} ${row.model} ${row.closed!.status}`), ['plan0 planner done', 'implement1 coder done', 'review1 checker passed']);
   assert.equal(rows[0].closed!.body, 'the result');
-  assert.match(rows[1].closed!.title, /^第 1 轮：实现完成（/);
-  assert.match(rows[2].closed!.title, /^第 1 轮：审核通过（/);
   assert.equal(rows[2].closed!.body, 'Fine.');
 });
-test('a review with no verdict says it is asked again, in its own row', async () => {
-  const { rows } = await play(reviewing(['no verdict here', 'FLOW_VERDICT: pass']));
-  assert.match(rows[2].closed!.title, /no verdict, so it is asked again/);
-  assert.match(rows[3].closed!.title, /review passed/);
+test('a review with no verdict is its own entry, then the one asked again', async () => {
+  const { rows, end } = await play(reviewing(['no verdict here', 'FLOW_VERDICT: pass']));
+  assert.deepEqual(rows.map(row => row.closed!.status), ['done', 'done', 'noVerdict', 'passed']);
+  assert.deepEqual({ ...end, ms: 0, report: '' }, { kind: 'passed', round: 1, sentBack: 0, ms: 0, report: '' });
+});
+test('a passed flow counts the rounds that were sent back', async () => {
+  const { end } = await play(reviewing(['no\nFLOW_VERDICT: needs_revision', 'no\nFLOW_VERDICT: needs_revision', 'FLOW_VERDICT: pass']));
+  assert.equal(end.kind === 'passed' && end.sentBack, 2);
+});
+test('a card speaks the goal\'s language: steps, tags and how it ended', () => {
+  const zh = cardWords(true), en = cardWords(false);
+  assert.equal(zh.step('plan', 0), '计划');
+  assert.equal(zh.step('implement', 2), '第 2 轮实现');
+  assert.equal(en.step('review', 1), 'Review · round 1');
+  assert.equal(zh.running('review', 2), '第 2 轮审核中');
+  assert.equal(en.running('implement', 1), 'Implementing, round 1');
+  assert.equal(zh.tag('sentBack'), '打回');
+  assert.equal(zh.tag('done'), '');
+  assert.equal(zh.summary({ kind: 'passed', round: 2, sentBack: 1, ms: 255_000 }), '第 2 轮审核通过 · 打回 1 次 · 4 分 15 秒');
+  assert.equal(zh.summary({ kind: 'passed', round: 1, sentBack: 0, ms: 30_000 }), '第 1 轮审核通过 · 30 秒');
+  assert.equal(en.summary({ kind: 'passed', round: 3, sentBack: 2, ms: 61_000 }), 'Review passed in round 3 · sent back 2 times · 1m 1s');
+  assert.equal(zh.summary({ kind: 'rejected', rounds: 3, ms: 360_000 }), '审核 3 轮仍未通过，交给你决定 · 6 分钟');
+  assert.equal(en.summary({ kind: 'failed', role: 'implement', reason: 'quota', ms: 1 }), 'Implement failed: quota');
+  assert.equal(zh.summary({ kind: 'stopped', ms: 60_000 }), '已停止 · 1 分钟');
+});
+test('a card survives being saved as text, line separators in a result included', () => {
+  const card: CardState = { parentId: 'p', zh: true, rounds: 3, steps: [
+    { role: 'plan', round: 0, model: 'Opus 5.5', machine: 'mini', status: 'done', ms: 97_000, childId: 'c1', body: 'line\u2028next\u2029end --> not the end' },
+    { role: 'review', round: 1, model: 'Opus 5.5', status: 'passed', ms: 39_000 },
+  ], end: { kind: 'passed', round: 1, sentBack: 0, ms: 140_000 } };
+  const parsed = parseRow(rowText({ title: '完成：第 1 轮审核通过，共 2 分 20 秒', body: '**实现**\n\nok', card }));
+  assert.deepEqual(parsed, { title: '完成：第 1 轮审核通过，共 2 分 20 秒', body: '**实现**\n\nok', card });
+  assert.deepEqual(parseRow(rowText({ title: 'Started: x', body: 'goal', start: true })), { title: 'Started: x', body: 'goal', start: true });
+  assert.deepEqual(parseRow('x\n\n<!-- flow-row {"card":{"steps":"no"}} -->'), { title: 'x' }, 'a card without steps is not a card');
 });
 test('a row keeps its title, its result and the conversation behind it', () => {
   const text = rowText({ title: '计划完成（3 分）', body: '# Plan\n\n1. one\n', parentId: 'p-1', childId: 'c-1' });
@@ -250,14 +280,12 @@ test('a new attempt keeps the last line until it has its own, and long lines are
   assert.equal([...lastLine('x'.repeat(500))].length, 201);
   assert.equal(lastLine('text\n---\n\n'), 'text');
 });
-test('the last row reports what was built and what the review found, open without a click', async () => {
-  const { notes } = await play(request => request.role === 'review'
+test('the ending reports what was built and what the review found', async () => {
+  const { end } = await play(request => request.role === 'review'
     ? { text: 'Checked.\n\nAll met.\nFLOW_VERDICT: pass', closing: 'All met.\nFLOW_VERDICT: pass', stopReason: 'completed' }
     : { text: 'working\n\nAdded subtract.', closing: 'Added subtract.', stopReason: 'completed' });
-  const row = parseRow(notes.at(-1)!);
-  assert.match(row.title, /^Done: review passed in round 1/);
-  assert.equal(row.open, true);
-  assert.match(row.body!, /Added subtract\.[\s\S]*All met\.$/);
+  assert.match(flowText('add csv').ended(end), /^Done: review passed in round 1/);
+  assert.match(end.report!, /Added subtract\.[\s\S]*All met\.$/);
 });
 test('the conversation model is told how the flow ended, whichever way it ended', async () => {
   const passed = await play(reviewing(['Good.\nFLOW_VERDICT: pass']));
