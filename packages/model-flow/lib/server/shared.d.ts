@@ -10,6 +10,7 @@ export type Locale = 'en' | 'zh';
 export declare const MARK = "\u2063";
 /** How a step ended. A review ends as passed, sent back, or without a verdict (asked again). */
 export type StepStatus = 'running' | 'done' | 'passed' | 'sentBack' | 'noVerdict' | 'failed' | 'stopped';
+/** `note` is the first line of a sent-back, failed or verdict-less step's result, shown under it without opening it. */
 export interface CardStep {
     role: Role;
     round: number;
@@ -19,6 +20,7 @@ export interface CardStep {
     ms?: number;
     childId?: string;
     body?: string;
+    note?: string;
 }
 export type CardEnd = {
     kind: 'passed';
@@ -46,6 +48,7 @@ export interface CardState {
     parentId: string;
     zh: boolean;
     rounds: number;
+    planned?: boolean;
     steps: CardStep[];
     end?: CardEnd;
 }
@@ -75,11 +78,21 @@ export declare function cardWords(zh: boolean): {
     roleName: (role: Role) => string;
     time: (ms: number) => string;
     step: (role: Role, round: number) => string;
+    rounds: (count: number) => string;
+    round: (round: number) => string;
     running: (role: Role, round: number) => string;
+    /** The line under a running card's title: who is at it, how it went so far, how far it may go. */
+    doing: (current: CardStep, sentBackSoFar: number, maxRounds: number) => string;
     tag: (status: StepStatus) => string;
     starting: string;
     interrupted: string;
-    summary(end: CardEnd): string;
-    rounds: (rounds: number) => string;
+    interruptedDetail: string;
+    title(end: CardEnd): string;
+    /** The line under a finished card's title. `last` is the step it stopped at. */
+    detail(end: CardEnd, last?: CardStep): string;
+    showSteps: (count: number) => string;
+    hideSteps: string;
 };
+/** A running clock: 1:05, or 1:02:05 past an hour. */
+export declare function clock(ms: number): string;
 export declare function formatTime(ms: number, zh: boolean): string;

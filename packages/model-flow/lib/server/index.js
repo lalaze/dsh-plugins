@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { Activity } from './activity.js';
+import { Activity, firstLine } from './activity.js';
 import { brief, flowText, hasCjk, runFlow } from './engine.js';
 import { API_PATH, createHandler } from './http.js';
 import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine } from './line.js';
@@ -44,21 +44,29 @@ export async function apply(ctx) {
     const cards = new Map(), cardByCommand = new Map(), stepByChild = new Map();
     /** Typed /flow lines still being handled: while they run, their row draws nothing. */
     const typed = new Set();
-    const stepsOf = (card, bodyLimit, now = Date.now()) => card.state.steps.map(({ startedAt, activity: _activity, body, ...step }) => ({
+    const stepsOf = (card, bodyLimit, now = Date.now()) => card.state.steps.map(({ startedAt, activity: _activity, said: _said, body, ...step }) => ({
         ...step, ...(step.ms === undefined && step.status === 'running' ? { ms: now - startedAt } : {}), ...(bodyLimit > 0 && body ? { body: cut(body, bodyLimit) } : {}),
     }));
     /** What a card can still show if DSH stops before the flow ends. */
     const snapshot = (card) => {
-        const { parentId, zh, rounds } = card.state;
-        return { parentId, zh, rounds, steps: stepsOf(card, 4000).map(step => step.status === 'running' ? { ...step, ms: undefined } : step) };
+        const { parentId, zh, rounds, planned } = card.state;
+        return { parentId, zh, rounds, planned, steps: stepsOf(card, 4000).map(step => step.status === 'running' ? { ...step, ms: undefined } : step) };
     };
     const view = (card) => {
-        const now = Date.now(), { parentId, zh, rounds, end } = card.state, steps = card.state.steps;
+        const now = Date.now(), { parentId, zh, rounds, planned, end } = card.state, steps = card.state.steps;
         let activity = '';
-        for (let index = steps.length - 1; index >= 0 && !activity; index--)
-            if (steps[index].status === 'running')
-                activity = steps[index].activity.current();
-        return { parentId, zh, rounds, ...(end ? { end } : {}), steps: stepsOf(card, 0, now), elapsed: (end ? card.startedAt + end.ms : now) - card.startedAt, ...(activity ? { activity } : {}) };
+        // A model goes quiet between its outputs; the card keeps its last line until it says something new.
+        for (let index = steps.length - 1; index >= 0; index--) {
+            const step = steps[index];
+            if (step.status !== 'running')
+                continue;
+            const now = step.activity.current();
+            if (now)
+                step.said = now;
+            activity = step.said ?? '';
+            break;
+        }
+        return { parentId, zh, rounds, planned, ...(end ? { end } : {}), steps: stepsOf(card, 0, now), elapsed: (end ? card.startedAt + end.ms : now) - card.startedAt, ...(activity ? { activity } : {}) };
     };
     /** The newest typed /flow: the new-session page stays where it is after a command, so the client opens this conversation. */
     let lastCommand;
@@ -195,7 +203,7 @@ export async function apply(ctx) {
         const controller = new AbortController(), startedAt = Date.now();
         running.set(agent.id, { controller, routes, goal, startedAt });
         let settle = () => undefined;
-        const card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, steps: [] }, done: new Promise(resolve => { settle = resolve; }) };
+        const card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, planned: !!routes.plan, steps: [] }, done: new Promise(resolve => { settle = resolve; }) };
         cards.set(card.id, card);
         const persist = () => { if (card.commandId && !card.state.end)
             saved.put(card.commandId, snapshot(card)); };
@@ -212,6 +220,9 @@ export async function apply(ctx) {
                     const kept = cut(body, MAX_STEP_BODY);
                     if (kept)
                         step.body = kept;
+                    // What went wrong reads in the card without opening the step.
+                    if (kept && (status === 'sentBack' || status === 'noVerdict' || status === 'failed'))
+                        step.note = firstLine(kept);
                     if (step.childId)
                         stepByChild.delete(step.childId);
                     persist();
@@ -224,8 +235,8 @@ export async function apply(ctx) {
                 return;
             ended = true;
             card.state.end = end;
-            const { parentId, zh } = card.state;
-            settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, steps: stepsOf(card, MAX_STEP_BODY), end } }) });
+            const { parentId, zh, planned } = card.state;
+            settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, planned, steps: stepsOf(card, MAX_STEP_BODY), end } }) });
             await executed;
             cards.delete(card.id);
             for (const step of card.state.steps)

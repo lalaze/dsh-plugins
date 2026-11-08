@@ -19,6 +19,8 @@ export type Chunk = {
     type: string;
 };
 export declare function lastLine(text: string, limit?: number): string;
+/** The first line that says something, for a result shown in one line. */
+export declare function firstLine(text: string, limit?: number): string;
 export declare class Activity {
     private blocks;
     private last;

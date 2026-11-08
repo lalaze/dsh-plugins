@@ -16,6 +16,15 @@ export function lastLine(text, limit = 200) {
     }
     return '';
 }
+/** The first line that says something, for a result shown in one line. */
+export function firstLine(text, limit = 140) {
+    for (const raw of text.split(/\r?\n/u)) {
+        const line = plain(raw);
+        if (line)
+            return [...line].length <= limit ? line : `${[...line].slice(0, limit).join('')}…`;
+    }
+    return '';
+}
 export class Activity {
     blocks = new Map();
     last = '';

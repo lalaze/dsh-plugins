@@ -33,11 +33,19 @@ export function parseRow(text) {
 export function cardWords(zh) {
     const roleName = (role) => zh ? { plan: '计划', implement: '实现', review: '审核' }[role] : { plan: 'Plan', implement: 'Implement', review: 'Review' }[role];
     const time = (ms) => formatTime(ms, zh);
+    const step = (role, round) => role === 'plan' ? roleName(role) : zh ? `第 ${round} 轮${roleName(role)}` : `${roleName(role)} · round ${round}`;
+    const sentBack = (count) => zh ? `打回 ${count} 次` : `sent back ${count === 1 ? 'once' : `${count} times`}`;
+    const rounds = (count) => zh ? `最多审核 ${count} 轮` : `up to ${count} review round${count === 1 ? '' : 's'}`;
     return {
-        roleName, time,
-        step: (role, round) => role === 'plan' ? roleName(role) : zh ? `第 ${round} 轮${roleName(role)}` : `${roleName(role)} · round ${round}`,
+        roleName, time, step, rounds,
+        round: (round) => zh ? `第 ${round} 轮` : `Round ${round}`,
         running: (role, round) => role === 'plan' ? (zh ? '计划中' : 'Planning')
             : zh ? `第 ${round} 轮${roleName(role)}中` : `${role === 'implement' ? 'Implementing' : 'Reviewing'}, round ${round}`,
+        /** The line under a running card's title: who is at it, how it went so far, how far it may go. */
+        doing: (current, sentBackSoFar, maxRounds) => [
+            zh ? `${current.model} 正在${roleName(current.role)}` : `${current.model} is ${{ plan: 'planning', implement: 'implementing', review: 'reviewing' }[current.role]}`,
+            sentBackSoFar ? sentBack(sentBackSoFar) : '', rounds(maxRounds),
+        ].filter(Boolean).join(' · '),
         tag: (status) => ({
             running: '', done: '',
             passed: zh ? '通过' : 'Passed', sentBack: zh ? '打回' : 'Sent back', noVerdict: zh ? '无结论' : 'No verdict',
@@ -45,19 +53,37 @@ export function cardWords(zh) {
         })[status],
         starting: zh ? '正在开始' : 'Starting',
         interrupted: zh ? 'DSH 关闭时中断了' : 'Stopped when DSH closed',
-        summary(end) {
-            const at = ` · ${time(end.ms)}`;
+        interruptedDetail: zh ? '流程没有继续，下面是它完成的步骤' : 'The flow did not go on; these are the steps it got through',
+        title(end) {
             switch (end.kind) {
-                case 'passed': return (zh ? `第 ${end.round} 轮审核通过` : `Review passed in round ${end.round}`)
-                    + (end.sentBack ? zh ? ` · 打回 ${end.sentBack} 次` : ` · sent back ${end.sentBack === 1 ? 'once' : `${end.sentBack} times`}` : '') + at;
-                case 'rejected': return (zh ? `审核 ${end.rounds} 轮仍未通过，交给你决定` : `Review did not pass after ${end.rounds} round${end.rounds === 1 ? '' : 's'}, yours to decide`) + at;
-                case 'failed': return zh ? `${roleName(end.role)}失败：${end.reason}` : `${roleName(end.role)} failed: ${end.reason}`;
-                case 'stopped': return (zh ? '已停止' : 'Stopped') + at;
-                case 'noVerdict': return zh ? '审核两次都没有给出结论，流程已停止' : 'The review gave no verdict twice, so the flow stopped';
+                case 'passed': return zh ? `第 ${end.round} 轮审核通过` : `Review passed in round ${end.round}`;
+                case 'rejected': return zh ? `审核 ${end.rounds} 轮仍未通过` : `Not passed after ${end.rounds} round${end.rounds === 1 ? '' : 's'}`;
+                case 'failed': return zh ? `${roleName(end.role)}失败` : `${roleName(end.role)} failed`;
+                case 'stopped': return zh ? '已停止' : 'Stopped';
+                case 'noVerdict': return zh ? '审核没有给出结论' : 'The review gave no verdict';
             }
         },
-        rounds: (rounds) => zh ? `最多审核 ${rounds} 轮` : `Up to ${rounds} review round${rounds === 1 ? '' : 's'}`,
+        /** The line under a finished card's title. `last` is the step it stopped at. */
+        detail(end, last) {
+            const total = zh ? `共 ${time(end.ms)}` : `${time(end.ms)} in all`;
+            switch (end.kind) {
+                case 'passed': return end.sentBack ? `${sentBack(end.sentBack)} · ${total}` : total;
+                case 'rejected': return `${zh ? '交给你决定' : 'yours to decide'} · ${total}`;
+                case 'failed': return end.reason;
+                case 'stopped': return last ? `${zh ? `停在${step(last.role, last.round)}` : `stopped at ${step(last.role, last.round)}`} · ${total}` : total;
+                case 'noVerdict': return `${zh ? '问了两次都没有结论' : 'asked twice without one'} · ${total}`;
+            }
+        },
+        showSteps: (count) => zh ? `查看 ${count} 个步骤` : `Show ${count} step${count === 1 ? '' : 's'}`,
+        hideSteps: zh ? '收起步骤' : 'Hide steps',
     };
+}
+/** A running clock: 1:05, or 1:02:05 past an hour. */
+export function clock(ms) {
+    // Rounded like the durations written out, so a finished card's clock and its total agree.
+    const total = Math.max(0, Math.round(ms / 1000)), hours = Math.floor(total / 3600), minutes = Math.floor(total / 60) % 60, seconds = total % 60;
+    const pad = (value) => String(value).padStart(2, '0');
+    return hours ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
 }
 export function formatTime(ms, zh) {
     const seconds = Math.max(1, Math.round(ms / 1000)), minutes = Math.floor(seconds / 60), rest = seconds % 60;
