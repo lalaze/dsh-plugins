@@ -1,3 +1,4 @@
+import { type ClaudeGoalBridge } from './claude-goal.js';
 import { createUserMessage, LlmAdapter, ToolCallId, type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { type DshPermission } from '../core/domain.js';
@@ -44,6 +45,7 @@ export declare const chatProviderId: (cli: string) => string;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
 export declare const CHAT_PROVIDERS: string[];
 export interface ChatHost extends Partial<ToolHost> {
+    claudeGoals?: ClaudeGoalBridge;
     agent(sessionId: NonNullable<GenerateOptions['sessionId']>): unknown;
     cwd?(sessionId: NonNullable<GenerateOptions['sessionId']>): string | undefined;
     workspace?(cwd: string, signal?: AbortSignal): Promise<WorkspacePlacement>;

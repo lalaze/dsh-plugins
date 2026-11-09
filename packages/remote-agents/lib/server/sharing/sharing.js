@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { BRIDGE_SCRIPT, BRIDGE_VERSION } from './bridge-script.js';
 import { RemoteError } from '../core/domain.js';
 import { connectionInput, quote } from '../core/ssh.js';
+import { CLAUDE_GOAL_SERVER, CLAUDE_GOAL_MCP } from '../chat/claude-goal.js';
 import { TEAM_MCP_NAME, TEAM_MEMBER_TOOLS, TEAM_SERVER } from '../chat/agent-teams.js';
 const BASE = '.dsh-remote-agents', SERVER = /^[A-Za-z0-9_-]{1,32}$/, SKILL = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SKIP = new Set(['.git', 'node_modules', '__pycache__', '.DS_Store', '.venv']);
@@ -140,6 +141,7 @@ export class Sharing {
     launch;
     log;
     host = {};
+    goals;
     server;
     listening;
     bridges = new Map();
@@ -218,6 +220,8 @@ export class Sharing {
             return;
         this.toolsTimer = setTimeout(() => {
             const servers = this.mcpServers();
+            // Goal visibility is scoped to each live conversation rather than the global MCP catalog.
+            this.changed(CLAUDE_GOAL_SERVER);
             for (const [name, seen] of this.listed) {
                 const now = toolSet(name === TEAM_SERVER ? this.teamTools() : servers.get(name));
                 if (now !== seen) {
@@ -236,7 +240,10 @@ export class Sharing {
         }
         return Buffer.from(value, 'hex');
     }
-    async token(taskId) { return createHmac('sha256', await this.secret()).update(taskId).digest('hex'); }
+    async token(taskId, goalSession, identity) { return createHmac('sha256', await this.secret()).update(goalSession === undefined ? taskId : JSON.stringify([CLAUDE_GOAL_SERVER, taskId, goalSession, identity?.epoch, identity?.messageId])).digest('hex'); }
+    goalOwner(task) {
+        return task.provider === 'claude' && task.chat?.sessionId && this.goals?.available(task.chat.sessionId) ? task.chat.sessionId : undefined;
+    }
     /** The conversation whose DSH agent runs the CLI's MCP calls: the main chat, or the agent that delegated it. */
     owner(task) { return task.chat?.sessionId ?? task.owner?.sessionId; }
     /** Names this DSH's socket pointer and tool cache on a host: one remote account may be used from several computers. */
@@ -312,14 +319,39 @@ export class Sharing {
         });
     }
     async hello(message) {
-        if (message.op !== 'hello' || typeof message.task !== 'string' || typeof message.token !== 'string' || typeof message.server !== 'string' || !SERVER.test(message.server) && message.server !== TEAM_SERVER)
+        if (message.op !== 'hello' || typeof message.task !== 'string' || typeof message.token !== 'string' || typeof message.server !== 'string' || !SERVER.test(message.server) && message.server !== TEAM_SERVER && message.server !== CLAUDE_GOAL_SERVER)
             return;
-        const expected = Buffer.from(await this.token(message.task), 'hex'), given = Buffer.from(/^[a-f0-9]{64}$/.test(message.token) ? message.token : '', 'hex');
+        const task = this.store.task(t => t.id === message.task);
+        const goalSession = message.server === CLAUDE_GOAL_SERVER && task ? this.goalOwner(task) : undefined;
+        if (message.server === CLAUDE_GOAL_SERVER && (!goalSession || message.session !== goalSession || !this.goals.matches(message.task, goalSession, message)))
+            return;
+        const expected = Buffer.from(await this.token(message.task, message.server === CLAUDE_GOAL_SERVER ? goalSession : undefined, message.server === CLAUDE_GOAL_SERVER ? { epoch: message.epoch, messageId: message.messageId } : undefined), 'hex'), given = Buffer.from(/^[a-f0-9]{64}$/.test(message.token) ? message.token : '', 'hex');
         if (given.length !== expected.length || !timingSafeEqual(given, expected))
             return;
-        return this.store.task(t => t.id === message.task) ? { server: message.server, task: message.task } : undefined;
+        return task ? { server: message.server, task: message.task, ...(message.server === CLAUDE_GOAL_SERVER ? { session: goalSession, epoch: message.epoch, messageId: message.messageId } : {}) } : undefined;
     }
     async handle(connection, message) {
+        if (connection.server === CLAUDE_GOAL_SERVER) {
+            const task = this.store.task(t => t.id === connection.task), session = task && this.goalOwner(task);
+            if (!session || session !== connection.session || !this.goals.matches(connection.task, session, connection))
+                throw new Error('Goal task/session binding is no longer available');
+            if (message.op === 'list')
+                return { tools: this.goals.schemas(session).map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.parameters })) };
+            if (message.op !== 'call')
+                throw new Error('Unknown goal bridge request');
+            if (message.epoch !== connection.epoch || message.messageId !== connection.messageId || typeof message.callId !== 'string')
+                throw new Error('Goal request origin does not match its connection');
+            if (connection.calls.has(message.id))
+                throw new Error('Duplicate in-flight goal request');
+            const controller = new AbortController();
+            connection.calls.set(message.id, controller);
+            try {
+                return await this.goals.call(task.id, session, String(message.name), message.arguments, controller.signal, { epoch: connection.epoch, messageId: connection.messageId, callId: message.callId });
+            }
+            finally {
+                connection.calls.delete(message.id);
+            }
+        }
         if (connection.server === TEAM_SERVER)
             return this.handleTeam(connection, message);
         const { server } = connection, tools = this.mcpServers().get(server), prefix = `mcp__${server}__`;
@@ -619,11 +651,14 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
         if (protocol === 'antigravity' || this.closed)
             return launch;
         const owner = this.owner(task);
-        const team = this.teamOwner(task);
+        const team = this.teamOwner(task), candidate = protocol === 'claude' ? this.goalOwner(task) : undefined;
+        const identity = candidate ? this.goals?.launchIdentity(task.id, candidate) : undefined, goal = identity ? candidate : undefined;
         // A shared MCP server named like the team server would get the same CLI name: the team's tools win.
-        const proxies = owner && this.host.agent ? [...this.mcpServers().keys()].filter(name => this.mcpShared(name) && !(team && `dsh-${name}` === TEAM_MCP_NAME)) : [];
+        const proxies = owner && this.host.agent ? [...this.mcpServers().keys()].filter(name => this.mcpShared(name) && !(team && `dsh-${name}` === TEAM_MCP_NAME) && !(goal && `dsh-${name}` === CLAUDE_GOAL_MCP)) : [];
         if (team)
             proxies.push(TEAM_SERVER);
+        if (goal)
+            proxies.push(CLAUDE_GOAL_SERVER);
         const wantsSkills = !!this.host.skills;
         if (!proxies.length && !wantsSkills)
             return launch;
@@ -666,8 +701,18 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
                 const timeout = delay(FORWARD_WAIT, undefined, { signal, ref: false });
                 timeout.catch(() => { });
                 await Promise.race([forward, timeout]);
-                for (const name of proxies)
-                    servers.push({ name: name === TEAM_SERVER ? TEAM_MCP_NAME : `dsh-${name}`, command: info.node, args: [script, 'proxy', file, name] });
+                for (const name of proxies) {
+                    let credentialFile = file;
+                    if (name === CLAUDE_GOAL_SERVER) {
+                        credentialFile = `${directory}/tasks/${task.id}-goal-${identity.epoch}.json`;
+                        const scoped = Buffer.from(JSON.stringify({ task: task.id, session: goal, ...identity, token: await this.token(task.id, goal, identity), pointer: `${directory}/current-${instance}`, cache: `${cache}/${task.id}-goal-${identity.epoch}` }));
+                        // Unique immutable file: old processes never reload a current-epoch credential.
+                        await transport.transfer(`umask 077; mkdir -p ${quote(`${cache}/${task.id}-goal-${identity.epoch}`)} && (set -C; cat > ${quote(credentialFile)})`, { input: (async function* () { yield scoped; })(), maxBytes: 4096, signal, login: false });
+                    }
+                    if (name === CLAUDE_GOAL_SERVER)
+                        launch.goalIdentity = identity;
+                    servers.push({ name: name === CLAUDE_GOAL_SERVER ? CLAUDE_GOAL_MCP : name === TEAM_SERVER ? TEAM_MCP_NAME : `dsh-${name}`, command: info.node, args: [script, 'proxy', credentialFile, name] });
+                }
             }
             catch (error) {
                 signal?.throwIfAborted();
@@ -676,10 +721,14 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
         }
         return launch;
     }
+    goalFailed(task, messageId, reason) {
+        if (task.provider === 'claude' && task.chat)
+            this.goals?.invalidate(task.id, messageId, reason);
+    }
     attached(host, transport, task) {
         try {
             // The settings decide, not DSH's tools: its MCP servers may still be connecting while CLIs are reattached.
-            if (this.closed || !this.owner(task) || !Object.values(this.settings().mcp ?? {}).some(Boolean) && !this.teamOwner(task))
+            if (this.closed || !this.owner(task) || !Object.values(this.settings().mcp ?? {}).some(Boolean) && !this.teamOwner(task) && !this.goalOwner(task))
                 return;
             this.keep(this.bridge(host, transport));
         }

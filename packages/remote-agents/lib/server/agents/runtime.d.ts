@@ -1,3 +1,4 @@
+import { type GoalIdentity } from '../chat/claude-goal.js';
 import { type Agent, type FinishedTurn, type TurnUsage, type NativeAttachment, type NativeProtocol, type PermissionAnswer, type Task } from '../core/domain.js';
 import { JsonlPeer } from '../core/ssh.js';
 import { type RelayLink } from './relay.js';
@@ -6,6 +7,8 @@ import type { Store } from '../core/store.js';
 export declare function initializeCodex(peer: JsonlPeer, capabilities?: Record<string, unknown>): Promise<void>;
 export declare function initializeAcp(peer: JsonlPeer): Promise<any>;
 export interface SessionHooks {
+    /** Revoke the exact goal grant before surfacing a native session failure. */
+    goalFailed?(messageId: string, reason: string): void;
     /** The CLI started a turn itself rather than for a message (see `continueUnprompted`). */
     ownTurnStarted?(): void;
     /** A turn ended; `unprompted` when the CLI started it itself rather than for a message (see `continueUnprompted`). */
@@ -30,6 +33,11 @@ export declare class CliSession {
     private nativeId;
     private savedUsage;
     private activeMessage?;
+    private goalIdentity?;
+    private goalOrigins?;
+    private claudeInputUuid?;
+    private claudeUuidSupported;
+    private claudeLegacy;
     private confirmed;
     private partialText;
     /** The model Claude's main thread answered with this turn: aliases such as `opus` resolve to a full model ID. */
@@ -93,7 +101,8 @@ export declare class CliSession {
             name: string;
             value: string;
         }[];
-    }[]): Promise<void>;
+    }[], goalIdentity?: GoalIdentity): Promise<void>;
+    private openGoalOrigins;
     /**
      * Reattach to a relay that kept running: rebuild the open turn, its tools and its unanswered
      * permission requests from the history, then resend saved answers (the relay drops duplicates).

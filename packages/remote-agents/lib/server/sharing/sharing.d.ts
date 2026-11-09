@@ -2,6 +2,7 @@ import { type ChildProcess } from 'node:child_process';
 import { type HostConfig, type NativeProtocol, type Task } from '../core/domain.js';
 import { type SshTransport } from '../core/ssh.js';
 import type { Store } from '../core/store.js';
+import { type ClaudeGoalBridge, type GoalIdentity } from '../chat/claude-goal.js';
 /** One stdio MCP server a remote CLI starts: the bridge script in proxy or skills mode. */
 export interface SharedServer {
     name: string;
@@ -12,12 +13,15 @@ export interface SharedServer {
 export interface SharedLaunch {
     pluginDir?: string;
     servers: SharedServer[];
+    goalIdentity?: GoalIdentity;
 }
 export interface LaunchSharing {
     /** Prepare the host for one CLI launch. Never fails the launch: what cannot be shared is left out. */
     prepare(host: HostConfig, transport: SshTransport, task: Task, protocol: NativeProtocol, signal?: AbortSignal): Promise<SharedLaunch>;
     /** A CLI kept running while DSH was away was reattached: its proxies need the reverse forward again. Never throws. */
     attached(host: HostConfig, transport: SshTransport, task: Task): void;
+    /** Native CLI session failure; not an MCP operation. */
+    goalFailed?(task: Task, messageId: string, reason: string): void;
     /** Prepare the host for a TUI conversation's CLI to lead teams; nothing when AgentTeams is not installed or the host cannot. */
     /** The host was removed: stop sharing with it. */
     forget(hostId: string): void;
@@ -154,6 +158,7 @@ export declare class Sharing implements LaunchSharing {
     private readonly launch;
     private readonly log;
     readonly host: SharingHost;
+    goals?: ClaudeGoalBridge;
     private server?;
     private listening?;
     private readonly bridges;
@@ -186,6 +191,7 @@ export declare class Sharing implements LaunchSharing {
     toolsChanged(): void;
     private secret;
     private token;
+    private goalOwner;
     /** The conversation whose DSH agent runs the CLI's MCP calls: the main chat, or the agent that delegated it. */
     private owner;
     /** Names this DSH's socket pointer and tool cache on a host: one remote account may be used from several computers. */
@@ -220,6 +226,7 @@ export declare class Sharing implements LaunchSharing {
     /** Replaced or removed: end the forward and never start another. */
     private stop;
     prepare(host: HostConfig, transport: SshTransport, task: Task, protocol: NativeProtocol, signal?: AbortSignal): Promise<SharedLaunch>;
+    goalFailed(task: Task, messageId: string, reason: string): void;
     attached(host: HostConfig, transport: SshTransport, task: Task): void;
     forget(hostId: string): void;
     /** Per-host forward problems, for the settings page. */

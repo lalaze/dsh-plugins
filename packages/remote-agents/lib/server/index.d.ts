@@ -18,9 +18,12 @@ export declare const name = "dsh-remote-agents";
 export declare const inject: string[];
 export declare const Config: Schema<{
     stateDir?: string;
+    claudeGoalSessions?: string[];
 }, {
     stateDir: string;
+    claudeGoalSessions: string[];
 }>;
 export declare function apply(ctx: Context, config?: {
     stateDir?: string;
+    claudeGoalSessions?: string[];
 }): Promise<void>;

@@ -1,3 +1,4 @@
+import { isGoalContinuation, goalContinuationPrompt, verifyClaudeGoalOrigin } from './claude-goal.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
 import { join } from 'node:path';
@@ -213,7 +214,7 @@ export class RemoteCliAdapter extends LlmAdapter {
      * Plugin unload or DSH shutdown: end local streams but leave remote turns running. A persistent
      * CLI keeps working; the conversation shows its remaining output with the next response.
      */
-    close() { this.released = true; for (const controller of this.controllers)
+    close() { this.released = true; this.host.claudeGoals?.shutdown(); for (const controller of this.controllers)
         controller.abort(RELEASED); }
     /** The remote task a conversation's model route continues: the same route, or another model of the same CLI. */
     bound(sessionId, route) {
@@ -406,14 +407,27 @@ export class RemoteCliAdapter extends LlmAdapter {
         if (!sessionId)
             throw new LlmError('Select a remote CLI in a DSH conversation to use it.', 'SESSION_REQUIRED');
         // DSH adds context of its own after the notice, such as the time: the latest human message or notice decides.
-        const final = options.messages.findLast(m => prompted(m) || m.role === 'user' && m.source?.kind === SYNC_SOURCE);
+        const claude = options.provider === chatProviderId('claude') || options.provider === CHAT_PROVIDER && options.model.split('/')[1] === 'claude';
+        const final = options.messages.findLast(m => prompted(m) || claude && isGoalContinuation(m) || m.role === 'user' && m.source?.kind === SYNC_SOURCE);
         const sync = final?.source?.kind === SYNC_SOURCE;
         if (this.active.has(sessionId))
             throw new LlmError('This conversation already has a remote CLI response in progress.', 'REMOTE_BUSY');
         const { project, provider, model, serviceTier: routeTier } = this.route(options.provider, options.model), service = this.projects.service;
         // A route saved with a tier keeps it; otherwise the conversation's lightning switch picks the Fast tier.
         const serviceTier = routeTier ?? (service.store.chatFast(sessionId) ? fastTierOf(model)?.id : undefined);
-        const lastUser = options.messages.findLast(prompted);
+        const continuation = claude && !!final && isGoalContinuation(final);
+        const lastUser = continuation ? final : options.messages.findLast(prompted);
+        let continuationError;
+        if (continuation) {
+            if (!this.host.claudeGoals)
+                throw new LlmError('DSH goal bridge is unavailable.', 'GOAL_UNAVAILABLE');
+            try {
+                this.host.claudeGoals.validateContinuation(sessionId, lastUser);
+            }
+            catch (error) {
+                continuationError = error;
+            }
+        }
         // A conversation continued from another DSH starts with the notice that shows its history, before any message of its own.
         if (!sync && (!lastUser || lastUser.role !== 'user'))
             throw new LlmError('A user message is required for the remote CLI.', 'INVALID_REQUEST');
@@ -443,6 +457,8 @@ export class RemoteCliAdapter extends LlmAdapter {
         const cwd = remotePath(placement.cwd);
         if (task && task.cwd !== cwd || project.id !== project.hostId && project.cwd !== cwd)
             throw new LlmError('The remote conversation belongs to a different workspace directory. Start a new conversation.', 'WORKSPACE_MISMATCH');
+        if (continuationError && !task?.agentId)
+            throw continuationError;
         const userId = lastUser?.id ?? hash(JSON.stringify(options.messages));
         // A CLI that never started left only its first prompt. A new message starts afresh with that prompt as
         // context; retrying it would run the stale prompt first and reject this message as busy.
@@ -452,6 +468,10 @@ export class RemoteCliAdapter extends LlmAdapter {
         }
         const binding = hash(sessionId, task?.chat?.receiptRoute ?? task?.chat?.route ?? options.model);
         const messageId = hash(binding, userId);
+        // A terminal/paused goal may replay an existing receipt after a lost response, but receives
+        // no new tool authority and can never admit another remote message.
+        if (continuationError && !(await service.messageTimeline(task.id, messageId)).found)
+            throw continuationError;
         const controller = new AbortController(), signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal;
         signal.throwIfAborted();
         const currentIndex = lastUser ? options.messages.lastIndexOf(lastUser) : -1;
@@ -470,10 +490,15 @@ export class RemoteCliAdapter extends LlmAdapter {
             .map(m => `${m.role}: ${blockText(m.role === 'user' ? contentOf(m) : m.content)}`).filter(t => t.trim() !== 'user:' && t.trim() !== 'assistant:').join('\n\n');
         const unattended = this.host.unattended?.(sessionId) === true, member = this.host.teamMember?.(sessionId);
         // A team member's new CLI session learns once how the team tools replace the DSH tools it does not have.
-        const note = member && !task ? `${teamMemberNote(member, unattended)}\n\n` : '';
-        const prompt = note + (previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\nCurrent user request:\n${currentPrompt}` : currentPrompt);
+        const goalSupport = provider.id === 'claude' ? this.host.claudeGoals?.support(sessionId) : undefined;
+        const goalNotice = goalSupport?.reason?.startsWith('selected scoped executor')
+            ? `DSH goal bridge unavailable: ${goalSupport.reason}. Do not claim to create or update a DSH goal through this chat. Ordinary remote work can continue.\n\n` : '';
+        const note = goalNotice + (member && !task ? `${teamMemberNote(member, unattended)}\n\n` : '');
+        const sourcePrompt = continuation ? goalContinuationPrompt(lastUser, currentPrompt) : currentPrompt;
+        const prompt = note + (previous ? `Conversation context (already occurred; do not repeat completed actions):\n${previous}\n\n${continuation ? 'Current automatic goal continuation' : 'Current user request'}:\n${sourcePrompt}` : sourcePrompt);
         const taskId = task?.id ?? messageId;
         let admitted = false, settled = false, index = 0;
+        let closeGoalGrant;
         /** The message is waiting for a turn the CLI started itself, which Stop then stops. */
         let waitingForOwnTurn = false;
         const rows = new NativeToolRows(this.host.step(sessionId), options, `${provider.label} on ${project.label}:${cwd}`);
@@ -791,6 +816,11 @@ export class RemoteCliAdapter extends LlmAdapter {
                 yield { type: 'finish', reason: { kind: 'stop' } };
                 return;
             }
+            const grantGoal = () => {
+                if (provider.id !== 'claude' || !lastUser || closeGoalGrant || continuationError)
+                    return;
+                closeGoalGrant = this.host.claudeGoals?.begin(taskId, sessionId, lastUser, signal, (origin, name, args, callSignal) => verifyClaudeGoalOrigin(cursor => service.messageTimeline(taskId, messageId, cursor), async (nativeSessionId) => { const state = await service.summary(taskId); return busy(state) && !state.unprompted && state.nativeSessionId === nativeSessionId; }, origin, name, args, callSignal), messageId);
+            };
             const blocks = options.messages.slice(contextStart, currentIndex + 1).flatMap(m => prompted(m) ? [...contentOf(m)] : []);
             // DSH Desktop cites dropped non-image files by their path on this machine: send copies along with the attachments.
             const stageInput = async () => {
@@ -802,6 +832,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                 const composerMode = presetMode(provider.id, provider.modes, this.host.permission?.(sessionId));
                 const { attachments, text } = await stageInput();
                 // A newly selected route receives prior human/assistant context, never local DSH tool schemas or its system prompt.
+                grantGoal();
                 admitted = true;
                 const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt: text, ...(attachments.length ? { attachments } : {}),
                     // Native chats follow the DSH composer's permission. Without a matching mode Claude and Codex follow the
@@ -812,8 +843,11 @@ export class RemoteCliAdapter extends LlmAdapter {
             }
             else {
                 // A receipt left by a failed HTTP/model response is replayed, never delivered again.
-                if (!task.agentId)
+                if (!task.agentId) {
+                    if (task.id === messageId)
+                        grantGoal();
                     await service.retry(task.id, signal);
+                }
                 const page = await service.messageTimeline(task.id, messageId);
                 if (!page.found) {
                     // A previous response may have continued while DSH was closed: show the rest before this one.
@@ -863,11 +897,24 @@ export class RemoteCliAdapter extends LlmAdapter {
                     waitingForOwnTurn = false;
                     if (shownOwn)
                         yield* textChunk('text', '\n\n---\n\n');
+                    if (continuation)
+                        this.host.claudeGoals.validateContinuation(sessionId, lastUser);
+                    // A permanent MCP proxy has no trustworthy turn identity. End the old process
+                    // before minting a grant; backend.send resumes the same native Claude session
+                    // with a fresh immutable epoch credential and records that launch's tool origins.
+                    if (provider.id === 'claude' && this.host.claudeGoals?.available(sessionId)) {
+                        await service.release(task.id);
+                        const released = await service.summary(task.id);
+                        if (busy(released) || released.attached)
+                            throw new LlmError('Claude must be idle and released before a new goal-authorized turn.', 'GOAL_PROCESS_BUSY');
+                    }
+                    grantGoal();
                     admitted = true;
                     await service.send(task.id, { id: messageId, text, ...(attachments.length ? { attachments } : {}) }, { interrupt: false, signal });
                 }
-                else
+                else {
                     admitted = true;
+                }
             }
             // A Stop or shutdown from here on concerns this message, even before any of its output is read.
             reached = { id: messageId, cursor: undefined };
@@ -900,6 +947,7 @@ export class RemoteCliAdapter extends LlmAdapter {
             yield { type: 'finish', reason: { kind: 'stop' } };
         }
         finally {
+            await closeGoalGrant?.();
             for (const pending of questions.values())
                 pending.abort();
             // Only a user's Stop interrupts the remote turn. Shutdown and plugin reloads leave it running.

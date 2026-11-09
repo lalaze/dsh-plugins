@@ -22,7 +22,7 @@ export function scheduleSessionRepair(ctx, store) {
     ctx.effect(() => () => clearTimeout(repairTimer));
 }
 /** Remote CLI models in DSH's model picker and main conversation. */
-export function installChat(ctx, service, projects, workspace) {
+export function installChat(ctx, service, projects, workspace, claudeGoals) {
     const { access, files, workspaces } = workspace;
     ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
         const host = scoped;
@@ -34,7 +34,7 @@ export function installChat(ctx, service, projects, workspace) {
                 steps.delete(session.id);
         }, { global: true });
         const sessionOf = (id) => steps.get(id)?.session ?? scoped.sessions.get(id);
-        const adapter = new RemoteCliAdapter(projects, { approval: host.approval, userQuestions: host.userQuestions,
+        const adapter = new RemoteCliAdapter(projects, { claudeGoals, approval: host.approval, userQuestions: host.userQuestions,
             agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => sessionOf(id)?.header.cwd,
             permission: id => accessOf(scoped, sessionOf(id)).permission,
             unattended: id => accessOf(scoped, sessionOf(id)).unattended,

@@ -3,6 +3,9 @@
 **English** | [简体中文](README.zh-CN.md)
 
 Use remote Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity directly in DSH's ordinary model picker and main conversation. DSH connects to each CLI's native protocol over system OpenSSH. **No Paseo daemon, SDK or remote service is required.**
+
+Remote Claude main chat has a default-off native DSH goal bridge, enabled per session with `claudeGoalSessions` (opted-in turns restart the CLI and end in-process background tasks): [Claude goal guide](docs/claude-goal.md). This is the narrow exception to excluding local tool schemas; it does not forward the local system prompt.
+
 ## Main conversation
 
 Each CLI appears as a separate provider in DSH's ordinary model picker:

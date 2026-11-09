@@ -4,6 +4,15 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.123 — Opt-in native DSH goals in remote Claude
+
+- Main-chat remote Claude can create, query and update the native DSH goal through three scoped MCP tools; the native round driver delivers automatic continuations to the same conversation.
+- The bridge is **off by default**. Add exact DSH session IDs to `claudeGoalSessions` only when needed. Unlisted Claude chats retain their persistent process and background tasks. Listed sessions restart the CLI between new turns, resuming the same conversation and ending in-process background tasks.
+- Native input UUIDs and root tool-call provenance fence old/replayed/background requests. Goal permissions, approvals, revisions, Stop/pause and restored disarmed behavior remain native; PTC and missing capabilities fail closed.
+- Session-level Claude errors without input UUIDs now end the turn with their original error detail. In opted-in sessions they also revoke goal access and stop automatic continuation.
+
+Reload the plugin or restart DSH after upgrading; configure the exact session allowlist to enable this feature. See the [Claude goal guide](docs/claude-goal.md). Real runtime/parser tests passed; real model-driven SSH goal E2E remains unverified. This release does not enable any session automatically.
+
 ## 0.2.122 — Ordinary DSH conversations across devices (release preparation)
 
 - Share an ordinary DSH conversation through a verified SSH authority and continue it on another device, with explicit handoff and one writer for the root and its child tree. Existing remote CLI sharing remains separate.

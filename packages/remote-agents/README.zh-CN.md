@@ -3,6 +3,9 @@
 [English](README.md) | **简体中文**
 
 在 DSH 原生模型选择器和主对话中直接使用远程 Claude Code、Codex、DSH、Grok、CodeBuddy 和反重力。DSH 通过系统 OpenSSH 直连每个 CLI 的原生协议，**不需要 Paseo daemon、SDK 或任何远端服务**。
+
+远程 Claude 主聊天提供默认关闭的原生 DSH goal 桥，需通过 `claudeGoalSessions` 按会话启用（启用后每轮重启 CLI，结束进程内后台任务）：[Claude goal 用法](docs/claude-goal.zh-CN.md)。这是不转发本地工具 schema 的明确例外，不会转发本地 system prompt。
+
 ## 在 DSH 主对话中使用
 
 每种远程 CLI 都作为独立提供方出现在 DSH 原生模型选择器中：

@@ -491,7 +491,7 @@ done`}`, 15_000, { login: false });
             }
             catch { /* A listener must not stop the session. */ }
         } };
-        return new CliSession(peer, task, history, this.store, { ownTurnStarted: historyChanged, turnEnded: ({ unprompted }) => {
+        return new CliSession(peer, task, history, this.store, { goalFailed: (messageId, reason) => this.sharing()?.goalFailed?.(task, messageId, reason), ownTurnStarted: historyChanged, turnEnded: ({ unprompted }) => {
                 // A finished turn changed the account's usage; read it again when it is next shown.
                 this.accounts.delete(task.provider);
                 if (unprompted)
@@ -727,7 +727,7 @@ done`}`, 15_000, { login: false });
             this.sessions.set(task.id, session);
             link?.open();
             try {
-                await session.initialize(profile.protocol, argv, resume, acpServers(shared));
+                await session.initialize(profile.protocol, argv, resume, acpServers(shared), shared?.goalIdentity);
                 this.assertOpen();
                 if (!resume)
                     await session.send(attachmentPrompt(task.prompt, attachments), task.id, attachments);

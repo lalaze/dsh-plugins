@@ -1,3 +1,4 @@
+import { ClaudeGoalOrigins, legacyClaudeVersion } from '../chat/claude-goal-origin.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { CHAT_IMAGE_LIMIT, CHAT_IMAGES, chatImageName, imageExtensionOf, viewedImageExtension, viewedImagePath, writeChatImage } from '../chat/images.js';
@@ -8,6 +9,13 @@ import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, 
 /** The file name an image is shown with, from the remote path it was read from. */
 const imageName = (path) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
 const contentText = (content) => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
+/** Claude result errors are string[], unlike assistant/tool content blocks. */
+const claudeResultError = (message) => {
+    const errors = typeof message.errors === 'string' ? message.errors
+        : list(message.errors).map(error => typeof error === 'string' ? error : contentText([error])).filter(Boolean).join('\n');
+    const error = typeof message.error === 'string' ? message.error : message.error?.message;
+    return errors || (typeof error === 'string' && error) || contentText(message.result) || 'Claude turn failed';
+};
 export async function initializeCodex(peer, capabilities = {}) {
     await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.1.0' }, capabilities });
     peer.send({ method: 'initialized', params: {} });
@@ -35,6 +43,11 @@ export class CliSession {
     nativeId = '';
     savedUsage = '';
     activeMessage;
+    goalIdentity;
+    goalOrigins;
+    claudeInputUuid;
+    claudeUuidSupported = false;
+    claudeLegacy = false;
     confirmed = false;
     partialText = false;
     /** The model Claude's main thread answered with this turn: aliases such as `opus` resolve to a full model ID. */
@@ -178,7 +191,8 @@ export class CliSession {
     }
     write(message, id) { this.peer.send(message, this.relay ? id : undefined); }
     /** `mcpServers` are DSH's shared servers in ACP's stdio form; other protocols receive them as launch options. */
-    async initialize(protocol, argv, resume = false, mcpServers = []) {
+    async initialize(protocol, argv, resume = false, mcpServers = [], goalIdentity) {
+        this.goalIdentity = goalIdentity;
         this.agent.resumable = protocol !== 'acp';
         if (protocol === 'codex') {
             // Stop needs the background terminal calls, which Codex only accepts from a client asking for experimental ones.
@@ -227,6 +241,8 @@ export class CliSession {
         }
         else {
             this.nativeId = this.task.native?.sessionId ?? argv[argv.indexOf('--session-id') + 1];
+            if (goalIdentity)
+                await this.openGoalOrigins();
             this.account = (await this.peer.control({ subtype: 'initialize' }))?.account;
         }
         if (typeof this.nativeId !== 'string' || !this.nativeId)
@@ -243,6 +259,14 @@ export class CliSession {
         if (protocol === 'claude')
             void this.claudeContext();
     }
+    async openGoalOrigins() {
+        const origins = new ClaudeGoalOrigins(join(this.store.directory, 'claude-goal-origins', `${this.task.id}.jsonl`));
+        this.goalOrigins = origins;
+        const prior = (await this.history.lines(1)).map(line => JSON.parse(line))
+            .filter(entry => entry.item.type === 'tool_call' && typeof entry.item.callId === 'string')
+            .map(entry => ({ nativeSessionId: this.nativeId, callId: String(entry.item.callId) }));
+        await origins.open(prior);
+    }
     /**
      * Reattach to a relay that kept running: rebuild the open turn, its tools and its unanswered
      * permission requests from the history, then resend saved answers (the relay drops duplicates).
@@ -256,6 +280,12 @@ export class CliSession {
         this.partialText = (await this.history.checkpoint(relay.id))?.partial === true;
         const { message, entries } = await this.history.turn();
         const id = message?.item.clientMessageId;
+        this.claudeInputUuid = typeof message?.item.claudeUserUuid === 'string' ? message.item.claudeUserUuid : undefined;
+        const savedGoal = message?.item.claudeGoalIdentity;
+        if (native.protocol === 'claude' && savedGoal?.messageId === id && typeof savedGoal?.epoch === 'string') {
+            this.goalIdentity = savedGoal;
+            await this.openGoalOrigins();
+        }
         const open = !!id && !entries.some(e => e.item.type === 'turn_end' && e.item.clientMessageId === id);
         this.suspended = false;
         this.agent.status = 'idle';
@@ -299,10 +329,15 @@ export class CliSession {
             const protocol = this.protocol(), images = attachments.filter(a => a.kind === 'image');
             if (images.length && (protocol === 'antigravity' || (protocol === 'acp' && !this.imageInput)))
                 throw new Error('This remote CLI does not support image input');
-            await this.history.append({ type: 'user_message', text, clientMessageId: messageId, delivery: 'pending', ...(attachments.length ? { attachments: attachments.map(({ data, ...file }) => file) } : {}), ...(sentBy ? { sentBy } : {}) });
+            const claudeUuid = protocol === 'claude' ? randomUUID() : undefined;
+            const goalSend = this.goalOrigins ? this.goalIdentity?.messageId === messageId ? this.goalIdentity : { epoch: `ungranted-${randomUUID()}`, messageId } : undefined;
+            if (claudeUuid && goalSend)
+                await this.goalOrigins.send({ ...goalSend, uuid: claudeUuid, nativeSessionId: this.nativeId });
+            await this.history.append({ type: 'user_message', text, clientMessageId: messageId, delivery: 'pending', ...(claudeUuid ? { claudeUserUuid: claudeUuid } : {}), ...(goalSend ? { claudeGoalIdentity: goalSend } : {}), ...(attachments.length ? { attachments: attachments.map(({ data, ...file }) => file) } : {}), ...(sentBy ? { sentBy } : {}) });
             if (messageId === this.task.id)
                 await this.store.update(state => { state.tasks.find(t => t.id === this.task.id).native.initialSent = true; });
             // Claude hands the notices of its finished background tasks to this message; they head no turn of its own now.
+            this.claudeInputUuid = claudeUuid;
             this.activeMessage = messageId;
             this.notices = [];
             this.confirmed = false;
@@ -319,7 +354,7 @@ export class CliSession {
             else if (protocol === 'antigravity')
                 this.write({ event: 'user', message: { content: text } }, id);
             else
-                this.write({ type: 'user', session_id: this.nativeId, uuid: randomUUID(), parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text }, ...images.map(a => ({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.data } }))] } }, id);
+                this.write({ type: 'user', session_id: this.nativeId, uuid: claudeUuid, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text }, ...images.map(a => ({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.data } }))] } }, id);
         }
         finally {
             this.admitting = false;
@@ -332,6 +367,8 @@ export class CliSession {
         this.append({ type: 'delivery', clientMessageId: this.activeMessage });
     }
     complete(toolStatus = 'completed') {
+        this.goalOrigins?.close();
+        this.claudeInputUuid = undefined;
         const unprompted = this.agent.activeTurn?.unprompted === true;
         this.saveUsage();
         this.turnModel = undefined;
@@ -425,6 +462,12 @@ export class CliSession {
             return;
         }
         const message = error instanceof Error ? error.message : String(error);
+        if (this.goalOrigins && this.activeMessage) {
+            try {
+                this.hooks.goalFailed?.(this.activeMessage, message);
+            }
+            catch { /* Still end the failed CLI turn. */ }
+        }
         this.complete('failed');
         this.agent.status = 'error';
         this.agent.lastError = message;
@@ -463,6 +506,29 @@ export class CliSession {
             this.append({ type: 'permission_response', requestId: id, resolved: true });
     }
     message(m) {
+        if (this.task.provider === 'claude' && m.type === 'system' && m.subtype === 'init' && m.session_id === this.nativeId && m.parent_tool_use_id == null && !m.historical && !m.isReplay) {
+            this.claudeLegacy = legacyClaudeVersion(m.claude_code_version);
+            this.goalOrigins?.noteInit(m, this.nativeId);
+            if (typeof m.claude_code_version === 'string' && !this.claudeLegacy)
+                this.claudeUuidSupported = true;
+        }
+        if (this.task.provider === 'claude' && (m.type === 'assistant' || m.type === 'stream_event')) {
+            if (m.parent_tool_use_id == null && !m.historical && !m.isReplay && typeof m.user_message_uuid === 'string' && m.session_id === this.nativeId)
+                this.claudeUuidSupported = true;
+            const origins = this.goalOrigins?.observe(m, this.nativeId, this.activeMessage) ?? [];
+            if (origins.length) {
+                // Publish provenance only after its independent append-only journal is durable.
+                // A journal failure disables goal proof; it does not stop ordinary CLI output.
+                const journal = this.goalOrigins;
+                void journal.flush().then(async (durable) => { if (durable)
+                    for (const origin of origins)
+                        await this.history.append({ type: 'claude_goal_origin', ...origin }); }).catch(() => { });
+            }
+            if (this.claudeInputUuid && m.parent_tool_use_id == null && typeof m.user_message_uuid === 'string' && m.user_message_uuid !== this.claudeInputUuid)
+                return;
+            if (this.goalOrigins && (m.historical || m.isReplay))
+                return;
+        }
         if (m.method && m.id !== undefined) {
             this.request(m);
             return;
@@ -621,10 +687,38 @@ export class CliSession {
                     this.tool(String(block.tool_use_id), String(call?.name ?? 'Tool'), block.is_error ? 'failed' : 'completed', contentText(block.content), block.is_error ? [] : this.toolImages(block.content, input?.file_path ?? input?.path));
                 }
         if (m.type === 'result') {
+            if (m.historical || m.isReplay || m.parent_tool_use_id != null || m.session_id !== undefined && m.session_id !== this.nativeId)
+                return;
+            const ownTurn = this.agent.activeTurn?.unprompted === true;
+            const failed = !!m.is_error || m.subtype !== 'success';
+            // Session-scoped/zeroed errors legitimately omit UUID even on modern Claude.
+            // They are failures of the current execution, never proof that its prompt succeeded.
+            // Explicitly stale UUIDs still take the rejection path below.
+            if (typeof m.user_message_uuid !== 'string' && failed) {
+                const reason = claudeResultError(m);
+                if (this.goalOrigins)
+                    this.fail(`Claude reported a session-level error without a message UUID; the current turn failed conservatively: ${reason}`);
+                else {
+                    this.confirm();
+                    this.turnUsage(claudeTurnUsage(m.usage), true, claudeModelUsage(m.model_usage_since_last_result));
+                    this.fail(reason);
+                }
+                void this.claudeContext();
+                return;
+            }
+            if (typeof m.user_message_uuid === 'string') {
+                this.claudeUuidSupported = true;
+                if (!ownTurn && m.user_message_uuid !== this.claudeInputUuid)
+                    return;
+            }
+            else if (this.claudeUuidSupported && !this.claudeLegacy && !ownTurn)
+                return;
+            if (this.goalOrigins && !ownTurn && !this.goalOrigins.resultMatches(m, this.nativeId, this.activeMessage))
+                return;
             this.confirm();
             this.turnUsage(claudeTurnUsage(m.usage), !!m.is_error || m.subtype !== 'success', claudeModelUsage(m.model_usage_since_last_result));
             if (m.is_error || m.subtype !== 'success')
-                this.fail(contentText(m.errors) || String(m.result ?? 'Claude turn failed'));
+                this.fail(claudeResultError(m));
             else
                 this.complete();
             void this.claudeContext();

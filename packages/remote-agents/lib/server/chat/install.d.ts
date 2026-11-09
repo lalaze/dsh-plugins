@@ -1,3 +1,4 @@
+import type { ClaudeGoalBridge } from './claude-goal.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { RemoteAgentsService } from '../agents/service.js';
 import type { Store } from '../core/store.js';
@@ -12,4 +13,4 @@ export declare function installChat(ctx: Context, service: RemoteAgentsService, 
     access: WorkspaceAccess;
     files: WorkspaceService;
     workspaces: RemoteWorkspaces;
-}): void;
+}, claudeGoals?: ClaudeGoalBridge): void;
