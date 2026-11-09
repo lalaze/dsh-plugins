@@ -4,6 +4,8 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+**Upgrading from 0.2.119:** Internal maintenance only: host connections and model catalogs, and shared notifications, read marks and workspace synchronization now have separate modules. Public APIs, saved data, permissions and the UI are unchanged; no migration or configuration changes are needed. This release adds regression coverage for connection, synchronization and shutdown boundaries; it does not change the shared-session read synchronization algorithm.
+
 **Upgrading from 0.2.118:** Live TUI output is now forwarded before the remote holder parses it for reconnection, removing an extra wait during streaming. A reconnecting client receives its screen snapshot followed by the intervening output in order. Parser backpressure and slow-client limits remain in place; this does not remove parsing CPU cost or guarantee an end-to-end latency improvement. SSH, input handling, WebGL and background-blur defaults are unchanged. After updating the plugin, newly started holders use this optimization. Existing terminal processes stay running with their old code; refreshing or reconnecting does not replace them.
 
 **Upgrading from 0.2.117:** TUI output no longer makes the shell-menu and model-label helpers scan the entire page on every update. The terminal lifecycle wrapper also avoids rendering and rebuilding subscriptions for output-only updates, while the terminal still receives every snapshot. This removes redundant work during streaming; it is not a measured guarantee of end-to-end latency on your device. Copying, reconnection, WebGL and background-blur defaults are unchanged. Reload the client after upgrading to load the updated terminal code.
