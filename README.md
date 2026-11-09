@@ -19,6 +19,8 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-translate` | [packages/translate](packages/translate/README.md) | Translate selected chat text and composer drafts through an OpenAI-compatible API |
 | `dsh-auth-cookie-cleanup` | [packages/auth-cookie-cleanup](packages/auth-cookie-cleanup/README.md) | Temporary fix for Desktop failing to open after ~70 launches: expires stale per-port `dsh-auth-*` cookies (deepseek-harness#10598) |
 
+Ordinary DSH conversation sharing is a separate opt-in feature of Remote Agents: native history and linked continuation copies through `shared-native-v1`, with explicit handoff. The existing `shared-v1` sharing switch covers remote CLI sessions. See [native sharing and its limits](packages/remote-agents/docs/native-sharing.md).
+
 ## Languages
 
 Plugin interfaces support English and Simplified Chinese. English is the source and fallback language. On hosts with the DSH locale service, plugins follow **Settings → General → Language** and update immediately, including open panels and known error messages. Older hosts without that service use English. API diagnostics and CSV column names use English; user content, model IDs and command syntax stay in their original language.

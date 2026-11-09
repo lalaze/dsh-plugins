@@ -10,6 +10,7 @@ import { remoteUsageRecords, type RemoteUsageRecord } from './agents/usage.js';
 import { adoptModel } from './chat/adopt-model.js';
 import { installChat, scheduleSessionRepair } from './chat/install.js';
 import { ChatProjects } from './chat/projects.js';
+import { installNativeSharing } from './chat/native-install.js';
 import type { SyncAgent } from './chat/native-chat.js';
 import { accessOf, loggerOf, type ToolDefinition, type ToolHost } from './core/dsh-host.js';
 import { Store } from './core/store.js';
@@ -40,6 +41,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
   const service = new RemoteAgentsService(store);
   const projects = new ChatProjects(service);
   const workspace = await installWorkspaces(ctx, store, service);
+  const native = await installNativeSharing(ctx, service, workspace);
   const sharing = new Sharing(store, undefined, message => loggerOf(ctx)?.warn?.(message));
   service.sharing = sharing;
   // Close the store last: a reloaded plugin's new instance owns the state from then on.
@@ -51,7 +53,7 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
     if (task) for (const record of remoteUsageRecords(task, store.hosts(), usage, turn)) ctx.emit('remote-agents/usage', record);
   });
   ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered',
-    fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing, adoptModel(name => ctx.get(name as never))) });
+    fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing, adoptModel(name => ctx.get(name as never)), native) });
   installChat(ctx, service, projects, { access: workspace.access, files: workspace.features.files, workspaces: workspace.workspaces });
   installSharingHost(ctx, sharing);
   // Native conversation routes and settings also work without the delegation tool registry.

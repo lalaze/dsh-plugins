@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { REMOTE_DSH_RUNNER } from './runner.js';
 import { WORKSPACE_SHELL } from './shell.js';
+import { nativeRpc } from '../chat/native-registry.js';
 import { initializeCodex } from '../agents/runtime.js';
 import { JsonlPeer, quote, type SshTransport } from '../core/ssh.js';
 import { endHolderScript } from './holder-protocol.js';
@@ -51,6 +52,7 @@ const BASIC_PATH = 'PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PAT
 
 export class WorkspaceFiles {
   constructor(private readonly transport: SshTransport) {}
+  nativeSharing(request: Record<string, unknown>): Promise<any> { return nativeRpc(this.transport, request); }
   /** The records that can title a Claude Code session, from its file on this machine if it has saved that session. */
   /** Ends a terminal's holder and what runs in it, if there is one. */
   async endHolder(holder: string): Promise<void> { await this.transport.exec(endHolderScript(holder), 15_000, { login: false }); }

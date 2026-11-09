@@ -19,6 +19,8 @@
 | `dsh-translate` | [packages/translate](packages/translate/README.zh-CN.md) | 在聊天选中文本或输入框草稿中调用 OpenAI 兼容接口进行翻译 |
 | `dsh-auth-cookie-cleanup` | [packages/auth-cookie-cleanup](packages/auth-cookie-cleanup/README.zh-CN.md) | 临时修复 Desktop 启动约 70 次后无法打开：自动清理残留的按端口 `dsh-auth-*` cookie（deepseek-harness#10598） |
 
+Remote Agents 的普通 DSH 对话共享需单独启用：通过 `shared-native-v1` 同步原生历史，以显式交接创建关联续聊副本。现有 `shared-v1` 共享开关只作用于远程 CLI 会话。详见[普通对话共享及限制](packages/remote-agents/docs/native-sharing.zh-CN.md)。
+
 ## 语言
 
 插件界面支持英语和简体中文，以英语作为源文案和回退语言。宿主提供 DSH locale 服务时，插件跟随「设置 → 通用 → 语言」即时切换，包括已打开的面板和插件自身的错误提示；未提供该服务的旧宿主使用英语。API 诊断和 CSV 列名使用英语，用户内容、模型 ID 和命令语法保持原文。

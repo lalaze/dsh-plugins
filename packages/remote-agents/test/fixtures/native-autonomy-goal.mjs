@@ -1,0 +1,52 @@
+// Actual public GoalService and log fold; disposable agents only. No profile or OS process work.
+import assert from 'node:assert/strict';
+import { resolve, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { nativeDshGoalAdapter, captureNativeGoal } from '../../src/chat/native-autonomy.ts';
+const publicPackage = resolve(process.argv[2]);
+const load = name => import(pathToFileURL(join(publicPackage, 'node_modules', '@deepseek-ai', name, 'lib/index.js')).href);
+const [{ Context }, { Session, SessionId }, { default: Projections }, { default: Goals, foldGoal }] = await Promise.all([
+  load('cordis'), load('dsh-session'), load('dsh-session-projection'), import(pathToFileURL(join(publicPackage, 'lib/index.js')).href),
+]);
+const ctx = new Context(), live = new Map(), forks = [];
+ctx.provide('agents', { get: id => live.get(id) });
+for (const plugin of [Projections, Goals]) { const f = ctx.plugin(plugin); forks.push(f); await f.await(); }
+const root = Session.create(SessionId('air-goal'));
+const a = { id: root.id, session: root, ctx }; live.set(a.id, a);
+const goal = ctx.goals.create(a, { objective: 'Exact goal objective with old-root text', maxGoalRounds: 4 });
+assert.equal(goal.activation, 'armed');
+const cold = new Map();
+const readColdGoal = async id => { const fold = foldGoal(cold.get(id).snapshotEvents()); return fold.goal && { ...fold.goal, roundsStarted: fold.roundsStarted, createdAt: fold.createdAt, updatedAt: fold.updatedAt }; };
+const goalApiWithoutDisarm = { get: agent => ctx.goals.get(agent), pause: (agent, ref) => ctx.goals.pause(agent, ref), resume: (agent, ref) => ctx.goals.resume(agent, ref) };
+const adapter = nativeDshGoalAdapter(goalApiWithoutDisarm, { liveAgent: id => live.get(id), readColdGoal });
+const initial = captureNativeGoal(ctx.goals, a, a.id);
+const activeCold = Session.create(SessionId('cold-active-goal'), structuredClone([...root.snapshotEvents()]), { ...root.header, id: SessionId('cold-active-goal') }, root.inheritedEventCount);
+cold.set(activeCold.id, activeCold);
+await adapter.importParked(initial, activeCold.id, 'active-cold-import');
+const activeColdAgent = { id: activeCold.id, session: activeCold, ctx }; live.set(activeCold.id, activeColdAgent);
+assert.equal(ctx.goals.get(activeColdAgent).phase, 'active');
+assert.equal(ctx.goals.get(activeColdAgent).activation, 'disarmed');
+const paused = await adapter.pause(initial, a.id, 'source-cut');
+assert.equal(ctx.goals.get(a).phase, 'paused'); assert.equal(ctx.goals.get(a).activation, 'disarmed');
+assert.equal(ctx.goals.get(a).revision, goal.revision + 1);
+assert.equal(Object.hasOwn(paused.state, 'activation'), false);
+await adapter.pause(initial, a.id, 'source-cut'); assert.equal(ctx.goals.get(a).revision, goal.revision + 1);
+const events = structuredClone([...root.snapshotEvents()]);
+const target = Session.create(SessionId('mini-goal'), events, { ...root.header, id: SessionId('mini-goal') }, root.inheritedEventCount);
+cold.set(target.id, target);
+const coldPause = await adapter.pause({ ...paused, sessionId: target.id }, target.id, 'cold-source-cut');
+assert.equal(coldPause.sourceMode, 'cold-log');
+assert.equal(coldPause.state.id, goal.id);
+const beforeImport = structuredClone([...target.snapshotEvents()]);
+await adapter.importParked(paused, target.id, 'import-cut');
+assert.deepEqual([...target.snapshotEvents()], beforeImport);
+assert.deepEqual(beforeImport.filter(e=>e.type==='goal/change'), events);
+const b = { id: target.id, session: target, ctx }; live.set(b.id, b);
+assert.equal(ctx.goals.get(b).id, goal.id); assert.equal(ctx.goals.get(b).activation, 'disarmed');
+const preResume = target.seq;
+await adapter.resume(paused, b.id, 'human-resume');
+assert.equal(ctx.goals.get(b).id, goal.id); assert.equal(ctx.goals.get(b).phase, 'active'); assert.equal(ctx.goals.get(b).activation, 'armed');
+assert.equal(target.seq, preResume + 1);
+assert.throws(() => ctx.goals.pause(b, { id: goal.id, revision: goal.revision }), /revision|stale|current/i);
+console.log(JSON.stringify({ package:'@deepseek-ai/dsh-goal@0.2.2-rc.1', sourcePaused:true, sourcePauseReplay:true, coldSourceInert:true, exactGoalId:true, importZeroMutation:true, coldDisarmed:true, explicitResumeArmed:true, revisionCAS:true }));
+for (const f of forks.reverse()) await f.dispose();

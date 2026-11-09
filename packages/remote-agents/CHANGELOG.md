@@ -4,6 +4,16 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.122 — Ordinary DSH conversations across devices (release preparation)
+
+- Share an ordinary DSH conversation through a verified SSH authority and continue it on another device, with explicit handoff and one writer for the root and its child tree. Existing remote CLI sharing remains separate.
+- Local workspaces use an explicitly confirmed project-key-to-directory mapping on each device; paths may differ. Verified remote workspaces retain their existing placement. Missing mappings preserve discoverable history and request setup. Project files, profiles and credentials are not copied.
+- Preserve native messages, normal tool calls/results, file and image attachments, and existing compaction. Continuations can use the receiver's ordinary tools and produce new compaction and titles. Historical message text is not rewritten.
+- Import goals, queued input, schedules and continuable child trees as parked state, without executing them. Resume work explicitly; originally paused schedules stay paused and expired one-shot tasks are not retimed. Freeze backups and acceptance receipts retain work across failed handoffs and uncertain replies.
+- Apply the receiver's read-only sandbox and approval policy to every imported agent, including cold-restored children. Source permissions do not grant receiver access. Running turns, tools, background jobs and OS processes must finish or stop before handoff; they are not migrated.
+
+After installing on both devices, restart the affected DSH instances, enable ordinary sharing, and confirm each local directory mapping before continuing. Isolated-runtime tests passed; two physical Macs with real GUI/accounts have not yet been accepted. Submission, market publication and deployment status are tracked in the [repository release record](https://github.com/lalaze/dsh-plugins/blob/main/docs/releases/2026-11-09.md); this entry prepares the release and does not record a completed publication.
+
 **Upgrading from 0.2.120:** Usage statistics no longer overcount Codex. After DSH reattached to a Codex that kept running (DSH restarted, the plugin was updated, or an idle session was closed because its host had no free session slot), the next turn was recorded with the whole thread's running total, so a long thread could be counted several times over. Each turn now records only the tokens it used: a DSH that reattaches during a turn counts from where that turn began, which it saves; another DSH taking over a running turn counts from the first request it sees, leaving out the ones before. A turn already running when you upgrade has no saved start and is counted the second way. Usage already recorded is not changed; turns after the upgrade are recorded the new way. Nothing to do after upgrading.
 
 **Upgrading from 0.2.119:** Internal maintenance only: host connections and model catalogs, and shared notifications, read marks and workspace synchronization now have separate modules. Public APIs, saved data, permissions and the UI are unchanged; no migration or configuration changes are needed. This release adds regression coverage for connection, synchronization and shutdown boundaries; it does not change the shared-session read synchronization algorithm.

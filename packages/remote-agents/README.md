@@ -92,7 +92,7 @@ Closing the panel leaves background work running, and so do quitting DSH and los
 
 ## Sessions shared between DSH instances
 
-Every DSH connected to the same SSH account sees the same sessions on that machine: their history, tasks in progress, approvals waiting for an answer, and the remote workspaces added there. Add the machine in each DSH; SSH keys and settings are not shared. Sharing is on for every machine by default. Clear **Share sessions and workspaces with other DSH instances** in its card to keep its sessions to this DSH.
+Every DSH connected to the same SSH account sees the same remote **CLI sessions** on that machine: their history, tasks in progress, approvals waiting for an answer, and the remote workspaces added there. This switch does not share ordinary model conversations. Add the machine in each DSH; SSH keys and settings are not shared. CLI sharing is on for every machine by default. Clear **Share sessions and workspaces with other DSH instances** in its card to keep its CLI sessions to this DSH.
 
 - **Where it is kept.** The SSH host keeps a registry in `~/.dsh-remote-agents/shared-v1`: a record and the history of each session, and the list of shared remote workspaces. Its files are private to the SSH account (`0700`/`0600`); anyone who can sign in as that account can read them, as they can read the CLIs' own history. Secrets, sharing tokens, uploaded image data and usage counters are not written there, and only the first 2,000 characters of the first prompt are. Like the relays, it needs Node.js 18 or newer on the host.
 - **Histories are copied when opened.** Sessions another DSH started appear in the list right away; a session's history is copied to this DSH the first time it is opened, and follows from then on. While the host is offline, only sessions opened before can be read.
@@ -107,7 +107,14 @@ Every DSH connected to the same SSH account sees the same sessions on that machi
 - **What you have read** carries across too. Opening a conversation in one DSH clears its **Completed** mark within seconds in the others connected to the machine. A DSH counts a conversation as read only while its window is in front and focused, so a turn that ends while you are away stays marked. Each session's position is kept in `read.json` in the registry.
 - **Turning sharing off** first catches up on the sessions started here, then withdraws them from the registry: the other DSH instances stop showing them, and this DSH keeps them and can continue them. Copies of sessions other DSH instances started are removed from this DSH. Turning sharing off needs the machine to be reachable, unless sharing never worked there. Turned on again, the withdrawn sessions are shared again.
 
+## Ordinary DSH conversations
+
+In **Settings → Remote agents → Ordinary DSH conversations**, select a verified remote host and enable ordinary sharing on both DSH instances. Confirm the displayed title/ID with **Share and close current conversation**. Native model history, including tool results and existing compaction, is copied without a model/tool call. **Continue here** acquires the single writer and creates a linked native continuation; the previous owner must use **Handoff and close this copy** first. Idle complete turns publish incremental checkpoints. Receiving instances poll metadata and import an initial cold read-only view every 30 seconds; **Open native history** refreshes an existing view on demand.
+
+This opt-in `shared-native-v1` protocol keeps CLI `shared-v1` unchanged. It supports explicitly mapped local workspaces and verified remote workspaces, native files and images, ordinary receiver tools, new compaction and titles. Goals, queued input, schedules and continuable child trees are imported without execution and restored only explicitly. Shared copies start read-only/ask and retain native permission checks. Project code and credentials are not copied; running processes and jobs must complete or stop before handoff. Version, publication and deployment status are tracked in the [repository release record](https://github.com/lalaze/dsh-plugins/blob/main/docs/releases/2026-11-09.md). Isolated-runtime acceptance has passed; two physical Macs with real GUI/accounts remain unverified. See [setup, ownership, recovery and verification boundaries](docs/native-sharing.md).
+
 ## Delegation from DSH
+
 
 DSH's own agent gets six tools to hand work to remote CLIs, the counterpart of Paseo's `create_agent` and `send_agent_prompt`:
 

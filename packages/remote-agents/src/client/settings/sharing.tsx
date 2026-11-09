@@ -3,11 +3,12 @@ import type { Dashboard } from '../../core/domain.js';
 import type { SharingCatalog } from '../../sharing/sharing.js';
 import { api } from '../api.js';
 import { localizeError, ui } from '../i18n.js';
+import { NativeSharingSettings } from './native-sharing.js';
 
 type Catalog = SharingCatalog & { errors: Record<string, string> };
 
 /** What DSH shares with every remote CLI: MCP servers through DSH (off by default) and skills (on by default). */
-export function SharingSettings({ dashboard }: { dashboard: Dashboard }) {
+export function SharingSettings({ dashboard, sessionId, sessionTitle, openChat }: { dashboard: Dashboard; sessionId?: string; sessionTitle?: string; openChat?: (id: string) => void }) {
   const [catalog, setCatalog] = useState<Catalog>(), [error, setError] = useState(''), [busy, setBusy] = useState('');
   useEffect(() => {
     const controller = new AbortController();
@@ -21,6 +22,7 @@ export function SharingSettings({ dashboard }: { dashboard: Dashboard }) {
   };
   const hosts = new Map(dashboard.hosts.map(host => [host.id, host.label]));
   return <div className="ra-page ra-sharing">
+    <NativeSharingSettings dashboard={dashboard} sessionId={sessionId} sessionTitle={sessionTitle} openChat={openChat} />
     <h2>{ui('Share with remote CLIs')}</h2>
     <p className="ra-muted">{ui('Remote CLIs started afterwards receive what is selected here. Antigravity cannot receive them.')}</p>
     {error && <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}</div>}
