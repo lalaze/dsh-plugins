@@ -57,7 +57,7 @@ pnpm --filter dsh-remote-agents run check
 
 ## 生效与下一步
 
-仅修改远程工作区源码；没有发布、安装到当前桌面 profile、重启 DSH 或结束用户终端。
+已随 Remote Agents **0.2.119** 发布到插件市场，详见 [发布记录](./releases/2026-11-09.md)。发布没有安装到当前桌面 profile、重启 DSH 或结束用户终端。
 
 这次优化运行在 **新启动的远端 holder** 中。安装包含修复的版本后，新建 TUI 会话可启用新 holder；已存活的 holder 为保证会话不中断会继续运行旧代码，刷新网页或断线重连不会替换它。不要为验证性能直接杀掉正在工作的 holder。
 
