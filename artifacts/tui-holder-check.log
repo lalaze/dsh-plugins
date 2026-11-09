@@ -1,0 +1,3974 @@
+(node:31325) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> dsh-remote-agents@0.2.118 check /Volumes/data/code/dsh-plugins/packages/remote-agents
+> pnpm run typecheck && pnpm test && pnpm run build
+
+(node:31366) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> dsh-remote-agents@0.2.118 typecheck /Volumes/data/code/dsh-plugins/packages/remote-agents
+> tsc --noEmit
+
+(node:31450) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> dsh-remote-agents@0.2.118 test /Volumes/data/code/dsh-plugins/packages/remote-agents
+> node --import tsx --import ./test/setup.mjs --test --test-timeout=60000 test/*.test.ts test/*.test.tsx
+
+(node:31483) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+TAP version 13
+# (node:31484) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a new conversation gets the model, and the default stays what the user chose elsewhere
+ok 1 - a new conversation gets the model, and the default stays what the user chose elsewhere
+  ---
+  duration_ms: 0.817125
+  type: 'test'
+  ...
+# Subtest: a conversation that has started keeps its model
+ok 2 - a conversation that has started keeps its model
+  ---
+  duration_ms: 0.316958
+  type: 'test'
+  ...
+# Subtest: a DSH without these services says so
+ok 3 - a DSH without these services says so
+  ---
+  duration_ms: 0.350667
+  type: 'test'
+  ...
+# (node:31485) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a transcript shows what was asked and answered, in the conversation's language, without prompt framing or reasoning
+ok 4 - a transcript shows what was asked and answered, in the conversation's language, without prompt framing or reasoning
+  ---
+  duration_ms: 1.497875
+  type: 'test'
+  ...
+# Subtest: a session another DSH started becomes a conversation here, in its workspace, on its CLI, model and permission
+ok 5 - a session another DSH started becomes a conversation here, in its workspace, on its CLI, model and permission
+  ---
+  duration_ms: 76.054041
+  type: 'test'
+  ...
+# Subtest: the conversation opens with the saved history, sends nothing, and continues the same CLI session
+ok 6 - the conversation opens with the saved history, sends nothing, and continues the same CLI session
+  ---
+  duration_ms: 36.724167
+  type: 'test'
+  ...
+# Subtest: a turn still running where the session started streams on after its history
+ok 7 - a turn still running where the session started streams on after its history
+  ---
+  duration_ms: 71.818458
+  type: 'test'
+  ...
+# (node:31486) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: AgentTeams members are recognized by their subagent descriptor only
+ok 8 - AgentTeams members are recognized by their subagent descriptor only
+  ---
+  duration_ms: 1.08675
+  type: 'test'
+  ...
+# Subtest: assignments in the current and the older AgentTeams message source are prompts; other plugins are not
+ok 9 - assignments in the current and the older AgentTeams message source are prompts; other plugins are not
+  ---
+  duration_ms: 0.07425
+  type: 'test'
+  ...
+# Subtest: the member note names the team tools and mentions approvals only when nobody answers
+ok 10 - the member note names the team tools and mentions approvals only when nobody answers
+  ---
+  duration_ms: 0.473208
+  type: 'test'
+  ...
+# Subtest: a delegated subagent that never asks is unattended and its sandbox bounds the CLI; main conversations are unchanged
+ok 11 - a delegated subagent that never asks is unattended and its sandbox bounds the CLI; main conversations are unchanged
+  ---
+  duration_ms: 0.738625
+  type: 'test'
+  ...
+# Subtest: a denial keeps the turn going: Codex cancel is chosen only when it is the only way to deny
+ok 12 - a denial keeps the turn going: Codex cancel is chosen only when it is the only way to deny
+  ---
+  duration_ms: 0.75225
+  type: 'test'
+  ...
+# Subtest: in a sandboxed task a shell command the CLI could not read runs, and everything else stays refused
+ok 13 - in a sandboxed task a shell command the CLI could not read runs, and everything else stays refused
+  ---
+  duration_ms: 0.439375
+  type: 'test'
+  ...
+# Subtest: a refusal passes on why the CLI asked, and does not claim a person decided
+ok 14 - a refusal passes on why the CLI asked, and does not claim a person decided
+  ---
+  duration_ms: 0.402333
+  type: 'test'
+  ...
+# Subtest: an unattended refusal tells a model how to go on with a shell command, and only with one
+ok 15 - an unattended refusal tells a model how to go on with a shell command, and only with one
+  ---
+  duration_ms: 0.165708
+  type: 'test'
+  ...
+# (node:31487) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the remote Antigravity runner forwards native JSONL and signals its owned child on interrupt
+ok 16 - the remote Antigravity runner forwards native JSONL and signals its owned child on interrupt
+  ---
+  duration_ms: 75.730583
+  type: 'test'
+  ...
+# (node:31488) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: claude: images and streamed binary files reach the native protocol and replay does not re-upload
+ok 17 - claude: images and streamed binary files reach the native protocol and replay does not re-upload
+  ---
+  duration_ms: 129.61
+  type: 'test'
+  ...
+# Subtest: codex: images and streamed binary files reach the native protocol and replay does not re-upload
+ok 18 - codex: images and streamed binary files reach the native protocol and replay does not re-upload
+  ---
+  duration_ms: 54.708875
+  type: 'test'
+  ...
+# Subtest: grok: images and streamed binary files reach the native protocol and replay does not re-upload
+ok 19 - grok: images and streamed binary files reach the native protocol and replay does not re-upload
+  ---
+  duration_ms: 33.631583
+  type: 'test'
+  ...
+# Subtest: DSH Desktop @path mentions of files on this machine are uploaded and point at their remote copies
+ok 20 - DSH Desktop @path mentions of files on this machine are uploaded and point at their remote copies
+  ---
+  duration_ms: 20.075041
+  type: 'test'
+  ...
+# Subtest: an interrupted upload is retryable without starting a CLI turn or losing attachment bytes
+ok 21 - an interrupted upload is retryable without starting a CLI turn or losing attachment bytes
+  ---
+  duration_ms: 17.948833
+  type: 'test'
+  ...
+# Subtest: workspace checks and explicit image capabilities run before attachment reads or transfer
+ok 22 - workspace checks and explicit image capabilities run before attachment reads or transfer
+  ---
+  duration_ms: 12.720625
+  type: 'test'
+  ...
+# Subtest: cancelled or corrupt attachment reads cannot publish a staged file or start a remote turn
+ok 23 - cancelled or corrupt attachment reads cannot publish a staged file or start a remote turn
+  ---
+  duration_ms: 4.506292
+  type: 'test'
+  ...
+# Subtest: what the real SSH upload command saves stays out of the project's Git status
+ok 24 - what the real SSH upload command saves stays out of the project's Git status
+  ---
+  duration_ms: 628.52725
+  type: 'test'
+  ...
+# Subtest: the real SSH upload command streams exact binary bytes into a private atomic copy
+ok 25 - the real SSH upload command streams exact binary bytes into a private atomic copy
+  ---
+  duration_ms: 297.809666
+  type: 'test'
+  ...
+# Subtest: SSH upload rejects directory traversal and symlinks and cancellation leaves no partial file
+ok 26 - SSH upload rejects directory traversal and symlinks and cancellation leaves no partial file
+  ---
+  duration_ms: 365.446125
+  type: 'test'
+  ...
+# (node:31489) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: close drains an in-flight restore without registering or opening its relay afterwards
+ok 27 - close drains an in-flight restore without registering or opening its relay afterwards
+  ---
+  duration_ms: 6.003041
+  type: 'test'
+  ...
+# Subtest: close does not deadlock when a start is waiting for a relay restore
+ok 28 - close does not deadlock when a start is waiting for a relay restore
+  ---
+  duration_ms: 1.255625
+  type: 'test'
+  ...
+# Subtest: concurrent launches reserve the last slot before asynchronous launch preparation
+ok 29 - concurrent launches reserve the last slot before asynchronous launch preparation
+  ---
+  duration_ms: 3.393292
+  type: 'test'
+  ...
+# Subtest: restores and launches share the same quota, and a failed restore releases its slot
+ok 30 - restores and launches share the same quota, and a failed restore releases its slot
+  ---
+  duration_ms: 1.327083
+  type: 'test'
+  ...
+# Subtest: a failed launch releases its reservation for the next task
+ok 31 - a failed launch releases its reservation for the next task
+  ---
+  duration_ms: 0.9055
+  type: 'test'
+  ...
+# Subtest: closing during relay launch cannot register or open the late session
+ok 32 - closing during relay launch cannot register or open the late session
+  ---
+  duration_ms: 0.284875
+  type: 'test'
+  ...
+# Subtest: aborting launch preparation releases its reserved slot without starting a CLI
+ok 33 - aborting launch preparation releases its reserved slot without starting a CLI
+  ---
+  duration_ms: 0.554875
+  type: 'test'
+  ...
+# Subtest: successful restores count towards quota and idle resumable sessions remain reclaimable
+ok 34 - successful restores count towards quota and idle resumable sessions remain reclaimable
+  ---
+  duration_ms: 0.714042
+  type: 'test'
+  ...
+# (node:31490) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: only workspace image paths are copied; URLs, anchors and other files stay as written
+ok 35 - only workspace image paths are copied; URLs, anchors and other files stay as written
+  ---
+  duration_ms: 0.431417
+  type: 'test'
+  ...
+# Subtest: streamed images are held until complete, then point at local copies
+ok 36 - streamed images are held until complete, then point at local copies
+  ---
+  duration_ms: 0.562125
+  type: 'test'
+  ...
+# Subtest: a failed fetch leaves the image as written
+ok 37 - a failed fetch leaves the image as written
+  ---
+  duration_ms: 0.083083
+  type: 'test'
+  ...
+# Subtest: saved images are content-addressed and reused
+ok 38 - saved images are content-addressed and reused
+  ---
+  duration_ms: 16.051083
+  type: 'test'
+  ...
+# (node:31491) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: LAN HTTP clients can create unique valid request IDs without crypto.randomUUID
+ok 39 - LAN HTTP clients can create unique valid request IDs without crypto.randomUUID
+  ---
+  duration_ms: 0.861667
+  type: 'test'
+  ...
+# (node:31492) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a custom picker's caption drops the host and keeps its tooltip
+ok 40 - a custom picker's caption drops the host and keeps its tooltip
+  ---
+  duration_ms: 59.009834
+  type: 'test'
+  ...
+# Subtest: the native trigger drops the host when another plugin's label shadows ours
+ok 41 - the native trigger drops the host when another plugin's label shadows ours
+  ---
+  duration_ms: 11.907084
+  type: 'test'
+  ...
+# Subtest: the host is dropped again when the selected model changes, and only once
+ok 42 - the host is dropped again when the selected model changes, and only once
+  ---
+  duration_ms: 14.254166
+  type: 'test'
+  ...
+# Subtest: a picker opened later is shortened too
+ok 43 - a picker opened later is shortened too
+  ---
+  duration_ms: 13.292209
+  type: 'test'
+  ...
+# Subtest: menu rows keep the host that tells saved hosts apart
+ok 44 - menu rows keep the host that tells saved hosts apart
+  ---
+  duration_ms: 8.280542
+  type: 'test'
+  ...
+# Subtest: other providers and unknown names stay as they are
+ok 45 - other providers and unknown names stay as they are
+  ---
+  duration_ms: 8.219667
+  type: 'test'
+  ...
+# Subtest: a caption with more than the name is left alone
+ok 46 - a caption with more than the name is left alone
+  ---
+  duration_ms: 4.173458
+  type: 'test'
+  ...
+# Subtest: unloading restores the names
+ok 47 - unloading restores the names
+  ---
+  duration_ms: 8.935291
+  type: 'test'
+  ...
+# (node:31494) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: merge is presentation-only, isolated by owner, deduplicated, and preserves all native entries
+ok 48 - merge is presentation-only, isolated by owner, deduplicated, and preserves all native entries
+  ---
+  duration_ms: 1.281208
+  type: 'test'
+  ...
+# Subtest: honest statuses do not invent completion, timing, or token totals
+ok 49 - honest statuses do not invent completion, timing, or token totals
+  ---
+  duration_ms: 0.204334
+  type: 'test'
+  ...
+# Subtest: remote routes never leak to native APIs; native address identity is unchanged
+ok 50 - remote routes never leak to native APIs; native address identity is unchanged
+  ---
+  duration_ms: 0.14375
+  type: 'test'
+  ...
+# Subtest: real SlotCore shadows exactly one original and follows HMR without registration loops
+ok 51 - real SlotCore shadows exactly one original and follows HMR without registration loops
+  ---
+  duration_ms: 0.544083
+  type: 'test'
+  ...
+# Subtest: decorator waits for absent native entry and removes its shadow on native unload
+ok 52 - decorator waits for absent native entry and removes its shadow on native unload
+  ---
+  duration_ms: 0.305167
+  type: 'test'
+  ...
+# Subtest: poll cancellation ignores a late response even when the transport ignores abort
+ok 53 - poll cancellation ignores a late response even when the transport ignores abort
+  ---
+  duration_ms: 0.125208
+  type: 'test'
+  ...
+# Subtest: poll failures retain successful items and cleanup clears its scheduled retry
+ok 54 - poll failures retain successful items and cleanup clears its scheduled retry
+  ---
+  duration_ms: 0.179958
+  type: 'test'
+  ...
+# (node:31495) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: actual native dropdown counts remote children and opens their read-only transcript
+ok 55 - actual native dropdown counts remote children and opens their read-only transcript # SKIP
+  ---
+  duration_ms: 0.381916
+  type: 'test'
+  ...
+# (node:31497) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: one native dropdown contains both kinds; remote selection opens read-only transcript without native navigation
+ok 56 - one native dropdown contains both kinds; remote selection opens read-only transcript without native navigation
+  ---
+  duration_ms: 95.69975
+  type: 'test'
+  ...
+# Subtest: switching conversations removes selection and late previous-owner responses cannot leak entries
+ok 57 - switching conversations removes selection and late previous-owner responses cannot leak entries
+  ---
+  duration_ms: 35.666083
+  type: 'test'
+  ...
+# (node:31498) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: delegation summaries expose durable ownership without converting it to a main-chat binding
+ok 58 - delegation summaries expose durable ownership without converting it to a main-chat binding
+  ---
+  duration_ms: 61.466292
+  type: 'test'
+  ...
+# Subtest: opening an owner catalog recovers only that owner’s existing relays and starts no CLI or prompt
+ok 59 - opening an owner catalog recovers only that owner’s existing relays and starts no CLI or prompt
+  ---
+  duration_ms: 12.393041
+  type: 'test'
+  ...
+# Subtest: owner catalog keeps live states, metadata and errors; HTTP requires an explicit valid owner
+ok 60 - owner catalog keeps live states, metadata and errors; HTTP requires an explicit valid owner
+  ---
+  duration_ms: 17.647167
+  type: 'test'
+  ...
+# Subtest: offline delegate recovery reports errors and menu polling does not churn retries
+ok 61 - offline delegate recovery reports errors and menu polling does not churn retries
+  ---
+  duration_ms: 12.859084
+  type: 'test'
+  ...
+# (node:31499) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: disabled CLI executables are never probed and changing selection invalidates the catalog cache
+ok 62 - disabled CLI executables are never probed and changing selection invalidates the catalog cache
+  ---
+  duration_ms: 24.436834
+  type: 'test'
+  ...
+# Subtest: the machine identity and home probes skip the remote login shell; CLI discovery keeps it
+ok 63 - the machine identity and home probes skip the remote login shell; CLI discovery keeps it
+  ---
+  duration_ms: 11.307291
+  type: 'test'
+  ...
+# Subtest: starting a session probes only the target CLI, not every enabled CLI
+ok 64 - starting a session probes only the target CLI, not every enabled CLI
+  ---
+  duration_ms: 14.821042
+  type: 'test'
+  ...
+# Subtest: an idle history is freed from memory and reloaded on demand, while a live one is kept
+ok 65 - an idle history is freed from memory and reloaded on demand, while a live one is kept
+  ---
+  duration_ms: 19.256333
+  type: 'test'
+  ...
+# Subtest: changing a model resumes the same native thread and preserves earlier output
+ok 66 - changing a model resumes the same native thread and preserves earlier output
+  ---
+  duration_ms: 20.029916
+  type: 'test'
+  ...
+# Subtest: Codex speed tiers come from the model catalog and apply to the thread and every turn
+ok 67 - Codex speed tiers come from the model catalog and apply to the thread and every turn
+  ---
+  duration_ms: 11.2305
+  type: 'test'
+  ...
+# Subtest: finished turns record their token usage in the timeline and report it once
+ok 68 - finished turns record their token usage in the timeline and report it once
+  ---
+  duration_ms: 32.972208
+  type: 'test'
+  ...
+# Subtest: a turn Claude moved to another model says so where it happened, and each model keeps what it used
+ok 69 - a turn Claude moved to another model says so where it happened, and each model keeps what it used
+  ---
+  duration_ms: 9.585625
+  type: 'test'
+  ...
+# Subtest: Codex context and cache snapshots survive detach, restart and resume without double counting
+ok 70 - Codex context and cache snapshots survive detach, restart and resume without double counting
+  ---
+  duration_ms: 9.289208
+  type: 'test'
+  ...
+# Subtest: Claude context and cache usage follow main-agent requests and survive detach
+ok 71 - Claude context and cache usage follow main-agent requests and survive detach
+  ---
+  duration_ms: 10.727333
+  type: 'test'
+  ...
+# Subtest: ACP usage updates fill the ring
+ok 72 - ACP usage updates fill the ring
+  ---
+  duration_ms: 25.163333
+  type: 'test'
+  ...
+# Subtest: plan limits are read through a running CLI or a prompt-free probe, cached until a turn ends
+ok 73 - plan limits are read through a running CLI or a prompt-free probe, cached until a turn ends
+  ---
+  duration_ms: 14.859417
+  type: 'test'
+  ...
+# Subtest: Claude plan limits come from its own /usage data on the SSH host
+ok 74 - Claude plan limits come from its own /usage data on the SSH host
+  ---
+  duration_ms: 2.003959
+  type: 'test'
+  ...
+# Subtest: Codex MCP tool approvals become permission prompts; other elicitations are declined
+ok 75 - Codex MCP tool approvals become permission prompts; other elicitations are declined
+  ---
+  duration_ms: 4.540292
+  type: 'test'
+  ...
+# Subtest: a non-resumable CLI refuses a model change without closing its live session
+ok 76 - a non-resumable CLI refuses a model change without closing its live session
+  ---
+  duration_ms: 7.053041
+  type: 'test'
+  ...
+# Subtest: SSH discovery asks each installed native CLI for models without sending a prompt
+ok 77 - SSH discovery asks each installed native CLI for models without sending a prompt
+  ---
+  duration_ms: 1.7195
+  type: 'test'
+  ...
+# Subtest: Codex binding is durable before inference; permissions, output, follow-ups and cancel use app-server
+ok 78 - Codex binding is durable before inference; permissions, output, follow-ups and cancel use app-server
+  ---
+  duration_ms: 6.834458
+  type: 'test'
+  ...
+# Subtest: stopping a Codex turn ends the commands it started and leaves those of earlier turns
+ok 79 - stopping a Codex turn ends the commands it started and leaves those of earlier turns
+  ---
+  duration_ms: 7.651333
+  type: 'test'
+  ...
+# Subtest: a Codex without the terminal calls is still stopped
+ok 80 - a Codex without the terminal calls is still stopped
+  ---
+  duration_ms: 6.759584
+  type: 'test'
+  ...
+# Subtest: a message to a running Codex agent interrupts its turn natively before starting the next one
+ok 81 - a message to a running Codex agent interrupts its turn natively before starting the next one
+  ---
+  duration_ms: 7.729542
+  type: 'test'
+  ...
+# Subtest: Claude reports a user interrupt as interrupted, not as a failed turn, and keeps its process
+ok 82 - Claude reports a user interrupt as interrupted, not as a failed turn, and keeps its process
+  ---
+  duration_ms: 7.581125
+  type: 'test'
+  ...
+# Subtest: restart resumes the saved native thread without replaying an uncertain prompt
+ok 83 - restart resumes the saved native thread without replaying an uncertain prompt
+  ---
+  duration_ms: 12.832292
+  type: 'test'
+  ...
+# Subtest: Codex inherit mode leaves approval policy and sandbox to the remote config
+ok 84 - Codex inherit mode leaves approval policy and sandbox to the remote config
+  ---
+  duration_ms: 8.374375
+  type: 'test'
+  ...
+# Subtest: an unattended Codex task never asks: it works in the selected sandbox, or in the remote config one
+ok 85 - an unattended Codex task never asks: it works in the selected sandbox, or in the remote config one
+  ---
+  duration_ms: 20.825291
+  type: 'test'
+  ...
+# Subtest: Codex auto review writes to the workspace and routes approval requests to its reviewer
+ok 86 - Codex auto review writes to the workspace and routes approval requests to its reviewer
+  ---
+  duration_ms: 10.734209
+  type: 'test'
+  ...
+# Subtest: saved agent output remains readable when its SSH host is unavailable
+ok 87 - saved agent output remains readable when its SSH host is unavailable
+  ---
+  duration_ms: 5.3255
+  type: 'test'
+  ...
+# Subtest: unloading during discovery cannot start a CLI after the backend has closed
+ok 88 - unloading during discovery cannot start a CLI after the backend has closed
+  ---
+  duration_ms: 1.050584
+  type: 'test'
+  ...
+# Subtest: grok uses native ACP permission option IDs, model/mode configuration, cancellation and session recovery
+ok 89 - grok uses native ACP permission option IDs, model/mode configuration, cancellation and session recovery
+  ---
+  duration_ms: 7.233416
+  type: 'test'
+  ...
+# Subtest: codebuddy uses native ACP permission option IDs, model/mode configuration, cancellation and session recovery
+ok 90 - codebuddy uses native ACP permission option IDs, model/mode configuration, cancellation and session recovery
+  ---
+  duration_ms: 5.987166
+  type: 'test'
+  ...
+# Subtest: DSH discovers opaque ACP model routes, applies reasoning and resumes through session/resume without replay
+ok 91 - DSH discovers opaque ACP model routes, applies reasoning and resumes through session/resume without replay
+  ---
+  duration_ms: 9.418792
+  type: 'test'
+  ...
+# Subtest: ACP configOptions discover grouped models and per-model reasoning, and restore the selected configuration
+ok 92 - ACP configOptions discover grouped models and per-model reasoning, and restore the selected configuration
+  ---
+  duration_ms: 6.9725
+  type: 'test'
+  ...
+# Subtest: ACP agents without model discovery use CLI default, and unsupported resume never resubmits
+ok 93 - ACP agents without model discovery use CLI default, and unsupported resume never resubmits
+  ---
+  duration_ms: 3.550375
+  type: 'test'
+  ...
+# Subtest: Antigravity uses its native JSONL, persists the conversation before prompting, and interrupts through the SSH runner
+ok 94 - Antigravity uses its native JSONL, persists the conversation before prompting, and interrupts through the SSH runner
+  ---
+  duration_ms: 4.274708
+  type: 'test'
+  ...
+# Subtest: Antigravity reports a missing remote Node runtime without starting an agent
+ok 95 - Antigravity reports a missing remote Node runtime without starting an agent
+  ---
+  duration_ms: 0.9765
+  type: 'test'
+  ...
+# Subtest: Claude streams once, returns structured questions and resumes its UUID over the same SSH transport
+ok 96 - Claude streams once, returns structured questions and resumes its UUID over the same SSH transport
+  ---
+  duration_ms: 3.426084
+  type: 'test'
+  ...
+# Subtest: mode changes release the idle session, and the next message resumes it with the new mode
+ok 97 - mode changes release the idle session, and the next message resumes it with the new mode
+  ---
+  duration_ms: 5.6125
+  type: 'test'
+  ...
+# Subtest: releasing an idle session ends its CLI and the next message resumes it; a busy one is left alone
+ok 98 - releasing an idle session ends its CLI and the next message resumes it; a busy one is left alone
+  ---
+  duration_ms: 3.630334
+  type: 'test'
+  ...
+# Subtest: an unattended Claude task with workspace write runs commands in Claude Code's sandbox; others do not
+ok 99 - an unattended Claude task with workspace write runs commands in Claude Code's sandbox; others do not
+  ---
+  duration_ms: 4.724
+  type: 'test'
+  ...
+# Subtest: commands are left to the sandbox only on a host and version where it has been measured
+ok 100 - commands are left to the sandbox only on a host and version where it has been measured
+  ---
+  duration_ms: 0.168416
+  type: 'test'
+  ...
+# Subtest: confined settings make Claude Code refuse to run unsandboxed, and only workspace write gets them
+ok 101 - confined settings make Claude Code refuse to run unsandboxed, and only workspace write gets them
+  ---
+  duration_ms: 0.067875
+  type: 'test'
+  ...
+# Subtest: a task is marked sandboxed only when its CLI was started with the confined settings
+ok 102 - a task is marked sandboxed only when its CLI was started with the confined settings
+  ---
+  duration_ms: 7.125167
+  type: 'test'
+  ...
+# Subtest: on a host where the sandbox is not relied on, nothing changes
+ok 103 - on a host where the sandbox is not relied on, nothing changes
+  ---
+  duration_ms: 2.243
+  type: 'test'
+  ...
+# Subtest: only an unattended read-only Claude task gets web search and web fetch without asking
+ok 104 - only an unattended read-only Claude task gets web search and web fetch without asking
+  ---
+  duration_ms: 8.121167
+  type: 'test'
+  ...
+# Subtest: Claude Auto is available for new sessions and is explicitly passed to the non-interactive CLI
+ok 105 - Claude Auto is available for new sessions and is explicitly passed to the non-interactive CLI
+  ---
+  duration_ms: 4.777708
+  type: 'test'
+  ...
+# Subtest: only Claude launches that may skip permissions say a root account means it
+ok 106 - only Claude launches that may skip permissions say a root account means it
+  ---
+  duration_ms: 14.008125
+  type: 'test'
+  ...
+# Subtest: other CLIs are launched without it
+ok 107 - other CLIs are launched without it
+  ---
+  duration_ms: 5.24375
+  type: 'test'
+  ...
+# Subtest: pre-upgrade Claude sessions can select Auto and retain it across messages and reconnects
+ok 108 - pre-upgrade Claude sessions can select Auto and retain it across messages and reconnects
+  ---
+  duration_ms: 5.384083
+  type: 'test'
+  ...
+# Subtest: Claude inherits remote permission settings unless a mode is explicitly selected, including after resume
+ok 109 - Claude inherits remote permission settings unless a mode is explicitly selected, including after resume
+  ---
+  duration_ms: 9.533
+  type: 'test'
+  ...
+# Subtest: Claude forwards explicitly selected session approval rules without broadening one-time approvals
+ok 110 - Claude forwards explicitly selected session approval rules without broadening one-time approvals
+  ---
+  duration_ms: 3.763625
+  type: 'test'
+  ...
+# Subtest: Claude forwards explicitly selected localSettings approval rules without broadening one-time approvals
+ok 111 - Claude forwards explicitly selected localSettings approval rules without broadening one-time approvals
+  ---
+  duration_ms: 2.849958
+  type: 'test'
+  ...
+# Subtest: Claude does not offer persistent grants for suppressed, global, malformed or mode-changing suggestions
+ok 112 - Claude does not offer persistent grants for suppressed, global, malformed or mode-changing suggestions
+  ---
+  duration_ms: 3.212125
+  type: 'test'
+  ...
+# Subtest: codex completed sessions are reclaimed, and messaging one resumes it without replay
+ok 113 - codex completed sessions are reclaimed, and messaging one resumes it without replay
+  ---
+  duration_ms: 25.536916
+  type: 'test'
+  ...
+# Subtest: dsh completed sessions are reclaimed, and messaging one resumes it without replay
+ok 114 - dsh completed sessions are reclaimed, and messaging one resumes it without replay
+  ---
+  duration_ms: 25.448
+  type: 'test'
+  ...
+# Subtest: session recycling never interrupts running agents or pending approvals
+ok 115 - session recycling never interrupts running agents or pending approvals
+  ---
+  duration_ms: 15.801667
+  type: 'test'
+  ...
+# Subtest: session recycling protects a follow-up while its delivery record is being saved
+ok 116 - session recycling protects a follow-up while its delivery record is being saved
+  ---
+  duration_ms: 13.89075
+  type: 'test'
+  ...
+# Subtest: a failed registry write rejects a follow-up before sending and leaks no session lease
+ok 117 - a failed registry write rejects a follow-up before sending and leaks no session lease
+  ---
+  duration_ms: 18.802417
+  type: 'test'
+  ...
+# Subtest: idle ACP sessions without either resume capability stay connected until archived
+ok 118 - idle ACP sessions without either resume capability stay connected until archived
+  ---
+  duration_ms: 21.025666
+  type: 'test'
+  ...
+# Subtest: deleting an agent removes its saved output
+ok 119 - deleting an agent removes its saved output
+  ---
+  duration_ms: 6.443916
+  type: 'test'
+  ...
+# Subtest: JSONL preserves split UTF-8 and correlates replies; closing rejects in-flight requests
+ok 120 - JSONL preserves split UTF-8 and correlates replies; closing rejects in-flight requests
+  ---
+  duration_ms: 0.146208
+  type: 'test'
+  ...
+# Subtest: history is durable, private, paginated and rejects truncated logs before appending
+ok 121 - history is durable, private, paginated and rejects truncated logs before appending
+  ---
+  duration_ms: 18.768542
+  type: 'test'
+  ...
+# Subtest: a missing workspace path is reported without executing in the discovery directory
+ok 122 - a missing workspace path is reported without executing in the discovery directory
+  ---
+  duration_ms: 29.682625
+  type: 'test'
+  ...
+# Subtest: codex: DSH native model streams through the real SSH backend and resumes the same conversation
+ok 123 - codex: DSH native model streams through the real SSH backend and resumes the same conversation
+  ---
+  duration_ms: 26.843083
+  type: 'test'
+  ...
+# Subtest: claude: DSH native model streams through the real SSH backend and resumes the same conversation
+ok 124 - claude: DSH native model streams through the real SSH backend and resumes the same conversation
+  ---
+  duration_ms: 14.013417
+  type: 'test'
+  ...
+# Subtest: dsh: DSH native model streams through the real SSH backend and resumes the same conversation
+ok 125 - dsh: DSH native model streams through the real SSH backend and resumes the same conversation
+  ---
+  duration_ms: 11.270542
+  type: 'test'
+  ...
+# Subtest: grok: DSH native model streams through the real SSH backend and resumes the same conversation
+ok 126 - grok: DSH native model streams through the real SSH backend and resumes the same conversation
+  ---
+  duration_ms: 9.499334
+  type: 'test'
+  ...
+# Subtest: codebuddy: DSH native model streams through the real SSH backend and resumes the same conversation
+ok 127 - codebuddy: DSH native model streams through the real SSH backend and resumes the same conversation
+  ---
+  duration_ms: 12.228875
+  type: 'test'
+  ...
+# Subtest: antigravity: DSH native model streams through the real SSH backend and resumes the same conversation
+ok 128 - antigravity: DSH native model streams through the real SSH backend and resumes the same conversation
+  ---
+  duration_ms: 11.786625
+  type: 'test'
+  ...
+# Subtest: JSONL frames report exact byte offsets for multi-byte text split anywhere
+ok 129 - JSONL frames report exact byte offsets for multi-byte text split anywhere
+  ---
+  duration_ms: 0.222167
+  type: 'test'
+  ...
+# Subtest: images in Claude tool results are saved on the DSH host and named on their tool calls, never stored in the history
+ok 130 - images in Claude tool results are saved on the DSH host and named on their tool calls, never stored in the history
+  ---
+  duration_ms: 5.096125
+  type: 'test'
+  ...
+# Subtest: Codex images are recorded: view_image by path, MCP and generated images by copy, with bytes kept out of the history
+ok 131 - Codex images are recorded: view_image by path, MCP and generated images by copy, with bytes kept out of the history
+  ---
+  duration_ms: 5.588583
+  type: 'test'
+  ...
+# Subtest: a turn Claude starts by itself after a background task is saved as its own turn, shown as running and announced as it starts and ends
+ok 132 - a turn Claude starts by itself after a background task is saved as its own turn, shown as running and announced as it starts and ends
+  ---
+  duration_ms: 6.630042
+  type: 'test'
+  ...
+# (node:31500) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a turn another DSH ran in the same CLI session shows here once it ends, and nothing is sent to the CLI
+ok 133 - a turn another DSH ran in the same CLI session shows here once it ends, and nothing is sent to the CLI
+  ---
+  duration_ms: 35.702375
+  type: 'test'
+  ...
+# Subtest: a turn another DSH is running shows here as it goes, after the turns that ended before it
+ok 134 - a turn another DSH is running shows here as it goes, after the turns that ended before it
+  ---
+  duration_ms: 43.588542
+  type: 'test'
+  ...
+# Subtest: a running turn shown here outlasts a moment when the other DSH reports nothing, and ends by its record
+ok 135 - a running turn shown here outlasts a moment when the other DSH reports nothing, and ends by its record
+  ---
+  duration_ms: 91.958583
+  type: 'test'
+  ...
+# Subtest: a running turn shown here lasts through silence and the lapse after it, as when the DSH running it goes away
+ok 136 - a running turn shown here lasts through silence and the lapse after it, as when the DSH running it goes away
+  ---
+  duration_ms: 391.195208
+  type: 'test'
+  ...
+# Subtest: a running turn nobody takes over ends here without being marked shown, and what follows still appears
+ok 137 - a running turn nobody takes over ends here without being marked shown, and what follows still appears
+  ---
+  duration_ms: 90.186541
+  type: 'test'
+  ...
+# Subtest: Stop here stops a turn another DSH is running that this conversation shows
+ok 138 - Stop here stops a turn another DSH is running that this conversation shows
+  ---
+  duration_ms: 39.378083
+  type: 'test'
+  ...
+# Subtest: a turn without a recorded end waits, even while the DSH running it has not reported it busy yet
+ok 139 - a turn without a recorded end waits, even while the DSH running it has not reported it busy yet
+  ---
+  duration_ms: 4.572125
+  type: 'test'
+  ...
+# Subtest: turns that ended are shown even when another one has started since
+ok 140 - turns that ended are shown even when another one has started since
+  ---
+  duration_ms: 7.788958
+  type: 'test'
+  ...
+# Subtest: turns another DSH ran come first in the reply to the next message sent here
+ok 141 - turns another DSH ran come first in the reply to the next message sent here
+  ---
+  duration_ms: 9.751
+  type: 'test'
+  ...
+# Subtest: the heading names where the turns ran: another DSH, Open sessions here, or elsewhere when not recorded
+ok 142 - the heading names where the turns ran: another DSH, Open sessions here, or elsewhere when not recorded
+  ---
+  duration_ms: 7.729292
+  type: 'test'
+  ...
+# Subtest: a cut-off response here and the turns another DSH ran after it are shown together, in order
+ok 143 - a cut-off response here and the turns another DSH ran after it are shown together, in order
+  ---
+  duration_ms: 6.711208
+  type: 'test'
+  ...
+# Subtest: turns are not shown when the turn this conversation showed last is gone from the history
+ok 144 - turns are not shown when the turn this conversation showed last is gone from the history
+  ---
+  duration_ms: 11.793375
+  type: 'test'
+  ...
+# Subtest: a conversation switched to another model is not woken
+ok 145 - a conversation switched to another model is not woken
+  ---
+  duration_ms: 5.232542
+  type: 'test'
+  ...
+# Subtest: turns from elsewhere read in the conversation's language, with what was asked, answered and used
+ok 146 - turns from elsewhere read in the conversation's language, with what was asked, answered and used
+  ---
+  duration_ms: 0.323125
+  type: 'test'
+  ...
+# Subtest: a turn from elsewhere that changed model says so, in the conversation's language
+ok 147 - a turn from elsewhere that changed model says so, in the conversation's language
+  ---
+  duration_ms: 0.138958
+  type: 'test'
+  ...
+# Subtest: a turn the CLI ran by itself, as after a background task finished, shows here once it ends, headed as its own
+ok 148 - a turn the CLI ran by itself, as after a background task finished, shows here once it ends, headed as its own
+  ---
+  duration_ms: 6.450542
+  type: 'test'
+  ...
+# Subtest: a message sent while the CLI runs a turn of its own waits for that turn and shows it ahead of the reply
+ok 149 - a message sent while the CLI runs a turn of its own waits for that turn and shows it ahead of the reply
+  ---
+  duration_ms: 51.834458
+  type: 'test'
+  ...
+# Subtest: a turn the CLI runs by itself shows here while it runs, and Stop here stops it
+ok 150 - a turn the CLI runs by itself shows here while it runs, and Stop here stops it
+  ---
+  duration_ms: 46.072917
+  type: 'test'
+  ...
+# Subtest: a sentence still being written when a running turn is first read stays whole
+ok 151 - a sentence still being written when a running turn is first read stays whole
+  ---
+  duration_ms: 41.854125
+  type: 'test'
+  ...
+# Subtest: a message waiting for a turn the CLI runs by itself shows that turn as it goes
+ok 152 - a message waiting for a turn the CLI runs by itself shows that turn as it goes
+  ---
+  duration_ms: 49.653917
+  type: 'test'
+  ...
+# Subtest: Stop while a message waits stops the turn it waits for, and the message is not sent
+ok 153 - Stop while a message waits stops the turn it waits for, and the message is not sent
+  ---
+  duration_ms: 36.470417
+  type: 'test'
+  ...
+# Subtest: Stop stops the CLI's own turn even when that turn cannot be shown
+ok 154 - Stop stops the CLI's own turn even when that turn cannot be shown
+  ---
+  duration_ms: 35.603625
+  type: 'test'
+  ...
+# Subtest: a failed read while a message waits leaves the CLI's own turn running
+ok 155 - a failed read while a message waits leaves the CLI's own turn running
+  ---
+  duration_ms: 38.604292
+  type: 'test'
+  ...
+# (node:31501) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: live output is synchronous even when snapshot parsing is blocked
+ok 156 - live output is synchronous even when snapshot parsing is blocked
+  ---
+  duration_ms: 0.76
+  type: 'test'
+  ...
+# Subtest: overlapping joins each receive their own snapshot boundary without duplicates
+ok 157 - overlapping joins each receive their own snapshot boundary without duplicates
+  ---
+  duration_ms: 0.306291
+  type: 'test'
+  ...
+# Subtest: disconnect and replacement hello invalidate queued snapshot and resize work
+ok 158 - disconnect and replacement hello invalidate queued snapshot and resize work
+  ---
+  duration_ms: 0.35025
+  type: 'test'
+  ...
+# Subtest: joining an already live client does not receive output ahead of its fresh snapshot
+ok 159 - joining an already live client does not receive output ahead of its fresh snapshot
+  ---
+  duration_ms: 0.08875
+  type: 'test'
+  ...
+# Subtest: immediate barriers and fragmented ANSI/UTF-8 output retain exact bytes
+ok 160 - immediate barriers and fragmented ANSI/UTF-8 output retain exact bytes
+  ---
+  duration_ms: 0.252375
+  type: 'test'
+  ...
+# Subtest: real headless snapshot plus catch-up matches uninterrupted ANSI and Unicode output
+ok 161 - real headless snapshot plus catch-up matches uninterrupted ANSI and Unicode output
+  ---
+  duration_ms: 29.563666
+  type: 'test'
+  ...
+# (node:31502) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the SSH backend removes saved output for an offline host without remote execution
+ok 162 - the SSH backend removes saved output for an offline host without remote execution
+  ---
+  duration_ms: 29.610375
+  type: 'test'
+  ...
+# Subtest: confirmed removal clears offline host sessions and catalogs without reconnecting or affecting other hosts
+ok 163 - confirmed removal clears offline host sessions and catalogs without reconnecting or affecting other hosts
+  ---
+  duration_ms: 16.740209
+  type: 'test'
+  ...
+# Subtest: a failed request leaves its host connected; only the connection itself marks the host
+ok 164 - a failed request leaves its host connected; only the connection itself marks the host
+  ---
+  duration_ms: 4.277042
+  type: 'test'
+  ...
+# (node:31503) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: settings wait for the native async locale service and follow language switches
+ok 165 - settings wait for the native async locale service and follow language switches
+  ---
+  duration_ms: 8.953
+  type: 'test'
+  ...
+# Subtest: the DSH client manifest loads the locale package before remote settings
+ok 166 - the DSH client manifest loads the locale package before remote settings
+  ---
+  duration_ms: 2.582375
+  type: 'test'
+  ...
+# (node:31537) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a kept copy shows as an image from the same file address DSH uses, once its alt text appears
+ok 167 - a kept copy shows as an image from the same file address DSH uses, once its alt text appears
+  ---
+  duration_ms: 61.99125
+  type: 'test'
+  ...
+# Subtest: in the desktop app the address stays on the app's own scheme, the only form DSH accepts there
+ok 168 - in the desktop app the address stays on the app's own scheme, the only form DSH accepts there
+  ---
+  duration_ms: 10.617458
+  type: 'test'
+  ...
+# Subtest: alt text inside a whole block DSH adds is found too, and one already on the page when this loads
+ok 169 - alt text inside a whole block DSH adds is found too, and one already on the page when this loads
+  ---
+  duration_ms: 9.646125
+  type: 'test'
+  ...
+# Subtest: a path with spaces is decoded once, as DSH decodes it
+ok 170 - a path with spaces is decoded once, as DSH decodes it
+  ---
+  duration_ms: 2.765167
+  type: 'test'
+  ...
+# Subtest: other images in a reply stay with DSH
+ok 171 - other images in a reply stay with DSH
+  ---
+  duration_ms: 9.88975
+  type: 'test'
+  ...
+# Subtest: alt text with no component holding a destination stays as it is
+ok 172 - alt text with no component holding a destination stays as it is
+  ---
+  duration_ms: 7.628083
+  type: 'test'
+  ...
+# Subtest: a copy that cannot be read goes back to its alt text and is not tried again
+ok 173 - a copy that cannot be read goes back to its alt text and is not tried again
+  ---
+  duration_ms: 5.821542
+  type: 'test'
+  ...
+# Subtest: an image appended to DSH's element does not start another one
+ok 174 - an image appended to DSH's element does not start another one
+  ---
+  duration_ms: 4.203416
+  type: 'test'
+  ...
+# Subtest: unloading the plugin leaves the page as DSH drew it
+ok 175 - unloading the plugin leaves the page as DSH drew it
+  ---
+  duration_ms: 12.003042
+  type: 'test'
+  ...
+# Subtest: clicking an image opens its preview, from the same file and with the focus on closing it
+ok 176 - clicking an image opens its preview, from the same file and with the focus on closing it
+  ---
+  duration_ms: 9.996917
+  type: 'test'
+  ...
+# Subtest: Escape closes the preview, goes no further, and returns the focus
+ok 177 - Escape closes the preview, goes no further, and returns the focus
+  ---
+  duration_ms: 9.117375
+  type: 'test'
+  ...
+# Subtest: Tab stays on the close button, and the close button and the mask both close the preview
+ok 178 - Tab stays on the close button, and the close button and the mask both close the preview
+  ---
+  duration_ms: 13.6065
+  type: 'test'
+  ...
+# Subtest: a preview stays open when the turn ends under it, and still closes
+ok 179 - a preview stays open when the turn ends under it, and still closes
+  ---
+  duration_ms: 5.660625
+  type: 'test'
+  ...
+# Subtest: unloading the plugin closes an open preview
+ok 180 - unloading the plugin closes an open preview
+  ---
+  duration_ms: 3.478041
+  type: 'test'
+  ...
+# (node:31538) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: machine catalogs persist and advertise models without project registration or opening SSH in the picker
+ok 181 - machine catalogs persist and advertise models without project registration or opening SSH in the picker
+  ---
+  duration_ms: 12.455542
+  type: 'test'
+  ...
+# Subtest: the native picker receives separate CLI provider groups and filters models to their owning CLI
+ok 182 - the native picker receives separate CLI provider groups and filters models to their owning CLI
+  ---
+  duration_ms: 12.271166
+  type: 'test'
+  ...
+# Subtest: the real DSH LLM registry lists, resolves and dispatches the remote adapter
+ok 183 - the real DSH LLM registry lists, resolves and dispatches the remote adapter
+  ---
+  duration_ms: 7.138333
+  type: 'test'
+  ...
+# Subtest: the Cordis plugin mounts its native model route with standard DSH services and disposes cleanly
+ok 184 - the Cordis plugin mounts its native model route with standard DSH services and disposes cleanly
+  ---
+  duration_ms: 100.451334
+  type: 'test'
+  ...
+# Subtest: the reply says where Claude moved to another model, in the language of the message
+ok 185 - the reply says where Claude moved to another model, in the language of the message
+  ---
+  duration_ms: 8.380875
+  type: 'test'
+  ...
+# Subtest: streaming, retry and follow-ups reuse the bound CLI without repeating a prompt or old output
+ok 186 - streaming, retry and follow-ups reuse the bound CLI without repeating a prompt or old output
+  ---
+  duration_ms: 9.083125
+  type: 'test'
+  ...
+# Subtest: remote workspace images in replies are copied to the DSH host so the chat can show them
+ok 187 - remote workspace images in replies are copied to the DSH host so the chat can show them
+  ---
+  duration_ms: 6.45225
+  type: 'test'
+  ...
+# Subtest: images the CLI read with its tools appear in the reply where it read them, once each
+ok 188 - images the CLI read with its tools appear in the reply where it read them, once each
+  ---
+  duration_ms: 4.831
+  type: 'test'
+  ...
+# Subtest: an image the CLI viewed by path, as Codex does, is fetched from the remote machine once per reply and only if it is an image
+ok 189 - an image the CLI viewed by path, as Codex does, is fetched from the remote machine once per reply and only if it is an image
+  ---
+  duration_ms: 5.395958
+  type: 'test'
+  ...
+# Subtest: turn token usage is not reported to DSH, whose usage chunks describe the conversation context
+ok 190 - turn token usage is not reported to DSH, whose usage chunks describe the conversation context
+  ---
+  duration_ms: 3.757042
+  type: 'test'
+  ...
+# Subtest: native bindings survive restart and a lost follow-up receipt
+ok 191 - native bindings survive restart and a lost follow-up receipt
+  ---
+  duration_ms: 6.01125
+  type: 'test'
+  ...
+# Subtest: the same machine model works from different DSH workspace paths without registering projects
+ok 192 - the same machine model works from different DSH workspace paths without registering projects
+  ---
+  duration_ms: 8.02425
+  type: 'test'
+  ...
+# Subtest: the shared catalog remains intact without a workspace, but execution requires workspace admission
+ok 193 - the shared catalog remains intact without a workspace, but execution requires workspace admission
+  ---
+  duration_ms: 2.399334
+  type: 'test'
+  ...
+# Subtest: a model from another workspace machine is rejected before remote execution
+ok 194 - a model from another workspace machine is rejected before remote execution
+  ---
+  duration_ms: 2.15275
+  type: 'test'
+  ...
+# Subtest: switching workspaces revokes a previously bound remote conversation
+ok 195 - switching workspaces revokes a previously bound remote conversation
+  ---
+  duration_ms: 3.96325
+  type: 'test'
+  ...
+# Subtest: main chat executes at the verified remote directory, never at its local placeholder
+ok 196 - main chat executes at the verified remote directory, never at its local placeholder
+  ---
+  duration_ms: 5.129916
+  type: 'test'
+  ...
+# Subtest: a workspace change while server verification is pending cannot start a remote CLI
+ok 197 - a workspace change while server verification is pending cannot start a remote CLI
+  ---
+  duration_ms: 5.432209
+  type: 'test'
+  ...
+# Subtest: adding only a machine through HTTP discovers its models and preserves them across an offline refresh
+ok 198 - adding only a machine through HTTP discovers its models and preserves them across an offline refresh
+  ---
+  duration_ms: 10.852708
+  type: 'test'
+  ...
+# Subtest: an unsuccessful first discovery keeps the machine saved and a later refresh can populate the picker
+ok 199 - an unsuccessful first discovery keeps the machine saved and a later refresh can populate the picker
+  ---
+  duration_ms: 8.196166
+  type: 'test'
+  ...
+# Subtest: saved project routes remain usable but are hidden from the machine model menu
+ok 200 - saved project routes remain usable but are hidden from the machine model menu
+  ---
+  duration_ms: 10.4955
+  type: 'test'
+  ...
+# Subtest: initial context contains conversation text but excludes DSH system, injected context and tool declarations
+ok 201 - initial context contains conversation text but excludes DSH system, injected context and tool declarations
+  ---
+  duration_ms: 4.58925
+  type: 'test'
+  ...
+# Subtest: DSH Stop cancels remote work and releases the conversation for a later follow-up
+ok 202 - DSH Stop cancels remote work and releases the conversation for a later follow-up
+  ---
+  duration_ms: 7.177833
+  type: 'test'
+  ...
+# Subtest: DSH Stop before any output leaves nothing to catch up on
+ok 203 - DSH Stop before any output leaves nothing to catch up on
+  ---
+  duration_ms: 7.612541
+  type: 'test'
+  ...
+# Subtest: DSH Stop drops what the CLI wrote after the last read instead of showing it as missed
+ok 204 - DSH Stop drops what the CLI wrote after the last read instead of showing it as missed
+  ---
+  duration_ms: 7.95875
+  type: 'test'
+  ...
+# Subtest: DSH Stop right after sending does not show the stopped turn as sent elsewhere
+ok 205 - DSH Stop right after sending does not show the stopped turn as sent elsewhere
+  ---
+  duration_ms: 9.727583
+  type: 'test'
+  ...
+# Subtest: DSH Stop that cannot reach the CLI still catches up on what it went on to write
+ok 206 - DSH Stop that cannot reach the CLI still catches up on what it went on to write
+  ---
+  duration_ms: 6.940208
+  type: 'test'
+  ...
+# Subtest: a CLI failure already shown is not repeated as output missed while DSH was disconnected
+ok 207 - a CLI failure already shown is not repeated as output missed while DSH was disconnected
+  ---
+  duration_ms: 12.950917
+  type: 'test'
+  ...
+# Subtest: a disconnect that missed only usage and a turn end shows no catch-up heading
+ok 208 - a disconnect that missed only usage and a turn end shows no catch-up heading
+  ---
+  duration_ms: 5.13475
+  type: 'test'
+  ...
+# Subtest: a disconnect that missed only empty reasoning shows no catch-up heading
+ok 209 - a disconnect that missed only empty reasoning shows no catch-up heading
+  ---
+  duration_ms: 4.427583
+  type: 'test'
+  ...
+# Subtest: a disconnect that missed only bookkeeping leaves the next message without a heading
+ok 210 - a disconnect that missed only bookkeeping leaves the next message without a heading
+  ---
+  duration_ms: 5.308375
+  type: 'test'
+  ...
+# Subtest: closing a stream early stops remote work; disposing the adapter or DSH shutdown leaves it running
+ok 211 - closing a stream early stops remote work; disposing the adapter or DSH shutdown leaves it running
+  ---
+  duration_ms: 7.335125
+  type: 'test'
+  ...
+# Subtest: permissions and questions use native DSH services and select only a one-time CLI action
+ok 212 - permissions and questions use native DSH services and select only a one-time CLI action
+  ---
+  duration_ms: 19.465125
+  type: 'test'
+  ...
+# Subtest: new Claude chats inherit remote permissions even with an old cached default, and follow-ups preserve acceptEdits
+ok 213 - new Claude chats inherit remote permissions even with an old cached default, and follow-ups preserve acceptEdits
+  ---
+  duration_ms: 9.149541
+  type: 'test'
+  ...
+# Subtest: new Claude chats inherit remote permissions even with an old cached default, and follow-ups preserve auto
+ok 214 - new Claude chats inherit remote permissions even with an old cached default, and follow-ups preserve auto
+  ---
+  duration_ms: 6.11025
+  type: 'test'
+  ...
+# Subtest: an AgentTeams member CLI receives its assignments, learns the team tools once and never waits for approvals
+ok 215 - an AgentTeams member CLI receives its assignments, learns the team tools once and never waits for approvals
+  ---
+  duration_ms: 12.547667
+  type: 'test'
+  ...
+# Subtest: injected DSH context still never reaches the CLI as a prompt
+ok 216 - injected DSH context still never reaches the CLI as a prompt
+  ---
+  duration_ms: 4.688166
+  type: 'test'
+  ...
+# Subtest: Claude chats follow the DSH composer permission over a mode chosen in Open sessions
+ok 217 - Claude chats follow the DSH composer permission over a mode chosen in Open sessions
+  ---
+  duration_ms: 20.272459
+  type: 'test'
+  ...
+# Subtest: Codex chats map the DSH composer permission and skip modes their catalog lacks
+ok 218 - Codex chats map the DSH composer permission and skip modes their catalog lacks
+  ---
+  duration_ms: 7.131833
+  type: 'test'
+  ...
+# Subtest: DSH Auto review selects Codex auto review, even from a catalog saved before it existed
+ok 219 - DSH Auto review selects Codex auto review, even from a catalog saved before it existed
+  ---
+  duration_ms: 3.975708
+  type: 'test'
+  ...
+# Subtest: a host that cannot keep the CLI running after DSH quits fails the response with the reason
+ok 220 - a host that cannot keep the CLI running after DSH quits fails the response with the reason
+  ---
+  duration_ms: 5.987666
+  type: 'test'
+  ...
+# Subtest: after a failed start is fixed, a new message starts the CLI with it instead of replaying the failed prompt
+ok 221 - after a failed start is fixed, a new message starts the CLI with it instead of replaying the failed prompt
+  ---
+  duration_ms: 8.34125
+  type: 'test'
+  ...
+# Subtest: new Codex chats use the remote CLI permission config instead of forcing workspace write
+ok 222 - new Codex chats use the remote CLI permission config instead of forcing workspace write
+  ---
+  duration_ms: 4.357666
+  type: 'test'
+  ...
+# Subtest: dismissed approvals stay pending and can be answered in the session panel without stopping the turn
+ok 223 - dismissed approvals stay pending and can be answered in the session panel without stopping the turn
+  ---
+  duration_ms: 10.362125
+  type: 'test'
+  ...
+# Subtest: unavailable DSH approval services fail promptly and stop the remote CLI
+ok 224 - unavailable DSH approval services fail promptly and stop the remote CLI
+  ---
+  duration_ms: 4.285
+  type: 'test'
+  ...
+# Subtest: answering from the panel while the native approval is open does not fail or answer twice
+ok 225 - answering from the panel while the native approval is open does not fail or answer twice
+  ---
+  duration_ms: 11.546125
+  type: 'test'
+  ...
+# Subtest: the session browser cannot send outside the bound native conversation
+ok 226 - the session browser cannot send outside the bound native conversation
+  ---
+  duration_ms: 15.691625
+  type: 'test'
+  ...
+# Subtest: switching models within a CLI retains the conversation and its old message receipts
+ok 227 - switching models within a CLI retains the conversation and its old message receipts
+  ---
+  duration_ms: 15.965083
+  type: 'test'
+  ...
+# Subtest: Codex Fast is a per-conversation switch on one model row; routes saved with a tier still run Fast
+ok 228 - Codex Fast is a per-conversation switch on one model row; routes saved with a tier still run Fast
+  ---
+  duration_ms: 25.356583
+  type: 'test'
+  ...
+# Subtest: the Fast switch picks Codex’s priority or fast tier, or a model’s only extra tier
+ok 229 - the Fast switch picks Codex’s priority or fast tier, or a model’s only extra tier
+  ---
+  duration_ms: 0.361625
+  type: 'test'
+  ...
+# Subtest: native tool cards produce a valid DSH session lifecycle and never request DSH tool dispatch
+ok 230 - native tool cards produce a valid DSH session lifecycle and never request DSH tool dispatch
+  ---
+  duration_ms: 8.500709
+  type: 'test'
+  ...
+# Subtest: text-only input, auxiliary calls and unavailable routes never start an unintended CLI
+ok 231 - text-only input, auxiliary calls and unavailable routes never start an unintended CLI
+  ---
+  duration_ms: 5.377833
+  type: 'test'
+  ...
+# Subtest: an explicit effort selection updates the default and survives restart without sending a turn
+ok 232 - an explicit effort selection updates the default and survives restart without sending a turn
+  ---
+  duration_ms: 22.568
+  type: 'test'
+  ...
+# Subtest: turns without an effort use the advertised remembered default, but explicit Low stays Low
+ok 233 - turns without an effort use the advertised remembered default, but explicit Low stays Low
+  ---
+  duration_ms: 26.747375
+  type: 'test'
+  ...
+# Subtest: old Low streams, receipt replay, sync and compaction cannot overwrite an explicit High selection
+ok 234 - old Low streams, receipt replay, sync and compaction cannot overwrite an explicit High selection
+  ---
+  duration_ms: 15.486708
+  type: 'test'
+  ...
+# Subtest: a rejected workspace admission cannot remember a stale conversation effort
+ok 235 - a rejected workspace admission cannot remember a stale conversation effort
+  ---
+  duration_ms: 4.232458
+  type: 'test'
+  ...
+# Subtest: explicit effort selection validates the provider, full route, legacy tier and supported effort
+ok 236 - explicit effort selection validates the provider, full route, legacy tier and supported effort
+  ---
+  duration_ms: 9.054166
+  type: 'test'
+  ...
+# Subtest: effort selections compare inside the write queue and preserve High-Low-High order
+ok 237 - effort selections compare inside the write queue and preserve High-Low-High order
+  ---
+  duration_ms: 6.423708
+  type: 'test'
+  ...
+# Subtest: compaction uses a disposable CLI session and preserves the live conversation binding
+ok 238 - compaction uses a disposable CLI session and preserves the live conversation binding
+  ---
+  duration_ms: 4.564458
+  type: 'test'
+  ...
+# Subtest: unconfirmed delivery stays visible as an error on retry instead of resending or returning empty success
+ok 239 - unconfirmed delivery stays visible as an error on retry instead of resending or returning empty success
+  ---
+  duration_ms: 5.146292
+  type: 'test'
+  ...
+# Subtest: main chat HTTP actions persist a discovered project and refresh/remove it
+ok 240 - main chat HTTP actions persist a discovered project and refresh/remove it
+  ---
+  duration_ms: 1.938375
+  type: 'test'
+  ...
+# Subtest: durable message pages drain more than 100 events and stop at the next submitted message
+ok 241 - durable message pages drain more than 100 events and stop at the next submitted message
+  ---
+  duration_ms: 18.622958
+  type: 'test'
+  ...
+# Subtest: follow-ups send the CLI only what it has not seen: never its own replies, but other models' replies and human turns
+ok 242 - follow-ups send the CLI only what it has not seen: never its own replies, but other models' replies and human turns
+  ---
+  duration_ms: 8.034041
+  type: 'test'
+  ...
+# Subtest: Claude’s progress sentences read as the reply, each its own paragraph, while Codex’s reasoning stays folded
+ok 243 - Claude’s progress sentences read as the reply, each its own paragraph, while Codex’s reasoning stays folded
+  ---
+  duration_ms: 7.523542
+  type: 'test'
+  ...
+# Subtest: a delegated subagent’s result holds no progress sentences, though the running tool still shows
+ok 244 - a delegated subagent’s result holds no progress sentences, though the running tool still shows
+  ---
+  duration_ms: 4.174958
+  type: 'test'
+  ...
+# Subtest: a team member’s result holds no progress sentences, though the running tool still shows
+ok 245 - a team member’s result holds no progress sentences, though the running tool still shows
+  ---
+  duration_ms: 4.065
+  type: 'test'
+  ...
+# Subtest: thinking too long to be a progress sentence stays folded
+ok 246 - thinking too long to be a progress sentence stays folded
+  ---
+  duration_ms: 10.280542
+  type: 'test'
+  ...
+# Subtest: the tool Claude is running shows at the end of the reply, and DSH never saves it, even when stopped
+ok 247 - the tool Claude is running shows at the end of the reply, and DSH never saves it, even when stopped
+  ---
+  duration_ms: 5.845709
+  type: 'test'
+  ...
+# Subtest: a tool Claude runs before writing anything shows too, in the language of the message, and leaves nothing to read
+ok 248 - a tool Claude runs before writing anything shows too, in the language of the message, and leaves nothing to read
+  ---
+  duration_ms: 5.7815
+  type: 'test'
+  ...
+# Subtest: a delegated Codex shows the tool it is running too, without the shell around the command, while a Codex chat does not
+ok 249 - a delegated Codex shows the tool it is running too, without the shell around the command, while a Codex chat does not
+  ---
+  duration_ms: 8.938334
+  type: 'test'
+  ...
+# Subtest: a remote CLI hears how a flow ended with the next message, as context and not as the request
+ok 250 - a remote CLI hears how a flow ended with the next message, as context and not as the request
+  ---
+  duration_ms: 3.096334
+  type: 'test'
+  ...
+# Subtest: a failed turn does not leave the running tool on screen
+ok 251 - a failed turn does not leave the running tool on screen
+  ---
+  duration_ms: 4.116083
+  type: 'test'
+  ...
+# Subtest: Codex replies show no running-tool line
+ok 252 - Codex replies show no running-tool line
+  ---
+  duration_ms: 3.315375
+  type: 'test'
+  ...
+# Subtest: the running-tool line says what the tool works on, or else names it, in one row of plain text that markdown cannot break
+ok 253 - the running-tool line says what the tool works on, or else names it, in one row of plain text that markdown cannot break
+  ---
+  duration_ms: 0.235792
+  type: 'test'
+  ...
+# Subtest: a turn in a TUI conversation starts no CLI, as its CLI runs in the terminal
+ok 254 - a turn in a TUI conversation starts no CLI, as its CLI runs in the terminal
+  ---
+  duration_ms: 0.156792
+  type: 'test'
+  ...
+# (node:31660) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: enabling remote agents preserves the native model seat and its already-declared label slot
+ok 255 - enabling remote agents preserves the native model seat and its already-declared label slot
+  ---
+  duration_ms: 1.801334
+  type: 'test'
+  ...
+# Subtest: remote model captions drop the host while list rows keep it muted
+ok 256 - remote model captions drop the host while list rows keep it muted
+  ---
+  duration_ms: 1.870666
+  type: 'test'
+  ...
+# Subtest: remote labels coexist with a label contribution already registered by another plugin
+ok 257 - remote labels coexist with a label contribution already registered by another plugin
+  ---
+  duration_ms: 0.4645
+  type: 'test'
+  ...
+# (node:31733) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a machine can be saved without starting discovery until a CLI is selected
+ok 258 - a machine can be saved without starting discovery until a CLI is selected
+  ---
+  duration_ms: 14.229125
+  type: 'test'
+  ...
+# Subtest: CLI selection persists, hides disabled errors and leaves existing agents running
+ok 259 - CLI selection persists, hides disabled errors and leaves existing agents running
+  ---
+  duration_ms: 12.692125
+  type: 'test'
+  ...
+# Subtest: the HTTP selection action validates IDs and scans only the selected catalog
+ok 260 - the HTTP selection action validates IDs and scans only the selected catalog
+  ---
+  duration_ms: 7.098541
+  type: 'test'
+  ...
+# (node:31734) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a conversation counts as read only while it is on screen in a window in use, and once per finished turn
+ok 261 - a conversation counts as read only while it is on screen in a window in use, and once per finished turn
+  ---
+  duration_ms: 0.798625
+  type: 'test'
+  ...
+# Subtest: a session read elsewhere stops showing as finished, but not by a read from before its turn
+ok 262 - a session read elsewhere stops showing as finished, but not by a read from before its turn
+  ---
+  duration_ms: 5186.840917
+  type: 'test'
+  ...
+# Subtest: nothing is asked while nothing is unread or the window is hidden
+ok 263 - nothing is asked while nothing is unread or the window is hidden
+  ---
+  duration_ms: 66.986
+  type: 'test'
+  ...
+# Subtest: a closed sync stops
+ok 264 - a closed sync stops
+  ---
+  duration_ms: 19.894167
+  type: 'test'
+  ...
+# (node:31741) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Codex app-server: a task keeps running through a DSH shutdown, completes offline and is recovered once after restart
+ok 265 - Codex app-server: a task keeps running through a DSH shutdown, completes offline and is recovered once after restart
+  ---
+  duration_ms: 1540.815541
+  type: 'test'
+  ...
+# Subtest: Claude stream-json: a task keeps running through a DSH shutdown, completes offline and is recovered once after restart
+ok 266 - Claude stream-json: a task keeps running through a DSH shutdown, completes offline and is recovered once after restart
+  ---
+  duration_ms: 2457.809625
+  type: 'test'
+  ...
+# Subtest: ACP: a task keeps running through a DSH shutdown, completes offline and is recovered once after restart
+ok 267 - ACP: a task keeps running through a DSH shutdown, completes offline and is recovered once after restart
+  ---
+  duration_ms: 2066.736709
+  type: 'test'
+  ...
+# Subtest: an old-node install probe prevents CLI startup and reports the reason
+ok 268 - an old-node install probe prevents CLI startup and reports the reason
+  ---
+  duration_ms: 363.947792
+  type: 'test'
+  ...
+# Subtest: repeated SSH interruptions reconnect from the saved byte offset without losing or repeating output
+ok 269 - repeated SSH interruptions reconnect from the saved byte offset without losing or repeating output
+  ---
+  duration_ms: 6043.685417
+  type: 'test'
+  ...
+# Subtest: Codex app-server: a pending approval survives restarts, is answered once, and is never asked again
+ok 270 - Codex app-server: a pending approval survives restarts, is answered once, and is never asked again
+  ---
+  duration_ms: 2711.211209
+  type: 'test'
+  ...
+# Subtest: Claude stream-json: a pending approval survives restarts, is answered once, and is never asked again
+ok 271 - Claude stream-json: a pending approval survives restarts, is answered once, and is never asked again
+  ---
+  duration_ms: 2612.415541
+  type: 'test'
+  ...
+# Subtest: ACP: a pending approval survives restarts, is answered once, and is never asked again
+ok 272 - ACP: a pending approval survives restarts, is answered once, and is never asked again
+  ---
+  duration_ms: 2484.532958
+  type: 'test'
+  ...
+# Subtest: Codex app-server: explicit stop interrupts the turn and keeps the relay; archiving terminates it
+ok 273 - Codex app-server: explicit stop interrupts the turn and keeps the relay; archiving terminates it
+  ---
+  duration_ms: 6451.780166
+  type: 'test'
+  ...
+# Subtest: Claude stream-json: explicit stop interrupts the turn and keeps the relay; archiving terminates it
+ok 274 - Claude stream-json: explicit stop interrupts the turn and keeps the relay; archiving terminates it
+  ---
+  duration_ms: 721.480083
+  type: 'test'
+  ...
+# Subtest: ACP: explicit stop interrupts the turn and keeps the relay; archiving terminates it
+ok 275 - ACP: explicit stop interrupts the turn and keeps the relay; archiving terminates it
+  ---
+  duration_ms: 735.0225
+  type: 'test'
+  ...
+# Subtest: deleting an agent while its host is offline is immediate; the relay is removed when the host returns
+ok 276 - deleting an agent while its host is offline is immediate; the relay is removed when the host returns
+  ---
+  duration_ms: 2290.866083
+  type: 'test'
+  ...
+# Subtest: a CLI exit is reported as a failed turn with its error, unlike a lost connection
+ok 277 - a CLI exit is reported as a failed turn with its error, unlike a lost connection
+  ---
+  duration_ms: 879.231542
+  type: 'test'
+  ...
+# Subtest: a forcibly killed DSH loses no remote output: the restarted one resumes from saved history
+ok 278 - a forcibly killed DSH loses no remote output: the restarted one resumes from saved history
+  ---
+  duration_ms: 3734.154834
+  type: 'test'
+  ...
+# Subtest: a relay started by an interrupted initialization is removed, and retrying starts cleanly once
+ok 279 - a relay started by an interrupted initialization is removed, and retrying starts cleanly once
+  ---
+  duration_ms: 765.312166
+  type: 'test'
+  ...
+# Subtest: native DSH conversations: shutdown leaves the turn running; it catches up by itself, the next message shows missed output, and a retry replays all of it
+ok 280 - native DSH conversations: shutdown leaves the turn running; it catches up by itself, the next message shows missed output, and a retry replays all of it
+  ---
+  duration_ms: 2037.949709
+  type: 'test'
+  ...
+# Subtest: Codex app-server: stopping a native DSH conversation leaves nothing to catch up on
+ok 281 - Codex app-server: stopping a native DSH conversation leaves nothing to catch up on
+  ---
+  duration_ms: 1469.634625
+  type: 'test'
+  ...
+# Subtest: Claude stream-json: stopping a native DSH conversation leaves nothing to catch up on
+ok 282 - Claude stream-json: stopping a native DSH conversation leaves nothing to catch up on
+  ---
+  duration_ms: 1470.204
+  type: 'test'
+  ...
+# Subtest: ACP: stopping a native DSH conversation leaves nothing to catch up on
+ok 283 - ACP: stopping a native DSH conversation leaves nothing to catch up on
+  ---
+  duration_ms: 1380.7625
+  type: 'test'
+  ...
+# Subtest: relay links deliver large payloads once, drop partial frames and keep exact UTF-8 byte offsets
+ok 284 - relay links deliver large payloads once, drop partial frames and keep exact UTF-8 byte offsets
+  ---
+  duration_ms: 3599.328834
+  type: 'test'
+  ...
+# Subtest: a CLI started through the relay finds the root setting, which is left out for other accounts, and the relay still knows it
+ok 285 - a CLI started through the relay finds the root setting, which is left out for other accounts, and the relay still knows it
+  ---
+  duration_ms: 1139.717542
+  type: 'test'
+  ...
+# Subtest: deleting a session stops its CLI even when the relay socket path exceeds the platform limit
+ok 286 - deleting a session stops its CLI even when the relay socket path exceeds the platform limit
+  ---
+  duration_ms: 696.642
+  type: 'test'
+  ...
+# Subtest: a relay whose socket is unreachable is stopped by its verified process ID before its files are deleted
+ok 287 - a relay whose socket is unreachable is stopped by its verified process ID before its files are deleted
+  ---
+  duration_ms: 828.534959
+  type: 'test'
+  ...
+# Subtest: sessions recover after the relay script is upgraded: the current script is installed before reattaching
+ok 288 - sessions recover after the relay script is upgraded: the current script is installed before reattaching
+  ---
+  duration_ms: 2037.490167
+  type: 'test'
+  ...
+# Subtest: a relay cleanup that finishes after a plugin reload cannot overwrite the new instance’s state
+ok 289 - a relay cleanup that finishes after a plugin reload cannot overwrite the new instance’s state
+  ---
+  duration_ms: 1143.979375
+  type: 'test'
+  ...
+# (node:31781) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the remote shell lists subdirectories by canonical path, expands ~ and survives unusual names
+ok 290 - the remote shell lists subdirectories by canonical path, expands ~ and survives unusual names
+  ---
+  duration_ms: 56.087625
+  type: 'test'
+  ...
+# Subtest: anchors use dsh-remote folders and metadata, are reused, and never overwrite another directory
+ok 291 - anchors use dsh-remote folders and metadata, are reused, and never overwrite another directory
+  ---
+  duration_ms: 7.141041
+  type: 'test'
+  ...
+# Subtest: concurrent adoption gives each remote directory its own anchor and one anchor per directory
+ok 292 - concurrent adoption gives each remote directory its own anchor and one anchor per directory
+  ---
+  duration_ms: 114.905083
+  type: 'test'
+  ...
+# Subtest: directory names up to the 255-byte limit are adopted, including shared long names
+ok 293 - directory names up to the 255-byte limit are adopted, including shared long names
+  ---
+  duration_ms: 10.902
+  type: 'test'
+  ...
+# Subtest: adopting a remote directory canonicalizes it on the host and admits that host's models
+ok 294 - adopting a remote directory canonicalizes it on the host and admits that host's models
+  ---
+  duration_ms: 14.425167
+  type: 'test'
+  ...
+# Subtest: dsh-remote folders saved with an ~/.ssh/config alias match through the alias
+ok 295 - dsh-remote folders saved with an ~/.ssh/config alias match through the alias
+  ---
+  duration_ms: 7.4935
+  type: 'test'
+  ...
+# Subtest: the settings API browses hosts and adopts workspaces
+ok 296 - the settings API browses hosts and adopts workspaces
+  ---
+  duration_ms: 14.038208
+  type: 'test'
+  ...
+# (node:31793) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: every route survives DSH’s request bridge: file downloads and the editor bundle have buffered GET routes, uploads a streaming POST one
+ok 297 - every route survives DSH’s request bridge: file downloads and the editor bundle have buffered GET routes, uploads a streaming POST one
+  ---
+  duration_ms: 128.408125
+  type: 'test'
+  ...
+# (node:31794) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: host configuration is durable, passwords stay out of the dashboard, and writes are private
+ok 298 - host configuration is durable, passwords stay out of the dashboard, and writes are private
+  ---
+  duration_ms: 16.329
+  type: 'test'
+  ...
+# Subtest: only valid SSH targets are accepted
+ok 299 - only valid SSH targets are accepted
+  ---
+  duration_ms: 0.253958
+  type: 'test'
+  ...
+# Subtest: an existing SSH machine identity cannot be replaced when reconnecting
+ok 300 - an existing SSH machine identity cannot be replaced when reconnecting
+  ---
+  duration_ms: 2.779584
+  type: 'test'
+  ...
+# Subtest: discovery and model validation are scoped to the execution host
+ok 301 - discovery and model validation are scoped to the execution host
+  ---
+  duration_ms: 3.209291
+  type: 'test'
+  ...
+# Subtest: two hosts discover independent CLI catalogs and route work to the selected machine
+ok 302 - two hosts discover independent CLI catalogs and route work to the selected machine
+  ---
+  duration_ms: 9.398167
+  type: 'test'
+  ...
+# Subtest: simultaneous duplicate creates and retries after a lost response execute one remote agent
+ok 303 - simultaneous duplicate creates and retries after a lost response execute one remote agent
+  ---
+  duration_ms: 6.620375
+  type: 'test'
+  ...
+# Subtest: creation saves titles, discovered modes and the delegation origin
+ok 304 - creation saves titles, discovered modes and the delegation origin
+  ---
+  duration_ms: 4.666333
+  type: 'test'
+  ...
+# Subtest: opening one conversation restores only its own persistent remote task
+ok 305 - opening one conversation restores only its own persistent remote task
+  ---
+  duration_ms: 10.553709
+  type: 'test'
+  ...
+# Subtest: sending to a working agent interrupts its turn, like Paseo; delegated sends can refuse instead
+ok 306 - sending to a working agent interrupts its turn, like Paseo; delegated sends can refuse instead
+  ---
+  duration_ms: 5.463792
+  type: 'test'
+  ...
+# Subtest: dashboard statuses reflect live sessions: attention, running, idle and failed starts
+ok 307 - dashboard statuses reflect live sessions: attention, running, idle and failed starts
+  ---
+  duration_ms: 10.495625
+  type: 'test'
+  ...
+# Subtest: archive releases the CLI and hides the agent; messaging restores it; delete removes it and its output
+ok 308 - archive releases the CLI and hides the agent; messaging restores it; delete removes it and its output
+  ---
+  duration_ms: 8.044417
+  type: 'test'
+  ...
+# Subtest: history archiving rechecks live state, keeps output, and restores after a server restart
+ok 309 - history archiving rechecks live state, keeps output, and restores after a server restart
+  ---
+  duration_ms: 8.155416
+  type: 'test'
+  ...
+# Subtest: mode changes use discovered modes, wait for idle, and apply by resuming the session
+ok 310 - mode changes use discovered modes, wait for idle, and apply by resuming the session
+  ---
+  duration_ms: 3.48375
+  type: 'test'
+  ...
+# Subtest: permission choices retain native IDs and questions return structured answers
+ok 311 - permission choices retain native IDs and questions return structured answers
+  ---
+  duration_ms: 4.943417
+  type: 'test'
+  ...
+# Subtest: unloading the plugin leaves remote work running rather than stopping it
+ok 312 - unloading the plugin leaves remote work running rather than stopping it
+  ---
+  duration_ms: 4.066875
+  type: 'test'
+  ...
+# Subtest: unloading waits for in-flight creation to save its recovery state
+ok 313 - unloading waits for in-flight creation to save its recovery state
+  ---
+  duration_ms: 7.157667
+  type: 'test'
+  ...
+# Subtest: a creation record without an in-flight request is reported as interrupted
+ok 314 - a creation record without an in-flight request is reported as interrupted
+  ---
+  duration_ms: 4.885209
+  type: 'test'
+  ...
+# Subtest: a changed remote agent binding cannot receive instructions
+ok 315 - a changed remote agent binding cannot receive instructions
+  ---
+  duration_ms: 4.860542
+  type: 'test'
+  ...
+# Subtest: registries from earlier builds load, and the next write drops main-chat bindings
+ok 316 - registries from earlier builds load, and the next write drops main-chat bindings
+  ---
+  duration_ms: 11.52375
+  type: 'test'
+  ...
+# Subtest: corrupt registries fail without overwriting existing data
+ok 317 - corrupt registries fail without overwriting existing data
+  ---
+  duration_ms: 2.727084
+  type: 'test'
+  ...
+# Subtest: HTTP boundary rejects malformed input, form submissions, oversized bodies and unknown actions
+ok 318 - HTTP boundary rejects malformed input, form submissions, oversized bodies and unknown actions
+  ---
+  duration_ms: 26.17725
+  type: 'test'
+  ...
+# Subtest: a store refuses to overwrite state written by another DSH instance, and refuses writes once closed
+ok 319 - a store refuses to overwrite state written by another DSH instance, and refuses writes once closed
+  ---
+  duration_ms: 3.65075
+  type: 'test'
+  ...
+# (node:31826) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: read-only delegated detail preserves paged history and pending requests without steering controls
+ok 320 - read-only delegated detail preserves paged history and pending requests without steering controls
+  ---
+  duration_ms: 130.691541
+  type: 'test'
+  ...
+# Subtest: a model switch reads as a sentence, with or without the category the CLI gave
+ok 321 - a model switch reads as a sentence, with or without the category the CLI gave
+  ---
+  duration_ms: 16.677958
+  type: 'test'
+  ...
+# Subtest: the existing session panel retains its steering controls by default
+ok 322 - the existing session panel retains its steering controls by default
+  ---
+  duration_ms: 24.211125
+  type: 'test'
+  ...
+# (node:31829) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: saved and main-chat sessions stay in history; activity and errors remain visible in progress
+ok 323 - saved and main-chat sessions stay in history; activity and errors remain visible in progress
+  ---
+  duration_ms: 0.403375
+  type: 'test'
+  ...
+# Subtest: attention takes priority over running tasks and newer idle history
+ok 324 - attention takes priority over running tasks and newer idle history
+  ---
+  duration_ms: 0.592417
+  type: 'test'
+  ...
+# (node:31833) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a 0.2.53 log becomes one DSH reopens: the advertising message moves ahead of its call
+ok 325 - a 0.2.53 log becomes one DSH reopens: the advertising message moves ahead of its call
+  ---
+  duration_ms: 4.599208
+  type: 'test'
+  ...
+# Subtest: a response cut off when DSH quit gets its advertising message, and DSH can close the turn
+ok 326 - a response cut off when DSH quit gets its advertising message, and DSH can close the turn
+  ---
+  duration_ms: 1.010375
+  type: 'test'
+  ...
+# Subtest: logs written in the current order are left alone
+ok 327 - logs written in the current order are left alone
+  ---
+  duration_ms: 1.171709
+  type: 'test'
+  ...
+# Subtest: stored logs are repaired once, keeping the original and the header frame
+ok 328 - stored logs are repaired once, keeping the original and the header frame
+  ---
+  duration_ms: 20.528334
+  type: 'test'
+  ...
+# Subtest: a conversation DSH has open is left alone, and the scan runs again next start
+ok 329 - a conversation DSH has open is left alone, and the scan runs again next start
+  ---
+  duration_ms: 13.879583
+  type: 'test'
+  ...
+# Subtest: a log torn when DSH quit mid-write keeps its complete lines
+ok 330 - a log torn when DSH quit mid-write keeps its complete lines
+  ---
+  duration_ms: 12.69875
+  type: 'test'
+  ...
+# (node:31834) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: older history and overlapping live pages preserve cursor position without duplicate output
+ok 331 - older history and overlapping live pages preserve cursor position without duplicate output
+  ---
+  duration_ms: 0.677291
+  type: 'test'
+  ...
+# Subtest: tool updates coalesce only within their turn and text chunks stay in conversational order
+ok 332 - tool updates coalesce only within their turn and text chunks stay in conversational order
+  ---
+  duration_ms: 0.252084
+  type: 'test'
+  ...
+# Subtest: only a native delivery receipt clears an unconfirmed message in history
+ok 333 - only a native delivery receipt clears an unconfirmed message in history
+  ---
+  duration_ms: 0.070834
+  type: 'test'
+  ...
+# Subtest: a turn the CLI started itself is headed by the notice it got, even an empty one
+ok 334 - a turn the CLI started itself is headed by the notice it got, even an empty one
+  ---
+  duration_ms: 0.157708
+  type: 'test'
+  ...
+# Subtest: a model switch is its own row between the replies around it
+ok 335 - a model switch is its own row between the replies around it
+  ---
+  duration_ms: 0.073792
+  type: 'test'
+  ...
+# (node:31835) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a session started in one DSH appears in another with its history and live status
+ok 336 - a session started in one DSH appears in another with its history and live status
+  ---
+  duration_ms: 1101.698041
+  type: 'test'
+  ...
+# Subtest: sending from another DSH takes the session over and the first follows without repeating anything
+ok 337 - sending from another DSH takes the session over and the first follows without repeating anything
+  ---
+  duration_ms: 1925.966291
+  type: 'test'
+  ...
+# Subtest: a permission requested while one DSH drives the CLI can be answered from another
+ok 338 - a permission requested while one DSH drives the CLI can be answered from another
+  ---
+  duration_ms: 1430.244333
+  type: 'test'
+  ...
+# Subtest: a CLI whose DSH quits is driven by another once its lease expires, and the first does not take it back
+ok 339 - a CLI whose DSH quits is driven by another once its lease expires, and the first does not take it back
+  ---
+  duration_ms: 2821.408459
+  type: 'test'
+  ...
+# Subtest: renaming and archiving are shared, and deleting removes the session everywhere
+ok 340 - renaming and archiving are shared, and deleting removes the session everywhere
+  ---
+  duration_ms: 2575.535708
+  type: 'test'
+  ...
+# Subtest: sessions recorded before sharing are published with their history
+ok 341 - sessions recorded before sharing are published with their history
+  ---
+  duration_ms: 974.372583
+  type: 'test'
+  ...
+# Subtest: with sharing switched off, a DSH neither imports nor publishes sessions
+ok 342 - with sharing switched off, a DSH neither imports nor publishes sessions
+  ---
+  duration_ms: 2678.549375
+  type: 'test'
+  ...
+# Subtest: remote workspaces added in one DSH are offered to the others once
+ok 343 - remote workspaces added in one DSH are offered to the others once
+  ---
+  duration_ms: 148.502125
+  type: 'test'
+  ...
+# Subtest: a workspace's tags set in one DSH reach the others, the latest change wins, and adding workspaces keeps them
+ok 344 - a workspace's tags set in one DSH reach the others, the latest change wins, and adding workspaces keeps them
+  ---
+  duration_ms: 483.285667
+  type: 'test'
+  ...
+# Subtest: after a network outage, the DSH that drove a session does not take it back from the one that took over
+ok 345 - after a network outage, the DSH that drove a session does not take it back from the one that took over
+  ---
+  duration_ms: 1559.890083
+  type: 'test'
+  ...
+# Subtest: a session bound to a main chat in one DSH is an ordinary session in another, which can continue it
+ok 346 - a session bound to a main chat in one DSH is an ordinary session in another, which can continue it
+  ---
+  duration_ms: 838.976541
+  type: 'test'
+  ...
+# Subtest: a message names the DSH that sent it, and the DSH following the session is told when its copy changed
+ok 347 - a message names the DSH that sent it, and the DSH following the session is told when its copy changed
+  ---
+  duration_ms: 943.225459
+  type: 'test'
+  ...
+# Subtest: a conversation is told when another DSH runs a turn in it, even with its history closed; other sessions are not
+ok 348 - a conversation is told when another DSH runs a turn in it, even with its history closed; other sessions are not
+  ---
+  duration_ms: 1075.185625
+  type: 'test'
+  ...
+# Subtest: a conversation showing another DSH's turn shows it to the end when that DSH quits and this one takes the CLI over
+ok 349 - a conversation showing another DSH's turn shows it to the end when that DSH quits and this one takes the CLI over
+  ---
+  duration_ms: 11184.589667
+  type: 'test'
+  ...
+# Subtest: another DSH copies a session’s history only when it is read
+ok 350 - another DSH copies a session’s history only when it is read
+  ---
+  duration_ms: 1136.288042
+  type: 'test'
+  ...
+# Subtest: a damaged shared record is never taken into the local state
+ok 351 - a damaged shared record is never taken into the local state
+  ---
+  duration_ms: 646.779
+  type: 'test'
+  ...
+# Subtest: history a DSH recorded but never shared is replaced by the shared one after another DSH took over
+ok 352 - history a DSH recorded but never shared is replaced by the shared one after another DSH took over
+  ---
+  duration_ms: 775.98075
+  type: 'test'
+  ...
+# Subtest: switching sharing off withdraws the sessions started here from the other DSH instances and keeps them here
+ok 353 - switching sharing off withdraws the sessions started here from the other DSH instances and keeps them here
+  ---
+  duration_ms: 1746.471792
+  type: 'test'
+  ...
+# Subtest: removing a shared machine forgets it here only, unless its sessions are deleted everywhere
+ok 354 - removing a shared machine forgets it here only, unless its sessions are deleted everywhere
+  ---
+  duration_ms: 1786.572125
+  type: 'test'
+  ...
+# Subtest: a registry with many sessions is listed in pages, and long first prompts are shared in part
+ok 355 - a registry with many sessions is listed in pages, and long first prompts are shared in part
+  ---
+  duration_ms: 1594.165292
+  type: 'test'
+  ...
+# Subtest: taking control of a session the host has no record of keeps its history
+ok 356 - taking control of a session the host has no record of keeps its history
+  ---
+  duration_ms: 732.991958
+  type: 'test'
+  ...
+# Subtest: a shared workspace is offered with its local folder, and one removed from the machine is not
+ok 357 - a shared workspace is offered with its local folder, and one removed from the machine is not
+  ---
+  duration_ms: 110.39375
+  type: 'test'
+  ...
+# Subtest: deleting a shared machine’s sessions everywhere needs the machine; removing it here only does not
+ok 358 - deleting a shared machine’s sessions everywhere needs the machine; removing it here only does not
+  ---
+  duration_ms: 528.523458
+  type: 'test'
+  ...
+# Subtest: a session read in one DSH reads as read in another until a new turn, and a read never moves back
+ok 359 - a session read in one DSH reads as read in another until a new turn, and a read never moves back
+  ---
+  duration_ms: 1207.8595
+  type: 'test'
+  ...
+# Subtest: a read reported for a session with no shared registry does nothing
+ok 360 - a read reported for a session with no shared registry does nothing
+  ---
+  duration_ms: 14.020666
+  type: 'test'
+  ...
+# (node:31836) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: MCP tool names map to their DSH server
+ok 361 - MCP tool names map to their DSH server
+  ---
+  duration_ms: 0.627583
+  type: 'test'
+  ...
+# Subtest: each CLI receives the shares in its own launch form; the saved argv is untouched
+ok 362 - each CLI receives the shares in its own launch form; the saved argv is untouched
+  ---
+  duration_ms: 0.947541
+  type: 'test'
+  ...
+# Subtest: skills are copied once and shared natively with Claude and as load_skill elsewhere; MCP stays off until enabled
+ok 363 - skills are copied once and shared natively with Claude and as load_skill elsewhere; MCP stays off until enabled
+  ---
+  duration_ms: 2183.0365
+  type: 'test'
+  ...
+# Subtest: a shared MCP server runs in DSH with the owning conversation, through one reverse forward per host
+ok 364 - a shared MCP server runs in DSH with the owning conversation, through one reverse forward per host
+  ---
+  duration_ms: 558.028834
+  type: 'test'
+  ...
+# Subtest: MCP content keeps DSH policies; images are read from DSH by the attachment the content names
+ok 365 - MCP content keeps DSH policies; images are read from DSH by the attachment the content names
+  ---
+  duration_ms: 0.423375
+  type: 'test'
+  ...
+# Subtest: proxies list again when DSH loads or drops a server, and keep its last tools meanwhile
+ok 366 - proxies list again when DSH loads or drops a server, and keep its last tools meanwhile
+  ---
+  duration_ms: 954.324417
+  type: 'test'
+  ...
+# Subtest: a forward is confirmed only by the server, and retried when it fails
+ok 367 - a forward is confirmed only by the server, and retried when it fails
+  ---
+  duration_ms: 117.07475
+  type: 'test'
+  ...
+# Subtest: a forward whose socket the host lost is replaced at the next install check
+ok 368 - a forward whose socket the host lost is replaced at the next install check
+  ---
+  duration_ms: 242.656083
+  type: 'test'
+  ...
+# Subtest: reattached CLIs get the forward back before DSH loads its MCP servers; a removed host stops it
+ok 369 - reattached CLIs get the forward back before DSH loads its MCP servers; a removed host stops it
+  ---
+  duration_ms: 103.90675
+  type: 'test'
+  ...
+# Subtest: closing while DSH opens its port starts no forward
+ok 370 - closing while DSH opens its port starts no forward
+  ---
+  duration_ms: 106.967167
+  type: 'test'
+  ...
+# Subtest: skills are read and sent again only when they change, and copied again when the host lost them
+ok 371 - skills are read and sent again only when they change, and copied again when the host lost them
+  ---
+  duration_ms: 200.368875
+  type: 'test'
+  ...
+# Subtest: CLIs started by an earlier version still reach DSH through the shared pointer
+ok 372 - CLIs started by an earlier version still reach DSH through the shared pointer
+  ---
+  duration_ms: 153.141958
+  type: 'test'
+  ...
+# Subtest: DSH instances sharing a remote account keep their own skills; a skill the host lost is sent again
+ok 373 - DSH instances sharing a remote account keep their own skills; a skill the host lost is sent again
+  ---
+  duration_ms: 264.914458
+  type: 'test'
+  ...
+# Subtest: an AgentTeams member CLI gets the member tools without any sharing setting; others and captain tools never do
+ok 374 - an AgentTeams member CLI gets the member tools without any sharing setting; others and captain tools never do
+  ---
+  duration_ms: 138.053125
+  type: 'test'
+  ...
+# Subtest: a shared MCP server named like the team server gives way to it for members
+ok 375 - a shared MCP server named like the team server gives way to it for members
+  ---
+  duration_ms: 139.817875
+  type: 'test'
+  ...
+# Subtest: the bridge refuses a connection without the task token
+ok 376 - the bridge refuses a connection without the task token
+  ---
+  duration_ms: 6.129041
+  type: 'test'
+  ...
+# Subtest: saved sharing settings are validated
+ok 377 - saved sharing settings are validated
+  ---
+  duration_ms: 1.636916
+  type: 'test'
+  ...
+# (node:32016) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the shell menu opens below its chevron, and other menus keep DSH placement
+ok 378 - the shell menu opens below its chevron, and other menus keep DSH placement
+  ---
+  duration_ms: 63.758667
+  type: 'test'
+  ...
+# Subtest: a new shell menu is placed before the browser paints it
+ok 379 - a new shell menu is placed before the browser paints it
+  ---
+  duration_ms: 25.799
+  type: 'test'
+  ...
+# Subtest: the shell menu is placed while it still lists only the loading row
+ok 380 - the shell menu is placed while it still lists only the loading row
+  ---
+  duration_ms: 23.5795
+  type: 'test'
+  ...
+# Subtest: the shell menu opens above when only that side fits, and stays inside the viewport
+ok 381 - the shell menu opens above when only that side fits, and stays inside the viewport
+  ---
+  duration_ms: 40.283
+  type: 'test'
+  ...
+# (node:32026) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: SSH config lists concrete aliases with quotes, comments, equals, exclusions and deduplication
+ok 382 - SSH config lists concrete aliases with quotes, comments, equals, exclusions and deduplication
+  ---
+  duration_ms: 28.5835
+  type: 'test'
+  ...
+# Subtest: SSH config expands Includes, globs, environment and home paths with cycle protection
+ok 383 - SSH config expands Includes, globs, environment and home paths with cycle protection
+  ---
+  duration_ms: 32.894083
+  type: 'test'
+  ...
+# Subtest: SSH config discovery never runs Match exec or connection commands and refresh sees edits
+ok 384 - SSH config discovery never runs Match exec or connection commands and refresh sees edits
+  ---
+  duration_ms: 2.892166
+  type: 'test'
+  ...
+# Subtest: missing SSH config permits manual connection entry; unreadable and oversized files report warnings
+ok 385 - missing SSH config permits manual connection entry; unreadable and oversized files report warnings
+  ---
+  duration_ms: 10.44825
+  type: 'test'
+  ...
+# Subtest: SSH config enumeration bounds recursive includes and total host count
+ok 386 - SSH config enumeration bounds recursive includes and total host count
+  ---
+  duration_ms: 31.373375
+  type: 'test'
+  ...
+# Subtest: SSH config API uses server configuration and saving preserves the alias for OpenSSH resolution
+ok 387 - SSH config API uses server configuration and saving preserves the alias for OpenSSH resolution
+  ---
+  duration_ms: 6.669583
+  type: 'test'
+  ...
+# (node:32035) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: /bin/sh: SSH identity handles a empty machine-id using the actual generated shell command
+ok 388 - /bin/sh: SSH identity handles a empty machine-id using the actual generated shell command
+  ---
+  duration_ms: 1773.151625
+  type: 'test'
+  ...
+# Subtest: /bin/sh: SSH identity handles a missing machine-id using the actual generated shell command
+ok 389 - /bin/sh: SSH identity handles a missing machine-id using the actual generated shell command
+  ---
+  duration_ms: 2047.244833
+  type: 'test'
+  ...
+# Subtest: /bin/sh: SSH identity handles a populated machine-id using the actual generated shell command
+ok 390 - /bin/sh: SSH identity handles a populated machine-id using the actual generated shell command
+  ---
+  duration_ms: 1337.577958
+  type: 'test'
+  ...
+# Subtest: /bin/zsh: SSH identity handles a empty machine-id using the actual generated shell command
+ok 391 - /bin/zsh: SSH identity handles a empty machine-id using the actual generated shell command
+  ---
+  duration_ms: 1917.080166
+  type: 'test'
+  ...
+# Subtest: /bin/zsh: SSH identity handles a missing machine-id using the actual generated shell command
+ok 392 - /bin/zsh: SSH identity handles a missing machine-id using the actual generated shell command
+  ---
+  duration_ms: 1882.176791
+  type: 'test'
+  ...
+# Subtest: /bin/zsh: SSH identity handles a populated machine-id using the actual generated shell command
+ok 393 - /bin/zsh: SSH identity handles a populated machine-id using the actual generated shell command
+  ---
+  duration_ms: 1085.5805
+  type: 'test'
+  ...
+# (node:32042) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: /bin/sh: SSH runtime selection handles old-node
+ok 394 - /bin/sh: SSH runtime selection handles old-node
+  ---
+  duration_ms: 2249.85275
+  type: 'test'
+  ...
+# Subtest: /bin/sh: SSH runtime selection handles modern-node
+ok 395 - /bin/sh: SSH runtime selection handles modern-node
+  ---
+  duration_ms: 651.445417
+  type: 'test'
+  ...
+# Subtest: /bin/sh: SSH runtime selection handles no-nvm
+ok 396 - /bin/sh: SSH runtime selection handles no-nvm
+  ---
+  duration_ms: 866.655666
+  type: 'test'
+  ...
+# Subtest: /bin/zsh: SSH runtime selection handles old-node
+ok 397 - /bin/zsh: SSH runtime selection handles old-node
+  ---
+  duration_ms: 1832.414708
+  type: 'test'
+  ...
+# Subtest: /bin/zsh: SSH runtime selection handles modern-node
+ok 398 - /bin/zsh: SSH runtime selection handles modern-node
+  ---
+  duration_ms: 507.7755
+  type: 'test'
+  ...
+# Subtest: /bin/zsh: SSH runtime selection handles no-nvm
+ok 399 - /bin/zsh: SSH runtime selection handles no-nvm
+  ---
+  duration_ms: 899.816292
+  type: 'test'
+  ...
+# (node:32043) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: bash: SSH probes receive the interactive login environment without startup output
+ok 400 - bash: SSH probes receive the interactive login environment without startup output
+  ---
+  duration_ms: 1122.463541
+  type: 'test'
+  ...
+# Subtest: bash: native CLI startup preserves stdin, quoting and working directory
+ok 401 - bash: native CLI startup preserves stdin, quoting and working directory
+  ---
+  duration_ms: 1731.814667
+  type: 'test'
+  ...
+# Subtest: bash: SSH probes survive startup scripts closing inherited descriptors
+ok 402 - bash: SSH probes survive startup scripts closing inherited descriptors
+  ---
+  duration_ms: 1269.74325
+  type: 'test'
+  ...
+# Subtest: bash: CLI input survives startup scripts closing inherited descriptors
+ok 403 - bash: CLI input survives startup scripts closing inherited descriptors
+  ---
+  duration_ms: 923.836625
+  type: 'test'
+  ...
+# Subtest: bash: exported environment keeps quotes, newlines and shell syntax literal
+ok 404 - bash: exported environment keeps quotes, newlines and shell syntax literal
+  ---
+  duration_ms: 990.031458
+  type: 'test'
+  ...
+# Subtest: bash: a fresh captured environment is cached so a burst of commands starts the login shell once
+ok 405 - bash: a fresh captured environment is cached so a burst of commands starts the login shell once
+  ---
+  duration_ms: 1785.669125
+  type: 'test'
+  ...
+# Subtest: bash: failed or interrupted login initialization leaves no saved environment
+ok 406 - bash: failed or interrupted login initialization leaves no saved environment
+  ---
+  duration_ms: 2052.406125
+  type: 'test'
+  ...
+# Subtest: zsh: SSH probes receive the interactive login environment without startup output
+ok 407 - zsh: SSH probes receive the interactive login environment without startup output
+  ---
+  duration_ms: 1407.491542
+  type: 'test'
+  ...
+# Subtest: zsh: native CLI startup preserves stdin, quoting and working directory
+ok 408 - zsh: native CLI startup preserves stdin, quoting and working directory
+  ---
+  duration_ms: 636.173917
+  type: 'test'
+  ...
+# Subtest: zsh: SSH probes survive startup scripts closing inherited descriptors
+ok 409 - zsh: SSH probes survive startup scripts closing inherited descriptors
+  ---
+  duration_ms: 677.674292
+  type: 'test'
+  ...
+# Subtest: zsh: CLI input survives startup scripts closing inherited descriptors
+ok 410 - zsh: CLI input survives startup scripts closing inherited descriptors
+  ---
+  duration_ms: 584.899667
+  type: 'test'
+  ...
+# Subtest: zsh: exported environment keeps quotes, newlines and shell syntax literal
+ok 411 - zsh: exported environment keeps quotes, newlines and shell syntax literal
+  ---
+  duration_ms: 687.280584
+  type: 'test'
+  ...
+# Subtest: zsh: a fresh captured environment is cached so a burst of commands starts the login shell once
+ok 412 - zsh: a fresh captured environment is cached so a burst of commands starts the login shell once
+  ---
+  duration_ms: 767.721667
+  type: 'test'
+  ...
+# Subtest: zsh: failed or interrupted login initialization leaves no saved environment
+ok 413 - zsh: failed or interrupted login initialization leaves no saved environment
+  ---
+  duration_ms: 1439.507458
+  type: 'test'
+  ...
+# (node:32070) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: every SSH connection notices a dead network and shares one connection per host
+ok 414 - every SSH connection notices a dead network and shares one connection per host
+  ---
+  duration_ms: 719.014041
+  type: 'test'
+  ...
+# Subtest: connection sharing is left off where ssh could not use the socket safely
+ok 415 - connection sharing is left off where ssh could not use the socket safely
+  ---
+  duration_ms: 944.078375
+  type: 'test'
+  ...
+# Subtest: a prefix runs before the CLI, whose command stops if its directory is missing
+ok 416 - a prefix runs before the CLI, whose command stops if its directory is missing
+  ---
+  duration_ms: 836.604292
+  type: 'test'
+  ...
+# Subtest: command output split inside a character is decoded intact
+ok 417 - command output split inside a character is decoded intact
+  ---
+  duration_ms: 1056.427958
+  type: 'test'
+  ...
+# Subtest: file requests and Git reads skip the login shell; commands and other Git requests keep it
+ok 418 - file requests and Git reads skip the login shell; commands and other Git requests keep it
+  ---
+  duration_ms: 1.858459
+  type: 'test'
+  ...
+# (node:32427) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: concurrent Fast selections preserve request order from off
+ok 419 - concurrent Fast selections preserve request order from off
+  ---
+  duration_ms: 9.29675
+  type: 'test'
+  ...
+# Subtest: concurrent Fast selections preserve request order from on
+ok 420 - concurrent Fast selections preserve request order from on
+  ---
+  duration_ms: 4.049833
+  type: 'test'
+  ...
+# Subtest: unchanged store updates preserve the file and do not notify listeners
+ok 421 - unchanged store updates preserve the file and do not notify listeners
+  ---
+  duration_ms: 1.442709
+  type: 'test'
+  ...
+# Subtest: no-op detection runs inside the write queue and retains stale-writer protection
+ok 422 - no-op detection runs inside the write queue and retains stale-writer protection
+  ---
+  duration_ms: 1.937708
+  type: 'test'
+  ...
+# Subtest: reselecting the same Fast or reasoning effort does not write or broadcast
+ok 423 - reselecting the same Fast or reasoning effort does not write or broadcast
+  ---
+  duration_ms: 3.909666
+  type: 'test'
+  ...
+# (node:32520) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: tags follow a shared workspace between DSH instances by machine and directory, and never by local ids
+ok 424 - tags follow a shared workspace between DSH instances by machine and directory, and never by local ids
+  ---
+  duration_ms: 9.91725
+  type: 'test'
+  ...
+# Subtest: the first comparison combines both sides, and an unreachable registry changes nothing
+ok 425 - the first comparison combines both sides, and an unreachable registry changes nothing
+  ---
+  duration_ms: 3.679375
+  type: 'test'
+  ...
+# Subtest: a tag change here triggers a sync on its own
+ok 426 - a tag change here triggers a sync on its own
+  ---
+  duration_ms: 309.640792
+  type: 'test'
+  ...
+# (node:32843) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a terminal outlives its client, and the next client gets its screen and modes
+ok 427 - a terminal outlives its client, and the next client gets its screen and modes
+  ---
+  duration_ms: 789.112542
+  type: 'test'
+  ...
+# Subtest: a command is only ever started once when two clients arrive together
+ok 428 - a command is only ever started once when two clients arrive together
+  ---
+  duration_ms: 794.81075
+  type: 'test'
+  ...
+# Subtest: with nobody attached the holder answers what the CLI asks the terminal
+ok 429 - with nobody attached the holder answers what the CLI asks the terminal
+  ---
+  duration_ms: 1218.29675
+  type: 'test'
+  ...
+# Subtest: SIGTERM ends what runs in the holder
+ok 430 - SIGTERM ends what runs in the holder
+  ---
+  duration_ms: 215.238542
+  type: 'test'
+  ...
+# Subtest: a holder that died, as in a restart of the machine, is replaced
+ok 431 - a holder that died, as in a restart of the machine, is replaced
+  ---
+  duration_ms: 360.46725
+  type: 'test'
+  ...
+# Subtest: other holders that died are cleared when a new one starts
+ok 432 - other holders that died are cleared when a new one starts
+  ---
+  duration_ms: 197.730292
+  type: 'test'
+  ...
+# Subtest: a host with no usable Python says so with its own code
+ok 433 - a host with no usable Python says so with its own code
+  ---
+  duration_ms: 27.557875
+  type: 'test'
+  ...
+# Subtest: a terminal nobody came back to ends in the end
+ok 434 - a terminal nobody came back to ends in the end
+  ---
+  duration_ms: 651.557458
+  type: 'test'
+  ...
+# Subtest: a client that stopped reading is dropped rather than holding up the CLI, and others carry on
+ok 435 - a client that stopped reading is dropped rather than holding up the CLI, and others carry on
+  ---
+  duration_ms: 559.824084
+  type: 'test'
+  ...
+# Subtest: holder IDs are stable, distinct and fit what the holder accepts
+ok 436 - holder IDs are stable, distinct and fit what the holder accepts
+  ---
+  duration_ms: 0.593709
+  type: 'test'
+  ...
+# Subtest: exit codes the launcher reads as the holder cannot come from a terminal
+ok 437 - exit codes the launcher reads as the holder cannot come from a terminal
+  ---
+  duration_ms: 0.069542
+  type: 'test'
+  ...
+# Subtest: ending a holder only signals the process recorded for it
+ok 438 - ending a holder only signals the process recorded for it
+  ---
+  duration_ms: 0.047125
+  type: 'test'
+  ...
+# Subtest: the launcher reports the terminal exit code
+ok 439 - the launcher reports the terminal exit code
+  ---
+  duration_ms: 697.524875
+  type: 'test'
+  ...
+# Subtest: the launcher installs the script once and tries again
+ok 440 - the launcher installs the script once and tries again
+  ---
+  duration_ms: 753.199875
+  type: 'test'
+  ...
+# Subtest: the launcher reconnects after a lost connection or holder, and says so once
+ok 441 - the launcher reconnects after a lost connection or holder, and says so once
+  ---
+  duration_ms: 2402.896833
+  type: 'test'
+  ...
+# Subtest: a host without Node.js gets a plain connection, and a word about it
+ok 442 - a host without Node.js gets a plain connection, and a word about it
+  ---
+  duration_ms: 560.614
+  type: 'test'
+  ...
+# Subtest: a host without Python gets a plain connection, and a word about it
+ok 443 - a host without Python gets a plain connection, and a word about it
+  ---
+  duration_ms: 485.492084
+  type: 'test'
+  ...
+# Subtest: the command for the host runs in sh whatever the login shell, and carries the start command safely
+ok 444 - the command for the host runs in sh whatever the login shell, and carries the start command safely
+  ---
+  duration_ms: 0.170125
+  type: 'test'
+  ...
+# (node:37383) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a sidebar terminal that ran a launcher starts it again in place of saying it no longer exists
+ok 445 - a sidebar terminal that ran a launcher starts it again in place of saying it no longer exists
+  ---
+  duration_ms: 0.454583
+  type: 'test'
+  ...
+# Subtest: a local terminal stays as DSH leaves it
+ok 446 - a local terminal stays as DSH leaves it
+  ---
+  duration_ms: 0.087
+  type: 'test'
+  ...
+# Subtest: every launcher counts, on Windows too
+ok 447 - every launcher counts, on Windows too
+  ---
+  duration_ms: 0.052292
+  type: 'test'
+  ...
+# Subtest: a terminal is told which one it is, and only that call sees the change
+ok 448 - a terminal is told which one it is, and only that call sees the change
+  ---
+  duration_ms: 0.453958
+  type: 'test'
+  ...
+# Subtest: a DSH with a different controller leaves terminals as they were
+ok 449 - a DSH with a different controller leaves terminals as they were
+  ---
+  duration_ms: 0.048084
+  type: 'test'
+  ...
+# Subtest: closing a terminal ends its holder, even if that fails, and DSH still closes it
+ok 450 - closing a terminal ends its holder, even if that fails, and DSH still closes it
+  ---
+  duration_ms: 0.194584
+  type: 'test'
+  ...
+# (node:37456) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: delegation tools use only the schema subset the DSH tool registry enforces
+ok 451 - delegation tools use only the schema subset the DSH tool registry enforces
+  ---
+  duration_ms: 4.4225
+  type: 'test'
+  ...
+# Subtest: create resolves names and defaults, waits for the turn, and returns the reply
+ok 452 - create resolves names and defaults, waits for the turn, and returns the reply
+  ---
+  duration_ms: 510.88
+  type: 'test'
+  ...
+# Subtest: starting a remote agent without per-action approval needs explicit DSH approval
+ok 453 - starting a remote agent without per-action approval needs explicit DSH approval
+  ---
+  duration_ms: 509.76575
+  type: 'test'
+  ...
+# Subtest: an unattended team member delegates within its own sandbox, and nobody is asked
+ok 454 - an unattended team member delegates within its own sandbox, and nobody is asked
+  ---
+  duration_ms: 1014.447167
+  type: 'test'
+  ...
+# Subtest: remote permission requests become one-time DSH approvals while a call waits
+ok 455 - remote permission requests become one-time DSH approvals while a call waits
+  ---
+  duration_ms: 505.312083
+  type: 'test'
+  ...
+# Subtest: a rejected approval denies through the native deny action; a dismissed one stays in the panel
+ok 456 - a rejected approval denies through the native deny action; a dismissed one stays in the panel
+  ---
+  duration_ms: 1022.551083
+  type: 'test'
+  ...
+# Subtest: remote questions are asked through DSH user questions
+ok 457 - remote questions are asked through DSH user questions
+  ---
+  duration_ms: 510.65125
+  type: 'test'
+  ...
+# Subtest: callers without a DSH agent get the pending request reported instead of a prompt
+ok 458 - callers without a DSH agent get the pending request reported instead of a prompt
+  ---
+  duration_ms: 5.622833
+  type: 'test'
+  ...
+# Subtest: send refuses to clobber a working agent unless asked to interrupt, and resolves ID prefixes
+ok 459 - send refuses to clobber a working agent unless asked to interrupt, and resolves ID prefixes
+  ---
+  duration_ms: 6.315333
+  type: 'test'
+  ...
+# Subtest: waiting times out or aborts without stopping the remote agents
+ok 460 - waiting times out or aborts without stopping the remote agents
+  ---
+  duration_ms: 1007.688042
+  type: 'test'
+  ...
+# Subtest: create without waiting fans out; wait collects several agents
+ok 461 - create without waiting fans out; wait collects several agents
+  ---
+  duration_ms: 5.423625
+  type: 'test'
+  ...
+# Subtest: list reports hosts, recent projects and active agents; providers reports models and modes
+ok 462 - list reports hosts, recent projects and active agents; providers reports models and modes
+  ---
+  duration_ms: 10.791791
+  type: 'test'
+  ...
+# (node:37617) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a title reads as what the CLI is doing, for both CLIs as measured
+ok 463 - a title reads as what the CLI is doing, for both CLIs as measured
+  ---
+  duration_ms: 1.181125
+  type: 'test'
+  ...
+# Subtest: a status report reads as what Codex says it is doing
+ok 464 - a status report reads as what Codex says it is doing
+  ---
+  duration_ms: 0.081166
+  type: 'test'
+  ...
+# Subtest: Claude Code's dialogs show on its screen, as its title reads at rest
+ok 465 - Claude Code's dialogs show on its screen, as its title reads at rest
+  ---
+  duration_ms: 0.239042
+  type: 'test'
+  ...
+# Subtest: running reports once its screen had a moment to arrive, and a rest only once it has lasted
+ok 466 - running reports once its screen had a moment to arrive, and a rest only once it has lasted
+  ---
+  duration_ms: 0.718042
+  type: 'test'
+  ...
+# Subtest: a compaction shows on Claude Code's screen, and only in its spinner
+ok 467 - a compaction shows on Claude Code's screen, and only in its spinner
+  ---
+  duration_ms: 0.105875
+  type: 'test'
+  ...
+# Subtest: a compaction Claude Code starts by itself is no run, so nothing reads as finished
+ok 468 - a compaction Claude Code starts by itself is no run, so nothing reads as finished
+  ---
+  duration_ms: 0.387584
+  type: 'test'
+  ...
+# Subtest: a turn that follows a compaction counts from when the compaction gives way to it
+ok 469 - a turn that follows a compaction counts from when the compaction gives way to it
+  ---
+  duration_ms: 0.127666
+  type: 'test'
+  ...
+# Subtest: a turn goes on running through a compaction in the middle of it
+ok 470 - a turn goes on running through a compaction in the middle of it
+  ---
+  duration_ms: 0.082625
+  type: 'test'
+  ...
+# Subtest: a busy conversation says so again, as a DSH turn of its own can report it stopped
+ok 471 - a busy conversation says so again, as a DSH turn of its own can report it stopped
+  ---
+  duration_ms: 0.239375
+  type: 'test'
+  ...
+# Subtest: working in the first seconds of a CLI does not count, unless it lasts
+ok 472 - working in the first seconds of a CLI does not count, unless it lasts
+  ---
+  duration_ms: 0.398875
+  type: 'test'
+  ...
+# Subtest: a dialog counts as waiting and keeps the conversation running, as a DSH approval does
+ok 473 - a dialog counts as waiting and keeps the conversation running, as a DSH approval does
+  ---
+  duration_ms: 0.124625
+  type: 'test'
+  ...
+# Subtest: Codex's own report decides over its title and the screen
+ok 474 - Codex's own report decides over its title and the screen
+  ---
+  duration_ms: 0.130166
+  type: 'test'
+  ...
+# Subtest: a terminal going away ends the run, and only the CLI's own terminal is watched
+ok 475 - a terminal going away ends the run, and only the CLI's own terminal is watched
+  ---
+  duration_ms: 0.092084
+  type: 'test'
+  ...
+# Subtest: a conversation that is no longer a TUI one lets go of its terminal
+ok 476 - a conversation that is no longer a TUI one lets go of its terminal
+  ---
+  duration_ms: 0.048042
+  type: 'test'
+  ...
+# (node:37716) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a copy request gives its text, in any language
+ok 477 - a copy request gives its text, in any language
+  ---
+  duration_ms: 0.547875
+  type: 'test'
+  ...
+# Subtest: a request to read the clipboard is not one to write it
+ok 478 - a request to read the clipboard is not one to write it
+  ---
+  duration_ms: 0.049791
+  type: 'test'
+  ...
+# Subtest: other clipboards, empty requests and damaged data change nothing
+ok 479 - other clipboards, empty requests and damaged data change nothing
+  ---
+  duration_ms: 0.077667
+  type: 'test'
+  ...
+# Subtest: the clipboard API is used where there is one
+ok 480 - the clipboard API is used where there is one
+  ---
+  duration_ms: 0.298625
+  type: 'test'
+  ...
+# Subtest: a refusal, or no clipboard API at all, falls back to the old way and reports what it did
+ok 481 - a refusal, or no clipboard API at all, falls back to the old way and reports what it did
+  ---
+  duration_ms: 0.099792
+  type: 'test'
+  ...
+# Subtest: mouse modes repeated during a drag leave the drag alone, and only then
+ok 482 - mouse modes repeated during a drag leave the drag alone, and only then
+  ---
+  duration_ms: 0.179292
+  type: 'test'
+  ...
+# Subtest: other modes pass during a drag, also when sent together with mouse modes
+ok 483 - other modes pass during a drag, also when sent together with mouse modes
+  ---
+  duration_ms: 0.049917
+  type: 'test'
+  ...
+# Subtest: a program turning the mouse on for the first time is never held back
+ok 484 - a program turning the mouse on for the first time is never held back
+  ---
+  duration_ms: 0.0395
+  type: 'test'
+  ...
+# Subtest: ending it takes its listeners along
+ok 485 - ending it takes its listeners along
+  ---
+  duration_ms: 0.203708
+  type: 'test'
+  ...
+# (node:37953) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a file keeps a recognizable name, with nothing a shell or a path detector must be careful about
+ok 486 - a file keeps a recognizable name, with nothing a shell or a path detector must be careful about
+  ---
+  duration_ms: 2.118
+  type: 'test'
+  ...
+# Subtest: a file reaches the conversation's machine whole, under a path set by its content, and leaves nothing behind here
+ok 487 - a file reaches the conversation's machine whole, under a path set by its content, and leaves nothing behind here
+  ---
+  duration_ms: 15.387375
+  type: 'test'
+  ...
+# Subtest: only a TUI conversation takes files, and a failed upload leaves nothing behind
+ok 488 - only a TUI conversation takes files, and a failed upload leaves nothing behind
+  ---
+  duration_ms: 5.788792
+  type: 'test'
+  ...
+# Subtest: the upload route takes only what the client declared, from the client
+ok 489 - the upload route takes only what the client declared, from the client
+  ---
+  duration_ms: 19.168375
+  type: 'test'
+  ...
+# Subtest: a folder is told apart from the files dropped with it
+ok 490 - a folder is told apart from the files dropped with it
+  ---
+  duration_ms: 0.429709
+  type: 'test'
+  ...
+# Subtest: a paste uploads what the user copied as a file or an image, and leaves copied text to the terminal
+ok 491 - a paste uploads what the user copied as a file or an image, and leaves copied text to the terminal
+  ---
+  duration_ms: 0.190667
+  type: 'test'
+  ...
+# Subtest: Ctrl+V takes only an image without text, and an unavailable clipboard counts as empty
+ok 492 - Ctrl+V takes only an image without text, and an unavailable clipboard counts as empty
+  ---
+  duration_ms: 0.444125
+  type: 'test'
+  ...
+# Subtest: a path is typed as a terminal types a dropped file
+ok 493 - a path is typed as a terminal types a dropped file
+  ---
+  duration_ms: 0.892333
+  type: 'test'
+  ...
+# Subtest: for Claude Code each file is its own paste, images last, and text stays apart from an earlier image
+ok 494 - for Claude Code each file is its own paste, images last, and text stays apart from an earlier image
+  ---
+  duration_ms: 0.159917
+  type: 'test'
+  ...
+# Subtest: for Codex each file is its own paste, in order, as its placeholder comes at once with a space after it
+ok 495 - for Codex each file is its own paste, in order, as its placeholder comes at once with a space after it
+  ---
+  duration_ms: 0.127375
+  type: 'test'
+  ...
+# Subtest: files upload one at a time in order, and their paths wait for the terminal to take them once
+ok 496 - files upload one at a time in order, and their paths wait for the terminal to take them once
+  ---
+  duration_ms: 1.279375
+  type: 'test'
+  ...
+# Subtest: a failed file is reported and the rest still upload
+ok 497 - a failed file is reported and the rest still upload
+  ---
+  duration_ms: 1.176209
+  type: 'test'
+  ...
+# Subtest: a folder or an oversized file is refused without sending anything, and clears the last errors
+ok 498 - a folder or an oversized file is refused without sending anything, and clears the last errors
+  ---
+  duration_ms: 0.545125
+  type: 'test'
+  ...
+# Subtest: cancelling stops the file being sent and those waiting, and a new upload starts clean
+ok 499 - cancelling stops the file being sent and those waiting, and a new upload starts clean
+  ---
+  duration_ms: 0.560833
+  type: 'test'
+  ...
+# Subtest: each conversation has its own uploads
+ok 500 - each conversation has its own uploads
+  ---
+  duration_ms: 0.350709
+  type: 'test'
+  ...
+# (node:38134) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a terminal goes to the area when shown and to the hidden place when left, in the same element
+ok 501 - a terminal goes to the area when shown and to the hidden place when left, in the same element
+  ---
+  duration_ms: 0.5005
+  type: 'test'
+  ...
+# Subtest: only the most recently used stay open, and using one again keeps it
+ok 502 - only the most recently used stay open, and using one again keeps it
+  ---
+  duration_ms: 0.519208
+  type: 'test'
+  ...
+# Subtest: a terminal starts from its saved generation, and replacing it saves the next
+ok 503 - a terminal starts from its saved generation, and replacing it saves the next
+  ---
+  duration_ms: 0.0915
+  type: 'test'
+  ...
+# Subtest: a dropped terminal is gone, and leaving its conversation afterwards does nothing
+ok 504 - a dropped terminal is gone, and leaving its conversation afterwards does nothing
+  ---
+  duration_ms: 0.087625
+  type: 'test'
+  ...
+# Subtest: leaving an old copy of a conversation does not hide its newer terminal
+ok 505 - leaving an old copy of a conversation does not hide its newer terminal
+  ---
+  duration_ms: 0.101417
+  type: 'test'
+  ...
+# (node:38227) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: terminal output does not scan the document or measure menu layout (menu closed)
+ok 506 - terminal output does not scan the document or measure menu layout (menu closed)
+  ---
+  duration_ms: 122.565666
+  type: 'test'
+  ...
+# Subtest: terminal output does not scan the document or measure menu layout (menu open)
+ok 507 - terminal output does not scan the document or measure menu layout (menu open)
+  ---
+  duration_ms: 125.6185
+  type: 'test'
+  ...
+# Subtest: nested late widgets and title-only changes are not filtered out
+ok 508 - nested late widgets and title-only changes are not filtered out
+  ---
+  duration_ms: 25.308708
+  type: 'test'
+  ...
+# (node:38725) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: the terminal is found in the ref of the component above its element
+ok 509 - the terminal is found in the ref of the component above its element
+  ---
+  duration_ms: 0.380458
+  type: 'test'
+  ...
+# Subtest: no terminal, and an element whose state is not a list of hooks, find nothing without throwing
+ok 510 - no terminal, and an element whose state is not a list of hooks, find nothing without throwing
+  ---
+  duration_ms: 0.082333
+  type: 'test'
+  ...
+# Subtest: a terminal far above is not taken for this one
+ok 511 - a terminal far above is not taken for this one
+  ---
+  duration_ms: 0.091125
+  type: 'test'
+  ...
+# Subtest: the background keeps its color with nothing to paint
+ok 512 - the background keeps its color with nothing to paint
+  ---
+  duration_ms: 0.096417
+  type: 'test'
+  ...
+# Subtest: the switches start as the page has always been, and are remembered
+ok 513 - the switches start as the page has always been, and are remembered
+  ---
+  duration_ms: 0.40225
+  type: 'test'
+  ...
+# Subtest: a damaged or partial saved value falls back to the defaults, and a storage that throws is survived
+ok 514 - a damaged or partial saved value falls back to the defaults, and a storage that throws is survived
+  ---
+  duration_ms: 0.080834
+  type: 'test'
+  ...
+# Subtest: a problem is reported once, and changing the switch clears it
+ok 515 - a problem is reported once, and changing the switch clears it
+  ---
+  duration_ms: 0.098833
+  type: 'test'
+  ...
+# (node:38910) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: starting a TUI records it and gives DSH the turn it needs to show the conversation
+ok 516 - starting a TUI records it and gives DSH the turn it needs to show the conversation
+  ---
+  duration_ms: 12.007625
+  type: 'test'
+  ...
+# Subtest: a TUI remembers the Claude model and effort chosen in the composer
+ok 517 - a TUI remembers the Claude model and effort chosen in the composer
+  ---
+  duration_ms: 5.819625
+  type: 'test'
+  ...
+# Subtest: starting a TUI tells DSH its model, which is what the workspace list shows an icon from
+ok 518 - starting a TUI tells DSH its model, which is what the workspace list shows an icon from
+  ---
+  duration_ms: 2.367292
+  type: 'test'
+  ...
+# Subtest: a TUI starts even if DSH will not take the model yet, and the next title check tries again
+ok 519 - a TUI starts even if DSH will not take the model yet, and the next title check tries again
+  ---
+  duration_ms: 4.154666
+  type: 'test'
+  ...
+# Subtest: a conversation started by an earlier version gets its model when it is next in view, even if renamed
+ok 520 - a conversation started by an earlier version gets its model when it is next in view, even if renamed
+  ---
+  duration_ms: 5.974833
+  type: 'test'
+  ...
+# Subtest: a value that could break out of the remote command line, or another CLI's model, is left out
+ok 521 - a value that could break out of the remote command line, or another CLI's model, is left out
+  ---
+  duration_ms: 7.629958
+  type: 'test'
+  ...
+# Subtest: a new DSH session not listed yet can start too
+ok 522 - a new DSH session not listed yet can start too
+  ---
+  duration_ms: 6.472292
+  type: 'test'
+  ...
+# Subtest: a TUI starts only in a new, open conversation of a verified remote workspace
+ok 523 - a TUI starts only in a new, open conversation of a verified remote workspace
+  ---
+  duration_ms: 2.573375
+  type: 'test'
+  ...
+# Subtest: the Claude session of a conversation does not change between versions
+ok 524 - the Claude session of a conversation does not change between versions
+  ---
+  duration_ms: 0.134084
+  type: 'test'
+  ...
+# Subtest: Claude Code's title is read from its records, and /rename wins
+ok 525 - Claude Code's title is read from its records, and /rename wins
+  ---
+  duration_ms: 0.211625
+  type: 'test'
+  ...
+# Subtest: without a title from Claude Code, the first prompt titles the conversation, as in DSH's other conversations
+ok 526 - without a title from Claude Code, the first prompt titles the conversation, as in DSH's other conversations
+  ---
+  duration_ms: 0.128708
+  type: 'test'
+  ...
+# Subtest: a conversation follows Claude Code's title until it is renamed in DSH
+ok 527 - a conversation follows Claude Code's title until it is renamed in DSH
+  ---
+  duration_ms: 5.819875
+  type: 'test'
+  ...
+# Subtest: a prompt title gives way to Claude Code's own when it arrives
+ok 528 - a prompt title gives way to Claude Code's own when it arrives
+  ---
+  duration_ms: 9.405541
+  type: 'test'
+  ...
+# Subtest: the title 0.2.81 gave a conversation is replaced
+ok 529 - the title 0.2.81 gave a conversation is replaced
+  ---
+  duration_ms: 4.115792
+  type: 'test'
+  ...
+# Subtest: a Codex conversation starts its thread first and remembers it, with its model and effort
+ok 530 - a Codex conversation starts its thread first and remembers it, with its model and effort
+  ---
+  duration_ms: 4.345791
+  type: 'test'
+  ...
+# Subtest: a Codex conversation that cannot get a thread records nothing, so it can be started again
+ok 531 - a Codex conversation that cannot get a thread records nothing, so it can be started again
+  ---
+  duration_ms: 6.240583
+  type: 'test'
+  ...
+# Subtest: each CLI takes only its own model, and anything but Codex is Claude Code
+ok 532 - each CLI takes only its own model, and anything but Codex is Claude Code
+  ---
+  duration_ms: 12.0825
+  type: 'test'
+  ...
+# Subtest: a Codex thread titles the conversation by its /rename, then its first prompt
+ok 533 - a Codex thread titles the conversation by its /rename, then its first prompt
+  ---
+  duration_ms: 0.474375
+  type: 'test'
+  ...
+# Subtest: a Codex conversation follows its thread and leaves a DSH rename alone, and never reads Claude Code
+ok 534 - a Codex conversation follows its thread and leaves a DSH rename alone, and never reads Claude Code
+  ---
+  duration_ms: 8.732458
+  type: 'test'
+  ...
+# Subtest: starting a TUI tells a live agent about its turn, as a real one numbered the same would corrupt the log
+ok 535 - starting a TUI tells a live agent about its turn, as a real one numbered the same would corrupt the log
+  ---
+  duration_ms: 6.179666
+  type: 'test'
+  ...
+# Subtest: a title cut from a prompt ends in no space
+ok 536 - a title cut from a prompt ends in no space
+  ---
+  duration_ms: 0.08775
+  type: 'test'
+  ...
+# (node:38959) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: output snapshots reach the body without rerendering its wrapper or replacing host hooks
+ok 537 - output snapshots reach the body without rerendering its wrapper or replacing host hooks
+  ---
+  duration_ms: 51.459458
+  type: 'test'
+  ...
+# Subtest: visibility reconnects only on return, while missing-terminal and theme changes remain live
+ok 538 - visibility reconnects only on return, while missing-terminal and theme changes remain live
+  ---
+  duration_ms: 8.439292
+  type: 'test'
+  ...
+# Subtest: generation replacement releases the old subscriptions and opens a fresh wrapper
+ok 539 - generation replacement releases the old subscriptions and opens a fresh wrapper
+  ---
+  duration_ms: 6.463417
+  type: 'test'
+  ...
+# (node:38960) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: cache counters keep provider input semantics, reported zeros and missing fields distinct
+ok 540 - cache counters keep provider input semantics, reported zeros and missing fields distinct
+  ---
+  duration_ms: 3.647458
+  type: 'test'
+  ...
+# Subtest: cache display distinguishes unreported counts, no hits and a token hit rate
+ok 541 - cache display distinguishes unreported counts, no hits and a token hit rate
+  ---
+  duration_ms: 6.280041
+  type: 'test'
+  ...
+# Subtest: Codex token reports and account limits become the ring and its plan windows
+ok 542 - Codex token reports and account limits become the ring and its plan windows
+  ---
+  duration_ms: 0.809042
+  type: 'test'
+  ...
+# Subtest: Claude usage reports keep the windows the account has and the extra usage switch
+ok 543 - Claude usage reports keep the windows the account has and the extra usage switch
+  ---
+  duration_ms: 0.422291
+  type: 'test'
+  ...
+# Subtest: ring labels use compact token counts and reset times
+ok 544 - ring labels use compact token counts and reset times
+  ---
+  duration_ms: 0.092333
+  type: 'test'
+  ...
+# Subtest: a conversation reports the context of its selected CLI and reads plan limits only on request
+ok 545 - a conversation reports the context of its selected CLI and reads plan limits only on request
+  ---
+  duration_ms: 16.078083
+  type: 'test'
+  ...
+# Subtest: turn usage converts each CLI report into DSH token usage
+ok 546 - turn usage converts each CLI report into DSH token usage
+  ---
+  duration_ms: 0.31525
+  type: 'test'
+  ...
+# Subtest: usage records name the CLI, host and remote directory, and tell conversations from delegated agents
+ok 547 - usage records name the CLI, host and remote directory, and tell conversations from delegated agents
+  ---
+  duration_ms: 0.507208
+  type: 'test'
+  ...
+# Subtest: a Claude turn is recorded once per model that ran it, or once when the CLI does not say
+ok 548 - a Claude turn is recorded once per model that ran it, or once when the CLI does not say
+  ---
+  duration_ms: 0.543458
+  type: 'test'
+  ...
+# (node:38980) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: workspace models match SSH host, user and port and translate placeholder subdirectories
+ok 549 - workspace models match SSH host, user and port and translate placeholder subdirectories
+  ---
+  duration_ms: 14.901208
+  type: 'test'
+  ...
+# Subtest: dsh-remote mirrors use their registered endpoint, reject malformed metadata and escaped paths
+ok 550 - dsh-remote mirrors use their registered endpoint, reject malformed metadata and escaped paths
+  ---
+  duration_ms: 4.8295
+  type: 'test'
+  ...
+# Subtest: binding changes during endpoint resolution cannot admit an old machine
+ok 551 - binding changes during endpoint resolution cannot admit an old machine
+  ---
+  duration_ms: 3.433042
+  type: 'test'
+  ...
+# Subtest: process-routed workspaces match the saved machine identity and reject local execution
+ok 552 - process-routed workspaces match the saved machine identity and reject local execution
+  ---
+  duration_ms: 4.720334
+  type: 'test'
+  ...
+# Subtest: plugin startup leaves saved relay sessions and their SSH hosts dormant
+ok 553 - plugin startup leaves saved relay sessions and their SSH hosts dormant
+  ---
+  duration_ms: 17.616583
+  type: 'test'
+  ...
+# Subtest: the mounted workspace API uses live or persisted session placement and rejects a concurrent switch
+ok 554 - the mounted workspace API uses live or persisted session placement and rejects a concurrent switch
+  ---
+  duration_ms: 9.85425
+  type: 'test'
+  ...
+# (node:39004) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: a local tunnel listens on loopback, plus the address the browser reached DSH at when it is this machine's
+ok 555 - a local tunnel listens on loopback, plus the address the browser reached DSH at when it is this machine's
+  ---
+  duration_ms: 3.478375
+  type: 'test'
+  ...
+# Subtest: a tunnel started from another address listens there, and says where it listens
+ok 556 - a tunnel started from another address listens there, and says where it listens
+  ---
+  duration_ms: 38.136583
+  type: 'test'
+  ...
+# Subtest: a tunnel that failed to start listens again when it is retried
+ok 557 - a tunnel that failed to start listens again when it is retried
+  ---
+  duration_ms: 42.486208
+  type: 'test'
+  ...
+# Subtest: tunnel startup, stop, saved definitions and host removal are independent of remote agents
+ok 558 - tunnel startup, stop, saved definitions and host removal are independent of remote agents
+  ---
+  duration_ms: 50.082875
+  type: 'test'
+  ...
+# Subtest: native terminal launcher resolves the workspace, refuses an invalid binding and opens the local shell elsewhere
+ok 559 - native terminal launcher resolves the workspace, refuses an invalid binding and opens the local shell elsewhere
+  ---
+  duration_ms: 4501.633125
+  type: 'test'
+  ...
+# Subtest: the workspace target names the Remote workspace shell once it is installed
+ok 560 - the workspace target names the Remote workspace shell once it is installed
+  ---
+  duration_ms: 0.31775
+  type: 'test'
+  ...
+# (node:39010) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: remote files list, read, edit with revision checks, search, rename and delete
+ok 561 - remote files list, read, edit with revision checks, search, rename and delete
+  ---
+  duration_ms: 198.046083
+  type: 'test'
+  ...
+# Subtest: workspace paths reject traversal, symlink escapes, binary editing and excessive uploads
+ok 562 - workspace paths reject traversal, symlink escapes, binary editing and excessive uploads
+  ---
+  duration_ms: 32.856791
+  type: 'test'
+  ...
+# Subtest: binary transfers are atomic, preserve exact bytes and require the current revision
+ok 563 - binary transfers are atomic, preserve exact bytes and require the current revision
+  ---
+  duration_ms: 50.421917
+  type: 'test'
+  ...
+# Subtest: a file a CLI named by absolute path is read exactly, with a size limit, and only as a regular file
+ok 564 - a file a CLI named by absolute path is read exactly, with a size limit, and only as a regular file
+  ---
+  duration_ms: 42.646
+  type: 'test'
+  ...
+# Subtest: remote commands preserve stdout, stderr and exit codes
+ok 565 - remote commands preserve stdout, stderr and exit codes
+  ---
+  duration_ms: 45.496625
+  type: 'test'
+  ...
+# Subtest: workspace files and commands never start Node.js on the SSH host
+ok 566 - workspace files and commands never start Node.js on the SSH host
+  ---
+  duration_ms: 232.205917
+  type: 'test'
+  ...
+# Subtest: a remote command that times out stops everything it started, and flooding output is cut
+ok 567 - a remote command that times out stops everything it started, and flooding output is cut
+  ---
+  duration_ms: 3545.041875
+  type: 'test'
+  ...
+# Subtest: remote Git passes each argument verbatim, runs in the workspace directory given and reports every command
+ok 568 - remote Git passes each argument verbatim, runs in the workspace directory given and reports every command
+  ---
+  duration_ms: 534.844625
+  type: 'test'
+  ...
+# Subtest: remote Git stops a command at its timeout, and a cancel stops the running command and skips the rest
+ok 569 - remote Git stops a command at its timeout, and a cancel stops the running command and skips the rest
+  ---
+  duration_ms: 1143.499792
+  type: 'test'
+  ...
+# Subtest: a name containing a newline is listed and readable, but scans skip it
+ok 570 - a name containing a newline is listed and readable, but scans skip it
+  ---
+  duration_ms: 96.916958
+  type: 'test'
+  ...
+# Subtest: managed remote DSH startup is isolated, idempotent, scoped to its workspace and explicitly stopped
+ok 571 - managed remote DSH startup is isolated, idempotent, scoped to its workspace and explicitly stopped
+  ---
+  duration_ms: 670.22575
+  type: 'test'
+  ...
+# Subtest: three-way pull and push preserve metadata, detect conflicts, preview without writes and propagate deletes
+ok 572 - three-way pull and push preserve metadata, detect conflicts, preview without writes and propagate deletes
+  ---
+  duration_ms: 201.3355
+  type: 'test'
+  ...
+# Subtest: a changed sync preview cannot be applied and large editor saves use stdin rather than SSH argv
+ok 573 - a changed sync preview cannot be applied and large editor saves use stdin rather than SSH argv
+  ---
+  duration_ms: 80.726958
+  type: 'test'
+  ...
+# Subtest: file routes use the verified session binding and never accept another machine or stale workspace
+ok 574 - file routes use the verified session binding and never accept another machine or stale workspace
+  ---
+  duration_ms: 36.656416
+  type: 'test'
+  ...
+# Subtest: a conversation's own file goes to its verified machine and directory, outside what sync and the project see
+ok 575 - a conversation's own file goes to its verified machine and directory, outside what sync and the project see
+  ---
+  duration_ms: 44.040167
+  type: 'test'
+  ...
+# Subtest: a Codex thread is started on the app server and saved by naming it, as nothing else saves one without a message
+ok 576 - a Codex thread is started on the app server and saved by naming it, as nothing else saves one without a message
+  ---
+  duration_ms: 1.242583
+  type: 'test'
+  ...
+# Subtest: starting a Codex thread reports a missing CLI or a bad answer, and leaves no app server behind
+ok 577 - starting a Codex thread reports a missing CLI or a bad answer, and leaves no app server behind
+  ---
+  duration_ms: 22.773834
+  type: 'test'
+  ...
+# Subtest: a Codex thread's title records come from the name index and its own record file, on the real shell
+ok 578 - a Codex thread's title records come from the name index and its own record file, on the real shell
+  ---
+  duration_ms: 91.004708
+  type: 'test'
+  ...
+# Subtest: sync never deletes a synced path that became a symbolic link on either side, nor anything below it
+ok 579 - sync never deletes a synced path that became a symbolic link on either side, nor anything below it
+  ---
+  duration_ms: 226.353084
+  type: 'test'
+  ...
+# Subtest: a sync preview with no changes can be applied to record the baseline
+ok 580 - a sync preview with no changes can be applied to record the baseline
+  ---
+  duration_ms: 110.914042
+  type: 'test'
+  ...
+# Subtest: a pull that updates a mirrored file keeps its permissions
+ok 581 - a pull that updates a mirrored file keeps its permissions
+  ---
+  duration_ms: 108.771333
+  type: 'test'
+  ...
+# Subtest: concurrent saves holding the same revision let exactly one through
+ok 582 - concurrent saves holding the same revision let exactly one through
+  ---
+  duration_ms: 2144.76875
+  type: 'test'
+  ...
+# Subtest: a save waits for a live lock holder and breaks the lock of one that died
+ok 583 - a save waits for a live lock holder and breaks the lock of one that died
+  ---
+  duration_ms: 1036.466875
+  type: 'test'
+  ...
+# Subtest: saves that reclaim a dead holder's lock together still let exactly one through
+ok 584 - saves that reclaim a dead holder's lock together still let exactly one through
+  ---
+  duration_ms: 1952.373625
+  type: 'test'
+  ...
+# Subtest: paths keep leading and trailing spaces, so an operation never reaches a differently named file
+ok 585 - paths keep leading and trailing spaces, so an operation never reaches a differently named file
+  ---
+  duration_ms: 212.497084
+  type: 'test'
+  ...
+# Subtest: a workspace at the filesystem root reaches its subpaths
+ok 586 - a workspace at the filesystem root reaches its subpaths
+  ---
+  duration_ms: 90.841625
+  type: 'test'
+  ...
+# (node:39605) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Add workspace shadows DSH's own picker, yields to dsh-remote and restores the picker on unload
+ok 587 - Add workspace shadows DSH's own picker, yields to dsh-remote and restores the picker on unload
+  ---
+  duration_ms: 1.391083
+  type: 'test'
+  ...
+# (node:39614) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: Git and file calls reject an expected target changed before dispatch, including the same host
+ok 588 - Git and file calls reject an expected target changed before dispatch, including the same host
+  ---
+  duration_ms: 0.976584
+  type: 'test'
+  ...
+# Subtest: Git and file calls recheck their pinned target after SSH connection discovery
+ok 589 - Git and file calls recheck their pinned target after SSH connection discovery
+  ---
+  duration_ms: 0.504292
+  type: 'test'
+  ...
+# Subtest: cancellation follows only the original active session/job after retargeting, with connection identity checks
+ok 590 - cancellation follows only the original active session/job after retargeting, with connection identity checks
+  ---
+  duration_ms: 0.261791
+  type: 'test'
+  ...
+# Subtest: cancellation during placement discovery prevents Git from starting
+ok 591 - cancellation during placement discovery prevents Git from starting
+  ---
+  duration_ms: 0.48975
+  type: 'test'
+  ...
+# Subtest: cancellation during connection discovery prevents the pending Git action
+ok 592 - cancellation during connection discovery prevents the pending Git action
+  ---
+  duration_ms: 0.21525
+  type: 'test'
+  ...
+# Subtest: failed Git calls remove their active cancellation binding
+ok 593 - failed Git calls remove their active cancellation binding
+  ---
+  duration_ms: 0.146833
+  type: 'test'
+  ...
+# (node:39622) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# (node:39622) ExperimentalWarning: The MockTimers API is an experimental feature and might change at any time
+# Subtest: shared remote workspaces are added to the sidebar once, and a failed addition is offered again
+ok 594 - shared remote workspaces are added to the sidebar once, and a failed addition is offered again
+  ---
+  duration_ms: 4.609042
+  type: 'test'
+  ...
+# (node:39628) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: each workspace filters the shared catalog without changing other sessions or ordinary models
+ok 595 - each workspace filters the shared catalog without changing other sessions or ordinary models
+  ---
+  duration_ms: 1.101875
+  type: 'test'
+  ...
+# Subtest: workspace changes immediately revoke admission and discard stale responses including a pending selection
+ok 596 - workspace changes immediately revoke admission and discard stale responses including a pending selection
+  ---
+  duration_ms: 0.276375
+  type: 'test'
+  ...
+# Subtest: selection rechecks admission, preserves ordinary selections and fails closed on errors and teardown
+ok 597 - selection rechecks admission, preserves ordinary selections and fails closed on errors and teardown
+  ---
+  duration_ms: 0.145792
+  type: 'test'
+  ...
+# Subtest: successful explicit thinking choices are remembered immediately without a conversation turn
+ok 598 - successful explicit thinking choices are remembered immediately without a conversation turn
+  ---
+  duration_ms: 0.214458
+  type: 'test'
+  ...
+# Subtest: failed selections and rejected workspace admissions never change the remembered effort
+ok 599 - failed selections and rejected workspace admissions never change the remembered effort
+  ---
+  duration_ms: 0.097375
+  type: 'test'
+  ...
+# Subtest: a preference save failure is visible and retrying the same choice saves it
+ok 600 - a preference save failure is visible and retrying the same choice saves it
+  ---
+  duration_ms: 0.205958
+  type: 'test'
+  ...
+# Subtest: a workspace change during the host selection does not save a stale preference
+ok 601 - a workspace change during the host selection does not save a stale preference
+  ---
+  duration_ms: 0.154833
+  type: 'test'
+  ...
+# Subtest: a dispose change during the host selection does not save a stale preference
+ok 602 - a dispose change during the host selection does not save a stale preference
+  ---
+  duration_ms: 0.124708
+  type: 'test'
+  ...
+# Subtest: a new conversation in a local workspace takes the last local model instead of a remote one it cannot run
+ok 603 - a new conversation in a local workspace takes the last local model instead of a remote one it cannot run
+  ---
+  duration_ms: 6.770625
+  type: 'test'
+  ...
+# Subtest: with no usable last local model it takes the first local one, and never a model the catalog dropped
+ok 604 - with no usable last local model it takes the first local one, and never a model the catalog dropped
+  ---
+  duration_ms: 6.765375
+  type: 'test'
+  ...
+# Subtest: on another machine it takes the same CLI and model there, keeping the thinking level
+ok 605 - on another machine it takes the same CLI and model there, keeping the thinking level
+  ---
+  duration_ms: 6.631083
+  type: 'test'
+  ...
+# Subtest: on another machine without that model it takes that CLI’s first, then any CLI there
+ok 606 - on another machine without that model it takes that CLI’s first, then any CLI there
+  ---
+  duration_ms: 13.08075
+  type: 'test'
+  ...
+# Subtest: a conversation that has started, or a model its machine can run, is left alone
+ok 607 - a conversation that has started, or a model its machine can run, is left alone
+  ---
+  duration_ms: 13.037667
+  type: 'test'
+  ...
+# Subtest: it tries once per inherited model, also when that fails or nothing fits, and waits for the catalog
+ok 608 - it tries once per inherited model, also when that fails or nothing fits, and waits for the catalog
+  ---
+  duration_ms: 25.942416
+  type: 'test'
+  ...
+# Subtest: a local model the user picks becomes the next fallback; a remote one does not
+ok 609 - a local model the user picks becomes the next fallback; a remote one does not
+  ---
+  duration_ms: 0.313625
+  type: 'test'
+  ...
+# (node:39660) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: file tab addresses are built as DSH builds them and read back unchanged
+ok 610 - file tab addresses are built as DSH builds them and read back unchanged
+  ---
+  duration_ms: 20.963125
+  type: 'test'
+  ...
+# Subtest: in the sidebar, the files tool is a list and a chosen file opens in its own tab
+ok 611 - in the sidebar, the files tool is a list and a chosen file opens in its own tab
+  ---
+  duration_ms: 53.464041
+  type: 'test'
+  ...
+# Subtest: a file tab shows only that file, at the line it was opened at, without the list or its own close button
+ok 612 - a file tab shows only that file, at the line it was opened at, without the list or its own close button
+  ---
+  duration_ms: 34.66975
+  type: 'test'
+  ...
+# Subtest: a tunnel started here names the address this browser uses, and its row says where it listens
+ok 613 - a tunnel started here names the address this browser uses, and its row says where it listens
+  ---
+  duration_ms: 14.81725
+  type: 'test'
+  ...
+# (node:39740) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: new workspace sessions execute in the verified remote directory and retries create once
+ok 614 - new workspace sessions execute in the verified remote directory and retries create once
+  ---
+  duration_ms: 19.829542
+  type: 'test'
+  ...
+# Subtest: workspace session creation refuses another host, changed directories and local or missing workspaces
+ok 615 - workspace session creation refuses another host, changed directories and local or missing workspaces
+  ---
+  duration_ms: 5.559875
+  type: 'test'
+  ...
+# Subtest: a workspace switch during CLI discovery is rejected before saving or starting an agent
+ok 616 - a workspace switch during CLI discovery is rejected before saving or starting an agent
+  ---
+  duration_ms: 1.959625
+  type: 'test'
+  ...
+# (node:39837) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: native file addresses preserve remote relative and absolute paths and reject other scopes
+ok 617 - native file addresses preserve remote relative and absolute paths and reject other scopes
+  ---
+  duration_ms: 0.594291
+  type: 'test'
+  ...
+# Subtest: native sidebar claims only verified remote sessions, invalidates workspace changes and disposes registrations
+ok 618 - native sidebar claims only verified remote sessions, invalidates workspace changes and disposes registrations
+  ---
+  duration_ms: 4.965083
+  type: 'test'
+  ...
+# Subtest: Remote Claude and Remote Codex count as remote launchers when remembering the user's shell
+ok 619 - Remote Claude and Remote Codex count as remote launchers when remembering the user's shell
+  ---
+  duration_ms: 0.306084
+  type: 'test'
+  ...
+# Subtest: archiving a TUI conversation closes its terminal once, and only a TUI one
+ok 620 - archiving a TUI conversation closes its terminal once, and only a TUI one
+  ---
+  duration_ms: 0.150458
+  type: 'test'
+  ...
+# Subtest: a TUI puts the scaled CJK font ahead of DSH's terminal fonts, without changing other terminals
+ok 621 - a TUI puts the scaled CJK font ahead of DSH's terminal fonts, without changing other terminals
+  ---
+  duration_ms: 0.1975
+  type: 'test'
+  ...
+# (node:40191) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: DSH workspace tools use the agent session, ask before commands and reject a switch during approval
+ok 622 - DSH workspace tools use the agent session, ask before commands and reject a switch during approval
+  ---
+  duration_ms: 7.57475
+  type: 'test'
+  ...
+# Subtest: the conversation permission decides which workspace changes still ask, as DSH tools do
+ok 623 - the conversation permission decides which workspace changes still ask, as DSH tools do
+  ---
+  duration_ms: 3.416667
+  type: 'test'
+  ...
+# (node:40214) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: names, branches, worktree lists and the setup file parse as Git and DSH write them
+ok 624 - names, branches, worktree lists and the setup file parse as Git and DSH write them
+  ---
+  duration_ms: 1.154708
+  type: 'test'
+  ...
+# Subtest: a new branch from a project becomes a DSH workspace next to it, set up and tagged like it
+ok 625 - a new branch from a project becomes a DSH workspace next to it, set up and tagged like it
+  ---
+  duration_ms: 900.044417
+  type: 'test'
+  ...
+# Subtest: checking out a remote branch tracks it; a branch already checked out elsewhere is refused
+ok 626 - checking out a remote branch tracks it; a branch already checked out elsewhere is refused
+  ---
+  duration_ms: 591.998667
+  type: 'test'
+  ...
+# Subtest: a workspace inside the repository opens the same folder in the worktree
+ok 627 - a workspace inside the repository opens the same folder in the worktree
+  ---
+  duration_ms: 485.4935
+  type: 'test'
+  ...
+# Subtest: setup commands that were not shown wait for a confirmation before anything runs
+ok 628 - setup commands that were not shown wait for a confirmation before anything runs
+  ---
+  duration_ms: 704.902459
+  type: 'test'
+  ...
+# Subtest: a failed setup can be retried, skipped or discarded
+ok 629 - a failed setup can be retried, skipped or discarded
+  ---
+  duration_ms: 1039.602
+  type: 'test'
+  ...
+# Subtest: archiving warns about unsaved work, runs teardown, removes the worktree and its workspace, and deletes a merged branch
+ok 630 - archiving warns about unsaved work, runs teardown, removes the worktree and its workspace, and deletes a merged branch
+  ---
+  duration_ms: 1654.809667
+  type: 'test'
+  ...
+# Subtest: on an SSH machine the worktree, its setup and its archive run through the remote shell
+ok 631 - on an SSH machine the worktree, its setup and its archive run through the remote shell
+  ---
+  duration_ms: 2189.837083
+  type: 'test'
+  ...
+# Subtest: a remote setup command can be stopped, with everything it started
+ok 632 - a remote setup command can be stopped, with everything it started
+  ---
+  duration_ms: 83.087
+  type: 'test'
+  ...
+# Subtest: this computer's shell reports exit codes and stops the whole command
+ok 633 - this computer's shell reports exit codes and stops the whole command
+  ---
+  duration_ms: 107.797958
+  type: 'test'
+  ...
+1..633
+# tests 633
+# suites 0
+# pass 632
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 53423.3175
+(node:71088) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> dsh-remote-agents@0.2.118 build /Volumes/data/code/dsh-plugins/packages/remote-agents
+> node -e "fs.rmSync('lib', { recursive: true, force: true })" && tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs && node ../../scripts/build-editor.mjs lib/editor.js && node scripts/build-holder.mjs
+
+(node:71122) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:71129) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:71131) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)
+/Volumes/data/code/dsh-plugins/packages/remote-agents/lib/editor.js: 5.52 MB (editor worker 300 KB, JSON worker 427 KB, CSS 371 KB)
+(node:71133) [UNDICI-EHPA] Warning: EnvHttpProxyAgent is experimental, expect them to change at any time.
+(Use `node --trace-warnings ...` to show where the warning was created)

@@ -17,6 +17,7 @@ import { createConnection, createServer, type Socket } from 'node:net';
 import { delimiter, join } from 'node:path';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
 import { ATTACH_EXIT, attachExitCode, FRAME } from './workspace/holder-protocol.js';
+import { HolderOutput } from './workspace/holder-output.js';
 
 const ID = /^[a-z]+-[0-9a-f]{16,64}$/;
 const number = (name: string, fallback: number) => (Number(process.env[name]) > 0 ? Number(process.env[name]) : fallback);
@@ -182,7 +183,9 @@ async function daemon(id: string, python: string): Promise<void> {
     stalled.set(socket, setTimeout(() => socket.destroy(), STALLED_MS));
     socket.once('drain', () => { clearTimeout(stalled.get(socket)); stalled.delete(socket); resumeOutput(); });
   };
-  const send = (socket: Socket, type: number, payload: Buffer | string) => { if (!socket.destroyed && !socket.write(frame(type, payload))) stall(socket); };
+  const sendFrame = (socket: Socket, data: Buffer) => { if (!socket.destroyed && !socket.write(data)) stall(socket); };
+  const send = (socket: Socket, type: number, payload: Buffer | string) => sendFrame(socket, frame(type, payload));
+  const output = new HolderOutput<Socket>(sendFrame);
   const resize = (cols: number, rows: number) => {
     if (!screen || (screen.cols === cols && screen.rows === rows)) return;
     screen.resize(cols, rows);
@@ -228,12 +231,11 @@ async function daemon(id: string, python: string): Promise<void> {
     child.stdout!.on('data', (chunk: Buffer) => {
       parsing += chunk.length;
       if (parsing > PARSE_HIGH) child.stdout!.pause();
-      // Sent once parsed, so that a client joining gets the screen up to here and everything after it from here.
+      // Interactive output must not wait behind headless parsing. Joining clients alone wait for their snapshot.
+      output.write(frame(FRAME.output, chunk));
       terminal.write(chunk, () => {
         parsing -= chunk.length;
         resumeOutput();
-        const data = frame(FRAME.output, chunk);
-        for (const socket of clients.keys()) if (!socket.destroyed && !socket.write(data)) stall(socket);
       });
     });
     child.on('error', () => finish(1));
@@ -242,6 +244,7 @@ async function daemon(id: string, python: string): Promise<void> {
   const server = createServer(socket => {
     socket.on('error', () => {});
     socket.on('close', () => {
+      output.remove(socket);
       clearTimeout(stalled.get(socket));
       if (stalled.delete(socket)) resumeOutput();
       if (!clients.delete(socket)) return;
@@ -255,14 +258,15 @@ async function daemon(id: string, python: string): Promise<void> {
       try { size = JSON.parse(payload.toString('utf8')) as typeof size; } catch { return; }
       const cols = dimension(size.cols, 80), rows = dimension(size.rows, 24);
       if (type === FRAME.resize) { if (clients.has(socket)) { clients.set(socket, { cols, rows }); resize(cols, rows); } return; }
-      if (!screen) { clients.set(socket, { cols, rows }); start(cols, rows); return; }
-      // After everything received so far is parsed.
-      screen.write('', () => {
-        if (socket.destroyed || ended) return;
+      if (!screen) { clients.set(socket, { cols, rows }); output.add(socket); start(cols, rows); return; }
+      // The snapshot covers everything before this barrier. Output arriving after it is held for this client only.
+      output.replay(socket, ready => screen!.write('', () => {
+        if (socket.destroyed || ended) { output.remove(socket); return; }
+        ready();
+      }), () => {
         resize(cols, rows);
-        send(socket, FRAME.output, snapshot());
-        clients.delete(socket); clients.set(socket, { cols, rows });
-      });
+        return frame(FRAME.output, snapshot());
+      }, () => { clients.delete(socket); clients.set(socket, { cols, rows }); });
     }));
   });
   process.on('SIGTERM', () => { if (shim) shim.kill('SIGTERM'); else finish(0); });

@@ -1,0 +1,169 @@
+{
+  "node": "v22.23.2",
+  "platform": "darwin",
+  "arch": "arm64",
+  "results": [
+    {
+      "round": 1,
+      "scenario": "short-echo",
+      "bytes": 14,
+      "mode": "parse-first",
+      "firstForwardMs": 0.918,
+      "lastForwardMs": 0.918,
+      "parseDoneMs": 0.95
+    },
+    {
+      "round": 1,
+      "scenario": "short-echo",
+      "bytes": 14,
+      "mode": "live-first",
+      "firstForwardMs": 0.009,
+      "lastForwardMs": 0.009,
+      "parseDoneMs": 0.256
+    },
+    {
+      "round": 1,
+      "scenario": "ansi-256KiB",
+      "bytes": 262144,
+      "mode": "parse-first",
+      "firstForwardMs": 0.531,
+      "lastForwardMs": 5.939,
+      "parseDoneMs": 6.015
+    },
+    {
+      "round": 1,
+      "scenario": "ansi-256KiB",
+      "bytes": 262144,
+      "mode": "live-first",
+      "firstForwardMs": 0.017,
+      "lastForwardMs": 0.13,
+      "parseDoneMs": 10.014
+    },
+    {
+      "round": 1,
+      "scenario": "ansi-1MiB",
+      "bytes": 1048576,
+      "mode": "parse-first",
+      "firstForwardMs": 2.411,
+      "lastForwardMs": 19.058,
+      "parseDoneMs": 19.096
+    },
+    {
+      "round": 1,
+      "scenario": "ansi-1MiB",
+      "bytes": 1048576,
+      "mode": "live-first",
+      "firstForwardMs": 0.011,
+      "lastForwardMs": 0.128,
+      "parseDoneMs": 20.944
+    },
+    {
+      "round": 2,
+      "scenario": "short-echo",
+      "bytes": 14,
+      "mode": "live-first",
+      "firstForwardMs": 0.01,
+      "lastForwardMs": 0.01,
+      "parseDoneMs": 0.913
+    },
+    {
+      "round": 2,
+      "scenario": "short-echo",
+      "bytes": 14,
+      "mode": "parse-first",
+      "firstForwardMs": 1.791,
+      "lastForwardMs": 1.791,
+      "parseDoneMs": 1.843
+    },
+    {
+      "round": 2,
+      "scenario": "ansi-256KiB",
+      "bytes": 262144,
+      "mode": "live-first",
+      "firstForwardMs": 0.006,
+      "lastForwardMs": 0.037,
+      "parseDoneMs": 6.356
+    },
+    {
+      "round": 2,
+      "scenario": "ansi-256KiB",
+      "bytes": 262144,
+      "mode": "parse-first",
+      "firstForwardMs": 1.05,
+      "lastForwardMs": 5.237,
+      "parseDoneMs": 5.272
+    },
+    {
+      "round": 2,
+      "scenario": "ansi-1MiB",
+      "bytes": 1048576,
+      "mode": "live-first",
+      "firstForwardMs": 0.007,
+      "lastForwardMs": 0.119,
+      "parseDoneMs": 19.01
+    },
+    {
+      "round": 2,
+      "scenario": "ansi-1MiB",
+      "bytes": 1048576,
+      "mode": "parse-first",
+      "firstForwardMs": 0.982,
+      "lastForwardMs": 15.616,
+      "parseDoneMs": 15.636
+    },
+    {
+      "round": 3,
+      "scenario": "short-echo",
+      "bytes": 14,
+      "mode": "parse-first",
+      "firstForwardMs": 0.64,
+      "lastForwardMs": 0.64,
+      "parseDoneMs": 0.648
+    },
+    {
+      "round": 3,
+      "scenario": "short-echo",
+      "bytes": 14,
+      "mode": "live-first",
+      "firstForwardMs": 0.004,
+      "lastForwardMs": 0.004,
+      "parseDoneMs": 0.739
+    },
+    {
+      "round": 3,
+      "scenario": "ansi-256KiB",
+      "bytes": 262144,
+      "mode": "parse-first",
+      "firstForwardMs": 0.872,
+      "lastForwardMs": 4.246,
+      "parseDoneMs": 4.265
+    },
+    {
+      "round": 3,
+      "scenario": "ansi-256KiB",
+      "bytes": 262144,
+      "mode": "live-first",
+      "firstForwardMs": 0.006,
+      "lastForwardMs": 0.039,
+      "parseDoneMs": 3.82
+    },
+    {
+      "round": 3,
+      "scenario": "ansi-1MiB",
+      "bytes": 1048576,
+      "mode": "parse-first",
+      "firstForwardMs": 1.482,
+      "lastForwardMs": 20.47,
+      "parseDoneMs": 20.5
+    },
+    {
+      "round": 3,
+      "scenario": "ansi-1MiB",
+      "bytes": 1048576,
+      "mode": "live-first",
+      "firstForwardMs": 0.008,
+      "lastForwardMs": 0.175,
+      "parseDoneMs": 13.396
+    }
+  ]
+}
