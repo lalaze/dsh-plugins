@@ -3,6 +3,7 @@ import { type SshTransport } from '../core/ssh.js';
 export declare class WorkspaceFiles {
     private readonly transport;
     constructor(transport: SshTransport);
+    nativeSharing(request: Record<string, unknown>): Promise<any>;
     /** The records that can title a Claude Code session, from its file on this machine if it has saved that session. */
     /** Ends a terminal's holder and what runs in it, if there is one. */
     endHolder(holder: string): Promise<void>;

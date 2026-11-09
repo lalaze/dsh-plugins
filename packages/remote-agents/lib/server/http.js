@@ -1,7 +1,8 @@
 import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './core/domain.js';
 import { ChatProjects } from './chat/projects.js';
+import { nativeSharingStatus, setNativeSharing } from './chat/native-sharing.js';
 import { workspaceAction, worktreeAction } from './workspace/http.js';
-export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing, adopt) {
+export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing, adopt, native) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
         try {
@@ -27,6 +28,149 @@ export function createHandler(service, projects = new ChatProjects(service), wor
             const hostId = () => identifier(input.hostId), agentId = () => identifier(input.agentId);
             let result;
             switch (action) {
+                case 'nativeSharing':
+                    result = native?.status() ?? nativeSharingStatus();
+                    break;
+                case 'nativeRollbackFreeze':
+                case 'nativeInspectWork':
+                case 'nativeReconcileWork':
+                case 'nativeRetryWork': {
+                    if (!native)
+                        throw new RemoteError('Native host integration is unavailable', 501);
+                    const id = field(input.sessionId, 'session ID', 256);
+                    if (action !== 'nativeInspectWork' && input.confirmed !== true)
+                        throw new RemoteError('Explicitly confirm freeze or acceptance recovery');
+                    if (action === 'nativeRollbackFreeze') {
+                        await native.rollbackFreeze(id);
+                        result = native.status();
+                    }
+                    else {
+                        const key = field(input.workKey, 'work receipt key', 1000);
+                        if (action === 'nativeInspectWork')
+                            result = await native.inspectWork(id, key);
+                        else if (action === 'nativeRetryWork') {
+                            await native.retryWork(id, key);
+                            result = native.status();
+                        }
+                        else
+                            result = await native.reconcileWork(id, key, { candidateId: input.candidateId === undefined ? undefined : field(input.candidateId, 'candidate task ID', 256), confirmAbsent: input.confirmAbsent === true });
+                    }
+                    break;
+                }
+                case 'nativeRestoreSource':
+                case 'nativeResumeSource':
+                case 'nativeResumeAutonomy': {
+                    if (!native)
+                        throw new RemoteError('Native host integration is unavailable', 501);
+                    if (input.confirmed !== true)
+                        throw new RemoteError('Explicitly confirm resuming parked queues and selected schedules');
+                    const schedules = input.schedules;
+                    if (schedules !== undefined && (!Array.isArray(schedules) || schedules.some(id => typeof id !== 'string' || id.length > 256)))
+                        throw new RemoteError('Invalid staged schedule IDs');
+                    const activatePaused = input.activatePaused;
+                    if (activatePaused !== undefined && (!Array.isArray(activatePaused) || activatePaused.some(id => typeof id !== 'string' || id.length > 256)))
+                        throw new RemoteError('Invalid paused schedule IDs');
+                    const id = field(input.sessionId, 'session ID', 256), options = { queues: input.queues === true, schedules: schedules, activatePaused: activatePaused, goals: input.goals === true };
+                    if (action === 'nativeRestoreSource')
+                        await native.restoreCancelledSource(id);
+                    else if (action === 'nativeResumeSource')
+                        await native.resumeSourceWork(id, options);
+                    else
+                        await native.resumeAutonomy(id, options);
+                    result = native.status();
+                    break;
+                }
+                case 'nativeMappings':
+                case 'nativeSourceProject':
+                case 'inspectNativeMapping':
+                case 'setNativeMapping': {
+                    if (!native)
+                        throw new RemoteError('Native host integration is unavailable', 501);
+                    if (!service.store.hosts().some(host => host.id === hostId()))
+                        throw new RemoteError('Remote host not found', 404);
+                    if (action === 'nativeMappings')
+                        result = native.mappings(hostId());
+                    else if (action === 'nativeSourceProject')
+                        result = await native.sourceProject(field(input.sessionId, 'session ID', 256), hostId());
+                    else if (action === 'inspectNativeMapping')
+                        result = native.inspectMapping(hostId(), field(input.localDirectory, 'local directory', 4096));
+                    else {
+                        if (input.confirmed !== true)
+                            throw new RemoteError('Explicitly confirm the target project directory');
+                        result = await native.setMapping(hostId(), field(input.projectKey, 'project key', 4096), field(input.localDirectory, 'local directory', 4096), field(input.confirmedDirectory, 'confirmed directory', 4096));
+                    }
+                    break;
+                }
+                case 'setNativeSharing': {
+                    if (!native) {
+                        result = setNativeSharing(input.enabled);
+                        break;
+                    }
+                    if (typeof input.enabled !== 'boolean')
+                        throw new RemoteError('enabled must be a boolean');
+                    if (!service.store.hosts().some(host => host.id === hostId()))
+                        throw new RemoteError('Remote host not found', 404);
+                    result = await native.configure(hostId(), input.enabled);
+                    break;
+                }
+                case 'nativeList':
+                case 'nativeShare':
+                case 'nativeOpen':
+                case 'nativeHandoff':
+                case 'nativeRecover':
+                case 'nativeCheckpoint':
+                case 'nativeRejected':
+                case 'nativeRestore':
+                case 'nativeCancel':
+                case 'nativeReconcile':
+                case 'nativeLockStatus': {
+                    if (!native)
+                        throw new RemoteError('Native host integration is unavailable', 501);
+                    const sessionId = () => field(input.sessionId, 'session ID', 256);
+                    if (action === 'nativeList')
+                        result = await native.list(hostId());
+                    else if (action === 'nativeShare') {
+                        if (input.confirmed !== true || input.confirmedSessionId !== sessionId())
+                            throw new RemoteError('Confirm the exact conversation ID and closing its original before sharing');
+                        result = await native.share(sessionId(), hostId());
+                    }
+                    else if (action === 'nativeOpen')
+                        result = await native.open(hostId(), identifier(input.sharedId), input.writing === true);
+                    else if (action === 'nativeRestore') {
+                        await native.restore(hostId(), identifier(input.sharedId));
+                        result = native.status();
+                    }
+                    else if (action === 'nativeRecover') {
+                        if (input.recoverLastCheckpoint !== true)
+                            throw new RemoteError('Explicitly confirm recovery of only the last shared checkpoint; unpublished local history is excluded');
+                        await native.recover(sessionId());
+                        result = native.status();
+                    }
+                    else if (action === 'nativeCancel') {
+                        await native.cancelEnrollment(sessionId());
+                        result = native.status();
+                    }
+                    else if (action === 'nativeReconcile') {
+                        await native.reconcileEnrollment(sessionId());
+                        result = native.status();
+                    }
+                    else if (action === 'nativeLockStatus')
+                        result = await native.diagnoseLock(hostId(), identifier(input.sharedId));
+                    else if (action === 'nativeRejected')
+                        result = native.recoveryInput(sessionId());
+                    else if (action === 'nativeCheckpoint') {
+                        await native.checkpoint(sessionId());
+                        result = native.status();
+                    }
+                    else {
+                        const operation = input.operation ?? 'release';
+                        if (!['release', 'archive', 'delete', 'withdraw'].includes(String(operation)))
+                            throw new RemoteError('Invalid native handoff operation');
+                        await native.handoff(sessionId(), operation);
+                        result = native.status();
+                    }
+                    break;
+                }
                 case 'workspaceTarget':
                 case 'workspaceFiles':
                 case 'workspaceSync':
@@ -138,6 +282,8 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     break;
                 case 'removeHost': {
                     const id = hostId();
+                    if (native?.status().hosts.includes(id))
+                        throw new RemoteError('Handoff native conversations and disable ordinary sharing before removing this host', 409);
                     result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true, everywhere: input.everywhere === true });
                     await features?.tunnels.removeHost(id);
                     break;
