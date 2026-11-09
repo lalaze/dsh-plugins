@@ -4,6 +4,15 @@
 
 按版本从新到旧列出变化及升级后需要做的事。
 
+## 0.2.123 — 远程 Claude 按会话启用原生 DSH goal
+
+- 远程 Claude 主聊天通过三个受限 MCP 工具创建、查询和更新原生 DSH goal；原生 round driver 将自动续轮投递到同一对话。
+- 桥**默认关闭**，仅对 `claudeGoalSessions` 中精确列出的 DSH session ID 启用。未列出的 Claude 聊天保留常驻进程和后台任务；启用的会话在新轮次间重启 CLI，恢复同一对话，但会结束进程内后台任务。
+- 使用原生输入 UUID 和 root tool-call 来源证据拒绝历史、回放、后台请求借用新轮权限。goal 权限、审批、revision、Stop/pause 和恢复后 disarmed 均遵循原生规则；PTC 或能力缺失时拒绝开放桥。
+- Claude 会话级无输入 UUID 错误会明确结束当前轮并保留原始错误详情；已启用 goal 桥时同时撤权、停止自动续轮。
+
+升级后重载插件或重启 DSH，再按精确会话 allowlist 启用。详见 [Claude goal 用法](docs/claude-goal.zh-CN.md)。真实运行时/解析器测试已通过，真实模型驱动的 SSH goal E2E 尚未验证。本版不会自动启用任何会话。
+
 ## 0.2.122 — 普通 DSH 对话跨设备续聊（发布准备）
 
 - 普通 DSH 对话可通过已验证的 SSH 主机登记共享，在另一设备显式交接后继续；根与整棵子会话树保持单写者。原有远程 CLI 共享保持独立。
