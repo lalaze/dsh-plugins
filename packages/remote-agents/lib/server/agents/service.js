@@ -1,12 +1,14 @@
-import { randomUUID } from 'node:crypto';
-import { connectionInput, SshBackend } from './backend.js';
+import { SshBackend } from './backend.js';
+import { HostConnections } from './host-connections.js';
+import { SharedSync } from './shared-sync.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from '../core/domain.js';
-import { browsePath, busy, enabledProvidersOf, permissionModes, providerSelection, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput } from '../core/domain.js';
+import { browsePath, busy, enabledProvidersOf, permissionModes, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput } from '../core/domain.js';
 export class RemoteAgentsService {
     store;
     readSshConfig;
-    connections = new Map();
+    hostConnections;
+    sharedSync;
     /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
     sharedWorkspaceListeners = new Set();
     /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
@@ -15,54 +17,49 @@ export class RemoteAgentsService {
     chatReadListeners = new Set();
     locks = new Map();
     restoring = new Map();
-    catalogListeners = new Set();
     delegationRecovery = new Map();
-    closed = false;
-    factory;
     /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
     sharing;
     constructor(store, factory, readSshConfig = readSshConfigHosts) {
         this.store = store;
         this.readSshConfig = readSshConfig;
-        this.factory = factory ?? (host => new SshBackend(host, store, undefined, () => this.sharing));
+        this.hostConnections = new HostConnections(store, factory ?? (host => new SshBackend(host, store, undefined, () => this.sharing)), (key, action) => this.serial(key, action), (hostId, backend) => this.sharedSync.bind(hostId, backend));
+        this.sharedSync = new SharedSync(store, this.hostConnections, {
+            workspaces: hostId => { for (const listener of this.sharedWorkspaceListeners)
+                listener(hostId); },
+            history: taskId => { for (const listener of this.sharedHistoryListeners)
+                listener(taskId); },
+            read: sessionId => { for (const listener of this.chatReadListeners)
+                listener(sessionId); },
+        });
     }
     async sshConfig() { return this.readSshConfig(); }
     /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
     async withWorkspace(hostId, verify, action) {
-        return this.use(hostId, async (backend) => {
+        return this.hostConnections.use(hostId, async (backend) => {
             await verify();
             if (!backend.workspaceFiles)
                 throw new RemoteError('Remote workspace files are unavailable on this host', 501);
             return action(backend.workspaceFiles);
         });
     }
-    hosts() {
-        return this.store.hosts().map(({ password, catalog, ...host }) => {
-            const enabled = enabledProvidersOf(host), providers = catalog?.providers.filter(p => enabled.includes(p.id)) ?? [];
-            // An unreachable host already reports its own error.
-            const connection = this.connections.get(host.id), shareError = sharesSessions(host) && connection?.status === 'connected' ? connection.backend.sharingError?.() : undefined;
-            return { ...host, enabledProviders: enabled, share: sharesSessions(host), ...(shareError ? { shareError: this.safeError(shareError) } : {}), status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
-                ...(!enabled.length ? { modelCount: 0 } : {}),
-                ...(catalog ? { modelsCheckedAt: catalog.checkedAt, modelCount: providers.filter(p => p.status === 'ready').reduce((n, p) => n + p.models.length, 0),
-                    providerErrors: providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) };
-        });
-    }
+    hosts() { return this.hostConnections.hosts(); }
     /** Closed for a plugin reload or DSH shutdown; remote work must not be stopped then. */
-    get stopped() { return this.closed; }
+    get stopped() { return this.hostConnections.stopped; }
     /** Reattach one saved CLI without making any other saved session connect to its host. */
     restore(task) {
         const pending = this.restoring.get(task.id);
         if (pending)
             return pending;
         const restoring = this.serial(task.id, async () => {
-            const backend = this.connection(task.hostId).backend;
+            const backend = this.hostConnections.backend(task.hostId);
             if (task.native) {
                 await backend.restore?.(task);
                 return;
             }
             // Interrupted before its native session existed: nothing can be resumed, so remove it.
             await backend.detach(task);
-        }).catch(error => this.updateTask(task.id, next => { next.error = this.safeError(error); }).catch(() => { })).then(() => { })
+        }).catch(error => this.updateTask(task.id, next => { next.error = this.hostConnections.safeError(error); }).catch(() => { })).then(() => { })
             .finally(() => { if (this.restoring.get(task.id) === restoring)
             this.restoring.delete(task.id); });
         this.restoring.set(task.id, restoring);
@@ -77,47 +74,24 @@ export class RemoteAgentsService {
         const tasks = this.store.tasks(t => !!t.relay && (!hostId || t.hostId === hostId));
         // Sharing hosts list the sessions other DSH instances started, whether or not this one has any.
         for (const host of this.store.hosts())
-            if (!this.closed && (!hostId || host.id === hostId))
-                this.connection(host.id).backend.startSharing?.();
+            if (!this.stopped && (!hostId || host.id === hostId))
+                this.hostConnections.backend(host.id).startSharing?.();
         return Promise.allSettled([
             ...tasks.map(task => this.restore(task)),
-            ...this.store.hosts().filter(host => !hostId || host.id === hostId).map(host => this.closed ? undefined : this.connection(host.id).backend.cleanup?.()),
+            ...this.store.hosts().filter(host => !hostId || host.id === hostId).map(host => this.stopped ? undefined : this.hostConnections.backend(host.id).cleanup?.()),
         ]).then(() => { });
     }
     /** Reattach only the remote tasks behind one open DSH conversation; unrelated hosts stay offline. */
     resumeConversation(sessionId) {
         const tasks = this.store.tasks(t => !!t.relay && t.chat?.sessionId === sessionId);
         for (const hostId of new Set(tasks.map(task => task.hostId)))
-            if (!this.closed)
-                this.connection(hostId).backend.startSharing?.();
+            if (!this.stopped)
+                this.hostConnections.backend(hostId).startSharing?.();
         return Promise.allSettled(tasks.map(task => this.restore(task))).then(() => { });
     }
-    /**
-     * What marks a conversation as read as far as its shared histories go, by whichever DSH or phone. It changes with each
-     * new read, so a reader can tell a read from one made before a turn it knows of. Nothing while a turn is still unread,
-     * or for a conversation with no shared CLI.
-     */
-    chatReadMark(sessionId) {
-        const marks = [];
-        for (const task of this.store.tasks(t => t.chat?.sessionId === sessionId)) {
-            const position = this.connections.get(task.hostId)?.backend.readPosition?.(task.id);
-            if (!position)
-                continue;
-            if (!position.read || position.read < position.head)
-                return undefined;
-            marks.push(`${task.id}:${position.read}`);
-        }
-        return marks.length ? marks.join() : undefined;
-    }
-    /** The user read a conversation: tell every DSH and phone sharing its CLIs. */
-    async markChatRead(sessionId) {
-        const tasks = this.store.tasks(t => t.chat?.sessionId === sessionId);
-        if (this.closed)
-            return;
-        for (const hostId of new Set(tasks.map(task => task.hostId)))
-            this.connection(hostId).backend.startSharing?.();
-        await Promise.allSettled(tasks.map(task => this.connection(task.hostId).backend.markRead?.(task.id)));
-    }
+    /** Shared read state is observational; marking read starts sharing for this conversation only. */
+    chatReadMark(sessionId) { return this.sharedSync.chatReadMark(sessionId); }
+    async markChatRead(sessionId) { return this.sharedSync.markChatRead(sessionId); }
     /** Observe only this conversation's delegated CLIs, including saved/archived history.
      * Recovery attaches existing relays only; it never starts a new CLI or sends a prompt.
      * Do not use snapshot/resume here: opening one conversation must not connect unrelated hosts.
@@ -128,7 +102,7 @@ export class RemoteAgentsService {
     }
     observeDelegation(task, live) {
         const summary = this.summarize(task, live);
-        if (!task.relay || !task.native || task.archived || summary.attached || this.closed)
+        if (!task.relay || !task.native || task.archived || summary.attached || this.stopped)
             return summary;
         const recovery = this.delegationRecovery.get(task.id), now = Date.now();
         // Polls must not repeatedly acquire a shared lease or retry an offline/quota failure.
@@ -138,79 +112,26 @@ export class RemoteAgentsService {
             void this.restore(task);
         }
         return { ...summary, status: task.error ? 'error' : 'starting', reconnecting: true,
-            ...(task.error ? { error: this.safeError(task.error) } : {}) };
+            ...(task.error ? { error: this.hostConnections.safeError(task.error) } : {}) };
     }
-    onCatalogChange(listener) { this.catalogListeners.add(listener); return () => this.catalogListeners.delete(listener); }
-    catalogChanged() { for (const listener of this.catalogListeners)
-        listener(); }
-    /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */
+    onCatalogChange(listener) { return this.hostConnections.onCatalogChange(listener); }
     async discoverHost(hostId) {
-        await this.serial(`catalog:${hostId}`, async () => {
-            const host = this.host(hostId);
-            if (!enabledProvidersOf(host).length) {
-                await this.store.update(state => { const saved = state.hosts.find(h => h.id === hostId); if (saved)
-                    delete saved.modelError; });
-                this.catalogChanged();
-                return;
-            }
-            try {
-                const catalog = await this.use(hostId, async (backend) => {
-                    const cwd = await backend.homeDirectory();
-                    return { cwd, providers: await backend.providers(cwd, true), checkedAt: new Date().toISOString() };
-                });
-                await this.store.update(state => {
-                    const host = state.hosts.find(h => h.id === hostId);
-                    if (!host)
-                        throw new RemoteError('Remote host was removed', 409);
-                    host.catalog = catalog;
-                    delete host.modelError;
-                });
-            }
-            catch (error) {
-                await this.store.update(state => { const host = state.hosts.find(h => h.id === hostId); if (host)
-                    host.modelError = this.safeError(error); });
-            }
-            this.catalogChanged();
-        });
+        await this.hostConnections.discoverHost(hostId);
         return this.snapshot();
     }
     async setHostProviders(hostId, value) {
-        const selection = providerSelection(value);
-        await this.serial(`catalog:${hostId}`, async () => {
-            this.host(hostId);
-            await this.store.update(state => {
-                const host = state.hosts.find(h => h.id === hostId);
-                if (!host)
-                    throw new RemoteError('Remote host was removed', 409);
-                host.enabledProviders = selection;
-                delete host.modelError;
-            });
-            this.catalogChanged();
-        });
-        return this.discoverHost(hostId);
+        await this.hostConnections.setHostProviders(hostId, value);
+        return this.snapshot();
     }
     async snapshot() {
         const tasks = this.store.snapshot().tasks;
         return { hosts: this.hosts(), agents: await Promise.all(tasks.map(async (task) => this.summarize(task, await this.live(task)))) };
-    }
-    host(id) {
-        const host = this.store.hosts().find(h => h.id === id);
-        if (!host)
-            throw new RemoteError('Remote host not found', 404);
-        return host;
     }
     task(id) {
         const task = this.store.task(t => t.id === id);
         if (!task)
             throw new RemoteError('Remote agent not found', 404);
         return task;
-    }
-    safeError(error) {
-        let message = error instanceof Error ? error.message : String(error);
-        for (const host of this.store.hosts())
-            if (host.password)
-                message = message.split(host.password).join('[redacted]');
-        return message.slice(0, 2000);
     }
     async serial(key, action) {
         const previous = this.locks.get(key) ?? Promise.resolve();
@@ -224,82 +145,12 @@ export class RemoteAgentsService {
                 this.locks.delete(key);
         }
     }
-    connection(hostId) {
-        if (this.closed)
-            throw new RemoteError('Remote agent service has stopped', 503);
-        let connection = this.connections.get(hostId);
-        if (!connection) {
-            connection = { backend: this.factory(this.host(hostId)), status: 'disconnected' };
-            this.connections.set(hostId, connection);
-            connection.backend.onSharedWorkspaces?.(() => { for (const listener of this.sharedWorkspaceListeners)
-                listener(hostId); });
-            connection.backend.onSharedHistory?.(taskId => { for (const listener of this.sharedHistoryListeners)
-                listener(taskId); });
-            connection.backend.onSharedRead?.(taskId => {
-                const sessionId = this.store.task(t => t.id === taskId)?.chat?.sessionId;
-                if (sessionId)
-                    for (const listener of this.chatReadListeners)
-                        listener(sessionId);
-            });
-        }
-        return connection;
-    }
-    async use(hostId, action, expectedServerId) {
-        let host = this.host(hostId);
-        const current = this.connection(hostId);
-        // Only the connection speaks for the host. An action can fail for reasons of its own, such as a missing file or a CLI's error.
-        try {
-            if (!current.ready) {
-                current.status = 'connecting';
-                current.ready = (async () => {
-                    const serverId = await current.backend.connect();
-                    host = this.host(hostId);
-                    if (host.serverId && host.serverId !== serverId)
-                        throw new RemoteError('Remote SSH machine identity changed. Add it as a new host before starting new agents.', 409);
-                    if (!host.serverId)
-                        await this.store.update(state => {
-                            const saved = state.hosts.find(h => h.id === hostId);
-                            if (!saved)
-                                throw new RemoteError('Remote host was removed', 409);
-                            if (saved.serverId && saved.serverId !== serverId)
-                                throw new RemoteError('Remote SSH machine identity changed', 409);
-                            saved.serverId = serverId;
-                        });
-                    current.status = 'connected';
-                    current.error = undefined;
-                    current.backend.startSharing?.();
-                })();
-            }
-            await current.ready;
-            host = this.host(hostId);
-            // Recheck the SSH execution identity before each operation.
-            const serverId = await current.backend.connect();
-            if (serverId !== host.serverId)
-                throw new RemoteError('Remote SSH machine identity changed', 409);
-        }
-        catch (error) {
-            current.status = 'error';
-            current.error = this.safeError(error);
-            current.ready = undefined;
-            // Independent SSH sessions keep running when another probe or request fails.
-            throw new RemoteError(current.error, error instanceof RemoteError ? error.status : 502);
-        }
-        try {
-            if (expectedServerId && host.serverId !== expectedServerId)
-                throw new RemoteError('Agent belongs to a different remote SSH machine', 409);
-            void current.backend.cleanup?.();
-            return await action(current.backend, host);
-        }
-        catch (error) {
-            throw new RemoteError(this.safeError(error), error instanceof RemoteError ? error.status : 502);
-        }
-    }
     /** Local process state; never contacts the SSH host. */
     async live(task) {
-        if (!task.agentId || this.closed)
+        if (!task.agentId || this.stopped)
             return null;
         try {
-            return await this.connection(task.hostId).backend.agent(task.agentId);
+            return await this.hostConnections.backend(task.hostId).agent(task.agentId);
         }
         catch {
             return null;
@@ -317,7 +168,7 @@ export class RemoteAgentsService {
                             : live?.status === 'closed' && resumable === false ? 'closed' : 'idle';
         const error = status === 'error' ? live?.lastError ?? task.error ?? 'Starting this agent was interrupted. Retry to finish starting it.'
             : status === 'closed' || (status === 'idle' && live?.lastError) ? live?.lastError : undefined;
-        const controller = this.closed ? undefined : this.connections.get(task.hostId)?.backend.controller?.(task.id);
+        const controller = this.stopped ? undefined : this.hostConnections.peek(task.hostId)?.controller?.(task.id);
         return {
             id: task.id, hostId: task.hostId, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model,
             ...(task.chat ? { chatSessionId: task.chat.sessionId } : {}),
@@ -336,49 +187,37 @@ export class RemoteAgentsService {
     /** One directory level on a verified host; `path` defaults to the remote home. */
     async browse(hostId, path, options = {}) {
         const target = path === undefined ? undefined : browsePath(path);
-        return this.use(hostId, async (backend) => {
+        return this.hostConnections.use(hostId, async (backend) => {
             if (!backend.listDirectory)
                 throw new RemoteError('This host cannot browse directories', 501);
             return backend.listDirectory(target, options);
         });
     }
     async addHost(input, options = {}) {
-        const value = record(input);
-        const host = { id: randomUUID(), label: field(value.label, 'host name', 100), connection: connectionInput(value.connection) };
-        if (value.enabledProviders !== undefined)
-            host.enabledProviders = providerSelection(value.enabledProviders);
-        if (value.password)
-            throw new RemoteError('SSH uses keys or an SSH agent; password storage is not supported');
-        await this.store.update(state => {
-            if (state.hosts.length >= 16)
-                throw new RemoteError('Up to 16 remote hosts can be saved');
-            if (state.hosts.some(h => h.connection === host.connection))
-                throw new RemoteError('This remote host is already saved', 409);
-            state.hosts.push(host);
-        });
+        const hostId = await this.hostConnections.addHost(input);
         if (options.discoverModels)
-            return this.discoverHost(host.id);
+            return this.discoverHost(hostId);
         return this.snapshot();
     }
     /** `everywhere` also deletes a shared host's sessions for the other DSH instances. */
     async removeHost(id, options = {}) {
         return this.serial(`catalog:${id}`, async () => {
-            this.host(id);
+            this.hostConnections.host(id);
             // Forget local sessions and output without probing an unreachable SSH host. Shared sessions stay on the host
             // for the other DSH instances, and their CLIs keep running, unless deleted everywhere, which needs the host.
-            const shared = sharesSessions(this.host(id)) && this.store.tasks(t => t.hostId === id).length > 0;
-            if (options.deleteAgents && options.everywhere && shared && !await this.connection(id).backend.sharingReachable?.(10_000)) {
+            const shared = sharesSessions(this.hostConnections.host(id)) && this.store.tasks(t => t.hostId === id).length > 0;
+            if (options.deleteAgents && options.everywhere && shared && !await this.hostConnections.backend(id).sharingReachable?.(10_000)) {
                 throw new RemoteError('Connect to this machine to delete its sessions in every DSH, or remove it from this DSH only.', 409);
             }
             if (options.deleteAgents)
                 for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id)) {
-                    if (sharesSessions(this.host(id)) && !options.everywhere)
+                    if (sharesSessions(this.hostConnections.host(id)) && !options.everywhere)
                         await this.forgetLocal(task.id);
                     else
                         await this.delete(task.id);
                 }
             // Give queued relay removals a short chance; an offline host never blocks removing it.
-            const queued = this.connections.get(id)?.backend.cleanup?.();
+            const queued = this.hostConnections.peek(id)?.cleanup?.();
             if (queued)
                 await Promise.race([queued, new Promise(resolve => setTimeout(resolve, 5000).unref())]);
             await this.store.update(state => {
@@ -395,11 +234,9 @@ export class RemoteAgentsService {
                     delete state.sharedDeletions;
                 delete state.seenWorkspaces?.[id];
             });
-            const connection = this.connections.get(id);
-            this.connections.delete(id);
-            await connection?.backend.close();
+            await this.hostConnections.release(id);
             this.sharing?.forget(id);
-            this.catalogChanged();
+            this.hostConnections.catalogChanged();
             return this.snapshot();
         });
     }
@@ -408,11 +245,11 @@ export class RemoteAgentsService {
         if (typeof share !== 'boolean')
             throw new RemoteError('Invalid sharing setting');
         await this.serial(`catalog:${hostId}`, async () => {
-            if (sharesSessions(this.host(hostId)) === share)
+            if (sharesSessions(this.hostConnections.host(hostId)) === share)
                 return;
             if (!share) {
                 // Sessions started here are withdrawn, so the other DSH instances stop showing them; this DSH keeps them.
-                await this.connection(hostId).backend.withdrawSharing?.(this.store.tasks(t => t.hostId === hostId && !t.shared?.imported).map(t => t.id));
+                await this.hostConnections.backend(hostId).withdrawSharing?.(this.store.tasks(t => t.hostId === hostId && !t.shared?.imported).map(t => t.id));
                 // Copies of sessions other DSH instances started are theirs.
                 for (const task of this.store.tasks(t => t.hostId === hostId && !!t.shared?.imported))
                     await this.forgetLocal(task.id);
@@ -429,16 +266,14 @@ export class RemoteAgentsService {
                     delete state.seenWorkspaces?.[hostId];
             });
             // A new backend starts or stops sharing, and reattaches the CLIs the old one released.
-            const connection = this.connections.get(hostId);
-            this.connections.delete(hostId);
-            await connection?.backend.close();
+            await this.hostConnections.release(hostId);
             void this.resume(hostId);
         });
         return this.snapshot();
     }
     async forgetLocal(id) {
         return this.serial(id, async () => {
-            const task = this.task(id), backend = this.connection(task.hostId).backend;
+            const task = this.task(id), backend = this.hostConnections.backend(task.hostId);
             if (backend.forgetLocal)
                 await backend.forgetLocal(task);
             else
@@ -446,57 +281,17 @@ export class RemoteAgentsService {
             await this.store.update(state => { state.tasks = state.tasks.filter(t => t.id !== id); });
         });
     }
-    /** Remote workspaces other DSH instances added on this host that were not offered to this DSH yet. */
-    async sharedWorkspaces(hostId) {
-        const host = this.host(hostId);
-        if (!sharesSessions(host))
-            return [];
-        const backend = this.connection(hostId).backend;
-        backend.startSharing?.();
-        const seen = new Set(this.store.seenWorkspaces(hostId));
-        return (await backend.sharedWorkspaces?.() ?? []).filter(w => !seen.has(w.path));
-    }
-    /** Offered to DSH: not offered again, even when removed from the sidebar. */
-    async seeWorkspaces(hostId, paths) {
-        this.host(hostId);
-        await this.store.update(state => {
-            const seen = new Set(state.seenWorkspaces?.[hostId] ?? []);
-            for (const path of paths)
-                seen.add(path);
-            (state.seenWorkspaces ??= {})[hostId] = [...seen].slice(-2000);
-        });
-    }
-    /** Every workspace shared on this host, with its tags; undefined while its registry cannot be reached. */
-    async sharedWorkspaceList(hostId, timeout = 3000) {
-        const host = this.store.hosts().find(h => h.id === hostId);
-        if (!host || !sharesSessions(host) || this.closed)
-            return undefined;
-        const backend = this.connection(hostId).backend;
-        backend.startSharing?.();
-        return backend.sharedWorkspaces?.(timeout).catch(() => undefined);
-    }
-    /** Share a workspace's tags with the other DSH instances on this host. */
-    async setWorkspaceTags(hostId, path, tags) {
-        if (!sharesSessions(this.host(hostId)))
-            throw new RemoteError('Sessions are not shared on this host', 409);
-        const backend = this.connection(hostId).backend;
-        if (!backend.setWorkspaceTags)
-            throw new RemoteError('This host cannot share workspace tags', 409);
-        return backend.setWorkspaceTags(path, tags);
-    }
-    /** Record a remote workspace on its host so other DSH instances offer it too. */
-    async shareWorkspace(hostId, path) {
-        if (!sharesSessions(this.host(hostId)))
-            return;
-        await this.connection(hostId).backend.shareWorkspace?.(path);
-        // Only once it reached the host; a failed attempt is repeated later.
-        await this.seeWorkspaces(hostId, [path]);
-    }
+    /** Shared workspaces not yet offered to this DSH. */
+    async sharedWorkspaces(hostId) { return this.sharedSync.sharedWorkspaces(hostId); }
+    async seeWorkspaces(hostId, paths) { return this.sharedSync.seeWorkspaces(hostId, paths); }
+    async sharedWorkspaceList(hostId, timeout = 3000) { return this.sharedSync.sharedWorkspaceList(hostId, timeout); }
+    async setWorkspaceTags(hostId, path, tags) { return this.sharedSync.setWorkspaceTags(hostId, path, tags); }
+    async shareWorkspace(hostId, path) { return this.sharedSync.shareWorkspace(hostId, path); }
     async connect(hostId) {
-        await this.use(hostId, async () => { });
+        await this.hostConnections.use(hostId, async () => { });
         return this.snapshot();
     }
-    async providers(hostId, cwd, refresh = false) { return this.use(hostId, backend => backend.providers(cwd, refresh)); }
+    async providers(hostId, cwd, refresh = false) { return this.hostConnections.use(hostId, backend => backend.providers(cwd, refresh)); }
     async updateTask(id, update) {
         await this.store.update(state => {
             const task = state.tasks.find(t => t.id === id);
@@ -516,7 +311,7 @@ export class RemoteAgentsService {
                     throw new RemoteError('This request ID belongs to a different agent', 409);
                 return existing.agentId ? this.summary(existing.id) : this.launch(existing, options.signal, options.beforeStart);
             }
-            return this.use(request.hostId, async (backend, host) => {
+            return this.hostConnections.use(request.hostId, async (backend, host) => {
                 if (!enabledProvidersOf(host).includes(request.provider))
                     throw new RemoteError('This CLI is disabled on this machine. Enable it in Settings → Remote agents.', 409);
                 // Probe only the target CLI here; launching the other enabled CLIs to list their models is what made starting slow.
@@ -554,7 +349,7 @@ export class RemoteAgentsService {
         const task = this.task(id);
         if (!task.agentId)
             return this.create(taskInput(task), { signal });
-        return this.serial(id, () => this.use(task.hostId, async (backend) => {
+        return this.serial(id, () => this.hostConnections.use(task.hostId, async (backend) => {
             const agent = await backend.recover(this.task(id), signal);
             this.assertAgent(task, agent);
             await this.updateTask(id, next => { next.state = 'ready'; delete next.error; });
@@ -563,7 +358,7 @@ export class RemoteAgentsService {
     }
     async launch(task, signal, beforeStart) {
         try {
-            await this.use(task.hostId, async (backend) => {
+            await this.hostConnections.use(task.hostId, async (backend) => {
                 await beforeStart?.();
                 const agent = await backend.create(task, signal);
                 if (agent.provider !== task.provider)
@@ -573,7 +368,7 @@ export class RemoteAgentsService {
         }
         catch (error) {
             // Keep the agent address available to the UI for an idempotent retry.
-            await this.updateTask(task.id, next => { next.state = 'uncertain'; next.error = this.safeError(error); });
+            await this.updateTask(task.id, next => { next.state = 'uncertain'; next.error = this.hostConnections.safeError(error); });
         }
         return this.summary(task.id);
     }
@@ -597,29 +392,25 @@ export class RemoteAgentsService {
         const live = await this.live(task);
         if (live)
             this.assertAgent(task, live);
-        const timeline = task.agentId ? await this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
+        const timeline = task.agentId ? await this.hostConnections.backend(task.hostId).timeline(task.agentId, cursor, direction) : null;
         return { agent: delegated ? this.observeDelegation(task, live) : this.summarize(task, live), permissions: live?.pendingPermissions ?? [], timeline };
     }
     /** Saved output only: nothing is restored or attached, so reading many sessions never connects their relays. */
     async timeline(id, cursor, direction) {
         const task = this.task(id);
-        return task.agentId ? this.connection(task.hostId).backend.timeline(task.agentId, cursor, direction) : null;
+        return task.agentId ? this.hostConnections.backend(task.hostId).timeline(task.agentId, cursor, direction) : null;
     }
-    /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
-    sender(hostId, instance, label) {
-        if (instance === this.store.instanceId())
-            return { self: true };
-        return this.connections.get(hostId)?.backend.sender?.(instance, label) ?? { name: label };
-    }
+    /** Identify the DSH that sent a shared message without opening a connection. */
+    sender(hostId, instance, label) { return this.sharedSync.sender(hostId, instance, label); }
     async reply(id) {
         const task = this.task(id);
-        return task.agentId ? this.connection(task.hostId).backend.reply(task.agentId) : '';
+        return task.agentId ? this.hostConnections.backend(task.hostId).reply(task.agentId) : '';
     }
     async messageTimeline(id, messageId, cursor) {
         const task = this.task(id);
         if (!task.agentId)
             throw new RemoteError('Remote agent is not ready', 409);
-        return this.connection(task.hostId).backend.messageTimeline(task.agentId, messageId, cursor);
+        return this.hostConnections.backend(task.hostId).messageTimeline(task.agentId, messageId, cursor);
     }
     async setThinking(id, thinkingOptionId) {
         return this.serial(id, async () => {
@@ -631,7 +422,7 @@ export class RemoteAgentsService {
             if (task.native?.resumable === false)
                 throw new RemoteError('This CLI cannot resume with a different thinking level', 409);
             if (task.agentId)
-                await this.connection(task.hostId).backend.detach(task);
+                await this.hostConnections.backend(task.hostId).detach(task);
             await this.updateTask(id, next => { next.thinkingOptionId = thinkingOptionId; });
         });
     }
@@ -645,7 +436,7 @@ export class RemoteAgentsService {
                 throw new RemoteError('Stop the agent before changing its model', 409);
             if (task.native?.resumable === false)
                 throw new RemoteError('This CLI cannot resume with a different model. Start a new conversation.', 409);
-            await this.use(task.hostId, async (backend) => {
+            await this.hostConnections.use(task.hostId, async (backend) => {
                 const provider = (await backend.providers(task.cwd, false)).find(p => p.id === task.provider && p.status === 'ready');
                 const selected = provider?.models.find(m => m.id === model);
                 if (!selected)
@@ -682,12 +473,12 @@ export class RemoteAgentsService {
         if (!options.account)
             return report;
         try {
-            const account = await this.use(target.hostId, backend => backend.account(target.provider, task ? task.executionCwd ?? task.cwd : undefined, options.refresh === true), task?.serverId);
+            const account = await this.hostConnections.use(target.hostId, backend => backend.account(target.provider, task ? task.executionCwd ?? task.cwd : undefined, options.refresh === true), task?.serverId);
             if (account)
                 report.account = account;
         }
         catch (error) {
-            report.account = { provider: target.provider, windows: [], checkedAt: new Date().toISOString(), error: this.safeError(error) };
+            report.account = { provider: target.provider, windows: [], checkedAt: new Date().toISOString(), error: this.hostConnections.safeError(error) };
         }
         return report;
     }
@@ -708,7 +499,7 @@ export class RemoteAgentsService {
                 return this.summary(id);
             if (options.interrupt === false && busy(await this.summary(id)))
                 throw new RemoteError('This agent is still working. Wait for it, or interrupt it to send now.', 409);
-            return this.use(task.hostId, async (backend) => {
+            return this.hostConnections.use(task.hostId, async (backend) => {
                 const live = await backend.agent(task.agentId);
                 this.assertAgent(task, live);
                 if (live.status === 'closed' && (live.resumable ?? task.native?.resumable) === false)
@@ -725,7 +516,7 @@ export class RemoteAgentsService {
             const task = this.task(id);
             if (!task.agentId)
                 return;
-            const backend = this.connection(task.hostId).backend;
+            const backend = this.hostConnections.backend(task.hostId);
             this.assertAgent(task, await backend.agent(task.agentId));
             // Interrupting uses the already-open SSH pipe; it must work while the host is otherwise unreachable.
             await backend.stop(task.agentId);
@@ -749,7 +540,7 @@ export class RemoteAgentsService {
                     throw new RemoteError('Invalid question answers');
                 answer.answers = answers;
             }
-            const backend = this.connection(task.hostId).backend;
+            const backend = this.hostConnections.backend(task.hostId);
             const agent = await backend.agent(task.agentId);
             this.assertAgent(task, agent);
             const permission = agent.pendingPermissions.find(p => p.id === requestId);
@@ -790,7 +581,7 @@ export class RemoteAgentsService {
                     throw new RemoteError('This session is active. Refresh before archiving.', 409);
             }
             if (archived)
-                await this.connection(task.hostId).backend.detach(task);
+                await this.hostConnections.backend(task.hostId).detach(task);
             await this.updateTask(id, next => { if (archived)
                 next.archived = true;
             else
@@ -810,13 +601,13 @@ export class RemoteAgentsService {
             const live = await this.live(task);
             if (live && busy(this.summarize(task, live)))
                 return;
-            await this.connection(task.hostId).backend.detach(task);
+            await this.hostConnections.backend(task.hostId).detach(task);
         });
     }
     async delete(id) {
         return this.serial(id, async () => {
             const task = this.task(id);
-            await this.connection(task.hostId).backend.forget(task);
+            await this.hostConnections.backend(task.hostId).forget(task);
             await this.store.update(state => { state.tasks = state.tasks.filter(t => t.id !== id); });
         });
     }
@@ -834,17 +625,16 @@ export class RemoteAgentsService {
             if (live && live.status !== 'closed' && task.native?.resumable === false)
                 throw new RemoteError('This CLI cannot resume its session, so its mode cannot change', 409);
             if (task.agentId)
-                await this.connection(task.hostId).backend.detach(task);
+                await this.hostConnections.backend(task.hostId).detach(task);
             await this.updateTask(id, next => { next.modeId = modeId; });
             return this.summary(id);
         });
     }
     async close() {
-        this.closed = true;
-        await Promise.allSettled([...this.connections.values()].map(c => c.backend.close()));
+        await this.hostConnections.closeBackends();
         // Let in-flight mutations persist their final receipt before a plugin reload opens state.
         await Promise.allSettled([...this.locks.values()]);
-        this.connections.clear();
+        this.hostConnections.clear();
         this.delegationRecovery.clear();
         await this.store.flush();
     }

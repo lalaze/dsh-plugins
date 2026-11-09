@@ -35,7 +35,8 @@ export interface SendOptions {
 export declare class RemoteAgentsService {
     readonly store: Store;
     private readonly readSshConfig;
-    private readonly connections;
+    private readonly hostConnections;
+    private readonly sharedSync;
     /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
     readonly sharedWorkspaceListeners: Set<(hostId: string) => void>;
     /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
@@ -44,10 +45,7 @@ export declare class RemoteAgentsService {
     readonly chatReadListeners: Set<(sessionId: string) => void>;
     private readonly locks;
     private readonly restoring;
-    private readonly catalogListeners;
     private readonly delegationRecovery;
-    private closed;
-    private readonly factory;
     /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
     sharing?: LaunchSharing;
     constructor(store: Store, factory?: BackendFactory, readSshConfig?: typeof readSshConfigHosts);
@@ -67,13 +65,8 @@ export declare class RemoteAgentsService {
     resume(hostId?: string): Promise<void>;
     /** Reattach only the remote tasks behind one open DSH conversation; unrelated hosts stay offline. */
     resumeConversation(sessionId: string): Promise<void>;
-    /**
-     * What marks a conversation as read as far as its shared histories go, by whichever DSH or phone. It changes with each
-     * new read, so a reader can tell a read from one made before a turn it knows of. Nothing while a turn is still unread,
-     * or for a conversation with no shared CLI.
-     */
+    /** Shared read state is observational; marking read starts sharing for this conversation only. */
     chatReadMark(sessionId: string): string | undefined;
-    /** The user read a conversation: tell every DSH and phone sharing its CLIs. */
     markChatRead(sessionId: string): Promise<void>;
     /** Observe only this conversation's delegated CLIs, including saved/archived history.
      * Recovery attaches existing relays only; it never starts a new CLI or sends a prompt.
@@ -82,17 +75,11 @@ export declare class RemoteAgentsService {
     delegations(sessionId: string): Promise<AgentSummary[]>;
     private observeDelegation;
     onCatalogChange(listener: () => void): () => void;
-    private catalogChanged;
-    /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */
     discoverHost(hostId: string): Promise<Dashboard>;
     setHostProviders(hostId: string, value: unknown): Promise<Dashboard>;
     snapshot(): Promise<Dashboard>;
-    private host;
     private task;
-    private safeError;
     private serial;
-    private connection;
-    private use;
     /** Local process state; never contacts the SSH host. */
     private live;
     private summarize;
@@ -112,15 +99,11 @@ export declare class RemoteAgentsService {
     /** Share this host's sessions and workspaces with other DSH instances, or stop. CLIs keep running either way. */
     setHostSharing(hostId: string, share: unknown): Promise<Dashboard>;
     private forgetLocal;
-    /** Remote workspaces other DSH instances added on this host that were not offered to this DSH yet. */
+    /** Shared workspaces not yet offered to this DSH. */
     sharedWorkspaces(hostId: string): Promise<SharedWorkspace[]>;
-    /** Offered to DSH: not offered again, even when removed from the sidebar. */
     seeWorkspaces(hostId: string, paths: string[]): Promise<void>;
-    /** Every workspace shared on this host, with its tags; undefined while its registry cannot be reached. */
     sharedWorkspaceList(hostId: string, timeout?: number): Promise<SharedWorkspace[] | undefined>;
-    /** Share a workspace's tags with the other DSH instances on this host. */
     setWorkspaceTags(hostId: string, path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
-    /** Record a remote workspace on its host so other DSH instances offer it too. */
     shareWorkspace(hostId: string, path: string): Promise<void>;
     connect(hostId: string): Promise<Dashboard>;
     providers(hostId: string, cwd: string, refresh?: boolean): Promise<import("../core/domain.js").Provider[]>;
@@ -135,7 +118,7 @@ export declare class RemoteAgentsService {
     detail(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<AgentDetail>;
     /** Saved output only: nothing is restored or attached, so reading many sessions never connects their relays. */
     timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage | null>;
-    /** Who sent a message a shared history records with its sender: this DSH, or another one by name. */
+    /** Identify the DSH that sent a shared message without opening a connection. */
     sender(hostId: string, instance: string, label: string): {
         self: true;
     } | {
