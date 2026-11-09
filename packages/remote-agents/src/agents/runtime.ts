@@ -7,7 +7,7 @@ import { RelayExit, RelayReleased, type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
 import { configureAcpSession } from './acp.js';
-import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTurnUsage, contextUsage } from './usage.js';
+import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, contextUsage } from './usage.js';
 
 /** The file name an image is shown with, from the remote path it was read from. */
 const imageName = (path: unknown) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
@@ -47,9 +47,13 @@ export class CliSession {
   private partialText = false;
   /** The model Claude's main thread answered with this turn: aliases such as `opus` resolve to a full model ID. */
   private turnModel?: string;
-  /** Codex running thread totals, now and when the current turn began. */
+  /** Codex's running thread totals, as last reported. */
   private codexTotal: unknown;
-  private codexBefore: unknown;
+  /**
+   * Where the open Codex turn began in those totals; unset until known. A session that attaches after the turn began, as
+   * after DSH restarts, does not know the thread's totals then, and must not count the whole thread as this turn.
+   */
+  private codexStart?: { turnId?: string; total: unknown };
   private suspended = true;
   private intentionalClose = false;
   private diskFailed = false;
@@ -211,6 +215,8 @@ export class CliSession {
     this.activeMessage = id; this.agent.status = 'running';
     this.confirmed = message!.item.delivery !== 'pending' || entries.some(e => e.item.type === 'delivery' && e.item.clientMessageId === id);
     this.agent.activeTurn = { turnId: entries.findLast(e => e.turnId)?.turnId ?? randomUUID(), startedAt: message!.timestamp, ...(message!.item.unprompted === true ? { unprompted: true as const } : {}) };
+    const start = this.store.task(t => t.id === this.task.id)?.codexTurnStart;
+    if (start?.turnId === this.agent.activeTurn.turnId) this.codexStart = { turnId: start.turnId, total: start.total };
     for (const entry of entries) if (entry.item.type === 'tool_call') this.tools.set(String(entry.item.callId), entry.item);
     const answered = new Set(entries.filter(e => e.item.type === 'permission_response').map(e => String(e.item.requestId)));
     const requests = entries.filter((e): e is TimelineEntry & { item: { wire: WireMessage } } => e.item.type === 'permission_request' && e.item.relay === relay.id && !!e.item.wire);
@@ -277,6 +283,14 @@ export class CliSession {
     this.hooks.usage?.(usage, { startedAt: this.agent.activeTurn?.startedAt ?? null, failed, ...(this.turnModel ? { model: this.turnModel } : {}), ...(models ? { models } : {}) });
   }
   private setTokenUsage(usage: TokenUsage | undefined): void { this.agent.tokenUsage = usage; this.saveUsage(); }
+  /** Keep where a Codex turn began, saved so that a DSH reattaching during the turn counts all of it. */
+  private startCodexTurn(turnId: unknown, total: unknown): void {
+    const id = typeof turnId === 'string' && turnId ? turnId : undefined;
+    this.codexStart = { ...(id ? { turnId: id } : {}), total };
+    if (!id) return;
+    const saved = { turnId: id, ...(total && typeof total === 'object' ? { total: structuredClone(total) as Record<string, number> } : {}) };
+    void this.store.update(state => { const task = state.tasks.find(t => t.id === this.task.id); if (task) task.codexTurnStart = saved; }).catch(() => {});
+  }
   /** Save request snapshots as they arrive, including during long tool loops and resume. */
   private saveUsage(): void {
     const { context, tokenUsage } = this.agent, key = JSON.stringify([context, tokenUsage]);
@@ -331,9 +345,12 @@ export class CliSession {
     if (m.id !== undefined && !m.method && this.activeMessage && String(m.id) === promptRequestId(this.activeMessage)) { this.promptResponse(m); return; }
     // Codex reports the resumed thread's usage while its history replay is still suppressed.
     if (m.method === 'thread/tokenUsage/updated') {
-      this.setContext(codexContext(m.params?.tokenUsage));
-      this.setTokenUsage(codexTokenUsage(m.params?.tokenUsage));
-      this.codexTotal = m.params?.tokenUsage?.total ?? this.codexTotal;
+      const usage = m.params?.tokenUsage, turnId = typeof m.params?.turnId === 'string' ? m.params.turnId : undefined;
+      this.setContext(codexContext(usage));
+      this.setTokenUsage(codexTokenUsage(usage));
+      // The first report of a turn whose start was missed: the turn began before that request, at the latest.
+      if (this.activeMessage && (!this.codexStart || (turnId && this.codexStart.turnId && turnId !== this.codexStart.turnId))) this.startCodexTurn(turnId, codexTotalBefore(usage));
+      this.codexTotal = usage?.total ?? this.codexTotal;
     }
     if (this.suspended) return; // A resume can replay native history already present in our log.
     // Claude reports a background task it ran as finished. Mid-turn the notice is the turn's own business; while idle it
@@ -361,8 +378,8 @@ export class CliSession {
       if (result.status === 'SUCCESS') this.complete(); else this.fail(result.error || 'Antigravity turn failed');
     }
     const p = m.params ?? {};
-    if (m.method === 'turn/started') { this.confirm(); this.codexBefore = this.codexTotal; if (this.agent.activeTurn && p.turn?.id) this.agent.activeTurn.turnId = p.turn.id; }
-    if (m.method === 'turn/completed') { this.confirm(); this.turnUsage(codexTurnUsage(this.codexTotal, this.codexBefore), p.turn?.status === 'failed'); this.codexBefore = this.codexTotal; if (p.turn?.status === 'failed') this.fail(p.turn.error?.message ?? 'Remote turn failed'); else this.complete(p.turn?.status === 'interrupted' ? 'canceled' : 'completed'); }
+    if (m.method === 'turn/started') { this.confirm(); if (this.codexTotal) this.startCodexTurn(p.turn?.id, this.codexTotal); else this.codexStart = undefined; if (this.agent.activeTurn && p.turn?.id) this.agent.activeTurn.turnId = p.turn.id; }
+    if (m.method === 'turn/completed') { this.confirm(); this.turnUsage(this.codexStart && codexTurnUsage(this.codexTotal, this.codexStart.total), p.turn?.status === 'failed'); this.codexStart = undefined; if (p.turn?.status === 'failed') this.fail(p.turn.error?.message ?? 'Remote turn failed'); else this.complete(p.turn?.status === 'interrupted' ? 'canceled' : 'completed'); }
     if (m.method === 'item/agentMessage/delta') { this.confirm(); this.append({ type: 'assistant_message', text: String(p.delta ?? '') }); }
     if (m.method?.startsWith('item/reasoning/') && m.method.endsWith('Delta')) this.append({ type: 'reasoning', text: String(p.delta ?? '') });
     if (m.method === 'item/started' || m.method === 'item/completed') {

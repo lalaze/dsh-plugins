@@ -216,6 +216,8 @@ export interface Task extends TaskInput {
   context?: ContextUsage;
   /** Latest native token counters, kept across detach and restart. */
   tokenUsage?: TokenUsage;
+  /** Codex's running thread totals when the turn began, so a DSH reattaching during that turn still counts all of it. */
+  codexTurnStart?: { turnId: string; total?: Record<string, number> };
   /** The shared record revision this copy matches. `imported` copies were started by another DSH, named by `creator`. */
   shared?: { rev: number; creator?: string; imported?: true };
   state: 'creating' | 'ready' | 'uncertain';

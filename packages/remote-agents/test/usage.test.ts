@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTurnUsage, remoteUsageRecord, remoteUsageRecords } from '../src/agents/usage.js';
+import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, remoteUsageRecord, remoteUsageRecords } from '../src/agents/usage.js';
 import type { HostConfig, Task } from '../src/core/domain.js';
 import { CacheSection, formatReset, formatTokens } from '../src/client/composer/usage.js';
 import { fixture } from './fakes.js';
@@ -136,6 +136,12 @@ test('turn usage converts each CLI report into DSH token usage', () => {
   assert.deepEqual(codexTurnUsage(second, first), { inputTokens: 3_000, outputTokens: 400, cacheReadTokens: 12_000, reasoningTokens: 100, totalTokens: 15_400 });
   assert.deepEqual(codexTurnUsage({ input_tokens: 100, output_tokens: 5, total_tokens: 105 }, second), { inputTokens: 100, outputTokens: 5, totalTokens: 105 }, 'a restarted thread counts from zero');
   assert.equal(codexTurnUsage(first, first), undefined, 'no new tokens, no report');
+  // A turn's first report gives the thread's totals before it: Codex 0.166's first report of a resumed turn.
+  const resumed = { total: { totalTokens: 34_637_297, inputTokens: 34_480_141, cachedInputTokens: 33_931_648, cacheWriteInputTokens: 0, outputTokens: 157_156, reasoningOutputTokens: 76_582 },
+    last: { totalTokens: 426_415, inputTokens: 425_980, cachedInputTokens: 425_344, cacheWriteInputTokens: 0, outputTokens: 435, reasoningOutputTokens: 0 } };
+  assert.deepEqual(codexTotalBefore(resumed), { inputTokens: 34_054_161, cachedInputTokens: 33_506_304, outputTokens: 156_721, reasoningOutputTokens: 76_582, totalTokens: 34_210_882 });
+  assert.deepEqual(codexTurnUsage(resumed.total, codexTotalBefore(resumed)), { inputTokens: 636, outputTokens: 435, cacheReadTokens: 425_344, totalTokens: 426_415 });
+  assert.equal(codexTotalBefore({ total: first }), undefined, 'without the request’s share the start is unknown');
   // ACP: a total that adds up with cache listed separately means input excludes it.
   assert.deepEqual(acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 50, totalTokens: 170 }), { inputTokens: 100, outputTokens: 20, cacheReadTokens: 50, totalTokens: 170 });
   assert.deepEqual(acpTurnUsage({ inputTokens: 100, outputTokens: 20, cachedReadTokens: 50, totalTokens: 120, thoughtTokens: 7 }), { inputTokens: 50, outputTokens: 20, cacheReadTokens: 50, reasoningTokens: 7, totalTokens: 120 });

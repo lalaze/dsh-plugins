@@ -1,6 +1,6 @@
 // A minimal Codex app-server, Claude stream-json and ACP CLI. The prompt selects the behavior:
 // `gate` waits for $HOME/gate, `stream N` streams N chunks, `approve` asks for permission,
-// `exit` crashes. Every prompt and permission reply is logged to detect duplicates.
+// `requests N` makes N model requests and one more after `gate` (Codex reports each in its token totals), `exit` crashes. Every prompt and permission reply is logged to detect duplicates.
 import fs from 'node:fs';
 import { basename, join } from 'node:path';
 
@@ -16,7 +16,12 @@ async function run(text, out) {
   let cancelled = false; cancel = () => { cancelled = true; };
   try {
     if (/\bexit\b/.test(text)) { process.stderr.write('fatal: simulated crash\n'); process.exit(3); }
-    if (/\bgate\b/.test(text)) {
+    if (/\brequests (\d+)/.test(text)) {
+      const count = Number(text.match(/\brequests (\d+)/)[1]);
+      for (let i = 0; i < count; i++) { out.delta(`r${i} `); out.request?.(); await sleep(25); }
+      if (/\bgate\b/.test(text)) while (!fs.existsSync(join(home, 'gate'))) { if (cancelled) return out.cancelled(); await sleep(20); }
+      out.delta('end'); out.request?.();
+    } else if (/\bgate\b/.test(text)) {
       out.delta('waiting 🌏 ');
       while (!fs.existsSync(join(home, 'gate'))) { if (cancelled) return out.cancelled(); await sleep(20); }
       out.delta('after-gate 你好');
@@ -37,6 +42,9 @@ function request(message) {
   return new Promise(resolve => { waiting.set(String(id), resolve); send(message); });
 }
 
+// Codex's running token totals for its one thread, which outlive any DSH attached to it.
+const REQUEST = { inputTokens: 100, cachedInputTokens: 60, outputTokens: 10, reasoningOutputTokens: 0, totalTokens: 110 };
+const threadTotal = Object.fromEntries(Object.keys(REQUEST).map(key => [key, 0]));
 const codex = {
   handle(m) {
     const reply = result => send({ jsonrpc: '2.0', id: m.id, result });
@@ -50,6 +58,10 @@ const codex = {
       reply({ turn: { id: turn } }); send({ method: 'turn/started', params: { turn: { id: turn } } });
       void run(m.params.input[0].text, {
         delta: delta => send({ method: 'item/agentMessage/delta', params: { delta } }),
+        request: () => {
+          for (const key of Object.keys(REQUEST)) threadTotal[key] += REQUEST[key];
+          send({ method: 'thread/tokenUsage/updated', params: { threadId: 'thread-1', turnId: turn, tokenUsage: { total: { ...threadTotal }, last: { ...REQUEST }, modelContextWindow: 100_000 } } });
+        },
         approval: async () => (await request({ jsonrpc: '2.0', id: ++nextRequest, method: 'item/commandExecution/requestApproval', params: { command: 'make', availableDecisions: ['accept', 'decline'] } })).result?.decision,
         done: () => send({ method: 'turn/completed', params: { turn: { id: turn, status: 'completed' } } }),
         cancelled: () => send({ method: 'turn/completed', params: { turn: { id: turn, status: 'interrupted' } } }),

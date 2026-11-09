@@ -10,6 +10,8 @@ import { REMOTE_HOME, remoteScript } from '../src/core/remote-host.js';
 import { RelayClient, RELAY_SCRIPT, RELAY_VERSION } from '../src/agents/relay.js';
 import { CLAUDE_ROOT_ENV } from '../src/agents/backend.js';
 import type { SshTransport } from '../src/core/ssh.js';
+import type { Store } from '../src/core/store.js';
+import type { RemoteAgentsService } from '../src/agents/service.js';
 
 /** A relay client on a host that is known to support relays. */
 const openRelay = async (transport: SshTransport) => { const client = await RelayClient.open(transport); assert.ok(client instanceof RelayClient, `relay unavailable: ${client}`); return client; };
@@ -185,6 +187,30 @@ test('a forcibly killed DSH loses no remote output: the restarted one resumes fr
   assert.equal(text, Array.from({ length: 120 }, (_, i) => `c${i}🌏 `).join(''), 'Claude partial-message state is restored: nothing is repeated or lost');
   assert.deepEqual(entries.filter(e => e.item.type === 'turn_end').map(e => e.item.status), ['completed']);
   assert.equal((await h.lines('prompts.log')).length, 1);
+});
+
+test('Codex: a turn counts only its own tokens after DSH reattaches, between turns or during one', async t => {
+  const h = await relayHarness(t);
+  // Each request uses 110 tokens; the thread's running totals carry on while DSH detaches and reattaches.
+  const recorded = (store: Store) => { const totals: number[] = []; store.usageListeners.add((_task, usage) => totals.push(usage.totalTokens!)); return totals; };
+  const idle = (service: RemoteAgentsService, id: string, label: string) => waitFor(async () => (await service.summary(id)).status === 'idle', label);
+  const first = recorded(h.first.store);
+  const agent = await h.first.service.create(h.request('codex', 'requests 1'));
+  await idle(h.first.service, agent.id, 'first turn');
+  assert.deepEqual(first, [220]);
+  await h.first.service.close();
+
+  const second = await h.open(), between = recorded(second.store); await second.service.resume();
+  await second.service.send(agent.id, { id: randomUUID(), text: 'requests 1' });
+  await idle(second.service, agent.id, 'turn after reattaching');
+  assert.deepEqual(between, [220], 'not the thread total of 440');
+
+  await second.service.send(agent.id, { id: randomUUID(), text: 'requests 3 gate' });
+  await waitFor(async () => (await transcript(second.service, agent.id)).text.endsWith('r2 '), 'requests before shutdown');
+  await second.service.close(); await h.gate();
+  const third = await h.open(), during = recorded(third.store); await third.service.resume();
+  await idle(third.service, agent.id, 'turn finished while detached');
+  assert.deepEqual(during, [440], 'from where the turn began, including the requests made before reattaching');
 });
 
 test('a relay started by an interrupted initialization is removed, and retrying starts cleanly once', async t => {
