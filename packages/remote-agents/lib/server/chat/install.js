@@ -38,6 +38,7 @@ export function installChat(ctx, service, projects, workspace) {
             agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => sessionOf(id)?.header.cwd,
             permission: id => accessOf(scoped, sessionOf(id)).permission,
             unattended: id => accessOf(scoped, sessionOf(id)).unattended,
+            subagent: id => !!sessionOf(id)?.header.parentSession,
             teamMember: id => teamMemberOf(sessionOf(id)),
             tui: id => service.store.snapshot().tuiSessions?.includes(id) === true,
             userContent: (id, messageId) => sessionOf(id)?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source)))?.content,

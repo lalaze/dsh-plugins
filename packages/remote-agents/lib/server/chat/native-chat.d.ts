@@ -57,6 +57,8 @@ export interface ChatHost extends Partial<ToolHost> {
     permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
     /** A delegated subagent nobody answers (DSH approval policy `never`): the CLI must not wait for approvals or answers. */
     unattended?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
+    /** Structural DSH child-session provenance, independent of labels and permission. */
+    subagent?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
     /** The AgentTeams team and member this conversation runs as, when it is a team member. */
     teamMember?(sessionId: NonNullable<GenerateOptions['sessionId']>): TeamMember | undefined;
     /** Whether the conversation's CLI runs in its terminal, as a TUI conversation's does. */

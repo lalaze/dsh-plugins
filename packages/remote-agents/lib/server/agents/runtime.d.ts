@@ -34,9 +34,13 @@ export declare class CliSession {
     private partialText;
     /** The model Claude's main thread answered with this turn: aliases such as `opus` resolve to a full model ID. */
     private turnModel?;
-    /** Codex running thread totals, now and when the current turn began. */
+    /** Codex's running thread totals, as last reported. */
     private codexTotal;
-    private codexBefore;
+    /**
+     * Where the open Codex turn began in those totals; unset until known. A session that attaches after the turn began, as
+     * after DSH restarts, does not know the thread's totals then, and must not count the whole thread as this turn.
+     */
+    private codexStart?;
     private suspended;
     private intentionalClose;
     private diskFailed;
@@ -114,6 +118,8 @@ export declare class CliSession {
     /** Record what a turn used before it ends, so readers of the turn see it ahead of its end. */
     private turnUsage;
     private setTokenUsage;
+    /** Keep where a Codex turn began, saved so that a DSH reattaching during the turn counts all of it. */
+    private startCodexTurn;
     /** Save request snapshots as they arrive, including during long tool loops and resume. */
     private saveUsage;
     /** Claude reports its exact context breakdown on request, including after compaction. */

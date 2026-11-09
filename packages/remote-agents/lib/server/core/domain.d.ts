@@ -289,8 +289,8 @@ export interface Task extends TaskInput {
     /** Mode choices discovered when the agent was created; mode changes are validated against them. */
     modes?: Choice[];
     archived?: boolean;
-    /** Started by the DSH agent through a delegation tool. */
-    origin?: 'dsh';
+    /** `dsh`: delegation tool task; `subagent`: native chat of a structural DSH child session, never auto-shared or adopted. */
+    origin?: 'dsh' | 'subagent';
     /** The DSH conversation whose agent delegated this task; it runs the task's shared MCP calls. */
     owner?: {
         sessionId: string;
@@ -317,6 +317,11 @@ export interface Task extends TaskInput {
     context?: ContextUsage;
     /** Latest native token counters, kept across detach and restart. */
     tokenUsage?: TokenUsage;
+    /** Codex's running thread totals when the turn began, so a DSH reattaching during that turn still counts all of it. */
+    codexTurnStart?: {
+        turnId: string;
+        total?: Record<string, number>;
+    };
     /** The shared record revision this copy matches. `imported` copies were started by another DSH, named by `creator`. */
     shared?: {
         rev: number;

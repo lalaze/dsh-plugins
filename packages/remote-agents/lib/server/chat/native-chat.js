@@ -806,7 +806,7 @@ export class RemoteCliAdapter extends LlmAdapter {
                 const agent = await service.create({ id: taskId, hostId: project.hostId, cwd, provider: provider.id, model: model.id, prompt: text, ...(attachments.length ? { attachments } : {}),
                     // Native chats follow the DSH composer's permission. Without a matching mode Claude and Codex follow the
                     // remote CLI's own permission config; old cached Claude catalogs must not override it.
-                    ...(composerMode ? { modeId: composerMode } : provider.id === 'codex' ? { modeId: 'inherit' } : provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) }, { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, ...(unattended ? { unattended } : {}), signal });
+                    ...(composerMode ? { modeId: composerMode } : provider.id === 'codex' ? { modeId: 'inherit' } : provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) }, { ...(this.host.subagent?.(sessionId) ? { origin: 'subagent' } : {}), title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, ...(unattended ? { unattended } : {}), signal });
                 if (!agent.started)
                     throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
             }

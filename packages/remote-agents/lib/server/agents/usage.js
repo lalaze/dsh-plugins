@@ -59,6 +59,16 @@ function codexCounters(value) {
     const pick = (camel, snake) => count(value?.[camel] ?? value?.[snake]) ?? 0;
     return { input: pick('inputTokens', 'input_tokens'), cached: pick('cachedInputTokens', 'cached_input_tokens'), output: pick('outputTokens', 'output_tokens'), reasoning: pick('reasoningOutputTokens', 'reasoning_output_tokens'), total: pick('totalTokens', 'total_tokens') };
 }
+/**
+ * Codex's `thread/tokenUsage/updated` follows every model request: the thread's running totals before that request
+ * (`total` less `last`). Undefined when the report leaves out the request's own share.
+ */
+export function codexTotalBefore(usage) {
+    if (!usage?.total || !usage?.last)
+        return undefined;
+    const now = codexCounters(usage.total), last = codexCounters(usage.last), less = (key) => Math.max(0, now[key] - last[key]);
+    return { inputTokens: less('input'), cachedInputTokens: less('cached'), outputTokens: less('output'), reasoningOutputTokens: less('reasoning'), totalTokens: less('total') };
+}
 /** Codex reports running thread totals; a turn used the difference since the previous turn ended. */
 export function codexTurnUsage(total, before) {
     if (!total)

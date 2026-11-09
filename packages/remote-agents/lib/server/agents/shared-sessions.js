@@ -36,7 +36,7 @@ catch {
 const VALID = {
     cwd: absolute, executionCwd: absolute, provider: v => typeof v === 'string' && Object.hasOwn(PROVIDER_LABELS, v), model: text(500),
     modeId: text(200), thinkingOptionId: text(200), serviceTier: text(200), prompt: text(100_000), attachments: v => valid(() => attachmentInput(v)),
-    serverId: text(200), title: text(100), createdAt: date, updatedAt: date, archived: v => typeof v === 'boolean', origin: v => v === 'dsh', state: v => v === 'ready' || v === 'uncertain',
+    serverId: text(200), title: text(100), createdAt: date, updatedAt: date, archived: v => typeof v === 'boolean', origin: v => v === 'dsh' || v === 'subagent', state: v => v === 'ready' || v === 'uncertain',
     modes: v => Array.isArray(v) && v.length <= 100 && v.every(m => m && typeof m === 'object' && text(200)(m.id) && typeof m.label === 'string' && m.label.length <= 200),
     agentId: v => valid(() => identifier(v)), relay: v => !!v && typeof v === 'object' && valid(() => identifier(v.id)),
     native: v => {
@@ -278,7 +278,7 @@ export class SharedSessions {
     /** Started sessions of this host, as it is identified now: those of a machine whose identity changed belong to the earlier one. */
     publishable() {
         const serverId = this.store.hosts().find(h => h.id === this.owner.hostId)?.serverId;
-        return task => !!serverId && task.hostId === this.owner.hostId && task.serverId === serverId && !!task.agentId && !!task.native && task.state !== 'creating'
+        return task => task.origin !== 'subagent' && !!serverId && task.hostId === this.owner.hostId && task.serverId === serverId && !!task.agentId && !!task.native && task.state !== 'creating'
             && !task.chat?.sessionId.startsWith('remote-compaction-');
     }
     async changed(params) {
@@ -385,6 +385,8 @@ export class SharedSessions {
         await this.store.update(state => {
             const task = state.tasks.find(t => t.id === id);
             if (!task) {
+                if (remote.origin === 'subagent')
+                    return;
                 // Only complete, started sessions of this same SSH account are imported.
                 const host = state.hosts.find(h => h.id === this.owner.hostId);
                 if (!host?.serverId || remote.serverId !== host.serverId || !remote.native || !remote.agentId || [...REQUIRED].some(field => remote[field] === undefined) || state.tasks.length >= 1000)
@@ -397,6 +399,9 @@ export class SharedSessions {
             }
             if (task.hostId !== this.owner.hostId)
                 return;
+            // Verified provenance can repair an older imported copy without removing its history or binding.
+            if (remote.origin === 'subagent')
+                task.origin = 'subagent';
             const unchanged = task.shared?.rev === manifest.rev;
             for (const field of FIELDS) {
                 const value = remote[field];

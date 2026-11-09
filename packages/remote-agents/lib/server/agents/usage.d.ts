@@ -35,6 +35,11 @@ export declare function claudeTurnUsage(usage: any): TurnUsage | undefined;
  * and a refused request retried on another model. Newer CLIs send it; older ones leave this undefined.
  */
 export declare function claudeModelUsage(models: unknown): FinishedTurn['models'];
+/**
+ * Codex's `thread/tokenUsage/updated` follows every model request: the thread's running totals before that request
+ * (`total` less `last`). Undefined when the report leaves out the request's own share.
+ */
+export declare function codexTotalBefore(usage: any): Record<string, number> | undefined;
 /** Codex reports running thread totals; a turn used the difference since the previous turn ended. */
 export declare function codexTurnUsage(total: any, before: any): TurnUsage | undefined;
 /** ACP's optional `PromptResponse.usage` for one prompt turn. */

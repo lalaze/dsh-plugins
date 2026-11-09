@@ -23,7 +23,7 @@ const step = async (name, run) => {
     }
 };
 /** Started by another DSH, as a conversation rather than a delegated background task, and not yet continued here. */
-const adoptable = (task) => !!task.shared?.imported && task.origin !== 'dsh' && !task.chat && !task.archived && !!task.agentId && !!task.native && task.state !== 'creating';
+const adoptable = (task) => !!task.shared?.imported && task.origin !== 'dsh' && task.origin !== 'subagent' && !task.chat && !task.archived && !!task.agentId && !!task.native && task.state !== 'creating';
 /**
  * Sessions another DSH started on a shared host become main conversations here, in their remote workspace and on
  * the same CLI session, so they can be continued. Each opens with its saved history; nothing is sent to the CLI.
@@ -62,7 +62,7 @@ export class SharedChatAdoption {
         // Oldest first: DSH lists conversations by their latest change, so the newest session ends up on top.
         const candidates = store.tasks(t => adoptable(t) && due(t)).sort((a, b) => (a.updatedAt ?? a.createdAt).localeCompare(b.updatedAt ?? b.createdAt));
         // A history not shown yet, because DSH quit first or the conversation was never saved, is shown again.
-        const unshown = store.tasks(t => t.chat?.history === 'pending' && !!t.shared?.imported && due(t));
+        const unshown = store.tasks(t => t.origin !== 'subagent' && t.origin !== 'dsh' && t.chat?.history === 'pending' && !!t.shared?.imported && due(t));
         if (!candidates.length && !unshown.length)
             return;
         const listed = await this.host.sessions(), instance = (await store.instance()).id, unreachable = new Set();
