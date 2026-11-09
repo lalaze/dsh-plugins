@@ -1095,3 +1095,9 @@ test('a turn in a TUI conversation starts no CLI, as its CLI runs in the termina
   assert.equal((await run({ purpose: 'compaction', messages: [message] as unknown as GenerateOptions['messages'] })).at(-1)?.type, 'finish', 'and maintenance has nothing to do');
   assert.equal((await run({ purpose: 'session-title', messages: [message] as unknown as GenerateOptions['messages'] })).find(chunk => chunk.type === 'text-delta')?.text, 'sent from another client', 'a title is still a title');
 });
+
+test('structural child provenance survives native chat creation', async t => {
+  const h = await setup(t, { subagent: () => true });
+  await collect(h.adapter.stream(h.options('ordinary title')));
+  assert.equal(h.store.snapshot().tasks[0].origin, 'subagent');
+});

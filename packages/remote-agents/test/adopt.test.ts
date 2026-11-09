@@ -172,3 +172,16 @@ test('a turn still running where the session started streams on after its histor
   assert.equal(output.match(/Found the bug/g)?.length, 1, 'output already in the history is not repeated');
   assert.equal(store.snapshot().tasks[0].chat?.delivered?.done, true);
 });
+
+test('internal subagents are never adopted or woken from pending imported history', async t => {
+  const h = await setup(t);
+  await h.store.update(state => { state.tasks[0].origin = 'subagent'; });
+  const adoption = new SharedChatAdoption(h.projects, h.host);
+  await adoption.run();
+  assert.deepEqual(h.calls, []);
+  await h.store.update(state => { state.tasks[0].chat = { sessionId: h.sessionId, route: h.route, history: 'pending' }; });
+  await adoption.run();
+  assert.deepEqual(h.calls, []);
+  assert.deepEqual(h.woken, []);
+  assert.ok(h.store.snapshot().tasks[0].native);
+});

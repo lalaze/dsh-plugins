@@ -69,6 +69,8 @@ export interface ChatHost extends Partial<ToolHost> {
   permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
   /** A delegated subagent nobody answers (DSH approval policy `never`): the CLI must not wait for approvals or answers. */
   unattended?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
+  /** Structural DSH child-session provenance, independent of labels and permission. */
+  subagent?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
   /** The AgentTeams team and member this conversation runs as, when it is a team member. */
   teamMember?(sessionId: NonNullable<GenerateOptions['sessionId']>): TeamMember | undefined;
   /** Whether the conversation's CLI runs in its terminal, as a TUI conversation's does. */
@@ -673,7 +675,7 @@ export class RemoteCliAdapter extends LlmAdapter {
           // Native chats follow the DSH composer's permission. Without a matching mode Claude and Codex follow the
           // remote CLI's own permission config; old cached Claude catalogs must not override it.
           ...(composerMode ? { modeId: composerMode } : provider.id === 'codex' ? { modeId: 'inherit' } : provider.id !== 'claude' && provider.defaultModeId ? { modeId: provider.defaultModeId } : {}), ...(effort ? { thinkingOptionId: effort } : {}), ...(serviceTier ? { serviceTier } : {}) },
-        { title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, ...(unattended ? { unattended } : {}), signal });
+        { ...(this.host.subagent?.(sessionId) ? { origin: 'subagent' as const } : {}), title: currentPrompt.replace(/\s+/g, ' ').slice(0, 80), chat: { sessionId, route: options.model, lastUserId: userId }, ...(unattended ? { unattended } : {}), signal });
         if (!agent.started) throw new LlmError(agent.error ?? 'The remote CLI could not start. Retry this response.', 'REMOTE_START_FAILED');
       } else {
         // A receipt left by a failed HTTP/model response is replayed, never delivered again.

@@ -199,8 +199,8 @@ export interface Task extends TaskInput {
   /** Mode choices discovered when the agent was created; mode changes are validated against them. */
   modes?: Choice[];
   archived?: boolean;
-  /** Started by the DSH agent through a delegation tool. */
-  origin?: 'dsh';
+  /** `dsh`: delegation tool task; `subagent`: native chat of a structural DSH child session, never auto-shared or adopted. */
+  origin?: 'dsh' | 'subagent';
   /** The DSH conversation whose agent delegated this task; it runs the task's shared MCP calls. */
   owner?: { sessionId: string };
   /** Runs for a DSH subagent nobody answers: the CLI is started so it does not ask (Codex approval policy `never`). */

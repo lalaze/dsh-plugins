@@ -503,3 +503,32 @@ test('a read reported for a session with no shared registry does nothing', { ski
   await h.first.service.markChatRead('no-such-conversation');
   assert.equal(h.first.service.chatReadMark('no-such-conversation'), undefined);
 });
+
+test('internal child sessions stay local while manual sessions still publish', { skip: !supported }, async t => {
+  const { h, second } = await twoInstances(t);
+  const child = await h.first.service.create(h.request('codex', 'stream 2'), { origin: 'subagent' });
+  await waitFor(async () => (await h.first.service.summary(child.id)).status === 'idle', 'child completed');
+  const normal = await h.first.service.create(h.request('codex', 'stream 2'));
+  await imported(second.service, normal.id);
+  assert.equal(existsSync(join(h.home, '.dsh-remote-agents', 'shared-v1', 'sessions', child.id, 'manifest.json')), false);
+  assert.equal(second.store.task(task => task.id === child.id), undefined);
+  assert.ok((await transcript(h.first.service, child.id)).entries.length);
+});
+
+test('explicit internal provenance repairs old imports without deleting history and blocks new imports', { skip: !supported }, async t => {
+  const { h, second } = await twoInstances(t);
+  const agent = await h.first.service.create(h.request('codex', 'stream 2'));
+  await imported(second.service, agent.id);
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'completed');
+  const path = join(sessionsDir(h.home), agent.id, 'manifest.json');
+  const manifest = JSON.parse(await readFile(path, 'utf8'));
+  await writeFile(path, JSON.stringify({ ...manifest, origin: 'subagent', rev: manifest.rev + 1 }));
+  await waitFor(async () => second.store.task(task => task.id === agent.id)?.origin === 'subagent', 'provenance repaired');
+  assert.ok(second.store.task(task => task.id === agent.id));
+  assert.ok((await transcript(h.first.service, agent.id)).entries.length);
+  const third = await h.open(undefined, join(h.root, 'state-third'));
+  const hostId = (await third.service.addHost({ label: 'Third', connection: 'ssh://builder@localhost' })).hosts[0].id;
+  await third.service.connect(hostId);
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  assert.equal(third.store.task(task => task.id === agent.id), undefined);
+});
