@@ -454,7 +454,7 @@ done`}`, 15_000, { login: false });
   private session(task: Task, peer: JsonlPeer, history: TaskHistory, relay?: RelayLink): CliSession {
     // A turn the CLI runs by itself grows the history without a message from here: told like one another DSH runs.
     const historyChanged = () => { for (const listener of this.historyListeners) { try { listener(task.id); } catch { /* A listener must not stop the session. */ } } };
-    return new CliSession(peer, task, history, this.store, { ownTurnStarted: historyChanged, turnEnded: ({ unprompted }) => {
+    return new CliSession(peer, task, history, this.store, { goalFailed: (messageId, reason) => this.sharing()?.goalFailed?.(task, messageId, reason), ownTurnStarted: historyChanged, turnEnded: ({ unprompted }) => {
         // A finished turn changed the account's usage; read it again when it is next shown.
         this.accounts.delete(task.provider);
         if (unprompted) historyChanged();
@@ -631,7 +631,7 @@ done`}`, 15_000, { login: false });
       this.sessions.set(task.id, session);
       link?.open();
       try {
-        await session.initialize(profile.protocol, argv, resume, acpServers(shared));
+        await session.initialize(profile.protocol, argv, resume, acpServers(shared), shared?.goalIdentity);
         this.assertOpen();
         if (!resume) await session.send(attachmentPrompt(task.prompt, attachments), task.id, attachments);
         return structuredClone(session.agent);

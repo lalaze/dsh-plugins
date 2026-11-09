@@ -1,3 +1,4 @@
+import type { ClaudeGoalBridge } from './claude-goal.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { join } from 'node:path';
@@ -31,7 +32,7 @@ export function scheduleSessionRepair(ctx: Context, store: Store): void {
 }
 
 /** Remote CLI models in DSH's model picker and main conversation. */
-export function installChat(ctx: Context, service: RemoteAgentsService, projects: ChatProjects, workspace: { access: WorkspaceAccess; files: WorkspaceService; workspaces: RemoteWorkspaces }): void {
+export function installChat(ctx: Context, service: RemoteAgentsService, projects: ChatProjects, workspace: { access: WorkspaceAccess; files: WorkspaceService; workspaces: RemoteWorkspaces }, claudeGoals?: ClaudeGoalBridge): void {
   const { access, files, workspaces } = workspace;
   ctx.inject(['llm', 'sessions', 'agents', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { agents: { get(id: string): unknown; list?(): SyncAgent[] } };
@@ -41,7 +42,7 @@ export function installChat(ctx: Context, service: RemoteAgentsService, projects
       else if (event.type === 'step/end' || event.type === 'turn/end') steps.delete(session.id);
     }, { global: true });
     const sessionOf = (id: string) => steps.get(id)?.session ?? scoped.sessions.get(id as Parameters<typeof scoped.sessions.get>[0]);
-    const adapter = new RemoteCliAdapter(projects, { approval: host.approval, userQuestions: host.userQuestions,
+    const adapter = new RemoteCliAdapter(projects, { claudeGoals, approval: host.approval, userQuestions: host.userQuestions,
       agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => sessionOf(id)?.header.cwd,
       permission: id => accessOf(scoped, sessionOf(id)).permission,
       unattended: id => accessOf(scoped, sessionOf(id)).unattended,

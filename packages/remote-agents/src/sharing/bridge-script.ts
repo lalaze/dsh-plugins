@@ -52,7 +52,7 @@ function serve(options) {
         case 'tools/list': reply({ tools: await options.list() }); return;
         case 'tools/call': {
           const params = message.params || {};
-          reply(await options.call(String(params.name), params.arguments && typeof params.arguments === 'object' ? params.arguments : {}, id));
+          reply(await options.call(String(params.name), params.arguments && typeof params.arguments === 'object' ? params.arguments : {}, id, params._meta));
           return;
         }
         case 'notifications/cancelled': if (options.cancel && message.params) options.cancel(message.params.requestId); return;
@@ -85,7 +85,7 @@ function proxy(taskFile, server) {
       let buffer = '', ready = false;
       const timer = setTimeout(() => { next.destroy(); reject(new Error('DSH did not answer')); }, 10000);
       next.setEncoding('utf8');
-      next.on('connect', () => next.write(JSON.stringify({ op: 'hello', task: task.task, token: task.token, server }) + '\n'));
+      next.on('connect', () => next.write(JSON.stringify({ op: 'hello', task: task.task, token: task.token, session: task.session, epoch: task.epoch, messageId: task.messageId, server }) + '\n'));
       next.on('data', chunk => {
         buffer += chunk;
         for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
@@ -126,17 +126,21 @@ function proxy(taskFile, server) {
   }
   connect().catch(() => { failed = true; retry(); });
   process.stdin.on('end', () => { ended = true; });
-  const team = server === '.agent-teams';
+  const team = server === '.agent-teams', goal = server === '.claude-goal';
   serve({
-    name: team ? 'dsh-agent-teams' : 'dsh-' + server,
-    instructions: team ? 'Coordination tools of the DSH AgentTeams team this session works for. They run in DSH on the user\'s computer, not on this host.'
+    name: goal ? 'dsh-goal' : team ? 'dsh-agent-teams' : 'dsh-' + server,
+    instructions: goal ? 'Native DSH goal controls for this conversation only. Call get_goal before updates and use its exact goal_id/revision. Automatic goal continuations are not human requests. Restored active goals are disarmed; only a human request may rearm them. Paused goals require the user to resume via DSH. Obey native tool errors and closing context. These tools do not grant other local capabilities.' : team ? 'Coordination tools of the DSH AgentTeams team this session works for. They run in DSH on the user\'s computer, not on this host.'
       : 'Tools of the "' + server + '" MCP server configured in DSH. They run in DSH on the user\'s computer, not on this host, and DSH may ask the user to approve a call.',
     async list() {
       try { const tools = (await request('list', {})).tools; writeJson(cache, tools); return tools; }
-      catch (error) { log('Listing tools from DSH failed: ' + error.message); return readJson(cache) || []; }
+      catch (error) { log('Listing tools from DSH failed: ' + error.message); return goal ? [] : readJson(cache) || []; }
     },
-    async call(name, input, mcpId) {
-      try { return await request('call', { name, arguments: input }, mcpId); }
+    async call(name, input, mcpId, meta) {
+      // Snapshot the native Claude metadata before any connect/retry await. Credentials came
+      // from this process's immutable launch file and are never refreshed from a current file.
+      const origin = goal ? { epoch: task.epoch, messageId: task.messageId, callId: meta && meta['claudecode/toolUseId'] } : {};
+      if (goal && (typeof origin.callId !== 'string' || !origin.callId)) return text('This Claude version did not provide native tool-use identity; goal call refused.');
+      try { return await request('call', { name, arguments: input, ...origin }, mcpId); }
       catch (error) { return text('DSH could not run this tool: ' + error.message + '. It runs in DSH on the user\'s computer; ask the user to open DSH and reconnect this host, then retry.'); }
     },
     cancel(requestId) {
