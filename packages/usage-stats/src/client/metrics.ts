@@ -38,3 +38,35 @@ const YI = 100_000_000;
  */
 export const compact = (value: number, language = 'en', scale = value) =>
   language === 'zh' && scale >= YI ? `${CHINESE.format(Math.floor(value / 1_000_000) / 100)}亿` : ENGLISH.format(value);
+
+/** A calendar month in the viewer's date domain; UTC arithmetic avoids DST gaps. */
+export function monthRange(month: string): { from: string; to: string } {
+  const start = Date.parse(`${month}-01T00:00:00Z`);
+  if (!/^\d{4}-\d{2}$/.test(month) || !Number.isFinite(start) || iso(start).slice(0, 7) !== month) throw new Error('Invalid month');
+  const date = new Date(start);
+  date.setUTCMonth(date.getUTCMonth() + 1);
+  return { from: iso(start), to: iso(date.getTime() - DAY) };
+}
+export function shiftMonth(month: string, offset: number): string {
+  const date = new Date(`${monthRange(month).from}T00:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + offset);
+  return iso(date.getTime()).slice(0, 7);
+}
+export interface CalendarDay { date: string; tokens: number; requests: number; future: boolean }
+/** Monday-first, six fixed weeks. Quiet days are zero; padding is not a real date. */
+export function calendarDays(month: string, series: UsageGroup[], today = localDay()): (CalendarDay | null)[] {
+  const { from, to } = monthRange(month);
+  const start = Date.parse(from), count = Number(to.slice(-2));
+  const leading = (new Date(start).getUTCDay() + 6) % 7;
+  const totals = new Map(series.map(day => [day.key, day.totals]));
+  return Array.from({ length: 42 }, (_, index) => {
+    const day = index - leading + 1;
+    if (day < 1 || day > count) return null;
+    const date = iso(start + (day - 1) * DAY), value = totals.get(date);
+    return { date, tokens: value?.totalTokens ?? 0, requests: value?.requests ?? 0, future: date > today };
+  });
+}
+/** Zero has no fill; positive usage occupies four relative intensity bands. */
+export function heatLevel(value: number, max: number): number {
+  return value <= 0 || max <= 0 ? 0 : Math.min(4, Math.max(1, Math.ceil(value / max * 4)));
+}

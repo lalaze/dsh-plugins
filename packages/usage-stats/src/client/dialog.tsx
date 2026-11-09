@@ -10,7 +10,8 @@ const CSS = `.us-dialog-overlay{position:fixed;inset:0;z-index:2147483000;displa
 .us-dialog-close{position:absolute;top:20px;right:14px;z-index:2;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:var(--dsw-alias-label-secondary,inherit);cursor:pointer}
 .us-dialog-close:hover{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,currentColor 8%,transparent));color:var(--dsw-alias-label-primary,inherit)}
 .us-dialog-close:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4176e6));outline-offset:-2px}
-.us-dialog-body{flex:1;min-height:0;overflow:auto}
+.us-dialog-body{flex:1;min-height:0;overflow:auto;scrollbar-width:none}
+.us-dialog-body::-webkit-scrollbar{display:none;width:0;height:0}
 .us-dialog .dsh-usage{max-width:none;padding:0 24px 24px}
 .us-dialog .us-top{position:sticky;top:0;z-index:1;margin:0 -24px -2px;padding:22px 54px 10px 24px;background:var(--dsw-alias-bg-layer-2,Canvas)}
 @media(max-width:500px){.us-dialog-overlay{padding:0}.us-dialog{width:100%;height:100%;border-radius:0}.us-dialog-close{top:16px;right:12px}

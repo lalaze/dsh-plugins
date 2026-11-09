@@ -3,16 +3,38 @@ import { createLocaleFixture } from '../../../../scripts/locale-fixture.js';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Dashboard } from '../../src/client/index.js';
+import { UsageDialog } from '../../src/client/dialog.js';
 import { parseQuery, report, toCsv, type UsageRecord } from '../../src/domain.js';
 
 const locale = createLocaleFixture();
 installLocale({ get: () => locale });
-const fixture = { setLocale: locale.setLocale, fail: false, empty: false, demo: location.hash === '#demo', workspaces: false, requests: [] as string[] };
+const options = new URLSearchParams(location.search);
+const pending: Array<{ url: string; release: () => void }> = [];
+const fixture = {
+  setLocale: locale.setLocale, fail: false, empty: false, demo: location.hash === '#demo', workspaces: false,
+  calendar: options.has('calendar'), now: options.get('now'), requests: [] as string[], hold: false, pending,
+  releaseRequests: () => { fixture.hold = false; pending.splice(0).forEach(request => request.release()); },
+};
 Object.assign(window, { fixture });
+// Freeze only opt-in scenarios. Proxy preserves every Date constructor overload and static method.
+if (fixture.now) {
+  const NativeDate = Date;
+  window.Date = new Proxy(NativeDate, {
+    construct(target, args) { return Reflect.construct(target, args.length ? args : [fixture.now]); },
+    get(target, key) { return key === 'now' ? () => new NativeDate(fixture.now!).getTime() : Reflect.get(target, key); },
+  });
+}
 const records: UsageRecord[] = [
   { id: 'local', provider: 'deepseek', model: 'deepseek-chat', sessionId: 'local-session', purpose: 'conversation', startedAt: '2026-10-21T12:00:00.000Z', durationMs: 100, status: 'completed', usage: { inputTokens: 10, outputTokens: 20, cacheReadTokens: 30 } },
   { id: 'remote', provider: 'claude-ssh-dev', model: 'sonnet', sessionId: 'remote-session', purpose: 'conversation', startedAt: '2026-10-20T12:00:00.000Z', durationMs: 200, status: 'completed', usage: { inputTokens: 2, outputTokens: 3, cacheReadTokens: 7, cacheWriteTokens: 11 } },
   { id: 'error', provider: 'claude-ssh-dev', model: 'opus', sessionId: 'remote-session', purpose: 'conversation', startedAt: '2026-10-21T13:00:00.000Z', durationMs: 20, status: 'error' },
+];
+// The first day is request-heavy but token-light, so changing metrics must change its intensity.
+const calendarRecords: UsageRecord[] = [
+  ...records,
+  ...Array.from({ length: 5 }, (_, i) => ({ ...records[0], id: `calendar-${i}`, startedAt: '2026-10-01T12:00:00', usage: { inputTokens: 1, outputTokens: 0 } })),
+  { ...records[0], id: 'calendar-peak', startedAt: '2026-10-02T12:00:00', usage: { inputTokens: 120, outputTokens: 0 } },
+  { ...records[0], id: 'calendar-leap', startedAt: '2024-02-29T12:00:00' },
 ];
 const demoRecords: UsageRecord[] = Array.from({ length: 21 }, (_, day) => {
   const startedAt = new Date(Date.now() - (20 - day) * 86_400_000).toISOString().slice(0, 10) + 'T12:00:00.000Z';
@@ -27,11 +49,13 @@ const demoRecords: UsageRecord[] = Array.from({ length: 21 }, (_, day) => {
 const workspaceRecords: UsageRecord[] = Array.from({ length: 21 }, (_, i) => ({ ...records[0], id: `workspace-${i}`, workspace: `/srv/projects/w${String(i).padStart(2, '0')}` }));
 window.fetch = async input => {
   const url = new URL(String(input), 'http://fixture.test'); fixture.requests.push(url.href);
+  // Queue before resolving a response: tests can inspect loading and DOM identity without timing races.
+  if (fixture.hold) await new Promise<void>(release => pending.push({ url: url.href, release }));
   if (fixture.fail) return Response.json({ error: '模拟网络错误' }, { status: 503 });
-  const data = report(fixture.empty ? [] : fixture.demo ? demoRecords : fixture.workspaces ? workspaceRecords : records, parseQuery(url));
+  const data = report(fixture.empty ? [] : fixture.demo ? demoRecords : fixture.workspaces ? workspaceRecords : fixture.calendar ? calendarRecords : records, parseQuery(url));
   if (url.searchParams.get('format') === 'csv') return new Response(toCsv(data), { headers: { 'Content-Type': 'text/csv' } });
   return Response.json(data);
 };
 const root = document.createElement('div'); document.body.append(root);
 if (fixture.demo) { const banner = document.createElement('div'); banner.textContent = '界面预览 · 以下为演示数据'; banner.style.cssText = 'padding:8px;text-align:center;font:11px system-ui;opacity:.5'; document.body.prepend(banner); }
-createRoot(root).render(<Dashboard />);
+createRoot(root).render(options.has('dialog') ? <UsageDialog Details={Dashboard} onClose={() => {}} /> : <Dashboard />);

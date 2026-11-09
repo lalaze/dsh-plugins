@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { compact, dateRange, localDay, localOffset, trendBuckets } from '../src/client/metrics.js';
+import { compact, dateRange, localDay, localOffset, trendBuckets, monthRange, shiftMonth, calendarDays, heatLevel } from '../src/client/metrics.js';
 import { report, type UsageRecord } from '../src/domain.js';
 
 const record = (date: string, provider = 'deepseek', tokens = 10): UsageRecord => ({ id: date, startedAt: `${date}T12:00:00.000Z`, provider, model: 'chat', durationMs: 1, purpose: 'conversation', status: 'completed', usage: { inputTokens: tokens, outputTokens: 0 } });
@@ -51,4 +51,34 @@ test('中文界面从 1 亿起以“亿”显示 Token 数，保留两位小数�
   // 图表纵轴按最大值的单位显示，避免同一轴上混用“亿”和 M。
   assert.equal(compact(60_000_000, 'zh', 120_000_000), '0.6亿');
   assert.equal(compact(60_000_000, 'en', 120_000_000), '60M');
+});
+
+test('月历覆盖整月、固定六周，按周一排列并正确处理闰年与跨年', () => {
+  assert.deepEqual(monthRange('2024-02'), { from: '2024-02-01', to: '2024-02-29' });
+  assert.deepEqual(monthRange('2025-02'), { from: '2025-02-01', to: '2025-02-28' });
+  assert.equal(shiftMonth('2026-01', -1), '2025-12');
+  assert.equal(shiftMonth('2026-12', 1), '2027-01');
+  assert.throws(() => monthRange('2026-13'));
+  assert.throws(() => monthRange('2026-2'));
+  const days = calendarDays('2024-02', [], '2024-02-10');
+  assert.equal(days.length, 42);
+  assert.deepEqual(days.slice(0, 3), [null, null, null]);
+  assert.equal(days.filter(Boolean).length, 29);
+  assert.equal(days[3]?.date, '2024-02-01');
+  assert.equal(days[12]?.future, false);
+  assert.equal(days[13]?.future, true);
+  assert.equal(calendarDays('2026-11', [])[6]?.date, '2026-11-01', '周日开头');
+  assert.equal(calendarDays('2026-03', []).filter(Boolean).length, 31);
+});
+test('热度图补齐零用量，忽略其他月份数据，并分别计算 Token 和调用次数', () => {
+  const data = report([record('2024-02-01', 'a', 20), record('2024-02-01', 'b', 30), record('2024-02-29', 'a', 10), record('2024-03-01', 'a', 100)], { groupBy: 'day' });
+  const days = calendarDays('2024-02', data.series, '2024-03-01').filter(day => day !== null);
+  assert.equal(days.length, 29);
+  assert.equal(days[0].tokens, 50); assert.equal(days[0].requests, 2);
+  assert.equal(days[1].tokens, 0); assert.equal(days[1].requests, 0);
+  assert.equal(days.reduce((sum, day) => sum + day.tokens, 0), 60);
+  assert.equal(days.reduce((sum, day) => sum + day.requests, 0), 3);
+  assert.equal(days.some(day => day.future), false);
+  assert.deepEqual([0, 1, 25, 26, 50, 51, 75, 76, 100].map(value => heatLevel(value, 100)), [0, 1, 1, 2, 2, 3, 3, 4, 4]);
+  assert.equal(heatLevel(0, 0), 0); assert.equal(heatLevel(10, 10), 4);
 });

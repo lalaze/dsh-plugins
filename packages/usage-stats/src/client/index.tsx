@@ -6,6 +6,7 @@ import { compact, dateRange, localOffset, trendBuckets } from './metrics.js';
 import { styles } from './styles.js';
 import { TodayBadge } from './today.js';
 import { UsageSettings } from './settings.js';
+import { MonthlyHeatmap } from './heatmap.js';
 
 interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
@@ -157,7 +158,8 @@ export function Dashboard() {
   };
   useEffect(() => {
     const controller = new AbortController(); let pending = false;
-    setData(undefined); setLoading(true); setError('');
+    // Keep the last report mounted while the next range loads: no collapse, scroll jump or flash.
+    setLoading(true); setError('');
     const read = async () => {
       if (period !== 'custom') {
         const range = dateRange(period);
@@ -188,8 +190,10 @@ export function Dashboard() {
   const filterCount = [provider, model, sessionId].filter(Boolean).length;
   const select = (label: string, value: string, set: (value: string) => void, options: string[]) => <label className="us-field">{label}<select aria-label={label} value={value} onChange={e => set(e.target.value)}><option value="">{ui("All {0}", { 0: label })}</option>{options.map(v => <option key={v} value={v}>{v}</option>)}</select></label>;
   const range = from && from === to ? from : from || to ? `${from || ui("First record")} → ${to || ui("Latest record")}` : ui("All records");
-  return <section className="dsh-usage" aria-label={ui("Usage statistics")}><style>{styles}</style>
-    <header className="us-top"><div className="us-title"><h2>{ui("Usage statistics")}</h2><p className="us-subtitle">{data ? ui("Updated {0}", { 0: new Date(data.generatedAt).toLocaleTimeString(formatLocale()) }) + ' · ' : ''}{ui("Updates every 5 seconds")}</p></div>
+  const updateStatus = loading && data ? ui("Updating… showing previous results") : error && data ? ui("Could not refresh; showing previous results") :
+    (data ? ui("Updated {0}", { 0: new Date(data.generatedAt).toLocaleTimeString(formatLocale()) }) + ' · ' : '') + ui("Updates every 5 seconds");
+  return <section className="dsh-usage" aria-label={ui("Usage statistics")} aria-busy={loading}><style>{styles}</style>
+    <header className="us-top"><div className="us-title"><h2>{ui("Usage statistics")}</h2><p className="us-subtitle" role="status" title={updateStatus}>{updateStatus}</p></div>
       <div className="us-actions"><button type="button" className="us-link" onClick={() => setRefresh(n => n + 1)}><Icon kind="refresh" />{ui("Refresh")}</button><button type="button" className="us-link" disabled={exporting} onClick={() => void exportCsv()}><Icon kind="download" />{exporting ? ui("Exporting…") : ui("Export CSV")}</button></div></header>
     <Tabs label={ui("Time range")} value={period} options={PERIODS} onChange={choosePeriod} />
     {period === 'custom' && <div className="us-custom-dates"><label className="us-field">{ui("Start date")}<input aria-label={ui("Start date")} type="date" value={from} onChange={e => setFrom(e.target.value)} /></label><span className="us-muted">—</span><label className="us-field">{ui("End date")}<input aria-label={ui("End date")} type="date" value={to} onChange={e => setTo(e.target.value)} /></label></div>}
@@ -199,12 +203,13 @@ export function Dashboard() {
     {filtersOpen && <div className="us-filter-grid">{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div>}
     {error && <div className="us-notice us-warning" role="alert">{ui("Could not load:")}{ui(error)}<button className="us-button" onClick={() => setRefresh(n => n + 1)}>{ui("Retry")}</button></div>}
     {exportError && <div className="us-notice us-warning" role="alert">{ui(exportError)}</div>}
-    {loading && <div className="us-loading" role="status">{ui("Loading usage…")}</div>}
+    {loading && !data && <div className="us-loading" role="status">{ui("Loading usage…")}</div>}
     {data && <>
       <Headline data={data} onPartial={showAttention} />
       <Tabs label={ui("Group by")} value={groupBy} options={BREAKDOWNS} onChange={setGroupBy} compact />
       <Breakdown data={data} by={groupBy} />
       <Trend data={data} />
+      <MonthlyHeatmap provider={provider} model={model} sessionId={sessionId} refresh={refresh} />
       <Sources data={data} open={sourcesOpen} onToggle={() => setSourcesOpen(!sourcesOpen)} anchor={sources} />
     </>}
   </section>;
