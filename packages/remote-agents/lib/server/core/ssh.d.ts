@@ -17,6 +17,8 @@ export interface StartOptions {
     stderr?(data: Buffer): void;
     /** Shell commands to run first, ending in `; `, for what the command needs in its environment. */
     prefix?: string;
+    /** A CLI started directly rather than under a relay: make sure it ends with the SSH session (see `ENDS_WITH_INPUT`). */
+    endWithSession?: boolean;
 }
 export interface SshTransport {
     /** `login: false` skips the remote login environment; for commands that need no CLI configuration. */

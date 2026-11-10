@@ -62,6 +62,26 @@ export function connectionInput(value) {
     return `ssh://${username ? `${username}@` : ''}${url.hostname}${url.port ? `:${url.port}` : ''}`;
 }
 /**
+ * Runs a CLI so that it ends with its SSH session. Over a plain pipe the remote side gets no hangup when the session
+ * closes, only the end of its input, and some CLIs keep running after that (CodeBuddy in ACP mode): every model probe left
+ * one behind on the host. This keeps the CLI as its child with its own input pipe. When the session's input ends, the
+ * CLI's input ends too; a CLI still running 2 seconds later gets TERM, and KILL 5 seconds after that. The CLI's output
+ * goes straight to the session, its exit status comes back as before, and TERM, HUP or INT sent here is passed on.
+ * The CLI's input stays an ordinary pipe: Node on macOS did not see the end of input from a named FIFO, so a FIFO fed by
+ * a shell `cat` cannot stand in.
+ * It avoids newer syntax, as the host's Node may be old; without Node the CLI runs as it did before.
+ */
+const ENDS_WITH_INPUT = `var spawn = require('child_process').spawn, signals = require('os').constants.signals;
+var child = spawn(process.argv[1], process.argv.slice(2), { stdio: ['pipe', 'inherit', 'inherit'] });
+child.on('error', function (error) { process.stderr.write(error.message + '\\n'); process.exit(127); });
+child.on('exit', function (code, signal) { process.exit(code !== null ? code : 128 + (signals[signal] || 15)); });
+child.stdin.on('error', function () { process.stdin.unpipe(child.stdin); process.stdin.resume(); });
+process.stdin.pipe(child.stdin);
+process.stdin.on('end', function () {
+  setTimeout(function () { child.kill('SIGTERM'); setTimeout(function () { child.kill('SIGKILL'); }, 5000); }, 2000);
+});
+['SIGTERM', 'SIGHUP', 'SIGINT'].forEach(function (name) { process.on(name, function () { child.kill(name); }); });`;
+/**
  * Ends a connection that stopped answering within about 45 seconds, as after the computer slept or changed networks.
  * Without it a relay attachment or the shared registry waits on a dead connection until TCP gives up, which can take hours.
  */
@@ -280,7 +300,10 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
         }
     }
     start(cwd, argv, options = {}) {
-        const process = this.spawn(`${options.prefix ?? ''}cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
+        const command = argv.map(quote).join(' ');
+        const process = this.spawn(`${options.prefix ?? ''}cd ${quote(cwd)} || exit\n${options.endWithSession
+            ? `if command -v node >/dev/null 2>&1; then exec node --no-warnings -e ${quote(ENDS_WITH_INPUT)} -- ${command}; fi\n`
+            : ''}exec ${command}`);
         let stderr = '', exited;
         const data = new Set(), exits = new Set();
         const end = (error) => { if (exited)
