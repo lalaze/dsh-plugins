@@ -36,7 +36,15 @@ export function expectedTarget(value) {
 }
 export async function workspaceAction(features, action, input, signal) {
     if (action === 'tuiSessions')
-        return { sessions: features.tui?.list() ?? [], codex: features.tui?.codex() ?? [] };
+        return { sessions: features.tui?.list() ?? [], codex: features.tui?.codex() ?? [], localScroll: features.tui?.localScroll() ?? true };
+    if (action === 'tuiScroll') {
+        if (!features.tui)
+            throw new RemoteError('The TUI is unavailable', 501);
+        if (typeof input.local !== 'boolean')
+            throw new RemoteError('Invalid scrolling choice');
+        await features.tui.setLocalScroll(input.local);
+        return { localScroll: input.local };
+    }
     const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
     if (action === 'tuiStart') {
         if (!features.tui)

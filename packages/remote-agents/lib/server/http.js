@@ -175,6 +175,7 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'workspaceFiles':
                 case 'workspaceSync':
                 case 'tuiSessions':
+                case 'tuiScroll':
                 case 'tuiStart':
                 case 'tuiTitle':
                 case 'tuiEnd':

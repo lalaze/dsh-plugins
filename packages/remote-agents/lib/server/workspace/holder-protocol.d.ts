@@ -32,5 +32,6 @@ export declare const HOLDER_FOLDER = ".dsh-remote-agents/terminal", HOLDERS_FOLD
 /**
  * Shell that ends a holder and what runs in it. The process is checked first, as a saved process ID may belong to something else after a reboot.
  * Written without the holder's script, so that it works on any holder an older version of the plugin started.
+ * It waits for the holder to tidy up, a few seconds at most: until its folder is gone a new terminal would join it and end with it.
  */
 export declare const endHolderScript: (holder: string) => string;

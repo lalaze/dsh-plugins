@@ -4,6 +4,15 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.127 — Scrolling a Claude Code conversation no longer waits on the network
+
+- In a TUI conversation Claude Code ran fullscreen and drew the scrolling itself: every wheel step went to the SSH host and came back as a repaint of the whole screen, about 3.5 KB. On a connection measured at 77 ms with 2% loss a step took about 120 ms to show and a swipe froze for 0.2 seconds at a time, while the page itself was idle.
+- Claude Code now starts with its classic renderer, so the conversation is in the terminal's own scrollback and the wheel scrolls it without sending anything: 17 ms a step on the same connection. The terminal of a TUI conversation keeps 10,000 lines instead of 1,000. Remote Claude in the sidebar's terminals starts the same way.
+- The menu in the bottom-right corner of a TUI conversation has a new switch, Local scrolling, on by default. Switch it off to get Claude Code's fullscreen mode back, with clicking to expand and jumping to the bottom. With it on, text is selected and copied as in any terminal.
+- A Claude Code that is already running keeps the renderer it started with. The menu then says so and offers Restart now, which ends it and resumes the same session; it warns when that would stop a turn in progress.
+
+Restart DSH after upgrading. After DSH restarts or the SSH connection is lost and comes back, only about the last 2,000 lines can be scrolled until Claude Code prints the conversation again. Typing is unchanged: each key is still echoed by the remote Claude Code.
+
 ## 0.2.126 — No more CodeBuddy processes left on SSH hosts
 
 - Short checks, such as listing CodeBuddy's models or validating a session, start `codebuddy --acp` over SSH and disconnect when done. On disconnect the remote program only sees its input end, and CodeBuddy keeps running after that, so every check left a process on the host. One host had 102 of them after two weeks, about 3.5 GB of memory; when the macOS permission service got stuck, each retried a read of the external disk every 5 seconds and made the outage harder to clear.

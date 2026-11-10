@@ -41,6 +41,8 @@ export interface State {
     tagSync?: Record<string, TagSyncRecord>;
     tuiSessions?: string[];
     tuiDetails?: Record<string, TuiDetails>;
+    /** Whether Claude Code in a terminal leaves scrolling to that terminal; on unless false. See TuiSessions.localScroll. */
+    tuiLocalScroll?: boolean;
 }
 /**
  * A TUI conversation's first launch of its CLI, the title the plugin last gave it, and whether DSH has been told the

@@ -120,7 +120,8 @@ export class Store {
             ...(value.relayCleanups ? { relayCleanups: value.relayCleanups } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts } : {}),
             ...(value.chatFast ? { chatFast: value.chatFast } : {}), ...(value.sharing ? { sharing: value.sharing } : {}),
             ...(value.instance ? { instance: value.instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces } : {}),
-            ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails } : {}) };
+            ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails } : {}),
+            ...(typeof value.tuiLocalScroll === 'boolean' ? { tuiLocalScroll: value.tuiLocalScroll } : {}) };
     }
     snapshot() { return structuredClone(this.state); }
     /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
