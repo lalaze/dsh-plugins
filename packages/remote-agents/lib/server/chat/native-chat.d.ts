@@ -116,7 +116,7 @@ export declare class RemoteCliAdapter extends LlmAdapter {
      * Finished turns of a conversation's CLI session that the conversation never showed, because another DSH sharing the
      * host or Open sessions sent them, after the last turn it showed and before `until`, a message it just sent, and one
      * that is still running. Undefined when there are none, or when the turn the conversation showed last is no longer in
-     * the history.
+     * the history. `language` is what the user last wrote here: see {@link transcript}.
      */
     private elsewhere;
     /**

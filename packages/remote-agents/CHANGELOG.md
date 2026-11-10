@@ -4,6 +4,14 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.125 — Turns Claude runs by itself read in your language, with one heading
+
+- A turn Claude starts without a new message, as after a background task finishes or at a wake-up it scheduled, is headed **Claude continued on its own** with its time, then the notice Claude got as a quote, then its reply. Before, each such turn had a sentence about it, a rule, a second heading and Claude's name again, which filled the chat when Claude kept waiting in a loop.
+- That heading is in the language you write in this conversation. A turn shown as soon as it started had no reply yet to tell the language from, so it was headed in English even in a Chinese conversation.
+- A turn that has shown nothing yet goes on right under its heading, without a rule. Turns sent from another DSH or Open sessions keep their heading, and a turn Claude ran by itself among them has the same short heading.
+
+The collapsed row DSH shows for the wake-up itself is still in English. Reload the page or restart DSH after upgrading.
+
 ## 0.2.124 — TUI conversations draw with WebGL by default
 
 - A TUI conversation's terminal is now drawn with WebGL unless you switch it off. Claude Code's echo of a key moves the cursor to the top of the screen and back, so the page's own renderer rebuilt every row for each key. Measured in Chrome on an Apple M4 with DSH 0.2.2-rc.1, a 113x50 terminal and Claude Code at its prompt over SSH to the same machine: a key took a median of 44 ms to show before and 26 ms with WebGL, and about 11.5 ms of the page's main thread before against about 2 ms. The desktop app and a real network were not measured.

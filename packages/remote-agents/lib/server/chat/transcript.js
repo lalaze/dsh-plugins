@@ -6,9 +6,8 @@ const LABELS = {
     en: {
         title: (cli, creator, turns) => `**History of this ${cli} session**${creator ? ` (started on ${creator})` : ''}, ${turns} ${turns === 1 ? 'turn' : 'turns'}. Messages sent here continue the same session.`,
         elsewhere: (cli, from, turns) => `**${turns} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}**, in the same ${cli} session.`,
-        own: (cli, turns) => `**${cli} continued on its own: ${turns} ${turns === 1 ? 'turn' : 'turns'}** without a new message, as after a background task it ran finished.`,
         omitted: (turns) => `_${turns} earlier ${turns === 1 ? 'turn is' : 'turns are'} not shown. The full record is in Settings → Remote agents → Open sessions._`,
-        you: 'You', continued: 'Continued on its own', tools: 'Tools', interrupted: 'Interrupted', attachments: (n) => `${n} ${n === 1 ? 'attachment' : 'attachments'}`,
+        you: 'You', continued: (cli) => `${cli} continued on its own`, tools: 'Tools', interrupted: 'Interrupted', attachments: (n) => `${n} ${n === 1 ? 'attachment' : 'attachments'}`,
         switched: (from, to) => `Switched from ${from} to ${to}`,
         switchNote: (from, to, category) => `**Model switched.** ${from}'s safeguards stopped this request${category}, so ${to} retried it. Later turns in this session stay on ${to}, and the model picker does not change to show it. To use another model, pick a different one; it applies to your next message.`,
         running: (what, more) => `Tool call · ${what}${more ? ` (${more} more running)` : ''}`,
@@ -17,9 +16,8 @@ const LABELS = {
     zh: {
         title: (cli, creator, turns) => `**这段 ${cli} 会话的历史记录**${creator ? `（在 ${creator} 上开始）` : ''}，共 ${turns} 轮。在这里发消息会接着同一个会话继续。`,
         elsewhere: (cli, from, turns) => `**${from && 'name' in from ? `在 ${from.name} 上` : from ? '在「打开会话」里' : '在别处'}进行的 ${turns} 轮**，同一个 ${cli} 会话。`,
-        own: (cli, turns) => `**${cli} 自行继续了 ${turns} 轮**，没有新消息，例如它跑的后台任务完成后接着做。`,
         omitted: (turns) => `_前面还有 ${turns} 轮没有显示，完整记录在「设置 → 远程智能体 → 打开会话」里。_`,
-        you: '你', continued: '自行继续', tools: '工具', interrupted: '已中断', attachments: (n) => `${n} 个附件`,
+        you: '你', continued: (cli) => `${cli} 自行继续`, tools: '工具', interrupted: '已中断', attachments: (n) => `${n} 个附件`,
         switched: (from, to) => `从 ${from} 切换到 ${to}`,
         switchNote: (from, to, category) => `**模型已切换。** ${from} 的安全机制拦截了这条消息${category}，这一轮改由 ${to} 重试。这段会话后面的轮次也继续用 ${to}，模型选择器不会跟着变。要换模型，选另一个模型，发下一条消息时生效。`,
         running: (what, more) => `工具调用 · ${what}${more ? `（另有 ${more} 个工具在运行）` : ''}`,
@@ -100,6 +98,7 @@ function tail(text, limit) {
     return `…\n${fences(kept) % 2 ? '```\n' : ''}${kept}`;
 }
 const closed = (text) => fences(text) % 2 ? `${text}\n\`\`\`` : text;
+const quoted = (text) => text.split('\n').map(line => `> ${line}`).join('\n');
 function stamp(value) {
     const date = value ? new Date(value) : undefined;
     if (!date || Number.isNaN(date.getTime()))
@@ -112,6 +111,7 @@ function stamp(value) {
  * tools it used. Latest turns win when the history is long; the full record stays in the sessions panel.
  * With `elsewhere` the entries are turns sent outside this conversation, headed by where they came from.
  * `writing` is what the CLI is still writing at the end, left out for whoever follows the turn: it still names the CLI and sets the language.
+ * `language` is what the user wrote in the conversation, which sets the language when these turns hold nothing they wrote.
  */
 export function transcript(entries, options) {
     const turns = [];
@@ -163,12 +163,15 @@ export function transcript(entries, options) {
         else if (item.type === 'interrupted' || item.type === 'turn_end' && item.status === 'canceled')
             target.interrupted = true;
     }
-    // The user's language decides; a turn the CLI started itself has no user text, so its replies stand in.
-    const labels = /[㐀-鿿]/.test(turns.map(t => t.unprompted ? t.replies.join('') : t.user ?? '').join('') + (options.writing ?? '')) ? LABELS.zh : LABELS.en;
+    // The user's language decides: what they wrote in these turns, else in the conversation. Turns the CLI started itself
+    // hold nothing the user wrote, and one just started holds no reply either; without both, the replies stand in.
+    const typed = turns.map(t => t.unprompted ? '' : t.user ?? '').join('') + (options.language ?? '');
+    const labels = /[㐀-鿿]/.test(typed.trim() ? typed : turns.map(t => t.replies.join('')).join('') + (options.writing ?? '')) ? LABELS.zh : LABELS.en;
     const blocks = turns.map(t => {
         const parts = [];
+        // A turn the CLI started itself is headed by that, which names the CLI, and the task notices it got.
         if (t.unprompted)
-            parts.push(`**${labels.continued}**${stamp(t.at)}${t.user ? `\n\n${closed(head(t.user, USER_LIMIT))}` : ''}`);
+            parts.push(`**${labels.continued(options.cli)}**${stamp(t.at)}${t.user ? `\n\n${quoted(closed(head(t.user, USER_LIMIT)))}` : ''}`);
         else if (t.user !== undefined) {
             const extra = t.attachments ? ` (${labels.attachments(t.attachments)})` : '';
             parts.push(`**${labels.you}**${stamp(t.at)}${extra}\n\n${closed(head(t.user || '…', USER_LIMIT))}`);
@@ -180,10 +183,11 @@ export function transcript(entries, options) {
             ...t.errors.filter(Boolean).map(error => head(error.replace(/\s+/g, ' '), 300)),
             ...(t.interrupted ? [labels.interrupted] : []),
         ];
-        if (reply || notes.length)
-            parts.push(`**${options.cli}**${reply ? `\n\n${closed(tail(reply, REPLY_LIMIT))}` : ''}${notes.length ? `\n\n_${notes.join(' · ').replace(/_/g, '\\_')}_` : ''}`);
-        else if (options.writing !== undefined && t === turns.at(-1))
-            parts.push(`**${options.cli}**`);
+        const body = [...(reply ? [closed(tail(reply, REPLY_LIMIT))] : []), ...(notes.length ? [`_${notes.join(' · ').replace(/_/g, '\\_')}_`] : [])];
+        if (t.unprompted)
+            parts.push(...body);
+        else if (body.length || options.writing !== undefined && t === turns.at(-1))
+            parts.push([`**${options.cli}**`, ...body].join('\n\n'));
         return parts.join('\n\n');
     });
     // Newest first until the budget is spent; the latest turn is always shown.
@@ -196,8 +200,9 @@ export function transcript(entries, options) {
         size += blocks[i].length;
     }
     const omitted = blocks.length - shown.length;
+    // Turns the CLI ran by itself need no title: each one's heading says so.
     const title = !options.elsewhere ? labels.title(options.cli, options.creator, turns.length)
-        : turns.length && turns.every(t => t.unprompted) ? labels.own(options.cli, turns.length) : labels.elsewhere(options.cli, options.elsewhere.from, turns.length);
-    const text = [title, ...(omitted ? [labels.omitted(omitted)] : []), ...shown].join('\n\n---\n\n');
+        : turns.length && turns.every(t => t.unprompted) ? undefined : labels.elsewhere(options.cli, options.elsewhere.from, turns.length);
+    const text = [...(title ? [title] : []), ...(omitted ? [labels.omitted(omitted)] : []), ...shown].join('\n\n---\n\n');
     return { text, ...(lastMessageId ? { lastMessageId } : {}) };
 }
