@@ -4,6 +4,14 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.124 — TUI conversations draw with WebGL by default
+
+- A TUI conversation's terminal is now drawn with WebGL unless you switch it off. Claude Code's echo of a key moves the cursor to the top of the screen and back, so the page's own renderer rebuilt every row for each key. Measured in Chrome on an Apple M4 with DSH 0.2.2-rc.1, a 113x50 terminal and Claude Code at its prompt over SSH to the same machine: a key took a median of 44 ms to show before and 26 ms with WebGL, and about 11.5 ms of the page's main thread before against about 2 ms. The desktop app and a real network were not measured.
+- The switch in the terminal's bottom-right corner still turns it off, and that choice is kept. An "off" saved by an earlier version is not: turning either switch there saved it, chosen or not, so turn WebGL off once more if you prefer the page's rendering.
+- A browser without WebGL, or one that loses it, keeps the page's rendering as before. The background blur is unchanged; switching it off did not change these timings.
+
+With WebGL, cells are whole screen pixels, so text is about 4% narrower and the same width fits a few more columns. The sidebar's terminals are DSH's own and are not changed. Reload the page or restart DSH after upgrading.
+
 ## 0.2.123 — Opt-in native DSH goals in remote Claude
 
 - Main-chat remote Claude can create, query and update the native DSH goal through three scoped MCP tools; the native round driver delivers automatic continuations to the same conversation.
