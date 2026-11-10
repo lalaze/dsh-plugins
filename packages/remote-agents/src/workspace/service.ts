@@ -4,6 +4,7 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { RemoteError, field, record } from '../core/domain.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { under, type WorkspacePlacement } from './access.js';
+import type { TuiUsageEntry } from './tui-usage.js';
 import { FILE_LIMIT, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type SyncResult, type WorkspaceManifest, type WorkspaceTarget } from './domain.js';
 
 export type SessionPlacement = (id: string, signal: AbortSignal) => Promise<WorkspacePlacement>;
@@ -80,6 +81,14 @@ export class WorkspaceService {
   async claudeTitleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string> {
     const target = await this.target(sessionId, signal);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.claudeTitleRecords(claudeSession));
+  }
+  /**
+   * What TUI conversations' CLIs logged on one machine since the last read, for their usage; every conversation is
+   * verified to be on it again first. See WorkspaceFiles.tuiUsageLines.
+   */
+  async tuiUsageLines(hostId: string, sessions: readonly { sessionId: string; target: WorkspaceTarget }[], entries: readonly TuiUsageEntry[], signal: AbortSignal): Promise<Buffer> {
+    const verify = async () => { for (const { sessionId, target } of sessions) await this.target(sessionId, signal, target); };
+    return this.machines.withWorkspace(hostId, verify, files => files.tuiUsageLines(entries, signal));
   }
   /** A new Codex thread in the conversation's verified remote directory. */
   async codexThread(sessionId: string, name: string, signal: AbortSignal): Promise<string> {

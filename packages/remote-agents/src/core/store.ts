@@ -3,6 +3,7 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from './domain.js';
+import type { TuiUsageCursor } from '../workspace/tui-usage.js';
 
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup { hostId: string; relayId: string }
@@ -28,7 +29,7 @@ export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainCha
  * A TUI conversation's first launch of its CLI, the title the plugin last gave it, and whether DSH has been told the
  * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code.
  */
-export interface TuiDetails { cli?: 'codex'; thread?: string; model?: string; effort?: string; title?: string; modelRecorded?: boolean }
+export interface TuiDetails { cli?: 'codex'; thread?: string; model?: string; effort?: string; title?: string; modelRecorded?: boolean; usage?: TuiUsageCursor }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord { names: string[]; at?: string }
 /** A deleted shared session whose deletion has not reached its SSH host yet. */

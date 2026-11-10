@@ -178,8 +178,11 @@ export class TuiActivityWatcher {
 interface DshTerminals { owners?: Map<string, { terminals: Map<string, WatchedTerminal> }> }
 interface DshSessionList { summaryFor?(session: unknown): { sessionId: string; running: boolean } }
 
-/** Report TUI conversations' activity: running through DSH's own status event and list, waiting over a route of its own. */
-export function installTuiActivity(ctx: Context, store: Pick<Store, 'snapshot'>): void {
+/**
+ * Report TUI conversations' activity: running through DSH's own status event and list, waiting over a route of its own.
+ * @param finished - told when a conversation stops running.
+ */
+export function installTuiActivity(ctx: Context, store: Pick<Store, 'snapshot'>, finished?: (sessionId: string) => void): void {
   const scopedCtx = ctx as unknown as {
     inject(services: string[], factory: (scoped: { get(name: string): unknown; effect(factory: () => () => void): void }) => void): unknown;
     emit(event: string, ...args: unknown[]): void;
@@ -191,7 +194,7 @@ export function installTuiActivity(ctx: Context, store: Pick<Store, 'snapshot'>)
     const active = new TuiActivityWatcher({
       sessions: () => store.snapshot().tuiSessions ?? [],
       terminals: id => terminals?.owners?.get(id)?.terminals.values() ?? [],
-      emit: (id, running) => scopedCtx.emit('api-session/status', id, running),
+      emit: (id, running) => { scopedCtx.emit('api-session/status', id, running); if (!running) finished?.(id); },
     });
     scoped.effect(() => {
       watcher = active;
