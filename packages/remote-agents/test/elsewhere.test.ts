@@ -286,7 +286,7 @@ test('a turn the CLI ran by itself, as after a background task finished, shows h
   assert.match(notice.content.map(b => b.type === 'text' ? b.text : '').join(''), /It is shown below/);
   const sends = remote.sends, shown = await answer(notice);
   const at = remote.entries.get(agentId)!.find(e => e.item.clientMessageId === 'cli-1')!.timestamp;
-  assert.equal(shown, `**Codex 自行继续了 1 轮**，没有新消息，例如它跑的后台任务完成后接着做。\n\n---\n\n**自行继续** · ${stamp(at)}\n\nBackground command "Run Codex" completed (exit code 0)\n\n**Codex**\n\n走路动画换好了。\n\n_工具: Bash_`);
+  assert.equal(shown, `**Codex 自行继续** · ${stamp(at)}\n\n> Background command "Run Codex" completed (exit code 0)\n\n走路动画换好了。\n\n_工具: Bash_`);
   assert.equal(remote.sends, sends, 'showing it sends nothing');
   assert.deepEqual(task().chat?.delivered, { messageId: 'cli-1', cursor: null, done: true });
   // Among turns sent from elsewhere, the block is headed by where those ran, and each turn by who started it.
@@ -294,7 +294,7 @@ test('a turn the CLI ran by itself, as after a background task finished, shows h
   elsewhere('phone-1', '提交发布', '已发布。', MAC_MINI);
   assert.equal(await adapter.catchUp(agent), true);
   assert.equal((sent.at(-1)!.source as { summary?: string }).summary, 'Codex turns on Mac mini');
-  assert.match(await answer(sent.at(-1)!), /^\*\*在 Mac mini 上进行的 2 轮\*\*[\s\S]*\*\*自行继续\*\* · [^\n]+\n\n\*\*Codex\*\*\n\n再检查了一遍。[\s\S]*\*\*你\*\*[^\n]*\n\n提交发布/);
+  assert.match(await answer(sent.at(-1)!), /^\*\*在 Mac mini 上进行的 2 轮\*\*[\s\S]*\*\*Codex 自行继续\*\* · [^\n]+\n\n再检查了一遍。[\s\S]*\*\*你\*\*[^\n]*\n\n提交发布/);
 });
 
 test('a message sent while the CLI runs a turn of its own waits for that turn and shows it ahead of the reply', async t => {
@@ -310,7 +310,7 @@ test('a message sent while the CLI runs a turn of its own waits for that turn an
   remote.append(agentId, { type: 'turn_end', clientMessageId: 'cli-1', status: 'completed' }); live.status = 'idle'; live.activeTurn = null;
   const reply = await replying;
   assert.equal(remote.sends, sends + 1); assert.equal(remote.interrupts, 0, 'the turn is never interrupted');
-  assert.match(reply, /^\*\*Codex 自行继续了 1 轮\*\*[\s\S]*\*\*Codex\*\*\n\n走路动画换好了。\n\n---\n\nFollow-up completed\.$/);
+  assert.match(reply, /^\*\*Codex 自行继续\*\* · [^\n]+\n\n> Background command "Run Codex" completed \(exit code 0\)\n\n走路动画换好了。\n\n---\n\nFollow-up completed\.$/);
   assert.deepEqual(prompts(remote.entries.get(agentId)), ['修复登录问题', 'Background command "Run Codex" completed (exit code 0)', '跑完了吗']);
   assert.deepEqual(task().chat?.delivered?.done, true);
 });
@@ -336,6 +336,21 @@ test('a turn the CLI runs by itself shows here while it runs, and Stop here stop
   controller.abort(); await stopped;
   assert.equal(remote.stops, 1); assert.equal(remote.sends, sends, 'showing it sends nothing');
   assert.equal(await adapter.catchUp(agent), false, 'what it showed is not shown again');
+});
+
+test('a turn the CLI just started by itself is headed in the conversation\'s language, and its output goes on under the heading', async t => {
+  for (const [first, heading] of [['修复登录问题', 'Codex 自行继续'], ['Fix the login bug', 'Codex continued on its own']]) {
+    const { adapter, remote, task, agentId, agent, sent, messages, request } = await setup(t, first);
+    const live = remote.live(task().id);
+    live.status = 'running'; live.activeTurn = { turnId: 'own-turn', startedAt: null, unprompted: true };
+    remote.append(agentId, { type: 'user_message', text: '', clientMessageId: 'cli-1', unprompted: true });
+    assert.equal(await adapter.catchUp(agent), true);
+    const shown = (async () => text(await collect(adapter.stream(request([...messages, sent[0]])))))();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    remote.append(agentId, { type: 'assistant_message', text: 'Backlog is still draining.' });
+    remote.append(agentId, { type: 'turn_end', clientMessageId: 'cli-1', status: 'completed' }); live.status = 'idle'; live.activeTurn = null;
+    assert.match(await shown, new RegExp(`^\\*\\*${heading}\\*\\* · [^\\n]+\\n\\nBacklog is still draining\\.$`), 'one heading, no title, rule or second name');
+  }
 });
 
 test('a sentence still being written when a running turn is first read stays whole', async t => {
@@ -377,7 +392,7 @@ test('a message waiting for a turn the CLI runs by itself shows that turn as it 
   }
   assert.ok(whileRunning, 'its output shows before it ends');
   assert.match(note, /Codex 正在跑它自己开始的一轮，你的消息会在这一轮结束后发送。现在按停止会中断这一轮。/);
-  assert.match(shown, /^\*\*Codex 自行继续了 1 轮\*\*[\s\S]*检查通过，正在发布。已经发布。\n\n---\n\nFollow-up completed\.$/);
+  assert.match(shown, /^\*\*Codex 自行继续\*\* · [^\n]+\n\n> [^\n]+\n\n检查通过，正在发布。已经发布。\n\n---\n\nFollow-up completed\.$/);
   assert.equal(shown.match(/检查通过/g)?.length, 1, 'output already shown is not repeated');
   assert.equal(remote.sends, sends + 1); assert.equal(remote.interrupts, 0); assert.equal(remote.stops, 0, 'the turn runs to its end');
   assert.deepEqual(prompts(remote.entries.get(agentId)), ['修复登录问题', 'Background command "Run the checks" completed (exit code 0)', '跑完了吗']);

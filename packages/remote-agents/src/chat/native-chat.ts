@@ -247,9 +247,9 @@ export class RemoteCliAdapter extends LlmAdapter {
    * Finished turns of a conversation's CLI session that the conversation never showed, because another DSH sharing the
    * host or Open sessions sent them, after the last turn it showed and before `until`, a message it just sent, and one
    * that is still running. Undefined when there are none, or when the turn the conversation showed last is no longer in
-   * the history.
+   * the history. `language` is what the user last wrote here: see {@link transcript}.
    */
-  private async elsewhere(taskId: string, signal?: AbortSignal, until?: string): Promise<Elsewhere | undefined> {
+  private async elsewhere(taskId: string, signal?: AbortSignal, until?: string, language?: string): Promise<Elsewhere | undefined> {
     const service = this.projects.service, task = service.store.task(t => t.id === taskId), after = task?.chat?.delivered?.messageId;
     if (!task?.chat || task.chat.history || !after || after === until) return;
     // Read back from the end to the turn the conversation showed last, which is usually close to it.
@@ -285,6 +285,8 @@ export class RemoteCliAdapter extends LlmAdapter {
     if (running) {
       const written = entries.findLastIndex(e => e.item.type !== 'assistant_message' && e.item.type !== 'reasoning');
       if (written < entries.length - 1) writing = entries.slice(written + 1).map(e => e.item.type === 'assistant_message' ? String(e.item.text ?? '') : '').join('');
+      // A turn that has shown nothing but its heading goes on under it, as a sentence being written does.
+      else if (!entries.slice(latest + 1).some(e => e.item.type !== 'reasoning' && showsOutput(e))) writing = '';
       resume = { epoch: end!.epoch, seq: entries[written].seqEnd };
       entries = entries.slice(0, written + 1);
     }
@@ -299,7 +301,7 @@ export class RemoteCliAdapter extends LlmAdapter {
     const cli = CLI_NAMES[task.provider] ?? task.provider, turns = messages.length;
     const summary = sent.length ? `${cli} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}`
       : `${cli} continued on its own${turns > 1 ? `, ${turns} turns` : ''}`;
-    return { text: transcript(entries, { cli, elsewhere: { from }, ...(writing !== undefined ? { writing } : {}) }).text, summary, lastMessageId, turns, ...(running ? { running: resume } : {}), ...(writing !== undefined ? { writing: true } : {}) };
+    return { text: transcript(entries, { cli, elsewhere: { from }, ...(writing !== undefined ? { writing } : {}), ...(language ? { language } : {}) }).text, summary, lastMessageId, turns, ...(running ? { running: resume } : {}), ...(writing !== undefined ? { writing: true } : {}) };
   }
   /**
    * Show turns that another DSH sharing the host, or Open sessions, ran in this conversation's CLI session; one still
@@ -657,7 +659,7 @@ export class RemoteCliAdapter extends LlmAdapter {
           shown = followed;
         } else { settled = true; shown = false; }
         // Then the turns another DSH or Open sessions ran since, once they finished. A failed read leaves them for the next message.
-        const turns = task && await this.elsewhere(taskId, signal).catch(() => undefined);
+        const turns = task && await this.elsewhere(taskId, signal, undefined, currentPrompt).catch(() => undefined);
         signal.throwIfAborted();
         if (turns) {
           yield* endBlock(); yield* textChunk('text', `${index ? '\n\n---\n\n' : ''}${turns.text}`); shown = true;
@@ -731,7 +733,7 @@ export class RemoteCliAdapter extends LlmAdapter {
           for (let summary = await service.summary(task.id), noted = false; busy(summary) && summary.unprompted; summary = await service.summary(task.id)) {
             waitingForOwnTurn = true;
             if (!noted) { noted = true; yield* textChunk('reasoning', `${ownTurnWaitNote(provider.label, currentPrompt)}\n`); yield* endBlock(); }
-            const own = await this.elsewhere(task.id, signal).catch(() => undefined);
+            const own = await this.elsewhere(task.id, signal, undefined, currentPrompt).catch(() => undefined);
             if (!own?.running) { await pause(this.pollMs, undefined, { signal }); continue; }
             yield* textChunk('text', own.text);
             if (own.writing) yield* textChunk('text', '\n\n'); else yield* endBlock();
@@ -757,7 +759,7 @@ export class RemoteCliAdapter extends LlmAdapter {
       // A Stop or shutdown from here on concerns this message, even before any of its output is read.
       reached = { id: messageId, cursor: undefined };
       // Turns another DSH or Open sessions ran since this conversation's last response come first, in the order they ran.
-      const turns = task && await this.elsewhere(taskId, signal, messageId).catch(() => undefined);
+      const turns = task && await this.elsewhere(taskId, signal, messageId, currentPrompt).catch(() => undefined);
       if (turns) yield* textChunk('text', `${turns.text}\n\n---\n\n`);
       const receipt = await service.messageTimeline(taskId, messageId);
       if (!receipt.hasFollowingMessage) await service.store.update(state => { const saved = state.tasks.find(t => t.id === taskId); if (saved?.chat) saved.chat.lastUserId = userId; });
