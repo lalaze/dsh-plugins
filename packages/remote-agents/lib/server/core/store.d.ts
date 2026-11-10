@@ -1,4 +1,5 @@
 import { type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from './domain.js';
+import type { TuiUsageCursor } from '../workspace/tui-usage.js';
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup {
     hostId: string;
@@ -55,6 +56,7 @@ export interface TuiDetails {
     effort?: string;
     title?: string;
     modelRecorded?: boolean;
+    usage?: TuiUsageCursor;
 }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord {

@@ -167,8 +167,11 @@ export class TuiActivityWatcher {
         this.deps.emit(sessionId, busy);
     }
 }
-/** Report TUI conversations' activity: running through DSH's own status event and list, waiting over a route of its own. */
-export function installTuiActivity(ctx, store) {
+/**
+ * Report TUI conversations' activity: running through DSH's own status event and list, waiting over a route of its own.
+ * @param finished - told when a conversation stops running.
+ */
+export function installTuiActivity(ctx, store, finished) {
     const scopedCtx = ctx;
     let watcher;
     scopedCtx.inject(['terminalController', 'sessionController'], (scoped) => {
@@ -177,7 +180,8 @@ export function installTuiActivity(ctx, store) {
         const active = new TuiActivityWatcher({
             sessions: () => store.snapshot().tuiSessions ?? [],
             terminals: id => terminals?.owners?.get(id)?.terminals.values() ?? [],
-            emit: (id, running) => scopedCtx.emit('api-session/status', id, running),
+            emit: (id, running) => { scopedCtx.emit('api-session/status', id, running); if (!running)
+                finished?.(id); },
         });
         scoped.effect(() => {
             watcher = active;

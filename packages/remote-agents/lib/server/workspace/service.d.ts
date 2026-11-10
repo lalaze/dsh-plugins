@@ -1,5 +1,6 @@
 import type { WorkspaceHosts } from './hosts.js';
 import { type WorkspacePlacement } from './access.js';
+import type { TuiUsageEntry } from './tui-usage.js';
 import { type FileOperation, type GitBatch, type GitRun, type SyncResult, type WorkspaceTarget } from './domain.js';
 export type SessionPlacement = (id: string, signal: AbortSignal) => Promise<WorkspacePlacement>;
 export declare const hash: (data: Uint8Array | string) => string;
@@ -28,6 +29,14 @@ export declare class WorkspaceService {
     endHolder(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
     /** The title records of a Claude Code session on the conversation's verified machine. */
     claudeTitleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string>;
+    /**
+     * What TUI conversations' CLIs logged on one machine since the last read, for their usage; every conversation is
+     * verified to be on it again first. See WorkspaceFiles.tuiUsageLines.
+     */
+    tuiUsageLines(hostId: string, sessions: readonly {
+        sessionId: string;
+        target: WorkspaceTarget;
+    }[], entries: readonly TuiUsageEntry[], signal: AbortSignal): Promise<Buffer>;
     /** A new Codex thread in the conversation's verified remote directory. */
     codexThread(sessionId: string, name: string, signal: AbortSignal): Promise<string>;
     /** The title records of a Codex thread on the conversation's verified machine. */

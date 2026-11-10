@@ -10,6 +10,7 @@ import { WorkspaceService } from './service.js';
 import { endClosedTerminals, installWorkspaceTerminal } from './terminal.js';
 import { installTuiActivity } from './tui-activity.js';
 import { TuiFiles } from './tui-files.js';
+import { TuiUsage } from './tui-usage.js';
 import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
@@ -59,7 +60,16 @@ export async function installWorkspaces(ctx, store, machines) {
     ctx.connection.fetch.register({ path: '/api/remote-agents/download', methods: ['GET'], requestBody: 'buffered', fetch: transfer });
     // The client's EDITOR_SRC; the build writes the bundle next to lib/server.
     ctx.connection.fetch.register({ path: '/api/remote-agents/editor.js', methods: ['GET'], requestBody: 'buffered', fetch: editorHandler(new URL('../../editor.js', import.meta.url)) });
-    installTuiActivity(ctx, store);
+    // TUI conversations' usage, read from their CLIs' logs, as no relay sees their turns.
+    const tuiUsage = new TuiUsage(store, {
+        target: (id, signal) => files.target(id, signal),
+        read: (hostId, sessions, entries, signal) => files.tuiUsageLines(hostId, sessions, entries, signal),
+        emit: record => ctx.emit('remote-agents/usage', record),
+        warn: message => ctx.get('logger')?.warn?.(message),
+    });
+    tuiUsage.start();
+    ctx.effect(() => () => tuiUsage.close());
+    installTuiActivity(ctx, store, id => tuiUsage.finished(id));
     ctx.inject(['terminalController'], scoped => {
         scoped.effect(() => endClosedTerminals(scoped.get('terminalController'), (sessionId, holder) => files.endHolder(sessionId, holder, AbortSignal.timeout(20_000))));
         let disposed = false, cleanup;

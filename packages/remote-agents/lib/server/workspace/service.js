@@ -99,6 +99,15 @@ export class WorkspaceService {
         const target = await this.target(sessionId, signal);
         return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.claudeTitleRecords(claudeSession));
     }
+    /**
+     * What TUI conversations' CLIs logged on one machine since the last read, for their usage; every conversation is
+     * verified to be on it again first. See WorkspaceFiles.tuiUsageLines.
+     */
+    async tuiUsageLines(hostId, sessions, entries, signal) {
+        const verify = async () => { for (const { sessionId, target } of sessions)
+            await this.target(sessionId, signal, target); };
+        return this.machines.withWorkspace(hostId, verify, files => files.tuiUsageLines(entries, signal));
+    }
     /** A new Codex thread in the conversation's verified remote directory. */
     async codexThread(sessionId, name, signal) {
         const target = await this.target(sessionId, signal);

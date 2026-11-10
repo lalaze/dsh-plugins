@@ -4,6 +4,16 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.128 — TUI conversations count in usage statistics
+
+- A TUI conversation's Claude Code or Codex runs in a terminal, so none of its turns passed through the relay that reports a chat's usage, and Usage statistics recorded nothing for them. A day of TUI work showed 0.
+- Their usage is now read from the CLI's own log on the SSH host: Claude Code's session file and its subagents' files, or the Codex thread's file and those of its subagent threads, such as the reviewer of approval requests. Each turn becomes one record per model, with the machine and remote directory, as a chat's turn does. A subagent's usage counts toward the turn running at the time, under its own model.
+- The log is read a few seconds after a turn ends while the TUI is open, and every 10 minutes for all TUI conversations, so turns run while DSH was closed are added too. Only the lines that hold usage are fetched, without the message text: about 770 KB for an 8.8 MB session log, then only what is new.
+- The first read of a TUI conversation also adds its earlier turns, at the times they ran.
+- A turn stopped with Esc counts at once. A reply cut off that way is logged with only the usage it started with, so the output it had written so far is not counted, and a request stopped before it wrote anything leaves no usage at all. A turn whose CLI was killed counts once its log has been quiet for 30 minutes.
+
+Restart DSH after upgrading. The first read of a Codex TUI conversation looks through the host's Codex threads once for its subagents: about 1.5 seconds on a host with 740 of them.
+
 ## 0.2.127 — Scrolling a Claude Code conversation no longer waits on the network
 
 - In a TUI conversation Claude Code ran fullscreen and drew the scrolling itself: every wheel step went to the SSH host and came back as a repaint of the whole screen, about 3.5 KB. On a connection measured at 77 ms with 2% loss a step took about 120 ms to show and a swipe froze for 0.2 seconds at a time, while the page itself was idle.

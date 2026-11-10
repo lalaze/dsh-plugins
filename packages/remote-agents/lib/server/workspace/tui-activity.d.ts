@@ -82,6 +82,9 @@ export declare class TuiActivityWatcher {
     private stop;
     private update;
 }
-/** Report TUI conversations' activity: running through DSH's own status event and list, waiting over a route of its own. */
-export declare function installTuiActivity(ctx: Context, store: Pick<Store, 'snapshot'>): void;
+/**
+ * Report TUI conversations' activity: running through DSH's own status event and list, waiting over a route of its own.
+ * @param finished - told when a conversation stops running.
+ */
+export declare function installTuiActivity(ctx: Context, store: Pick<Store, 'snapshot'>, finished?: (sessionId: string) => void): void;
 export {};
