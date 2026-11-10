@@ -7,8 +7,17 @@ const SAVED_KEY = 'remote-agents.tui.render';
 const LOOK_MS = 100, LOOK_LIMIT_MS = 15_000;
 
 export interface RenderChoices { webgl: boolean; blur: boolean }
-/** What this page's look has been until now, so nothing changes for anyone who leaves the switches alone. */
-const DEFAULTS: RenderChoices = { webgl: false, blur: true };
+/**
+ * WebGL unless it is switched off. Claude Code's echo of one key moves the cursor to the top of the screen and back, so
+ * xterm takes every row as changed and the page's own renderer builds them all again: measured on DSH 0.2.2-rc.1 at 113x50,
+ * a key took a median of 44 ms to show against 26 ms with WebGL, and about 11.5 ms of the page's main thread against 2 ms.
+ */
+const DEFAULTS: RenderChoices = { webgl: true, blur: true };
+/**
+ * Marks a value saved since WebGL became the default. Until then turning either switch saved `webgl: false` along with it,
+ * so in an older value "off" need not be anyone's choice and the default applies; "on" always was one.
+ */
+const SAVED_VERSION = 2;
 export type WebglIssue = 'unavailable' | 'lost';
 
 interface ChoiceStorage { getItem(key: string): string | null; setItem(key: string, value: string): void }
@@ -20,9 +29,10 @@ export class TuiRenderChoices {
   private problem?: WebglIssue;
   private readonly listeners = new Set<() => void>();
   constructor(private readonly storage = browserStorage()) {
-    let saved: Partial<RenderChoices> = {};
-    try { saved = JSON.parse(storage?.getItem(SAVED_KEY) ?? '{}') as Partial<RenderChoices>; } catch { /* a damaged value just means the defaults */ }
-    this.choices = { webgl: saved.webgl ?? DEFAULTS.webgl, blur: saved.blur ?? DEFAULTS.blur };
+    let saved: Partial<RenderChoices> & { version?: number } = {};
+    try { saved = JSON.parse(storage?.getItem(SAVED_KEY) ?? '{}') as typeof saved; } catch { /* a damaged value just means the defaults */ }
+    const webgl = saved.webgl === true || saved.version === SAVED_VERSION ? saved.webgl : undefined;
+    this.choices = { webgl: webgl ?? DEFAULTS.webgl, blur: saved.blur ?? DEFAULTS.blur };
   }
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   snapshot = () => this.choices;
@@ -31,7 +41,7 @@ export class TuiRenderChoices {
   set(change: Partial<RenderChoices>): void {
     this.choices = { ...this.choices, ...change };
     if (change.webgl !== undefined) this.problem = undefined;
-    try { this.storage?.setItem(SAVED_KEY, JSON.stringify(this.choices)); } catch { /* it still applies until the page reloads */ }
+    try { this.storage?.setItem(SAVED_KEY, JSON.stringify({ ...this.choices, version: SAVED_VERSION })); } catch { /* it still applies until the page reloads */ }
     this.notify();
   }
   report(problem: WebglIssue | undefined): void {

@@ -42,25 +42,42 @@ test('the background keeps its color with nothing to paint', () => {
   assert.equal(withoutPaint(undefined), undefined);
 });
 
-test('the switches start as the page has always been, and are remembered', () => {
-  const saved = new Map<string, string>();
-  const storage = { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, value: string) => { saved.set(key, value); } };
+const memory = (value?: string) => {
+  const saved = new Map<string, string>(value === undefined ? [] : [['remote-agents.tui.render', value]]);
+  return { getItem: (key: string) => saved.get(key) ?? null, setItem: (key: string, text: string) => { saved.set(key, text); } };
+};
+
+test('the switches start with WebGL and blur on, and are remembered', () => {
+  const storage = memory();
   const choices = new TuiRenderChoices(storage);
-  assert.deepEqual(choices.snapshot(), { webgl: false, blur: true });
+  assert.deepEqual(choices.snapshot(), { webgl: true, blur: true });
   let changes = 0;
   const off = choices.subscribe(() => { changes += 1; });
-  choices.set({ webgl: true });
+  choices.set({ webgl: false });
   choices.set({ blur: false });
   assert.equal(changes, 2);
   off();
   choices.set({ blur: false });
   assert.equal(changes, 2);
-  assert.deepEqual(new TuiRenderChoices(storage).snapshot(), { webgl: true, blur: false });
+  assert.deepEqual(new TuiRenderChoices(storage).snapshot(), { webgl: false, blur: false });
+});
+
+test('WebGL switched off stays off, while an "off" saved before it was the default gives way to it', () => {
+  // Saved by turning the blur off in an older version, which wrote WebGL's old default beside it.
+  const older = memory('{"webgl":false,"blur":false}');
+  assert.deepEqual(new TuiRenderChoices(older).snapshot(), { webgl: true, blur: false });
+  assert.deepEqual(new TuiRenderChoices(memory('{"webgl":true,"blur":false}')).snapshot(), { webgl: true, blur: false });
+  // Switched off since: a choice, kept through the blur switch and a reload.
+  const chosen = new TuiRenderChoices(older);
+  chosen.set({ webgl: false });
+  chosen.set({ blur: true });
+  assert.deepEqual(new TuiRenderChoices(older).snapshot(), { webgl: false, blur: true });
+  assert.deepEqual(new TuiRenderChoices(memory('{"blur":false,"version":2}')).snapshot(), { webgl: true, blur: false });
 });
 
 test('a damaged or partial saved value falls back to the defaults, and a storage that throws is survived', () => {
   const damaged = { getItem: () => 'not json', setItem() {} };
-  assert.deepEqual(new TuiRenderChoices(damaged).snapshot(), { webgl: false, blur: true });
+  assert.deepEqual(new TuiRenderChoices(damaged).snapshot(), { webgl: true, blur: true });
   assert.deepEqual(new TuiRenderChoices({ getItem: () => '{"webgl":true}', setItem() {} }).snapshot(), { webgl: true, blur: true });
   const full = new TuiRenderChoices({ getItem: () => null, setItem() { throw new Error('quota'); } });
   full.set({ blur: false });
