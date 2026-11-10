@@ -854,6 +854,17 @@ test('other CLIs are launched without it', async t => {
   for (const child of ssh.children) assert.equal(child.options?.prefix, undefined);
 });
 
+test('CLIs started without a relay end with their SSH session: model checks and direct sessions alike', async t => {
+  for (const provider of ['codebuddy', 'claude', 'codex']) {
+    const { service, ssh, request, hostId } = await fixture(t, provider);
+    await service.providers(hostId, request.cwd);
+    assert.ok(ssh.children.length > 0);
+    for (const child of ssh.children) assert.equal(child.options?.endWithSession, true, `${provider} model check`);
+    await service.create(request);
+    assert.equal(ssh.live.options?.endWithSession, true, `${provider} session without a relay`);
+  }
+});
+
 test('pre-upgrade Claude sessions can select Auto and retain it across messages and reconnects', async t => {
   const { service, ssh, request, store } = await fixture(t, 'claude');
   const agent = await service.create(request), first = ssh.live;

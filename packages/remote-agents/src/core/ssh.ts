@@ -66,7 +66,29 @@ export interface StartOptions {
   stderr?(data: Buffer): void;
   /** Shell commands to run first, ending in `; `, for what the command needs in its environment. */
   prefix?: string;
+  /** A CLI started directly rather than under a relay: make sure it ends with the SSH session (see `ENDS_WITH_INPUT`). */
+  endWithSession?: boolean;
 }
+/**
+ * Runs a CLI so that it ends with its SSH session. Over a plain pipe the remote side gets no hangup when the session
+ * closes, only the end of its input, and some CLIs keep running after that (CodeBuddy in ACP mode): every model probe left
+ * one behind on the host. This keeps the CLI as its child with its own input pipe. When the session's input ends, the
+ * CLI's input ends too; a CLI still running 2 seconds later gets TERM, and KILL 5 seconds after that. The CLI's output
+ * goes straight to the session, its exit status comes back as before, and TERM, HUP or INT sent here is passed on.
+ * The CLI's input stays an ordinary pipe: Node on macOS did not see the end of input from a named FIFO, so a FIFO fed by
+ * a shell `cat` cannot stand in.
+ * It avoids newer syntax, as the host's Node may be old; without Node the CLI runs as it did before.
+ */
+const ENDS_WITH_INPUT = `var spawn = require('child_process').spawn, signals = require('os').constants.signals;
+var child = spawn(process.argv[1], process.argv.slice(2), { stdio: ['pipe', 'inherit', 'inherit'] });
+child.on('error', function (error) { process.stderr.write(error.message + '\\n'); process.exit(127); });
+child.on('exit', function (code, signal) { process.exit(code !== null ? code : 128 + (signals[signal] || 15)); });
+child.stdin.on('error', function () { process.stdin.unpipe(child.stdin); process.stdin.resume(); });
+process.stdin.pipe(child.stdin);
+process.stdin.on('end', function () {
+  setTimeout(function () { child.kill('SIGTERM'); setTimeout(function () { child.kill('SIGKILL'); }, 5000); }, 2000);
+});
+['SIGTERM', 'SIGHUP', 'SIGINT'].forEach(function (name) { process.on(name, function () { child.kill(name); }); });`;
 export interface SshTransport {
   /** `login: false` skips the remote login environment; for commands that need no CLI configuration. */
   exec(script: string, timeout?: number, options?: { login?: boolean }): Promise<string>;
@@ -251,7 +273,10 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
     } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort); if (!ended) child.kill('SIGTERM'); }
   }
   start(cwd: string, argv: string[], options: StartOptions = {}): Child {
-    const process = this.spawn(`${options.prefix ?? ''}cd ${quote(cwd)} && exec ${argv.map(quote).join(' ')}`);
+    const command = argv.map(quote).join(' ');
+    const process = this.spawn(`${options.prefix ?? ''}cd ${quote(cwd)} || exit\n${options.endWithSession
+      ? `if command -v node >/dev/null 2>&1; then exec node --no-warnings -e ${quote(ENDS_WITH_INPUT)} -- ${command}; fi\n`
+      : ''}exec ${command}`);
     let stderr = '', exited: Error | undefined;
     const data = new Set<(data: Buffer) => void>(), exits = new Set<(error: Error) => void>();
     const end = (error: Error) => { if (exited) return; exited = error; for (const listener of exits) listener(error); };

@@ -330,7 +330,7 @@ done`}`, 15_000, { login: false });
       }
       const launch = definition.protocol === 'claude' ? claudeProbe(path) : argv;
       this.assertOpen();
-      peer = new JsonlPeer(this.transport.start(canonical, launch, definition.protocol === 'claude' ? { prefix: CLAUDE_ROOT_ENV } : undefined)); this.probes.add(peer);
+      peer = new JsonlPeer(this.transport.start(canonical, launch, { endWithSession: true, ...(definition.protocol === 'claude' ? { prefix: CLAUDE_ROOT_ENV } : {}) })); this.probes.add(peer);
       peer.onMessage(message => { if (message.method && message.id !== undefined) peer?.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Discovery does not execute tools' } }); });
       let models: Model[] = [], modes: Provider['modes'] = [], defaultModeId: string | undefined;
       if (definition.protocol === 'codex') {
@@ -627,7 +627,7 @@ done`}`, 15_000, { login: false });
         link = this.link(relayId, 0, state => { if (this.sessions.get(task.id)?.relay === link) this.sessions.get(task.id)!.agent.reconnecting = !state.connected; }, task.id);
       }
       this.assertOpen();
-      const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch, { prefix })), history, link);
+      const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch, { prefix, endWithSession: true })), history, link);
       this.sessions.set(task.id, session);
       link?.open();
       try {
@@ -770,7 +770,7 @@ done`}`, 15_000, { login: false });
     this.assertOpen();
     if (!path.startsWith('/')) throw new Error(`${definition.label} is not installed on this SSH host`);
     const argv = definition.protocol === 'claude' ? claudeProbe(path) : [path, ...definition.args];
-    const peer = new JsonlPeer(this.transport.start(cwd ?? await this.homeDirectory(), argv, definition.protocol === 'claude' ? { prefix: CLAUDE_ROOT_ENV } : undefined)); this.probes.add(peer);
+    const peer = new JsonlPeer(this.transport.start(cwd ?? await this.homeDirectory(), argv, { endWithSession: true, ...(definition.protocol === 'claude' ? { prefix: CLAUDE_ROOT_ENV } : {}) })); this.probes.add(peer);
     try {
       peer.onMessage(message => { if (message.method && message.id !== undefined) peer.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Usage checks do not execute tools' } }); });
       if (definition.protocol === 'codex') { await initializeCodex(peer); return await readAccountUsage(peer, 'codex'); }

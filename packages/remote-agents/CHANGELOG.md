@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.126 — No more CodeBuddy processes left on SSH hosts
+
+- Short checks, such as listing CodeBuddy's models or validating a session, start `codebuddy --acp` over SSH and disconnect when done. On disconnect the remote program only sees its input end, and CodeBuddy keeps running after that, so every check left a process on the host. One host had 102 of them after two weeks, about 3.5 GB of memory; when the macOS permission service got stuck, each retried a read of the external disk every 5 seconds and made the outage harder to clear.
+- These checks, and sessions run directly over SSH on hosts without relay support, now end with their connection: the CLI gets 2 seconds to exit by itself, then TERM, then KILL 5 seconds later. A CLI that exits by itself still reports its exit status. This needs Node.js on the host; without it nothing changes. Normal sessions run under a relay and are not affected.
+
+Processes already left behind are not cleaned up automatically. On the host, `ps -axo pid=,ppid=,command= | awk '/[c]odebuddy --acp/ && $2==1'` lists the ones whose parent is now launchd or init. Restart DSH after upgrading.
+
 ## 0.2.125 — Turns Claude runs by itself read in your language, with one heading
 
 - A turn Claude starts without a new message, as after a background task finishes or at a wake-up it scheduled, is headed **Claude continued on its own** with its time, then the notice Claude got as a quote, then its reply. Before, each such turn had a sentence about it, a rule, a second heading and Claude's name again, which filled the chat when Claude kept waiting in a loop.

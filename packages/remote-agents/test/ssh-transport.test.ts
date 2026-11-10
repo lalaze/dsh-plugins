@@ -81,6 +81,74 @@ test('a prefix runs before the CLI, whose command stops if its directory is miss
   assert.equal(await output(join(root, 'missing')), '', 'a prefix does not let the CLI start somewhere else');
 });
 
+/** Whether a process with this ID still runs (a zombie has been reaped by its parent shell soon after). */
+function alive(pid: number): boolean {
+  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+}
+async function gone(pid: number, within: number): Promise<number> {
+  const started = Date.now();
+  while (alive(pid)) { if (Date.now() - started > within) return -1; await new Promise(resolve => setTimeout(resolve, 100)); }
+  return Date.now() - started;
+}
+/** Starts a CLI that prints its process ID first, and resolves with that ID. */
+function started(transport: OpenSshTransport, cwd: string, script: string) {
+  const child = transport.start(cwd, ['sh', '-c', `printf '%s\\n' "$$"; ${script}`], { endWithSession: true });
+  let text = '';
+  const pid = new Promise<number>((resolve, reject) => {
+    child.onData(data => { text += data; const line = /^(\d+)\n/.exec(text); if (line) resolve(Number(line[1])); });
+    child.onExit(error => reject(error));
+  });
+  return { child, pid };
+}
+
+test('a directly started CLI that keeps running after its input ends is stopped with the session', { skip: !supported, timeout: 30_000 }, async t => {
+  const { root, ssh } = await fakeSsh(t), transport = new OpenSshTransport('ssh://host.test', ssh);
+  // Like CodeBuddy and DSH in ACP mode: never reads its input, so the end of it changes nothing.
+  const quiet = started(transport, root, 'exec sleep 600'), quietPid = await quiet.pid;
+  t.after(() => { if (alive(quietPid)) process.kill(quietPid, 'SIGKILL'); });
+  quiet.child.stop();
+  const quietMs = await gone(quietPid, 6_000);
+  assert.ok(quietMs >= 0, 'stopped by TERM once its input ended');
+  assert.ok(quietMs >= 1_500, `it had a moment to exit by itself first (${quietMs} ms)`);
+  // One that ignores TERM too.
+  const stubborn = started(transport, root, `trap '' TERM; while :; do sleep 1; done`), stubbornPid = await stubborn.pid;
+  t.after(() => { if (alive(stubbornPid)) process.kill(stubbornPid, 'SIGKILL'); });
+  stubborn.child.stop();
+  assert.ok(await gone(stubbornPid, 10_000) >= 0, 'killed 5 seconds after TERM');
+});
+
+test('input reaches the CLI and its exit ends the session with its status while input stays open', { skip: !supported }, async t => {
+  const { root, ssh } = await fakeSsh(t), transport = new OpenSshTransport('ssh://host.test', ssh);
+  const child = transport.start(root, ['sh', '-c', 'IFS= read -r line; printf "got %s\\n" "$line"; read -r second; printf "then %s\\n" "$second"; exit 7'], { endWithSession: true });
+  let text = ''; const start = Date.now();
+  const ended = new Promise<Error>(resolve => { child.onData(data => { text += data; }); child.onExit(resolve); });
+  child.write('中文 line\n'); child.write('two\n');
+  const error = await ended;
+  assert.equal(text, 'got 中文 line\nthen two\n');
+  assert.equal(error.message, 'Remote CLI exited (7)');
+  assert.ok(Date.now() - start < 2_000, 'the session ends as soon as the CLI does, not when its input ends');
+});
+
+test('a CLI that exits by itself as its input ends keeps its own exit', { skip: !supported }, async t => {
+  const { root, ssh } = await fakeSsh(t), transport = new OpenSshTransport('ssh://host.test', ssh);
+  // Like Claude and Codex: reads to the end of its input and exits on its own, with no signal.
+  const marker = join(root, 'exited');
+  const reader = started(transport, root, `trap 'printf TERM > ${marker}; exit 1' TERM; cat >/dev/null; printf clean > ${marker}`), pid = await reader.pid;
+  reader.child.stop();
+  assert.ok(await gone(pid, 3_000) >= 0);
+  assert.equal(await readFile(marker, 'utf8'), 'clean');
+});
+
+test('only a CLI started directly gets the session guard; other commands stay the session process itself', { skip: !supported }, async t => {
+  const { root, ssh } = await fakeSsh(t), transport = new OpenSshTransport('ssh://host.test', ssh);
+  const parent = (options?: { endWithSession: true }) => new Promise<string>((resolve, reject) => {
+    let text = ''; const child = transport.start(root, ['sh', '-c', 'ps -o args= -p "$PPID"'], options);
+    child.onData(data => { text += data; }); child.onExit(error => /\(0\)$/.test(error.message) ? resolve(text) : reject(error));
+  });
+  assert.doesNotMatch(await parent(), /--no-warnings -e/, 'a relay attachment is what the session started');
+  assert.match(await parent({ endWithSession: true }), /node --no-warnings -e/);
+});
+
 test('command output split inside a character is decoded intact', { skip: !supported }, async t => {
   const { ssh } = await fakeSsh(t), transport = new OpenSshTransport('ssh://host.test', ssh);
   // 中 is E4 B8 AD: the pause makes ssh deliver its bytes in two reads.
