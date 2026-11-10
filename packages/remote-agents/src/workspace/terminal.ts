@@ -135,8 +135,10 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const interactive = cli === 'claude' ? claude : cli === 'codex' ? codex : undefined;
   // The same process stays in charge of the terminal throughout; a shell run beside it could be left without the TTY.
   const start = interactive ? shell + " -lic '" + interactive + "; exec " + shell + " -l'" : shell + ' -l';
+  // Claude Code's classic renderer, so that the terminal scrolls the conversation itself; see TuiSessions.localScroll.
+  const localScroll = cli === 'claude' && saved.tuiLocalScroll !== false;
   // SSH does not carry COLORTERM. Without it Claude Code falls back to 256 colors, which turns its orange pink.
-  const command = 'cd ' + quote(placement.cwd) + (interactive ? ' && export COLORTERM=truecolor' : '') + ' && exec ' + start;
+  const command = 'cd ' + quote(placement.cwd) + (interactive ? ' && export COLORTERM=truecolor' + (localScroll ? ' CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' : '') : '') + ' && exec ' + start;
   const ssh = ['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', ...TERMINAL_KEEPALIVE, ...TERMINAL_TYPING, ...(url.port ? ['-p', url.port] : []), '--', target];
   const terminalId = process.env[TERMINAL_ID_ENV];
   const holder = own ? tuiHolder(dshSession) : dshSession && terminalId ? tabHolder(dshSession, terminalId) : undefined;

@@ -7,6 +7,7 @@ import { TuiTerminal } from '../src/client/workspace/tui.js';
 import { TuiUploads } from '../src/client/workspace/tui-files.js';
 import { KeptTerminals } from '../src/client/workspace/tui-kept.js';
 import { TuiRenderChoices } from '../src/client/workspace/tui-render.js';
+import { TuiScrollChoice } from '../src/client/workspace/tui-scroll.js';
 
 type Props = Parameters<typeof TuiTerminal>[0];
 type State = { phase: string; writable: boolean; issue?: string; info: { state: string }; frame: number };
@@ -62,6 +63,7 @@ function rig() {
     terminals: { view: () => model, launchShells: async () => ({ shells: [] }), close() {} },
     uploads: new TuiUploads(async () => '/uploaded'), t: {}, title: () => undefined, cli: () => 'claude', kept, shells: new Map(),
     render: new TuiRenderChoices({ getItem: () => null, setItem() {} }),
+    scroll: new TuiScrollChoice(async () => {}, { getItem: () => null, setItem() {} }), running: () => false,
     theme: { getSnapshot: () => theme, subscribe: listener => { themeListeners.add(listener); return () => { themeListeners.delete(listener); }; } },
   };
   let item: Props['item'] = { sessionId: 'a', host, shell: '/shell', generation: 0, visible: false };

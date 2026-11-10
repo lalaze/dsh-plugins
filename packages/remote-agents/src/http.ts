@@ -96,7 +96,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
           }
           break;
         }
-        case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync': case 'tuiSessions': case 'tuiStart': case 'tuiTitle': case 'tuiEnd':
+        case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync': case 'tuiSessions': case 'tuiScroll': case 'tuiStart': case 'tuiTitle': case 'tuiEnd':
         case 'workspaceTunnels': case 'addWorkspaceTunnel': case 'startWorkspaceTunnel': case 'stopWorkspaceTunnel': case 'removeWorkspaceTunnel': {
           if (!features) throw new RemoteError('Remote workspaces are unavailable', 501);
           result = await workspaceAction(features, action, input, request.signal); break;

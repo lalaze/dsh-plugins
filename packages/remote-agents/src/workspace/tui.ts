@@ -108,6 +108,15 @@ export class TuiSessions {
     endHolder?(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
   }) {}
   list(): string[] { return this.store.snapshot().tuiSessions ?? []; }
+  /**
+   * Whether Claude Code is started with its classic renderer, which leaves the conversation in the terminal's own
+   * scrollback. Its fullscreen one draws the scrolling itself: every wheel step is a trip to the host and a repaint of the
+   * whole screen (about 3.5 KB at 126x47), so on a slow or lossy connection scrolling stutters while the page is idle.
+   * Measured over a path of 77 ms with 2% loss: 120 ms a step and pauses of 200 ms, against 17 ms and none this way.
+   * The launchers in terminal.ts read it, so it applies to a CLI when it next starts.
+   */
+  localScroll(): boolean { return this.store.snapshot().tuiLocalScroll !== false; }
+  async setLocalScroll(local: boolean): Promise<void> { await this.store.update(state => { state.tuiLocalScroll = local; }); }
   /** Those of `list` that run Codex. */
   codex(): string[] {
     const { tuiSessions = [], tuiDetails } = this.store.snapshot();

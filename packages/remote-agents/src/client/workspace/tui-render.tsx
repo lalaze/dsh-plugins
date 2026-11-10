@@ -1,6 +1,7 @@
 import { WebglAddon } from '@xterm/addon-webgl';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ui, useLocale } from '../i18n.js';
+import { localizeError, ui, useLocale } from '../i18n.js';
+import type { TuiScrollChoice } from './tui-scroll.js';
 
 const SAVED_KEY = 'remote-agents.tui.render';
 /** How often to look for a terminal that is not there yet, as DSH's terminal code loads late, and for how long. */
@@ -56,8 +57,9 @@ export class TuiRenderChoices {
 export interface Xterm {
   loadAddon(addon: unknown): void;
   element?: HTMLElement;
-  options: { theme?: { background?: string } & Record<string, unknown> };
+  options: { theme?: { background?: string } & Record<string, unknown>; scrollback?: number };
   modes: { mouseTrackingMode: string };
+  buffer: { active: { type: string } };
   parser: {
     registerOscHandler(ident: number, handler: (data: string) => boolean): { dispose(): void };
     registerCsiHandler(id: { prefix?: string; final: string }, handler: (params: Array<number | number[]>) => boolean): { dispose(): void };
@@ -190,16 +192,56 @@ const styles = `.ra-tui-render{position:absolute;right:3px;bottom:3px;z-index:2}
 .ra-tui-render-track::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#fff;transition:transform .12s}
 [aria-checked="true"]>.ra-tui-render-track{background:var(--dsw-alias-state-business-primary,#4d6bfe)}
 [aria-checked="true"]>.ra-tui-render-track::after{transform:translateX(10px)}
-.ra-tui-render-issue{padding:4px 8px 2px;color:var(--dsw-alias-state-error-primary,#d64545);font-size:12px}`;
+.ra-tui-render-issue{padding:4px 8px 2px;color:var(--dsw-alias-state-error-primary,#d64545);font-size:12px}
+.ra-tui-render-note{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:2px 8px 6px;color:var(--dsw-alias-label-secondary,#aaa);font-size:12px}
+.ra-tui-render-act{padding:3px 8px;border:1px solid rgba(127,127,127,.4);border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-primary,#eee);font:inherit;cursor:pointer}
+.ra-tui-render-act:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
+.ra-tui-render-act:disabled{cursor:default;opacity:.5}`;
 
-function Switch({ label, on, change }: { label: string; on: boolean; change(on: boolean): void }) {
-  return <button type="button" role="switch" aria-checked={on} className="ra-tui-render-row" onClick={() => change(!on)}>
+function Switch({ label, hint, on, change }: { label: string; hint?: string; on: boolean; change(on: boolean): void }) {
+  return <button type="button" role="switch" aria-checked={on} className="ra-tui-render-row" title={hint} onClick={() => change(!on)}>
     <span>{label}</span><span className="ra-tui-render-track" />
   </button>;
 }
 
+/** The scrolling switch of a Claude Code conversation, and what it takes to apply it to the CLI already running there. */
+export interface TuiScrollControl {
+  choice: TuiScrollChoice;
+  /** The buffer the conversation's terminal shows now, if it has a terminal. */
+  buffer(): string | undefined;
+  /** Whether the CLI is in a turn, which restarting it would stop. */
+  running(): boolean;
+  /** Ends the CLI and starts it again in the same conversation. */
+  restart(): Promise<void>;
+}
+/** How often to look at the terminal and its turn while the menu is open: a restarted CLI takes a moment to show which buffer it uses. */
+const BUFFER_CHECK_MS = 500;
+
+function ScrollRows({ scroll }: { scroll: TuiScrollControl }) {
+  const local = useSyncExternalStore(scroll.choice.subscribe, scroll.choice.snapshot);
+  const [buffer, setBuffer] = useState(scroll.buffer), [running, setRunning] = useState(scroll.running);
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  useEffect(() => {
+    const timer = setInterval(() => { setBuffer(scroll.buffer()); setRunning(scroll.running()); }, BUFFER_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [scroll]);
+  const restart = () => {
+    setBusy(true); setError('');
+    scroll.restart().catch(cause => setError(localizeError(cause instanceof Error ? cause.message : String(cause)))).finally(() => setBusy(false));
+  };
+  return <>
+    <Switch label={ui('Local scrolling')} hint={ui('The terminal scrolls the conversation itself instead of asking Claude Code over the network. Claude Code\'s fullscreen features, such as clicking to expand, are off.')} on={local} change={value => scroll.choice.set(value)} />
+    {scroll.choice.stale(buffer) && <div className="ra-tui-render-note">
+      <span>{ui('Takes effect when Claude Code restarts.')}</span>
+      <button type="button" className="ra-tui-render-act" disabled={busy} onClick={restart}>{ui(running ? 'Restart now and stop the current turn' : 'Restart now')}</button>
+    </div>}
+    {error && <div className="ra-tui-render-issue" role="alert">{error}</div>}
+  </>;
+}
+
 /** The render switches, in the corner of a TUI conversation so the two ways can be compared while using it. */
-export function TuiRenderMenu({ choices }: { choices: TuiRenderChoices }) {
+/** @param scroll - given for a Claude Code conversation; Codex always scrolls in the terminal. */
+export function TuiRenderMenu({ choices, scroll }: { choices: TuiRenderChoices; scroll?: TuiScrollControl }) {
   useLocale();
   const { webgl, blur } = useSyncExternalStore(choices.subscribe, choices.snapshot);
   const issue = useSyncExternalStore(choices.subscribe, choices.issue);
@@ -222,6 +264,7 @@ export function TuiRenderMenu({ choices }: { choices: TuiRenderChoices }) {
     {open && <div className="ra-tui-render-menu" role="group" aria-label={ui('Terminal rendering')}>
       <Switch label={ui('WebGL rendering')} on={webgl} change={value => choices.set({ webgl: value })} />
       <Switch label={ui('Background blur')} on={blur} change={value => choices.set({ blur: value })} />
+      {scroll && <ScrollRows scroll={scroll} />}
       {webgl && issue && <div className="ra-tui-render-issue" role="alert">{ui(issue === 'lost' ? 'WebGL stopped working here, so the standard rendering is back.' : 'WebGL is not available here, so the standard rendering stays.')}</div>}
     </div>}
   </div>;

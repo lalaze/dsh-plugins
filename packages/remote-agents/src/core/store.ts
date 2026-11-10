@@ -21,7 +21,9 @@ export interface Instance { id: string; label: string }
  * `instance` identifies this DSH to others sharing a host's sessions; `seenWorkspaces` lists, per host, the
  * shared remote workspaces already offered to DSH, so one removed from the sidebar is not added again.
  */
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord>; tuiSessions?: string[]; tuiDetails?: Record<string, TuiDetails> }
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord>; tuiSessions?: string[]; tuiDetails?: Record<string, TuiDetails>;
+  /** Whether Claude Code in a terminal leaves scrolling to that terminal; on unless false. See TuiSessions.localScroll. */
+  tuiLocalScroll?: boolean }
 /**
  * A TUI conversation's first launch of its CLI, the title the plugin last gave it, and whether DSH has been told the
  * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code.
@@ -103,7 +105,8 @@ export class Store {
       ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
       ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}),
       ...(value.instance ? { instance: value.instance as Instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces as Record<string, string[]> } : {}),
-      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails as Record<string, TuiDetails> } : {}) };
+      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails as Record<string, TuiDetails> } : {}),
+      ...(typeof value.tuiLocalScroll === 'boolean' ? { tuiLocalScroll: value.tuiLocalScroll } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
   /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */

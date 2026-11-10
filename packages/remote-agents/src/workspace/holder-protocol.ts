@@ -26,6 +26,9 @@ export const HOLDER_FOLDER = '.dsh-remote-agents/terminal', HOLDERS_FOLDER = '.d
 /**
  * Shell that ends a holder and what runs in it. The process is checked first, as a saved process ID may belong to something else after a reboot.
  * Written without the holder's script, so that it works on any holder an older version of the plugin started.
+ * It waits for the holder to tidy up, a few seconds at most: until its folder is gone a new terminal would join it and end with it.
  */
 export const endHolderScript = (holder: string) => `dsh_pid="$(cat "$HOME/${HOLDERS_FOLDER}/${holder}/pid" 2>/dev/null)" || exit 0
-case "$(ps -o command= -p "$dsh_pid" 2>/dev/null)" in *" daemon "*"${holder}"*) kill "$dsh_pid" ;; esac`;
+case "$(ps -o command= -p "$dsh_pid" 2>/dev/null)" in *" daemon "*"${holder}"*) kill "$dsh_pid" ;; *) exit 0 ;; esac
+dsh_tries=0
+while [ -d "$HOME/${HOLDERS_FOLDER}/${holder}" ] && [ "$dsh_tries" -lt 50 ]; do sleep 0.1; dsh_tries=$((dsh_tries + 1)); done`;

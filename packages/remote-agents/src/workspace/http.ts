@@ -39,7 +39,13 @@ export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   return { hostId: identifier(v.hostId), cwd: workspacePath(v.cwd, 'remote workspace'), label: '' };
 }
 export async function workspaceAction(features: WorkspaceFeatures, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-  if (action === 'tuiSessions') return { sessions: features.tui?.list() ?? [], codex: features.tui?.codex() ?? [] };
+  if (action === 'tuiSessions') return { sessions: features.tui?.list() ?? [], codex: features.tui?.codex() ?? [], localScroll: features.tui?.localScroll() ?? true };
+  if (action === 'tuiScroll') {
+    if (!features.tui) throw new RemoteError('The TUI is unavailable', 501);
+    if (typeof input.local !== 'boolean') throw new RemoteError('Invalid scrolling choice');
+    await features.tui.setLocalScroll(input.local);
+    return { localScroll: input.local };
+  }
   const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
   if (action === 'tuiStart') {
     if (!features.tui) throw new RemoteError('The TUI is unavailable', 501);

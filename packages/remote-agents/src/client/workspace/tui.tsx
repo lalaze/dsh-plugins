@@ -8,7 +8,8 @@ import type { Client } from '../index.js';
 import { useTerminalCopy } from './tui-copy.js';
 import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
-import { TuiRenderChoices, TuiRenderMenu, useWebglRenderer } from './tui-render.js';
+import { findXterm, TuiRenderChoices, TuiRenderMenu, useWebglRenderer, type TuiScrollControl } from './tui-render.js';
+import { TuiScrollChoice, useConversationScrollback } from './tui-scroll.js';
 import { KeptTerminals, type KeptTerminal } from './tui-kept.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
@@ -67,11 +68,14 @@ interface Services {
   slots: Slots; terminals: Terminals; uploads: TuiUploads; t: unknown; title(sessionId: string): string | undefined; cli(sessionId: string): TuiCli;
   kept: KeptTerminals;
   render: TuiRenderChoices;
+  scroll: TuiScrollChoice;
+  /** Whether DSH shows the conversation as running. */
+  running(sessionId: string): boolean;
   /** The launcher of each conversation prepared since DSH last connected: it needs preparing only once. */
   shells: Map<string, string>;
   theme: { getSnapshot(): unknown; subscribe(listener: () => void): () => void };
 }
-type SessionList = { getSnapshot(): { byId?: Record<string, { cwd?: string; blank?: boolean; title?: string }> }; subscribe(listener: () => void): () => void };
+type SessionList = { getSnapshot(): { byId?: Record<string, { cwd?: string; blank?: boolean; title?: string; running?: boolean }> }; subscribe(listener: () => void): () => void };
 
 const read = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const write = (key: string, value: string | null) => {
@@ -167,6 +171,7 @@ export function TuiTerminal({ item, services }: { item: KeptTerminal; services: 
   useUploadedPaths(root, sessionId, services.uploads, model.state, services.cli(sessionId));
   useWebglRenderer(item.host, visible, services.render, useSyncExternalStore(theme.subscribe, theme.getSnapshot));
   useTerminalCopy(item.host, visible);
+  useConversationScrollback(item.host);
   const Body = slots.entries('sidebar.right.pane.tab').find(entry => entry.options.key === TERMINAL_TAB)?.component as React.FC<any> | undefined;
   if (!Body) return <div className="ra-empty" role="alert">{ui("DSH's terminal is not available")}</div>;
   return <Body view={view} t={t} useTabInfo={useTabInfo} useTerminal={useTerminal} useTheme={useTheme} />;
@@ -238,6 +243,18 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     return () => controller.abort();
   }, [services, sessionId]);
   const ready = !!shell && fontReady;
+  const scroll = useMemo<TuiScrollControl | undefined>(() => (cli === 'claude' ? {
+    choice: services.scroll,
+    buffer: () => { const host = kept.snapshot().find(item => item.sessionId === sessionId)?.host; return host ? findXterm(host)?.buffer.active.type : undefined; },
+    running: () => services.running(sessionId),
+    restart: async () => {
+      const old = kept.generation(sessionId) ?? savedGeneration(sessionId);
+      // Until the CLI and its holder are gone: a terminal opened sooner would join the one that is ending.
+      await api('tuiEnd', { sessionId });
+      services.terminals.close(sessionId, terminalKey(old), terminalContent(sessionId, old));
+      kept.restart(sessionId);
+    },
+  } : undefined), [services, kept, sessionId, cli]);
   // Before the browser paints, so the terminal is simply there.
   useLayoutEffect(() => (ready ? kept.show(sessionId, shell, seat.current!) : undefined), [kept, sessionId, ready]);
   return <div ref={root} data-remote-agents-tui="" style={{ position: 'relative', flex: '1 1 0', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -245,7 +262,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     <div ref={seat} style={{ display: 'contents' }} />
     {!ready && <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
     <TuiFileStatus sessionId={sessionId} uploads={services.uploads} />
-    <TuiRenderMenu choices={services.render} />
+    <TuiRenderMenu choices={services.render} scroll={scroll} />
   </div>;
 }
 
@@ -314,6 +331,7 @@ export function installTuiSessions(ctx: Client): void {
     const kept = new KeptTerminals<HTMLElement>(KEPT_TERMINALS, hidden, () => { const host = document.createElement('div'); host.style.display = 'contents'; return host; },
       { load: savedGeneration, save: (id, generation) => write(`${GENERATION_KEY}.${id}`, String(generation)) });
     const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title, kept, shells: new Map(), render: new TuiRenderChoices(),
+      scroll: new TuiScrollChoice(local => api('tuiScroll', { local })), running: id => sessions.getSnapshot()?.byId?.[id]?.running === true,
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
       theme: { getSnapshot: () => themes.getTheme(), subscribe: listener => on.call(scoped, 'theme/change', listener) } };
     // A restarted DSH may offer other launchers.
@@ -321,7 +339,10 @@ export function installTuiSessions(ctx: Client): void {
     slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'remote-agents-tui-terminals' }, () => <TuiTerminalLayer services={services} />));
     scoped.effect(() => {
       const controller = new AbortController();
-      void api<{ sessions: string[]; codex?: string[] }>('tuiSessions', {}, controller.signal).then(value => store.set(value.sessions, value.codex), () => {});
+      void api<{ sessions: string[]; codex?: string[]; localScroll?: boolean }>('tuiSessions', {}, controller.signal).then(value => {
+        store.set(value.sessions, value.codex);
+        if (typeof value.localScroll === 'boolean') services.scroll.load(value.localScroll);
+      }, () => {});
       return () => controller.abort();
     });
     slots.inject('conversation.view', () => {
