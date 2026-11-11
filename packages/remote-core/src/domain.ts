@@ -290,8 +290,22 @@ export interface SharedWorkspace {
 export interface SharedTag { name: string; color: string }
 export const busy =(agent: Pick<AgentSummary, 'status'>) => agent.status === 'starting' || agent.status === 'running' || agent.status === 'attention';
 
+/**
+ * A failure with the HTTP status that reports it. Every plugin compiles its own copy of this class, and an error one
+ * plugin throws reaches another through a service: dsh-remote-terminals gets Remote Agents' "not found" this way. So
+ * `instanceof RemoteError` also accepts an error that another copy made, told by its class name and its status.
+ */
 export class RemoteError extends Error {
   constructor(message: string, readonly status = 400) { super(message); }
+  static [Symbol.hasInstance](value: unknown): boolean {
+    if (Function.prototype[Symbol.hasInstance].call(this, value)) return true;
+    // A subclass is only what its own copy made.
+    if (this !== RemoteError || !(value instanceof Error) || typeof (value as { status?: unknown }).status !== 'number') return false;
+    for (let prototype = Object.getPrototypeOf(value); prototype; prototype = Object.getPrototypeOf(prototype)) {
+      if (prototype.constructor?.name === 'RemoteError') return true;
+    }
+    return false;
+  }
 }
 /** A protocol field that should be an array; anything else reads as empty. */
 export const list = (value: unknown): any[] => Array.isArray(value) ? value : [];
