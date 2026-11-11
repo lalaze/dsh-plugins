@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { SshBackend } from '../src/agents/backend.js';
 import type { CliSession } from '../src/agents/runtime.js';
-import type { HostConfig, Task } from '../src/core/domain.js';
+import type { HostConfig, Task } from '@dsh-plugins/remote-core/domain.js';
 import type { Store } from '../src/core/store.js';
-import type { SshTransport } from '../src/core/ssh.js';
+import type { SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import type { LaunchSharing } from '../src/sharing/sharing.js';
 
 function deferred() {

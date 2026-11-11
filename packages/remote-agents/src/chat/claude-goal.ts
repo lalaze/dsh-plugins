@@ -1,6 +1,6 @@
 import { randomUUID, randomBytes } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
-import type { Cursor, MessageTimeline } from '../core/domain.js';
+import type { Cursor, MessageTimeline } from '@dsh-plugins/remote-core/domain.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { GenerateOptions } from '@deepseek-ai/dsh-llm';
 import type { SharedTool } from '../sharing/sharing.js';

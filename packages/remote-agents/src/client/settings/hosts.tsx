@@ -1,5 +1,5 @@
 import React, { useId, useState } from 'react';
-import { enabledProvidersOf, PROVIDER_LABELS, type Dashboard, type Host } from '../../core/domain.js';
+import { enabledProvidersOf, PROVIDER_LABELS, type Dashboard, type Host } from '@dsh-plugins/remote-core/domain.js';
 import { api } from '../api.js';
 import { localizeError, ui } from '../i18n.js';
 import { ActionsMenu, Chevron } from './menu.js';

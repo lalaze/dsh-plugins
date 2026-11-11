@@ -3,10 +3,10 @@ import { HostConnections } from './host-connections.js';
 import { SharedSync } from './shared-sync.js';
 import type { LaunchSharing } from '../sharing/sharing.js';
 import { Store } from '../core/store.js';
-import { readSshConfigHosts } from '../core/ssh-config.js';
-import { attachmentInput, inputModalitiesOf } from '../core/domain.js';
+import { readSshConfigHosts } from '@dsh-plugins/remote-core/ssh-config.js';
+import { attachmentInput, inputModalitiesOf } from '@dsh-plugins/remote-core/domain.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import { browsePath, busy, enabledProvidersOf, permissionModes, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type PermissionAnswer, type SharedTag, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
+import { browsePath, busy, enabledProvidersOf, permissionModes, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type PermissionAnswer, type SharedTag, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '@dsh-plugins/remote-core/domain.js';
 
 export interface UsageOptions {
   /** The conversation's selected route; picks its CLI when the conversation used several. */

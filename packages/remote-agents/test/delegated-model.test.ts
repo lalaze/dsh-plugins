@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SlotCore } from '@deepseek-ai/dsh-client-ui-slots';
-import type { AgentSummary } from '../src/core/domain.js';
+import type { AgentSummary } from '@dsh-plugins/remote-core/domain.js';
 import { DELEGATED_ID, DELEGATED_SLOT, decorateCatalogSlot, mergeDelegatedCatalog, ownedDelegations, pollDelegations, remoteCatalogId, routeCatalogAddress, type CatalogSlots, type CatalogState } from '../src/client/sessions/delegated-model.js';
 
 const agent: AgentSummary = { id: 'remote-task', ownerSessionId: 'parent', hostId: 'host', cwd: '/project', provider: 'codex', model: 'actual-model', modes: [], title: 'Review changes', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', archived: false, delegated: true, started: true, attached: true, status: 'running', pendingPermissions: 0 };

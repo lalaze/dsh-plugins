@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute } from 'node:path';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import type { NativeSnapshot } from './native-protocol.js';
 
 export interface NativeProjectMapping { hostId: string; projectKey: string; localDirectory: string }

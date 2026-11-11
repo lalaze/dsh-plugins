@@ -1,4 +1,4 @@
-import { RemoteError, remotePath } from '../core/domain.js';
+import { RemoteError, remotePath } from '@dsh-plugins/remote-core/domain.js';
 import { FILE_LIMIT, GIT_LIMITS, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceFile, type WorkspaceManifest } from './domain.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
@@ -6,7 +6,7 @@ import { REMOTE_DSH_RUNNER } from './runner.js';
 import { WORKSPACE_SHELL } from './shell.js';
 import { nativeRpc } from '../chat/native-registry.js';
 import { initializeCodex } from '../agents/runtime.js';
-import { JsonlPeer, quote, type SshTransport } from '../core/ssh.js';
+import { JsonlPeer, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { endHolderScript } from './holder-protocol.js';
 import { TUI_CODEX_CHILD, TUI_SUBAGENT_FILE, TUI_USAGE_CAP, type TuiUsageEntry } from './tui-usage.js';
 

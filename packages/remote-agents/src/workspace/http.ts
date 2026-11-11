@@ -1,4 +1,4 @@
-import { field, identifier, RemoteError } from '../core/domain.js';
+import { field, identifier, RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { FILE_LIMIT, type WorkspaceTarget } from './domain.js';
 import type { WorkspaceService } from './service.js';
 import { revision, workspacePath } from './service.js';

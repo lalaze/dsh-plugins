@@ -1,5 +1,5 @@
-import { RemoteError, type DshPermission } from '../core/domain.js';
-import type { ToolDefinition, ToolHost } from '../core/dsh-host.js';
+import { RemoteError, type DshPermission } from '@dsh-plugins/remote-core/domain.js';
+import type { ToolDefinition, ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
 import { fileOperation, type WorkspaceService } from './service.js';
 
 const READS = ['list', 'read', 'stat', 'search', 'manifest'];

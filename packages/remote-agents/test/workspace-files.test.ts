@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, writeFile, symlink, rm, readdir, realpath, ch
 import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
-import { OpenSshTransport, type SshTransport } from '../src/core/ssh.js';
+import { OpenSshTransport, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';
 import { fileOperation, hash, WorkspaceService } from '../src/workspace/service.js';
 import { RemoteAgentsService } from '../src/agents/service.js';

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import type { Backend } from '../src/agents/backend.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
-import { RemoteError, type HostConfig, type Task } from '../src/core/domain.js';
+import { RemoteError, type HostConfig, type Task } from '@dsh-plugins/remote-core/domain.js';
 import { Store } from '../src/core/store.js';
 import { FakeRemote } from './fakes.js';
 

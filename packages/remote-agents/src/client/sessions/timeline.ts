@@ -1,4 +1,4 @@
-import type { TimelineEntry, TimelinePage } from '../../core/domain.js';
+import type { TimelineEntry, TimelinePage } from '@dsh-plugins/remote-core/domain.js';
 
 export interface TimelineState extends Omit<TimelinePage, 'reset' | 'staleCursor' | 'gap'> {}
 export const emptyTimeline = (): TimelineState => ({ epoch: '', entries: [], startCursor: null, endCursor: null, hasOlder: false, hasNewer: false });

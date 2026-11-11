@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { clipboardImage, pastedFiles, pastesFor, pickFiles, terminalPath, TuiUploads } from '../src/client/workspace/tui-files.js';
-import { RemoteError } from '../src/core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { FILE_LIMIT } from '../src/workspace/domain.js';
 import { tuiFilesHandler } from '../src/workspace/http.js';
 import { TuiFiles, tuiFileName, tuiFilePath } from '../src/workspace/tui-files.js';

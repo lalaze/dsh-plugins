@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { KNOWN_SESSION_EVENT_TYPES, SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { validateNativeAutonomy, assertNativeAutonomyIdle, nativeParkedQueues, type NativeAutonomyBundle } from './native-autonomy.js';
 import { nativeImageProjection } from './native-image-projection.js';
 

@@ -5,11 +5,11 @@ import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { relayHarness, transcript, waitFor } from './relay-harness.js';
-import { RELAY_UNAVAILABLE } from '../src/core/domain.js';
-import { REMOTE_HOME, remoteScript } from '../src/core/remote-host.js';
+import { RELAY_UNAVAILABLE } from '@dsh-plugins/remote-core/domain.js';
+import { REMOTE_HOME, remoteScript } from '@dsh-plugins/remote-core/remote-host.js';
 import { RelayClient, RELAY_SCRIPT, RELAY_VERSION } from '../src/agents/relay.js';
 import { CLAUDE_ROOT_ENV } from '../src/agents/backend.js';
-import type { SshTransport } from '../src/core/ssh.js';
+import type { SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import type { Store } from '../src/core/store.js';
 import type { RemoteAgentsService } from '../src/agents/service.js';
 
@@ -310,7 +310,7 @@ for (const [provider, label] of PROTOCOLS) test(`${label}: stopping a native DSH
 
 test('relay links deliver large payloads once, drop partial frames and keep exact UTF-8 byte offsets', async t => {
   const { RelayLink } = await import('../src/agents/relay.js');
-  const { JsonlPeer } = await import('../src/core/ssh.js');
+  const { JsonlPeer } = await import('@dsh-plugins/remote-core/ssh.js');
   const { writeFile, stat } = await import('node:fs/promises');
   const h = await relayHarness(t);
   const echo = join(h.root, 'echo.mjs');

@@ -3,7 +3,7 @@ import { test, type TestContext } from 'node:test';
 import { access, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OpenSshTransport, quote } from '../src/core/ssh.js';
+import { OpenSshTransport, quote } from '@dsh-plugins/remote-core/ssh.js';
 
 async function fixture(t: TestContext, shell: 'bash' | 'zsh', options: { closeDescriptors?: boolean; startup?: string } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-shell-environment-'));

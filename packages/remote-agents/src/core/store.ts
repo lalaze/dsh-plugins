@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from './domain.js';
+import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from '@dsh-plugins/remote-core/domain.js';
 import type { TuiUsageCursor } from '../workspace/tui-usage.js';
 
 /** A relay to stop and delete on its SSH host once it is reachable. */

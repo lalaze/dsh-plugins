@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { remoteScript, REMOTE_HOME } from '../core/remote-host.js';
-import type { SshTransport } from '../core/ssh.js';
-import { RemoteError } from '../core/domain.js';
+import { remoteScript, REMOTE_HOME } from '@dsh-plugins/remote-core/remote-host.js';
+import type { SshTransport } from '@dsh-plugins/remote-core/ssh.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { NATIVE_LIMIT } from './native-protocol.js';
 
 /** Separate protocol, storage and non-expiring ownership from the CLI force-claim registry. */

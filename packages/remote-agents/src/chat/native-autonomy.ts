@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { nativeDigest, type NativeSnapshot } from './native-protocol.js';
 import type { NativeRuntimePlacement } from './native-placement.js';
 

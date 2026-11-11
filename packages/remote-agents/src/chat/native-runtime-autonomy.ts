@@ -1,5 +1,5 @@
 import { Session, SessionId } from '@deepseek-ai/dsh-session';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import type { NativeHost, NativeSharing } from './native-service.js';
 import { nativeDigest, validateNative, type NativeSnapshot } from './native-protocol.js';
 import { assertNativeAutonomyIdle, nativeParkedQueues, captureNativeSchedules, nativeDshGoalAdapter, captureNativeGoal, NATIVE_DSH_GOAL_ADAPTER,

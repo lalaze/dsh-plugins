@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { stage } from '../agents/attachments.js';
-import { attachmentInput, RemoteError } from '../core/domain.js';
+import { attachmentInput, RemoteError } from '@dsh-plugins/remote-core/domain.js';
 
 /** Below the 255 bytes file systems allow; the same limit as a chat attachment's name. */
 const MAX_NAME_BYTES = 160;

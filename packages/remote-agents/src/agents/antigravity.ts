@@ -1,4 +1,4 @@
-import type { Model, Task } from '../core/domain.js';
+import type { Model, Task } from '@dsh-plugins/remote-core/domain.js';
 
 export const ANTIGRAVITY_NOTICE = 'Antigravity headless mode denies operations that require interactive approval. Configure permissions in agy before running tasks.';
 

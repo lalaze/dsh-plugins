@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import type { AccountUsage, ContextUsage, FinishedTurn, HostConfig, NativeProtocol, QuotaWindow, Task, TokenUsage, TokenUsageBreakdown, TurnUsage } from '../core/domain.js';
-import type { JsonlPeer } from '../core/ssh.js';
-import { list } from '../core/domain.js';
+import type { AccountUsage, ContextUsage, FinishedTurn, HostConfig, NativeProtocol, QuotaWindow, Task, TokenUsage, TokenUsageBreakdown, TurnUsage } from '@dsh-plugins/remote-core/domain.js';
+import type { JsonlPeer } from '@dsh-plugins/remote-core/ssh.js';
+import { list } from '@dsh-plugins/remote-core/domain.js';
 
 const count = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
 const capitalize = (value: string) => value ? value[0].toUpperCase() + value.slice(1) : value;

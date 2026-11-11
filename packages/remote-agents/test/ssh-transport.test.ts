@@ -3,7 +3,7 @@ import { test, type TestContext } from 'node:test';
 import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OpenSshTransport, type SshTransport } from '../src/core/ssh.js';
+import { OpenSshTransport, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';
 import type { GitBatch } from '../src/workspace/domain.js';
 

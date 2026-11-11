@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { AgentSummary } from '../src/core/domain.js';
+import type { AgentSummary } from '@dsh-plugins/remote-core/domain.js';
 import { projectName, sessionPriority, sessionView, visibleSession } from '../src/client/sessions/session-list.js';
 
 const agent = (overrides: Partial<AgentSummary> = {}): AgentSummary => ({

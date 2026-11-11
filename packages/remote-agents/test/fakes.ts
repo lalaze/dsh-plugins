@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TestContext } from 'node:test';
 import type { Backend } from '../src/agents/backend.js';
-import { enabledProvidersOf, type AccountUsage, type Agent, type Cursor, type HostConfig, type PermissionAnswer, type Provider, type Task, type TaskInput, type TimelineEntry, type TimelinePage } from '../src/core/domain.js';
+import { enabledProvidersOf, type AccountUsage, type Agent, type Cursor, type HostConfig, type PermissionAnswer, type Provider, type Task, type TaskInput, type TimelineEntry, type TimelinePage } from '@dsh-plugins/remote-core/domain.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { Store } from '../src/core/store.js';
 import { messageTimeline } from '../src/agents/history.js';

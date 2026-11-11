@@ -7,7 +7,7 @@ import { HouseIcon } from '@phosphor-icons/react/dist/csr/House';
 import { XIcon } from '@phosphor-icons/react/dist/csr/X';
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Dashboard, DirectoryListing, Host, RemoteWorkspace } from '../../core/domain.js';
+import type { Dashboard, DirectoryListing, Host, RemoteWorkspace } from '@dsh-plugins/remote-core/domain.js';
 import type { WorktreeProject } from '../../workspace/worktrees.js';
 import { api } from '../api.js';
 import { localizeError, ui, useLocale } from '../i18n.js';

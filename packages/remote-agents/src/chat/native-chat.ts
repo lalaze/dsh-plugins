@@ -7,14 +7,14 @@ import {
   type ContentBlock, type GenerateOptions, type LlmModelInfo, type LlmResolvedModelInfo, type StreamChunk,
 } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
-import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Cursor, type DshPermission, type Model, type TimelineEntry } from '../core/domain.js';
+import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Cursor, type DshPermission, type Model, type TimelineEntry } from '@dsh-plugins/remote-core/domain.js';
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
 import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
 import { modelSwitchNote, ownTurnWaitNote, toolStatus, transcript, type TurnSource } from './transcript.js';
 import { decidePermission, unattendedAnswer } from '../agents/tools.js';
 import { isTeamPrompt, teamMemberNote, type TeamMember } from './agent-teams.js';
-import type { ToolHost } from '../core/dsh-host.js';
+import type { ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
 import type { WorkspacePlacement } from '../workspace/access.js';
 
 export const CHAT_PROVIDER = 'remote-cli';

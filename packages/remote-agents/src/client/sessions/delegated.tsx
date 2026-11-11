@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { XIcon } from '@phosphor-icons/react/dist/csr/X';
-import type { AgentSummary } from '../../core/domain.js';
+import type { AgentSummary } from '@dsh-plugins/remote-core/domain.js';
 import { api } from '../api.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 import { styles } from '../styles.js';

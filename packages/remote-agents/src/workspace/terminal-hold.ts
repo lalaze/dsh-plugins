@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createReadStream } from 'node:fs';
-import { quote, REMOTE_PATH } from '../core/ssh.js';
+import { quote, REMOTE_PATH } from '@dsh-plugins/remote-core/ssh.js';
 import { ATTACH_EXIT, HOLDER_FOLDER, HOLDERS_FOLDER } from './holder-protocol.js';
 
 /**

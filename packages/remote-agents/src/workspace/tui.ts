@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import type { Store } from '../core/store.js';
 import type { TuiCli } from './domain.js';
 import { tuiHolder } from './holder-protocol.js';

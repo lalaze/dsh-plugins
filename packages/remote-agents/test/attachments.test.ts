@@ -10,14 +10,14 @@ import { promisify } from 'node:util';
 import { Context } from '@deepseek-ai/cordis';
 import LlmRuntime, { createUserMessage, type ContentBlock, type FileBlock, type GenerateOptions, type ImageBlock, type StreamChunk } from '@deepseek-ai/dsh-llm';
 import { SessionId } from '@deepseek-ai/dsh-session';
-import { OpenSshTransport, type Child, type SshTransport, type WireMessage } from '../src/core/ssh.js';
+import { OpenSshTransport, type Child, type SshTransport, type WireMessage } from '@dsh-plugins/remote-core/ssh.js';
 import { SshBackend, CLI_PROVIDERS } from '../src/agents/backend.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { Store } from '../src/core/store.js';
 import { ChatProjects } from '../src/chat/projects.js';
 import { chatModelId, chatProviderId, CHAT_PROVIDERS, RemoteCliAdapter } from '../src/chat/native-chat.js';
 import { attachmentDirectory, attachmentRelativePath, stageAttachments, type AttachmentAccess } from '../src/agents/attachments.js';
-import type { Attachment } from '../src/core/domain.js';
+import type { Attachment } from '@dsh-plugins/remote-core/domain.js';
 
 const digest = (data: Uint8Array) => createHash('sha256').update(data).digest('hex');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+afo8AAAAASUVORK5CYII=', 'base64');

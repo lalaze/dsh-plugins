@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
-import { busy, permissionModes, presetMode, questionsOf, remotePath, type AgentState, type AgentSummary, type Choice, type DshPermission, type Permission, type PermissionAnswer } from '../core/domain.js';
+import { busy, permissionModes, presetMode, questionsOf, remotePath, type AgentState, type AgentSummary, type Choice, type DshPermission, type Permission, type PermissionAnswer } from '@dsh-plugins/remote-core/domain.js';
 import type { RemoteAgentsService } from './service.js';
-import type { ToolCall, ToolDefinition, ToolHost } from '../core/dsh-host.js';
+import type { ToolCall, ToolDefinition, ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
 
 type Schema = Record<string, unknown>;
 export interface AgentReport { id: string; title: string; host: string; cwd: string; provider: string; model: string; mode?: string; status: string; error?: string; waitingFor?: string[]; reply?: string }

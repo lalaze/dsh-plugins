@@ -6,7 +6,7 @@ import { adoptedSessionId, SharedChatAdoption, type AdoptionHost } from '../src/
 import { ChatProjects } from '../src/chat/projects.js';
 import { SYNC_SOURCE, chatModelId, chatProviderId, RemoteCliAdapter, type SyncAgent } from '../src/chat/native-chat.js';
 import { transcript } from '../src/chat/transcript.js';
-import type { TimelineEntry } from '../src/core/domain.js';
+import type { TimelineEntry } from '@dsh-plugins/remote-core/domain.js';
 import { fixture } from './fakes.js';
 
 const CODEX_PROVIDER = chatProviderId('codex');

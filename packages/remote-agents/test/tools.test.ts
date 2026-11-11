@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as pause } from 'node:timers/promises';
 import { delegationTools, type WaitResult } from '../src/agents/tools.js';
-import type { ToolDefinition, ToolHost } from '../src/core/dsh-host.js';
-import type { Agent, DshPermission } from '../src/core/domain.js';
+import type { ToolDefinition, ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
+import type { Agent, DshPermission } from '@dsh-plugins/remote-core/domain.js';
 import { fixture } from './fakes.js';
 
 type Approval = Parameters<ToolHost['approval']['request']>[0];

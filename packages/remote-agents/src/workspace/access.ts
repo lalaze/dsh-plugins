@@ -3,9 +3,9 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { homedir, hostname, userInfo } from 'node:os';
 import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import type { Readable } from 'node:stream';
-import { remotePath, type HostConfig } from '../core/domain.js';
-import { connectionInput } from '../core/ssh.js';
-import { MACHINE_IDENTITY, serverIdOf } from '../core/remote-host.js';
+import { remotePath, type HostConfig } from '@dsh-plugins/remote-core/domain.js';
+import { connectionInput } from '@dsh-plugins/remote-core/ssh.js';
+import { MACHINE_IDENTITY, serverIdOf } from '@dsh-plugins/remote-core/remote-host.js';
 
 export interface WorkspacePlacement { hostIds: string[]; cwd?: string }
 export interface Endpoint { host: string; username: string; port: number }

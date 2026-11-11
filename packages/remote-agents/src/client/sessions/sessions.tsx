@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { busy as isWorking, permissionModes, PROVIDER_LABELS, type AgentDetail, type AgentSummary, type ChatProject, type Dashboard, type Host, type PermissionAnswer, type TaskInput } from '../../core/domain.js';
+import { busy as isWorking, permissionModes, PROVIDER_LABELS, type AgentDetail, type AgentSummary, type ChatProject, type Dashboard, type Host, type PermissionAnswer, type TaskInput } from '@dsh-plugins/remote-core/domain.js';
 import { api, ApiError, requestId } from '../api.js';
 import { formatLocale, localizeError, ui, useLocale } from '../i18n.js';
 import { PermissionCard } from './permission.js';

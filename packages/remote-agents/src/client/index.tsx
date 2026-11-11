@@ -2,7 +2,7 @@ import { XIcon } from '@phosphor-icons/react/dist/csr/X';
 import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { LocaleContext } from '@dsh-plugins/i18n';
-import type { Dashboard } from '../core/domain.js';
+import type { Dashboard } from '@dsh-plugins/remote-core/domain.js';
 import { api } from './api.js';
 import { installLocale, localizeError, ui, useLocale } from './i18n.js';
 import { HostManager } from './settings/hosts.js';

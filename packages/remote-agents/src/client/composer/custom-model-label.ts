@@ -1,4 +1,4 @@
-import type { ChatProject } from '../../core/domain.js';
+import type { ChatProject } from '@dsh-plugins/remote-core/domain.js';
 import { api } from '../api.js';
 import { affectsElements } from '../dom-mutations.js';
 

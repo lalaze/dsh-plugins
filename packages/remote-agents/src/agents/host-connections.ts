@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { connectionInput, type Backend, type BackendFactory } from './backend.js';
 import type { Store } from '../core/store.js';
-import { enabledProvidersOf, field, providerSelection, record, RemoteError, sharesSessions, type Host, type HostConfig } from '../core/domain.js';
+import { enabledProvidersOf, field, providerSelection, record, RemoteError, sharesSessions, type Host, type HostConfig } from '@dsh-plugins/remote-core/domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
 /** The facade supplies its single queue, shared by host configuration and task mutations. */

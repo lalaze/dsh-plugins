@@ -1,4 +1,4 @@
-import type { DirectoryListing, Host, SharedTag, SharedWorkspace } from '../core/domain.js';
+import type { DirectoryListing, Host, SharedTag, SharedWorkspace } from '@dsh-plugins/remote-core/domain.js';
 import type { Store } from '../core/store.js';
 import type { WorkspaceFiles } from './files.js';
 

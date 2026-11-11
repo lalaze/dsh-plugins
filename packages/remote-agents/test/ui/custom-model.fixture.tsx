@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import type { ChatProject } from '../../src/core/domain.js';
+import type { ChatProject } from '@dsh-plugins/remote-core/domain.js';
 import { installCustomModelLabels } from '../../src/client/composer/custom-model-label.js';
 
 /** Replay the custom composer markup captured from the desktop, with real React text reconciliation. */

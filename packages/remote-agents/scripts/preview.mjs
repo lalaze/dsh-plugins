@@ -16,7 +16,7 @@ import { ChatProjects } from '../src/chat/projects.ts';
 import { RemoteWorkspaces } from '../src/workspace/remote-workspaces.ts';
 import { WorkspaceAccess } from '../src/workspace/access.ts';
 import { randomUUID } from 'node:crypto';
-import { OpenSshTransport } from '../src/core/ssh.ts';
+import { OpenSshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { WorkspaceFiles } from '../src/workspace/files.ts';
 import { WorkspaceService } from '../src/workspace/service.ts';
 import { WorkspaceTunnels } from '../src/workspace/tunnels.ts';

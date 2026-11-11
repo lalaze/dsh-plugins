@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
-import type { SharedTag, SharedWorkspace } from '../src/core/domain.js';
+import type { SharedTag, SharedWorkspace } from '@dsh-plugins/remote-core/domain.js';
 import { Store } from '../src/core/store.js';
 import { WorkspaceTagSync, type WorkspaceTagsService } from '../src/workspace/tag-sync.js';
 

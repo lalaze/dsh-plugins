@@ -1,4 +1,4 @@
-import { busy, type AgentSummary } from '../../core/domain.js';
+import { busy, type AgentSummary } from '@dsh-plugins/remote-core/domain.js';
 
 export type SessionView = 'active' | 'history' | 'archived';
 export const needsAttention = (agent: AgentSummary) => agent.pendingPermissions > 0 || agent.status === 'attention' || agent.status === 'error';

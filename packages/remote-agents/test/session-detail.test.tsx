@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { fill } from '@dsh-plugins/i18n';
-import type { AgentDetail, AgentSummary, TimelineEntry, TimelinePage } from '../src/core/domain.js';
+import type { AgentDetail, AgentSummary, TimelineEntry, TimelinePage } from '@dsh-plugins/remote-core/domain.js';
 import { zh } from '../src/client/locales.js';
 import { SessionDetail } from '../src/client/sessions/sessions.js';
 

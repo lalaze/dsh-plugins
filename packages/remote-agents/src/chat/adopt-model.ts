@@ -1,4 +1,4 @@
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 
 type Selection = { provider: string; model: string; reasoningEffort?: string };
 interface Sessions {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { nativeDigest, validateNative, nativeSelection, NATIVE_CLOSED_PROVIDER, type NativeRecord, type NativeSnapshot } from './native-protocol.js';
 import type { NativeRpc } from './native-registry.js';
 import { NativePlacements, nativeLocalDirectory, type NativeRuntimePlacement, type NativeProjectSnapshot } from './native-placement.js';

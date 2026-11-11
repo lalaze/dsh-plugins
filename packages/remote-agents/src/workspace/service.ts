@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { RemoteError, field, record } from '../core/domain.js';
+import { RemoteError, field, record } from '@dsh-plugins/remote-core/domain.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { under, type WorkspacePlacement } from './access.js';
 import type { TuiUsageEntry } from './tui-usage.js';

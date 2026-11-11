@@ -86,9 +86,12 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   // Every launcher invocation has a finite fallback, never the developer's interactive shell.
   await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
   for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'workspace/access', 'workspace/tui', 'workspace/holder-protocol', 'workspace/terminal-hold']) {
-    const source = await readFile(new URL(`../src/${name}.ts`, import.meta.url), 'utf8');
+    // As the build lays them out: the shared core's files beside the plugin's own in core/, imported by relative path.
+    const shared = name.startsWith('core/') && name !== 'core/store';
+    const source = await readFile(new URL(shared ? `../../remote-core/src/${name.slice(5)}.ts` : `../src/${name}.ts`, import.meta.url), 'utf8');
     await mkdir(dirname(join(modules, name)), { recursive: true });
-    await writeFile(join(modules, `${name}.js`), (await transform(source, { loader: 'ts', format: 'esm', target: 'node22' })).code);
+    const { code } = await transform(source, { loader: 'ts', format: 'esm', target: 'node22' });
+    await writeFile(join(modules, `${name}.js`), code.replace(/(["'])@dsh-plugins\/remote-core\//g, name.startsWith('core/') ? '$1./' : '$1../core/'));
   }
   await writeFile(join(bin, 'ssh'), `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv.includes('-G'))process.stdout.write('hostname build-box\\nuser builder\\nport 22\\n');else fs.writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify(process.argv.slice(2)));\n`); await chmod(join(bin, 'ssh'), 0o700);
   const anchor = await ensureAnchor(directory, { host: 'build-box', username: 'builder', port: 22 }, '/srv/app');

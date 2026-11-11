@@ -1,8 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { join } from 'node:path';
-import { accessOf, type ToolDefinition, type ToolHost } from '../core/dsh-host.js';
-import { sharesSessions } from '../core/domain.js';
+import { accessOf, type ToolDefinition, type ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
+import { sharesSessions } from '@dsh-plugins/remote-core/domain.js';
 import type { Store } from '../core/store.js';
 import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type WorkspaceRuntime } from './access.js';
 import { editorHandler } from './editor-route.js';

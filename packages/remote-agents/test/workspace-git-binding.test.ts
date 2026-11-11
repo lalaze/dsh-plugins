@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
-import { RemoteError } from '../src/core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import type { WorkspacePlacement } from '../src/workspace/access.js';
 import type { GitBatch, GitRun, WorkspaceTarget } from '../src/workspace/domain.js';
 import type { WorkspaceFiles } from '../src/workspace/files.js';

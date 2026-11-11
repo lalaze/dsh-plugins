@@ -6,9 +6,9 @@ import { isIP } from 'node:net';
 import { networkInterfaces } from 'node:os';
 import { dirname } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { connectionInput } from '../core/ssh.js';
-import { field, identifier, record, RemoteError } from '../core/domain.js';
-import type { HostConfig } from '../core/domain.js';
+import { connectionInput } from '@dsh-plugins/remote-core/ssh.js';
+import { field, identifier, record, RemoteError } from '@dsh-plugins/remote-core/domain.js';
+import type { HostConfig } from '@dsh-plugins/remote-core/domain.js';
 import type { Tunnel, TunnelConfig } from './domain.js';
 
 export function tunnelConfig(raw: unknown): TunnelConfig {

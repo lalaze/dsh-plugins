@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { Host, SshConfigHost } from '../../core/domain.js';
+import type { Host, SshConfigHost } from '@dsh-plugins/remote-core/domain.js';
 import { ui } from '../i18n.js';
 
 function Icon({ kind }: { kind: 'server' | 'search' | 'chevron' | 'check' }) {

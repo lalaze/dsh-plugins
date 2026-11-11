@@ -13,7 +13,7 @@ import { ClaudeGoalBridge } from './chat/claude-goal.js';
 import { ChatProjects } from './chat/projects.js';
 import { installNativeSharing } from './chat/native-install.js';
 import type { SyncAgent } from './chat/native-chat.js';
-import { accessOf, loggerOf, type ToolDefinition, type ToolHost } from './core/dsh-host.js';
+import { accessOf, loggerOf, type ToolDefinition, type ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
 import { Store } from './core/store.js';
 import { createHandler } from './http.js';
 import { installSharingHost } from './sharing/install.js';

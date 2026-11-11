@@ -5,8 +5,8 @@ import { createServer, type AddressInfo, type Server, type Socket } from 'node:n
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BRIDGE_SCRIPT, BRIDGE_VERSION } from './bridge-script.js';
-import { RemoteError, type HostConfig, type NativeProtocol, type Task } from '../core/domain.js';
-import { connectionInput, quote, type SshTransport } from '../core/ssh.js';
+import { RemoteError, type HostConfig, type NativeProtocol, type Task } from '@dsh-plugins/remote-core/domain.js';
+import { connectionInput, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import type { Store } from '../core/store.js';
 import { CLAUDE_GOAL_SERVER, CLAUDE_GOAL_MCP, type ClaudeGoalBridge, type GoalIdentity } from '../chat/claude-goal.js';
 import { TEAM_MCP_NAME, TEAM_MEMBER_TOOLS, TEAM_SERVER } from '../chat/agent-teams.js';

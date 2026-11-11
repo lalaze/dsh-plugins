@@ -7,9 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as pause } from 'node:timers/promises';
 import type { TestContext } from 'node:test';
 import { SshBackend } from '../src/agents/backend.js';
-import { OpenSshTransport } from '../src/core/ssh.js';
+import { OpenSshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
-import type { Cursor } from '../src/core/domain.js';
+import type { Cursor } from '@dsh-plugins/remote-core/domain.js';
 import { Store } from '../src/core/store.js';
 
 /**

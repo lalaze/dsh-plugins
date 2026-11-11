@@ -5,8 +5,8 @@ import { basename, isAbsolute, join } from 'node:path';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type { ContentBlock, FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm';
-import { attachmentInput, identifier, RemoteError, type Attachment, type NativeAttachment } from '../core/domain.js';
-import type { SshTransport } from '../core/ssh.js';
+import { attachmentInput, identifier, RemoteError, type Attachment, type NativeAttachment } from '@dsh-plugins/remote-core/domain.js';
+import type { SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 
 export interface AttachmentAccess {
   image(ref: ImageBlock['attachment'], signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>;

@@ -5,8 +5,8 @@ import { RemoteAgentsService } from '../src/agents/service.js';
 import { WorkspaceService } from '../src/workspace/service.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';
 import { workspaceTools } from '../src/workspace/tools.js';
-import type { ToolHost } from '../src/core/dsh-host.js';
-import type { DshPermission } from '../src/core/domain.js';
+import type { ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
+import type { DshPermission } from '@dsh-plugins/remote-core/domain.js';
 
 // Answers each workspace operation as the remote shell program would.
 const RESPONSES: Record<string, string> = { list: 'ok\n\0', command: 'ok\n0 0 3 0\nran', upload: `ok\n${'a'.repeat(64)} 5\n` };

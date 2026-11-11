@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { RemoteError } from '../src/core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { claudeTitle, CODEX_THREAD_NAME, codexTitle, TuiSessions, tuiClaudeSession } from '../src/workspace/tui.js';
 import { fixture } from './fakes.js';
 

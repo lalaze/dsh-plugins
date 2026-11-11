@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { questionsOf, type Permission, type PermissionAnswer } from '../../core/domain.js';
+import { questionsOf, type Permission, type PermissionAnswer } from '@dsh-plugins/remote-core/domain.js';
 import { ui } from '../i18n.js';
 
 export function PermissionCard({ permission, busy, respond }: { permission: Permission; busy: boolean; respond: (answer: PermissionAnswer) => void }) {

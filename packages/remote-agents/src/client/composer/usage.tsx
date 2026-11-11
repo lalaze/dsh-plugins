@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { PROVIDER_LABELS, type AccountUsage, type TokenUsage, type TokenUsageBreakdown, type UsageReport } from '../../core/domain.js';
+import { PROVIDER_LABELS, type AccountUsage, type TokenUsage, type TokenUsageBreakdown, type UsageReport } from '@dsh-plugins/remote-core/domain.js';
 import { api } from '../api.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 

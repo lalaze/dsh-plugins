@@ -27,7 +27,7 @@ Remote Agents 的普通 DSH 对话共享需单独启用：通过 `shared-native-
 
 插件界面支持英语和简体中文，以英语作为源文案和回退语言。宿主提供 DSH locale 服务时，插件跟随「设置 → 通用 → 语言」即时切换，包括已打开的面板和插件自身的错误提示；未提供该服务的旧宿主使用英语。API 诊断和 CSV 列名使用英语，用户内容、模型 ID 和命令语法保持原文。
 
-私有的 `packages/i18n` 工具在构建时打入各客户端，插件安装包仍可独立安装。私有的 `packages/file-view`（代码编辑器、差异编辑器与文件预览）以同样方式由 `dsh-file-editor`、`dsh-remote-agents` 和 `dsh-git-view` 共用，各插件打入自己使用的部分。
+私有的 `packages/i18n` 工具在构建时打入各客户端，插件安装包仍可独立安装。私有的 `packages/file-view`（代码编辑器、差异编辑器与文件预览）以同样方式由 `dsh-file-editor`、`dsh-remote-agents` 和 `dsh-git-view` 共用，各插件打入自己使用的部分。私有的 `packages/remote-core`（已保存主机与任务的类型、SSH 传输）在构建时编译进使用它的插件的服务端，目前是 `dsh-remote-agents`。
 
 ## 初始化
 
@@ -95,6 +95,7 @@ packages/
   file-editor/          # 本地工作区文件的代码编辑器
   git-view/             # 本地/远程工作区的 Git 侧栏、差异编辑与冲突处理
   file-view/            # 私有的共享代码/差异编辑器与文件预览
+  remote-core/          # 私有的共享 SSH 传输与远程机器类型
   workspace-tags/       # 工作区标签，侧栏按标签或状态分组
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景

@@ -4,7 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { appendFile, mkdir, mkdtemp, readdir, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OpenSshTransport } from '../src/core/ssh.js';
+import { OpenSshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import type { State } from '../src/core/store.js';
 import type { RemoteUsageRecord } from '../src/agents/usage.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';

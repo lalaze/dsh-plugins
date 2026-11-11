@@ -3,7 +3,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
-import type { AgentSummary } from '../src/core/domain.js';
+import type { AgentSummary } from '@dsh-plugins/remote-core/domain.js';
 import { DelegatedCatalog, type DelegatedCatalogProps } from '../src/client/sessions/delegated.js';
 import type { CatalogAddress, CatalogState } from '../src/client/sessions/delegated-model.js';
 

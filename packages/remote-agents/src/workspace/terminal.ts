@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { quote } from '../core/ssh.js';
+import { quote } from '@dsh-plugins/remote-core/ssh.js';
 import { dshHome } from './access.js';
 import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from './domain.js';
 import { tabHolder, TERMINAL_ID_ENV } from './holder-protocol.js';

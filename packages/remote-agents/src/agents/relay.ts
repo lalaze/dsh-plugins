@@ -1,8 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
-import { quote, type Child, type SshTransport } from '../core/ssh.js';
-import type { RelayUnavailable } from '../core/domain.js';
-import { REMOTE_HOME, remoteScript } from '../core/remote-host.js';
+import { quote, type Child, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
+import type { RelayUnavailable } from '@dsh-plugins/remote-core/domain.js';
+import { REMOTE_HOME, remoteScript } from '@dsh-plugins/remote-core/remote-host.js';
 
 /**
  * Runs on the SSH host and owns one CLI process, so the CLI outlives DSH and its SSH connection.

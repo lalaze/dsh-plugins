@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { modePermission, type DshPermission, type Task } from '../core/domain.js';
+import { modePermission, type DshPermission, type Task } from '@dsh-plugins/remote-core/domain.js';
 import { chatModelId, chatProviderId } from './native-chat.js';
 import type { ChatProjects } from './projects.js';
 

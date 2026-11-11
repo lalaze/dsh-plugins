@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, realpath, rm } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { dshHome, under, type WorkspaceAccess, type WorkspacePlacement } from './access.js';
 import type { WorkspaceHosts } from './hosts.js';
 import type { RemoteWorkspaces } from './remote-workspaces.js';

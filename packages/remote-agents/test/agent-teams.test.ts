@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { isTeamPrompt, teamMemberNote, teamMemberOf } from '../src/chat/agent-teams.js';
-import { accessOf } from '../src/core/dsh-host.js';
+import { accessOf } from '@dsh-plugins/remote-core/dsh-host.js';
 import { decidePermission, unattendedAnswer } from '../src/agents/tools.js';
-import type { Permission } from '../src/core/domain.js';
+import type { Permission } from '@dsh-plugins/remote-core/domain.js';
 
 const session = (header: Record<string, unknown>, events: unknown[] = []) =>
   ({ header, eventAt: (seq: number) => events[seq] }) as unknown as Session;

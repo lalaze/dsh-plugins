@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { Cursor, MessageTimeline, RelayPosition, TimelineEntry, TimelinePage } from '../core/domain.js';
+import type { Cursor, MessageTimeline, RelayPosition, TimelineEntry, TimelinePage } from '@dsh-plugins/remote-core/domain.js';
 
 export class TaskHistory {
   private entries: TimelineEntry[] = [];

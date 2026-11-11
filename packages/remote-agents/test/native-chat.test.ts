@@ -10,14 +10,14 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session';
 import { assertReleasedV4Relationships } from '@deepseek-ai/dsh-session-format-v3-to-v4';
 import { ChatProjects } from '../src/chat/projects.js';
 import { CHAT_PROVIDER, CHAT_PROVIDERS, SYNC_SOURCE, chatProviderId, chatModelId, RemoteCliAdapter, type ChatHost } from '../src/chat/native-chat.js';
-import { TOOL_STATUS_URL } from '../src/core/domain.js';
+import { TOOL_STATUS_URL } from '@dsh-plugins/remote-core/domain.js';
 import { toolStatus } from '../src/chat/transcript.js';
 import { Store } from '../src/core/store.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { TaskHistory } from '../src/agents/history.js';
 import { createHandler } from '../src/http.js';
 import { fixture } from './fakes.js';
-import { fastTierOf, RELAY_UNAVAILABLE, type DshPermission } from '../src/core/domain.js';
+import { fastTierOf, RELAY_UNAVAILABLE, type DshPermission } from '@dsh-plugins/remote-core/domain.js';
 
 const CODEX_PROVIDER = chatProviderId('codex');
 const user = (text: string) => createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'user' } });

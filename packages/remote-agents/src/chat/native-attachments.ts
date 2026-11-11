@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { fileRefs, isNativeImage, nativeAttachmentLimit, ATTACHMENTS_LIMIT, type NativeFile } from './native-protocol.js';
 
 /** Only public AttachmentStore and the audited local provider publication API.

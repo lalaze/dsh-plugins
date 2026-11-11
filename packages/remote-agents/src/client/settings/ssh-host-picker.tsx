@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { Host, SshConfigHost, SshConfigHosts } from '../../core/domain.js';
+import type { Host, SshConfigHost, SshConfigHosts } from '@dsh-plugins/remote-core/domain.js';
 import { api } from '../api.js';
 import { localizeError, ui } from '../i18n.js';
 import { SshAliasSelect } from './ssh-alias-select.js';

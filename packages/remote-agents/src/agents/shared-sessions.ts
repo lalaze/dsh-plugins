@@ -1,9 +1,9 @@
-import { JsonlPeer, type SshTransport } from '../core/ssh.js';
+import { JsonlPeer, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { SHARED_SCRIPT, SHARED_VERSION } from './shared-script.js';
-import { attachmentInput, identifier, PROVIDER_LABELS, type Agent, type SharedTag, type SharedWorkspace, type Task } from '../core/domain.js';
+import { attachmentInput, identifier, PROVIDER_LABELS, type Agent, type SharedTag, type SharedWorkspace, type Task } from '@dsh-plugins/remote-core/domain.js';
 import type { TaskHistory } from './history.js';
 import type { Instance, Store } from '../core/store.js';
-import { REMOTE_HOME, remoteScript } from '../core/remote-host.js';
+import { REMOTE_HOME, remoteScript } from '@dsh-plugins/remote-core/remote-host.js';
 
 const BASE = `${REMOTE_HOME}/shared-v1`;
 const { path: SCRIPT, install: INSTALL } = remoteScript('shared', SHARED_VERSION, SHARED_SCRIPT, { directories: [BASE],

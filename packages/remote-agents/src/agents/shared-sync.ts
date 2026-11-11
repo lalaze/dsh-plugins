@@ -1,7 +1,7 @@
 import type { Backend } from './backend.js';
 import type { HostConnections } from './host-connections.js';
 import type { Store } from '../core/store.js';
-import { RemoteError, sharesSessions, type SharedTag, type SharedWorkspace } from '../core/domain.js';
+import { RemoteError, sharesSessions, type SharedTag, type SharedWorkspace } from '@dsh-plugins/remote-core/domain.js';
 
 /** Sharing needs local backend access, never the verified remote-operation path or the catalog queue. */
 type SharedHosts = Pick<HostConnections, 'host' | 'backend' | 'peek' | 'stopped'>;

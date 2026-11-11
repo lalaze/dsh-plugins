@@ -1,4 +1,4 @@
-import { PROVIDER_LABELS, type AgentSummary } from '../../core/domain.js';
+import { PROVIDER_LABELS, type AgentSummary } from '@dsh-plugins/remote-core/domain.js';
 
 export const DELEGATED_SLOT = 'conversation.session.header.actions';
 export const DELEGATED_ID = 'subagent-catalog';

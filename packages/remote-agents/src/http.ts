@@ -1,4 +1,4 @@
-import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './core/domain.js';
+import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from '@dsh-plugins/remote-core/domain.js';
 import type { RemoteAgentsService } from './agents/service.js';
 import type { adoptModel } from './chat/adopt-model.js';
 import { ChatProjects } from './chat/projects.js';

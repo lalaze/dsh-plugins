@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import { SshBackend } from '../src/agents/backend.js';
-import { quote, type SshTransport } from '../src/core/ssh.js';
+import { quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { Store } from '../src/core/store.js';
 
 const run = promisify(execFile);

@@ -5,9 +5,9 @@ import { mkdtemp, readdir, rm, readFile, writeFile, stat } from 'node:fs/promise
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SshBackend, CLI_PROVIDERS, CLAUDE_ROOT_ENV, confinesCommands, unattendedClaude } from '../src/agents/backend.js';
-import { JsonlPeer, quote, type Child, type SshTransport, type StartOptions, type WireMessage } from '../src/core/ssh.js';
+import { JsonlPeer, quote, type Child, type SshTransport, type StartOptions, type WireMessage } from '@dsh-plugins/remote-core/ssh.js';
 import { Store } from '../src/core/store.js';
-import type { FinishedTurn } from '../src/core/domain.js';
+import type { FinishedTurn } from '@dsh-plugins/remote-core/domain.js';
 import { TaskHistory } from '../src/agents/history.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { decodeAntigravityModels } from '../src/agents/antigravity.js';

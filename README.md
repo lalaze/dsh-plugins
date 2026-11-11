@@ -27,7 +27,7 @@ Ordinary DSH conversation sharing is a separate opt-in feature of Remote Agents:
 
 Plugin interfaces support English and Simplified Chinese. English is the source and fallback language. On hosts with the DSH locale service, plugins follow **Settings → General → Language** and update immediately, including open panels and known error messages. Older hosts without that service use English. API diagnostics and CSV column names use English; user content, model IDs and command syntax stay in their original language.
 
-The private `packages/i18n` helper is bundled into each client at build time, so plugin archives remain independently installable. The private `packages/file-view` code editor, diff editor and file previews are shared the same way by `dsh-file-editor`, `dsh-remote-agents` and `dsh-git-view`; each plugin bundles the parts it uses.
+The private `packages/i18n` helper is bundled into each client at build time, so plugin archives remain independently installable. The private `packages/file-view` code editor, diff editor and file previews are shared the same way by `dsh-file-editor`, `dsh-remote-agents` and `dsh-git-view`; each plugin bundles the parts it uses. The private `packages/remote-core` (saved-host and task types, the SSH transport) is compiled into the server of the plugin that uses it, today `dsh-remote-agents`.
 
 ## Setup
 
@@ -95,6 +95,7 @@ packages/
   file-editor/          # Code editor for local workspace files
   git-view/             # Git sidebar, diff editor and conflicts for local/remote workspaces
   file-view/            # Private shared code/diff editors and file previews
+  remote-core/          # Private shared SSH transport and remote-machine types
   workspace-tags/       # Workspace tags and tag/status grouping in the sidebar
   usage-stats/          # DSH and Claude SSH usage statistics
   gallery/              # Local wallpaper library and DSH backgrounds

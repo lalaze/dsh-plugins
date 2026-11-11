@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { SharedTag, SharedWorkspace } from '../core/domain.js';
+import type { SharedTag, SharedWorkspace } from '@dsh-plugins/remote-core/domain.js';
 import type { Store, TagSyncRecord } from '../core/store.js';
 
 /** dsh-workspace-tags' host service, version 1: tags by id, and each workspace's tag ids. */

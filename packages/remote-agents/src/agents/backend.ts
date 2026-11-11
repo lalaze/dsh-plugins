@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, RelayUnavailable, SharedTag, SharedWorkspace, Task, TimelinePage } from '../core/domain.js';
-import { enabledProvidersOf, list, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError, sharesSessions } from '../core/domain.js';
-import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from '../core/ssh.js';
-import { MACHINE_IDENTITY, serverIdOf } from '../core/remote-host.js';
+import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, RelayUnavailable, SharedTag, SharedWorkspace, Task, TimelinePage } from '@dsh-plugins/remote-core/domain.js';
+import { enabledProvidersOf, list, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError, sharesSessions } from '@dsh-plugins/remote-core/domain.js';
+import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
+import { MACHINE_IDENTITY, serverIdOf } from '@dsh-plugins/remote-core/remote-host.js';
 import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
 import { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { WorkspaceFiles } from '../workspace/files.js';
 import { acpServers, sharedArguments, type LaunchSharing } from '../sharing/sharing.js';
 import { SharedSessions } from './shared-sessions.js';
-export { connectionInput } from '../core/ssh.js';
+export { connectionInput } from '@dsh-plugins/remote-core/ssh.js';
 
 /** Agent state, replies and timelines are local reads; only process control needs the SSH host. */
 export interface Backend {

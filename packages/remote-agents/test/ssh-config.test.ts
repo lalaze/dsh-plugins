@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { readSshConfigHosts } from '../src/core/ssh-config.js';
+import { readSshConfigHosts } from '@dsh-plugins/remote-core/ssh-config.js';
 import { createHandler } from '../src/http.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { Store } from '../src/core/store.js';

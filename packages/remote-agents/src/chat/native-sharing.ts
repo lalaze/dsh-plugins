@@ -1,4 +1,4 @@
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 
 /** Capability result, not a wire protocol advertisement. No native session is enrolled or read. */
 export interface NativeSharingStatus {

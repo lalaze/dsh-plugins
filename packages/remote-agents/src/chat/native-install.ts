@@ -3,7 +3,7 @@ import { Session, SessionId } from '@deepseek-ai/dsh-session';
 import { join } from 'node:path';
 import type { RemoteAgentsService } from '../agents/service.js';
 import type { Workspaces } from '../workspace/install.js';
-import { RemoteError } from '../core/domain.js';
+import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { validateNative, validateNativeInput, portableInboxAudit, nativeSelection, NATIVE_CLOSED_PROVIDER, type NativeSnapshot } from './native-protocol.js';
 import { exportNativeAttachments, importNativeAttachments } from './native-attachments.js';
 import { installNativeAgentAliases } from './native-agent-aliases.js';

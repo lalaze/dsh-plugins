@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import type { Dashboard } from '../../core/domain.js';
+import type { Dashboard } from '@dsh-plugins/remote-core/domain.js';
 import type { SharingCatalog } from '../../sharing/sharing.js';
 import { api } from '../api.js';
 import { localizeError, ui } from '../i18n.js';

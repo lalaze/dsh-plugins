@@ -1,6 +1,6 @@
-import type { Choice, Model, Task } from '../core/domain.js';
-import type { JsonlPeer } from '../core/ssh.js';
-import { list } from '../core/domain.js';
+import type { Choice, Model, Task } from '@dsh-plugins/remote-core/domain.js';
+import type { JsonlPeer } from '@dsh-plugins/remote-core/ssh.js';
+import { list } from '@dsh-plugins/remote-core/domain.js';
 
 type SelectOption = { id: string; category?: string; currentValue: string; options: unknown[] };
 function selector(session: any, category: string, fallbackId: string): SelectOption | undefined {

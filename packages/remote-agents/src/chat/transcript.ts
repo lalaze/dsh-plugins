@@ -1,4 +1,4 @@
-import { TOOL_STATUS_URL, type TimelineEntry } from '../core/domain.js';
+import { TOOL_STATUS_URL, type TimelineEntry } from '@dsh-plugins/remote-core/domain.js';
 
 /** Main-chat prompts carry earlier DSH messages ahead of the request; the transcript shows only what the user typed. */
 const CONTEXT = /^Conversation context \(already occurred; do not repeat completed actions\):\n[\s\S]*?\n\nCurrent user request:\n/;

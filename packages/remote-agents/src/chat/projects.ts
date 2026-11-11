@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { enabledProvidersOf, fastTierOf, field, identifier, record, remotePath, RemoteError, type ChatProject, type Choice } from '../core/domain.js';
+import { enabledProvidersOf, fastTierOf, field, identifier, record, remotePath, RemoteError, type ChatProject, type Choice } from '@dsh-plugins/remote-core/domain.js';
 import type { RemoteAgentsService } from '../agents/service.js';
 
 /** Saved, explicitly discovered catalogs let the native model picker work without opening SSH. */
