@@ -484,12 +484,12 @@
       },
       "versions": [
         {
-          "version": "0.1.1",
-          "publishTimestamp": 1794418369,
+          "version": "0.1.2",
+          "publishTimestamp": 1794419471,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "d1744dc9b6145c4f611889dd97ab1435f61a3ad3",
+            "commit": "d5e385cb3099c71869b59728b5c5d329af5d9cbf",
             "path": "packages/game-assets"
           },
           "engines": {
