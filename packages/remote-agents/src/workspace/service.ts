@@ -18,13 +18,6 @@ export function workspacePath(value: unknown, label: string): string {
 export function fileOperation(raw: unknown): FileOperation {
   const v = record(raw), op = field(v.op, 'workspace operation', 40), path = v.path === '' ? '' : workspacePath(v.path ?? '.', 'workspace path');
   if (op === 'list' || op === 'read' || op === 'stat' || op === 'mkdir' || op === 'manifest') return { op, path };
-  if (op === 'webStart' || op === 'webStop') {
-    if (typeof v.port !== 'number' || !Number.isInteger(v.port) || v.port < 1024 || v.port > 65535) throw new RemoteError('Enter a port between 1024 and 65535');
-    if (op === 'webStop') return { op, path, port: v.port };
-    // Passed to dsh as --trusted-host, so it must not read as an option.
-    if (typeof v.host !== 'string' || v.host.length > 253 || !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(v.host)) throw new RemoteError('Invalid remote DSH access address');
-    return { op, path, port: v.port, host: v.host };
-  }
   if (op === 'write') {
     if (typeof v.content !== 'string' || Buffer.byteLength(v.content) > TEXT_LIMIT) throw new RemoteError('File exceeds the 256 KB editor limit', 413);
     return { op, path, content: v.content, revision: revision(v.revision) };

@@ -2,13 +2,12 @@ import { field, identifier, RemoteError } from '@dsh-plugins/remote-core/domain.
 import { FILE_LIMIT, type WorkspaceTarget } from './domain.js';
 import type { WorkspaceService } from './service.js';
 import { revision, workspacePath } from './service.js';
-import type { WorkspaceTunnels } from './tunnels.js';
 import type { TuiFiles } from './tui-files.js';
 import type { TuiSessions } from './tui.js';
 import type { JobAction, WorktreeService } from './worktrees.js';
 
 /** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
-export interface WorkspaceFeatures { files: WorkspaceService; tunnels: WorkspaceTunnels; terminal?: { shell?: string }; worktrees?: WorktreeService; tui?: TuiSessions }
+export interface WorkspaceFeatures { files: WorkspaceService; terminal?: { shell?: string }; worktrees?: WorktreeService; tui?: TuiSessions }
 const JOB_ACTIONS: readonly JobAction[] = ['cancel', 'retry', 'skip', 'discard', 'confirm'];
 /** Worktree workspaces: a project's DSH workspace path, a worktree's path on its machine, and operation IDs. */
 export async function worktreeAction(worktrees: WorktreeService, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
@@ -64,19 +63,6 @@ export async function workspaceAction(features: WorkspaceFeatures, action: strin
     const plan = input.apply === true ? field(input.planId, 'sync preview', 64) : undefined;
     return features.files.sync(sessionId, input.direction, input.apply !== true, signal, expected, plan);
   }
-  const target = await features.files.target(sessionId, signal, expected);
-  if (action === 'workspaceTunnels') return features.tunnels.list(target.hostId);
-  if (action === 'addWorkspaceTunnel') {
-    const tunnel = input.tunnel && typeof input.tunnel === 'object' ? input.tunnel : {};
-    return features.tunnels.add({ ...tunnel, hostId: target.hostId });
-  }
-  const id = identifier(input.id);
-  if (action === 'startWorkspaceTunnel') {
-    await features.files.machines.connect(target.hostId); await features.files.target(sessionId, signal, target);
-    return features.tunnels.start(id, target.hostId, input.access);
-  }
-  if (action === 'stopWorkspaceTunnel') { features.tunnels.stop(id, target.hostId); return { ok: true }; }
-  if (action === 'removeWorkspaceTunnel') { await features.tunnels.remove(id, target.hostId); return { ok: true }; }
   throw new RemoteError('Unknown workspace action');
 }
 const requireClient = (request: Request) => { if (request.headers.get('X-DSH-Remote-Agents') !== '1') throw new RemoteError('Use the remote agents client to submit requests', 403); };

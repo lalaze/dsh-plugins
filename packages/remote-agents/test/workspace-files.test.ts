@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { spawn, execFile, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdtemp, mkdir, readFile, writeFile, symlink, rm, readdir, realpath, chmod, stat } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -13,8 +13,6 @@ import { expectedTarget, workspaceTransferHandler } from '../src/workspace/http.
 import type { WorkspaceFile, WorkspaceManifest } from '../src/workspace/domain.js';
 import { fixture } from './fakes.js';
 import { codexTitle, CODEX_THREAD_NAME } from '../src/workspace/tui.js';
-import { REMOTE_DSH_RUNNER } from '../src/workspace/runner.js';
-import { promisify } from 'node:util';
 
 class LocalTransport extends OpenSshTransport {
   // The runner keeps its locks under the remote home; tests give it a temporary one.
@@ -168,26 +166,6 @@ test('a name containing a newline is listed and readable, but scans skip it', as
   assert.deepEqual([Object.keys(manifest.files), manifest.skipped], [['plain'], ['two\nlines']]);
   const found = await files.operate(remote, { op: 'search', path: '.', query: 'needle' }) as { matches: { path: string }[]; skipped: string[] };
   assert.deepEqual([found.matches.map(m => m.path), found.skipped], [['plain'], ['two\nlines']]);
-});
-test('managed remote DSH startup is isolated, idempotent, scoped to its workspace and explicitly stopped', async t => {
-  const { root, remote } = await directory(t), bin = join(root, 'bin'); await mkdir(bin);
-  await writeFile(join(bin, 'dsh'), `#!${process.execPath}\nconst port=process.argv[process.argv.indexOf('--port')+1];console.log(process.argv.slice(2).join(' '));console.log('http://127.0.0.1:'+port+'/?token=fixture-only');setInterval(()=>{},1000);\n`, { mode: 0o700 });
-  await writeFile(join(bin, 'ps'), `#!${process.execPath}\ntry{process.kill(Number(process.argv[process.argv.indexOf('-p')+1]),0);console.log('fixed-test-start-stamp');}catch{process.exit(1);}\n`, { mode: 0o700 });
-  const source = `require('node:os').homedir=()=>${JSON.stringify(root)};\n${REMOTE_DSH_RUNNER}`;
-  const run = async (op: string, cwd = remote, host = 'dsh.example.test') => JSON.parse((await promisify(execFile)(process.execPath, ['-e', source, JSON.stringify({ op, cwd, path: '.', port: 3080, host })], { env: { ...process.env, PATH: `${bin}:${process.env.PATH}` }, timeout: 10000 })).stdout);
-  let pid: number | undefined;
-  t.after(() => { if (pid) try { process.kill(-pid, 'SIGKILL'); } catch {} });
-  assert.equal((await run('webStart')).result.url, 'http://127.0.0.1:3080/?token=fixture-only');
-  pid = JSON.parse(await readFile(join(root, '.dsh-remote-agents/web-ui/3080/process.json'), 'utf8')).pid;
-  // The browser reaches the instance through a tunnel on the access address, which it must trust.
-  assert.match(await readFile(join(root, '.dsh-remote-agents/web-ui/3080/output.log'), 'utf8'), /--trusted-host dsh\.example\.test\b/);
-  assert.equal((await run('webStart', remote, 'other.example')).status, 409);
-  assert.throws(() => fileOperation({ op: 'webStart', path: '.', port: 3080, host: '-oProxyCommand=x' }), /address/);
-  assert.equal((await run('webStart')).result.managed, true);
-  assert.equal(JSON.parse(await readFile(join(root, '.dsh-remote-agents/web-ui/3080/process.json'), 'utf8')).pid, pid);
-  assert.equal((await run('webStop', root)).status, 409);
-  assert.equal((await run('webStop')).result.stopped, true);
-  assert.equal((await run('webStop')).status, 409);
 });
 test('three-way pull and push preserve metadata, detect conflicts, preview without writes and propagate deletes', async t => {
   const f = await fixture(t), d = await directory(t); await f.service.close();

@@ -1,25 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CodeEditor, ImagePreview, MarkdownPreview, imageType, isMarkdown } from '@dsh-plugins/file-view';
-import { api, EDITOR_SRC, requestId } from '../api.js';
+import { api, EDITOR_SRC } from '../api.js';
 import { i18n, ui, localizeError, useLocale } from '../i18n.js';
 import { workspaceStyles } from './styles.js';
-import { type SyncResult, type Tunnel, type WorkspaceEntry, type WorkspaceFile, type WorkspaceTarget } from '../../workspace/domain.js';
+import { type SyncResult, type WorkspaceEntry, type WorkspaceFile, type WorkspaceTarget } from '../../workspace/domain.js';
 
-const TOOLS = { files: 'Files', sync: 'Sync', tunnels: 'Tunnels', web: 'Remote DSH' } as const;
+const TOOLS = { files: 'Files', sync: 'Sync' } as const;
 export type WorkspaceTool = keyof typeof TOOLS;
 const ALL_TOOLS = Object.keys(TOOLS) as WorkspaceTool[];
-/**
- * The address this browser reaches DSH at. A local tunnel started from here listens there too, so its links use it, and a
- * managed remote DSH must trust it as the Host header those links send.
- */
-const accessHost = () => /^https?:$/.test(location.protocol) && location.hostname ? location.hostname : 'localhost';
 const size = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const PATHS = {
   server: 'M3 4.5h10v3H3zM3 8.5h10v3H3zM5 6h.01M5 10h.01', folder: 'M2 4.5a1 1 0 0 1 1-1h3l1.5 1.5H13a1 1 0 0 1 1 1V12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z',
   file: 'M4 2h5l3 3v9H4zM9 2v3h3', up: 'M8 13V3M4 7l4-4 4 4', plus: 'M8 3v10M3 8h10', upload: 'M8 10V2.5M5 5.5l3-3 3 3M3 10v3h10v-3',
   download: 'M8 2.5V10M5 7l3 3 3-3M3 10v3h10v-3', refresh: 'M13 3v3.5H9.5M3 13V9.5h3.5M4.2 6A4.5 4.5 0 0 1 12.6 5.7M11.8 10A4.5 4.5 0 0 1 3.4 10.3',
-  search: 'M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM14 14l-3.5-3.5', trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5', play: 'M5 3.5v9l7-4.5z',
-  stop: 'M4.5 4.5h7v7h-7z', close: 'M4.5 4.5l7 7M11.5 4.5l-7 7', external: 'M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5',
+  search: 'M7 12A5 5 0 1 0 7 2a5 5 0 0 0 0 10zM14 14l-3.5-3.5', trash: 'M3 4.5h10M6.5 4.5V3h3v1.5M4.5 4.5l.5 8.5h6l.5-8.5',
+  close: 'M4.5 4.5l7 7M11.5 4.5l-7 7',
   save: 'M3 2.5h8l2.5 2.5v8.5h-10.5zM5.5 2.5V6h5V2.5M5.5 13.5V9.5h5v4', discard: 'M3.5 6.5h6.5a3.5 3.5 0 0 1 0 7H6.5M6 4 3.5 6.5 6 9',
   rename: 'M10.5 2.5l3 3-8 8h-3v-3zM9 4l3 3', preview: 'M1.5 8s2.5-4.5 6.5-4.5S14.5 8 14.5 8 12 12.5 8 12.5 1.5 8 1.5 8zM8 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
   check: 'M3 8.5l3 3 7-7',
@@ -48,8 +43,6 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
   const [renaming, setRenaming] = useState(false);
   const [query, setQuery] = useState(''), [matches, setMatches] = useState<{ path: string; line: number; text: string }[]>();
   const [direction, setDirection] = useState<'pull' | 'push'>('pull'), [sync, setSync] = useState<SyncResult>();
-  const [tunnels, setTunnels] = useState<Tunnel[]>([]), [listenPort, setListenPort] = useState('38080'), [targetPort, setTargetPort] = useState('3000'), [tunnelDirection, setTunnelDirection] = useState<'local' | 'reverse'>('local');
-  const [webPort, setWebPort] = useState('3080'), [webLocalPort, setWebLocalPort] = useState('38088'), [webUrl, setWebUrl] = useState(''), [webLink, setWebLink] = useState('');
   const abort = useRef(new AbortController()), input = useRef<HTMLInputElement>(null), alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; abort.current.abort(); }; }, []);
   useEffect(() => {
@@ -106,24 +99,6 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
     const url = URL.createObjectURL(await response.blob()), link = document.createElement('a');
     link.href = url; link.download = selected.split('/').pop() || 'file'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  useEffect(() => {
-    if (!target || tab !== 'tunnels') return;
-    let stopped = false, timer: ReturnType<typeof setTimeout>;
-    const poll = async () => { try { const value = await call<Tunnel[]>('workspaceTunnels'); if (!stopped) setTunnels(value); } catch (e) { if (!stopped) setError(localizeError(e)); } if (!stopped) timer = setTimeout(() => void poll(), 3000); };
-    void poll(); return () => { stopped = true; clearTimeout(timer); };
-  }, [target, tab, call]);
-  /** Forwards a remote loopback DSH login URL and shows the local link; starting the managed instance calls it too. */
-  const connectWeb = async (url: string) => {
-    const remote = new URL(url);
-    if (remote.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(remote.hostname) || remote.username || remote.password || !remote.port) throw new Error(ui('Enter the remote loopback DSH login URL.'));
-    const listenPort = Number(webLocalPort), targetPort = Number(remote.port);
-    // Reconnecting reuses the saved tunnel for this port pair; starting one that already runs returns it unchanged.
-    const saved = (await call<Tunnel[]>('workspaceTunnels')).find(t => t.direction === 'local' && t.listenPort === listenPort && t.targetHost === '127.0.0.1' && t.targetPort === targetPort);
-    const id = saved?.id ?? requestId();
-    if (!saved) await call('addWorkspaceTunnel', { tunnel: { id, direction: 'local', listenPort, targetPort, targetHost: '127.0.0.1' } });
-    await call('startWorkspaceTunnel', { id, access: accessHost() });
-    if (alive.current) setWebLink(`http://${accessHost()}:${listenPort}${remote.pathname}${remote.search}`);
-  };
   // A binary image is fetched at the revision just read; an SVG previews the text being edited.
   const binaryImage = !file && info && imageType(info.path) ? info : undefined;
   useEffect(() => {
@@ -139,7 +114,6 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
   const svg = useMemo(() => file && mode === 'preview' && imageType(file.path) ? URL.createObjectURL(new Blob([draft], { type: 'image/svg+xml' })) : undefined, [file, mode, draft]);
   useEffect(() => () => { if (svg) URL.revokeObjectURL(svg); }, [svg]);
   const previewable = !!file && (isMarkdown(file.path) || !!imageType(file.path));
-  const tunnelAction = async (action: string, id: string) => { await call(action, { id, access: accessHost() }); setTunnels(await call<Tunnel[]>('workspaceTunnels')); };
 
   const folders = path ? path.split('/') : [];
   // Browsing folders leaves the open file and its unsaved edits alone.
@@ -252,41 +226,6 @@ export function WorkspacePanel({ sessionId, initialPath, tools = ALL_TOOLS, open
             {sync.conflicts.map(p => <li key={p}><span className="ra-ws-tag" data-action="conflict">{ui('Conflict')}</span><span className="ra-mono">{p}</span></li>)}</ul> : <p className="ra-ws-empty">{ui('Nothing to sync')}</p>}
           {sync.skipped.length > 0 && <details className="ra-ws-skipped"><summary>{ui('Skipped files')} ({sync.skipped.length})</summary><pre>{sync.skipped.join('\n')}</pre></details>}
         </div>}
-      </div>}
-      {tab === 'tunnels' && <div className="ra-ws-section">
-        <p className="ra-ws-note">{ui('Forward application ports or a running remote DSH web interface. Tunnels stop when DSH closes; saved definitions remain. Agent sessions keep running independently.')}</p>
-        <form className="ra-ws-card" onSubmit={event => { event.preventDefault(); void run(async () => { const id = requestId();
-          // A new tunnel starts right away; if starting fails it stays saved with the error, ready to retry.
-          await call('addWorkspaceTunnel', { tunnel: { id, direction: tunnelDirection, listenPort: Number(listenPort), targetPort: Number(targetPort), targetHost: '127.0.0.1' } });
-          try { await call('startWorkspaceTunnel', { id, access: accessHost() }); } finally { setTunnels(await call<Tunnel[]>('workspaceTunnels')); } }); }}>
-          {segmented(ui('Direction'), tunnelDirection, setTunnelDirection, [['local', ui('Local → remote')], ['reverse', ui('Remote → local')]] as const)}
-          <div className="ra-ws-ports"><label className="ra-ws-field">{ui('Listen port')}<input className="ra-ws-input" type="number" min="1" max="65535" required value={listenPort} onChange={e => setListenPort(e.target.value)} /></label>
-            <span className="ra-ws-arrow" aria-hidden="true">→</span>
-            <label className="ra-ws-field">{ui('Target port')}<input className="ra-ws-input" type="number" min="1" max="65535" required value={targetPort} onChange={e => setTargetPort(e.target.value)} /></label>
-            <button className="ra-ws-button ra-primary" disabled={busy}><Icon kind="plus" />{ui('Add and start')}</button></div>
-        </form>
-        <h3 className="ra-ws-subhead">{ui('Saved tunnels')}{tunnels.length > 0 && <span>{tunnels.length}</span>}</h3>
-        {tunnels.length ? <ul className="ra-ws-tunnels">{tunnels.map(t => <li key={t.id} data-status={t.status}>
-          <span className="ra-ws-dot" aria-hidden="true" />
-          <div className="ra-ws-tunnel-main"><span className="ra-mono">{t.listenPort} → {t.targetHost}:{t.targetPort}</span><small>{ui(t.direction === 'local' ? 'Local → remote' : 'Remote → local')} · {ui(t.status)}{t.status === 'running' && t.listening && ` · ${t.listening.join(', ')}`}</small>{t.error && <small className="ra-ws-error" role="alert">{t.error}</small>}</div>
-          <div className="ra-ws-row">{t.status === 'running' && t.direction === 'local' && <a className="ra-ws-icon" href={`http://${accessHost()}:${t.listenPort}`} target="_blank" rel="noreferrer" title={ui('Open')} aria-label={ui('Open')}><Icon kind="external" /></a>}
-            <button type="button" className="ra-ws-icon" title={ui(t.status === 'running' ? 'Stop' : 'Start')} aria-label={ui(t.status === 'running' ? 'Stop' : 'Start')} disabled={busy} onClick={() => void run(() => tunnelAction(t.status === 'running' ? 'stopWorkspaceTunnel' : 'startWorkspaceTunnel', t.id))}><Icon kind={t.status === 'running' ? 'stop' : 'play'} /></button>
-            <button type="button" className="ra-ws-icon ra-ws-danger" title={ui('Remove')} aria-label={ui('Remove')} disabled={busy} onClick={() => void run(() => tunnelAction('removeWorkspaceTunnel', t.id))}><Icon kind="trash" /></button></div>
-        </li>)}</ul> : <p className="ra-ws-empty">{ui('No tunnels yet. Add one above.')}</p>}
-      </div>}
-      {tab === 'web' && <div className="ra-ws-section">
-        <p className="ra-ws-note">{ui('Open the remote machine’s DSH interface through SSH. Starting an instance uses an isolated DSH home and requires dsh on the remote login PATH. Closing the tunnel leaves that instance running.')}</p>
-        <div className="ra-ws-card"><p className="ra-ws-card-title">{ui('Managed instance')}</p>
-          <div className="ra-ws-ports"><label className="ra-ws-field">{ui('Remote DSH port')}<input className="ra-ws-input" aria-label={ui('Remote DSH port')} type="number" min="1024" max="65535" value={webPort} onChange={e => setWebPort(e.target.value)} /></label>
-            <button className="ra-ws-button ra-primary" disabled={busy} onClick={() => void run(async () => { const result = await operate<{ url: string }>({ op: 'webStart', path: '.', port: Number(webPort), host: accessHost() }); setWebUrl(result.url); setWebLink(''); await connectWeb(result.url); })}><Icon kind="play" />{ui('Start remote DSH')}</button>
-            <button className="ra-ws-button" disabled={busy} onClick={() => void run(async () => { await operate({ op: 'webStop', path: '.', port: Number(webPort) }); setWebUrl(''); setWebLink(''); })}>{ui('Stop managed instance')}</button></div>
-        </div>
-        <form className="ra-ws-card" onSubmit={event => { event.preventDefault(); void run(() => connectWeb(webUrl)); }}><p className="ra-ws-card-title">{ui('Connect remote DSH')}</p>
-          <label className="ra-ws-field">{ui('Remote login URL')}<input className="ra-ws-input" aria-label={ui('Remote login URL')} type="password" autoComplete="off" value={webUrl} onChange={e => { setWebUrl(e.target.value); setWebLink(''); }} placeholder="http://127.0.0.1:3080/?token=…" /></label>
-          <div className="ra-ws-ports"><label className="ra-ws-field">{ui('Local DSH port')}<input className="ra-ws-input" type="number" min="1" max="65535" value={webLocalPort} onChange={e => setWebLocalPort(e.target.value)} /></label>
-            <button className="ra-ws-button ra-primary" disabled={busy || !webUrl}>{ui('Connect remote DSH')}</button>
-            {webLink && <a className="ra-ws-button" href={webLink} target="_blank" rel="noreferrer"><Icon kind="external" />{ui('Open remote DSH')}</a>}</div>
-        </form>
       </div>}
     </>}
   </section>;

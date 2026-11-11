@@ -35,7 +35,7 @@ const workspaceChecks = () => {
   const fill = text => evaluate(`(() => { const e = ${shown}; e.focus(); e.getModel().setValue(${JSON.stringify(text)}); })()`);
   browser('click', '[data-open-workspace]'); wait(`document.querySelector("${entries}")?.textContent.includes("hello.txt")`);
   expect('document.querySelector(".ra-ws-target")?.title === "build-box:/srv/main-chat"');
-  expect('[...document.querySelectorAll(".ra-ws-tabs button")].map(b => b.textContent).join() === "Files,Sync,Tunnels,Remote DSH"');
+  expect('[...document.querySelectorAll(".ra-ws-tabs button")].map(b => b.textContent).join() === "Files,Sync"');
   browser('click', `${entries} button:has-text("hello.txt")`);
   wait(`${editorText}?.includes("Hello from")`);
   // ⌘/Ctrl+S saves from the editor.
@@ -91,30 +91,8 @@ const workspaceChecks = () => {
   // A preview without changes is applied too, recording the baseline for identical files.
   browser('click', 'button:text-is("Preview sync")'); wait(`document.querySelector("${syncTitle}")?.textContent === "Sync preview0 changes · 0 conflicts"`);
   browser('click', 'button:text-is("Apply preview")'); wait(`document.querySelector("${syncTitle}")?.textContent === "Sync completed0 changes · 0 conflicts"`);
-  // Add and start saves a tunnel and runs it.
-  const tunnel = '.ra-ws-tunnels li', status = value => `document.querySelector("${tunnel}")?.dataset.status === "${value}"`;
-  browser('click', '.ra-ws-tabs button:text-is("Tunnels")'); browser('click', 'button:text-is("Add and start")');
-  wait(`${status('running')} && document.querySelector("${tunnel} a")?.href === "http://" + location.hostname + ":38080/"`);
-  browser('click', `${tunnel} [aria-label="Stop"]`); wait(status('stopped'));
-  browser('click', `${tunnel} [aria-label="Remove"]`); wait(`!document.querySelector("${tunnel}")`);
-  const webLink = '.ra-ws-section a.ra-ws-button';
-  browser('click', '.ra-ws-tabs button:text-is("Remote DSH")'); browser('fill', '[aria-label="Remote login URL"]', 'http://127.0.0.1:3080/?token=test-only'); browser('click', 'button:text-is("Connect remote DSH")');
-  wait(`document.querySelector("${webLink}")?.href === "http://" + location.hostname + ":38088/?token=test-only"`);
-  // Connecting again reuses the saved tunnel, whether it is still running or was stopped.
-  const reconnect = token => {
-    browser('fill', '[aria-label="Remote login URL"]', `http://127.0.0.1:3080/?token=${token}`); wait(`!document.querySelector("${webLink}")`);
-    browser('click', 'button:text-is("Connect remote DSH")'); wait(`document.querySelector("${webLink}")?.href === "http://" + location.hostname + ":38088/?token=${token}"`);
-    expect('!document.querySelector(".ra-workspace-panel [role=alert]")');
-  };
-  reconnect('running');
-  browser('click', '.ra-ws-tabs button:text-is("Tunnels")'); wait(status('running'));
-  browser('click', `${tunnel} [aria-label="Stop"]`); wait(status('stopped'));
-  browser('click', '.ra-ws-tabs button:text-is("Remote DSH")'); reconnect('stopped');
-  browser('click', '.ra-ws-tabs button:text-is("Tunnels")'); wait(status('running'));
-  expect(`document.querySelectorAll("${tunnel}").length === 1`);
-  browser('click', `${tunnel} [aria-label="Remove"]`); wait(`!document.querySelector("${tunnel}")`);
   browser('press', 'Escape'); wait('!document.querySelector("dialog[open]")'); evaluate('window.fixture.setLocale("zh")');
-  console.log('PASS: integrated workspace files, Ctrl+S, stale-edit conflicts, create/rename/close/delete, folders with unsaved edits, upload, search and clear, sync preview/apply, tunnels, remote DSH attach and mobile layout');
+  console.log('PASS: integrated workspace files, Ctrl+S, stale-edit conflicts, create/rename/close/delete, folders with unsaved edits, upload, search and clear, sync preview/apply and mobile layout');
 };
 try {
   const base = await new Promise((resolve, reject) => {

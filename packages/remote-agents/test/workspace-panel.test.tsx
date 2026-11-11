@@ -23,8 +23,6 @@ beforeEach(() => {
   const fetch = async (_url: string, init: { body: string }) => {
     const body = JSON.parse(init.body); requests.push(body);
     if (body.action === 'workspaceTarget') return Response.json({ hostId: 'host-test', label: 'Box', cwd: '/srv/app' });
-    if (body.action === 'addWorkspaceTunnel' || body.action === 'startWorkspaceTunnel') return Response.json({});
-    if (body.action === 'workspaceTunnels') return Response.json([{ id: 'tunnel-test-1', hostId: 'host-test', direction: 'local', listenPort: 38080, targetPort: 3000, targetHost: '127.0.0.1', status: 'running', listening: ['127.0.0.1', '100.96.195.115'] }]);
     const operation = body.operation;
     if (operation.op === 'list') return Response.json({ entries: [{ name: 'main.ts', path: 'main.ts', kind: 'file', size: 12, modified: '' }] });
     if (operation.op === 'read') return Response.json({ path: operation.path, content: 'one\ntwo\nthree\n', revision: 'a'.repeat(64), size: 14 });
@@ -67,13 +65,4 @@ test('a file tab shows only that file, at the line it was opened at, without the
   assert.equal(editor.getModel()!.getValue(), 'one\ntwo\nthree\n');
   assert.equal(editor.getPosition()!.lineNumber, 3);
   assert.equal(container.querySelector('[aria-label="Close file"]'), null, 'the tab has its own close button');
-});
-
-test('a tunnel started here names the address this browser uses, and its row says where it listens', async () => {
-  const { WorkspacePanel } = await import('../src/client/workspace/panel.js');
-  await render(<WorkspacePanel sessionId="session-test" tools={['tunnels']} />);
-  const form = container.querySelector('.ra-ws-section form') as HTMLFormElement;
-  await act(async () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }); await settle();
-  assert.equal(requests.find(request => request.action === 'startWorkspaceTunnel')?.access, 'localhost');
-  assert.match(container.querySelector('.ra-ws-tunnels li')!.textContent!, /127\.0\.0\.1, 100\.96\.195\.115/);
 });

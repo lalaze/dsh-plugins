@@ -2,7 +2,6 @@ import { RemoteError, remotePath } from '@dsh-plugins/remote-core/domain.js';
 import { FILE_LIMIT, GIT_LIMITS, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceFile, type WorkspaceManifest } from './domain.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
-import { REMOTE_DSH_RUNNER } from './runner.js';
 import { WORKSPACE_SHELL } from './shell.js';
 import { nativeRpc } from '../chat/native-registry.js';
 import { initializeCodex } from '../agents/runtime.js';
@@ -181,23 +180,12 @@ true`, { maxBytes: 64 * 1024 * 1024, signal });
     if (failure) throw new RemoteError(failure[2].trim() || 'Remote workspace operation failed', Number(failure[1]));
     throw new RemoteError('The SSH host returned an unexpected workspace response', 502);
   }
-  /** Remote DSH runs on Node.js, so only its own operations need it on the host. */
-  private async remoteDsh(cwd: string, operation: FileOperation, signal?: AbortSignal): Promise<unknown> {
-    if (!this.transport.transfer) throw new RemoteError('File transfers are unavailable on this host', 501);
-    const request = quote(JSON.stringify({ ...operation, cwd: remotePath(cwd) }));
-    const command = `command -v node >/dev/null 2>&1 || { printf '%s' '{"error":"Remote DSH needs Node.js on the SSH host login PATH","status":501}'; exit 0; }
-node -e ${quote(REMOTE_DSH_RUNNER)} ${request}`;
-    const response = JSON.parse((await this.transport.transfer(command, { maxBytes: 2_000_000, signal })).toString('utf8')) as { result?: unknown; error?: string; status?: number };
-    if (response.error) throw new RemoteError(response.error, response.status ?? 400);
-    return response.result;
-  }
   async operate(cwd: string, operation: FileOperation, signal?: AbortSignal): Promise<unknown> {
     if (operation.op === 'write') {
       const data = Buffer.from(operation.content);
       if (data.length > TEXT_LIMIT) throw new RemoteError('File exceeds the 256 KB editor limit', 413);
       return this.upload(cwd, operation.path, operation.revision, data.length, (async function* () { yield data; })(), signal);
     }
-    if (operation.op === 'webStart' || operation.op === 'webStop') return this.remoteDsh(cwd, operation, signal);
     const at = locate(remotePath(cwd), operation.path), under = (name: string) => at.path ? `${at.path}/${name}` : name;
     switch (operation.op) {
       case 'list': {

@@ -1,80 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { spawn, execFile } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile, chmod, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { transform } from 'esbuild';
 import { fixture } from './fakes.js';
-import { listenAddresses, WorkspaceTunnels, tunnelArguments } from '../src/workspace/tunnels.js';
 import { installWorkspaceTerminal } from '../src/workspace/terminal.js';
 import { ensureAnchor } from '../src/workspace/remote-workspaces.js';
 import { workspaceAction, type WorkspaceFeatures } from '../src/workspace/http.js';
-
-test('a local tunnel listens on loopback, plus the address the browser reached DSH at when it is this machine\'s', async () => {
-  const network = { addresses: () => ['192.168.1.20', '100.96.195.115'], lookup: async (host: string) => ({ 'box.tail.ts.net': ['100.96.195.115'], 'box.local': ['192.168.1.20'], 'proxy.example.com': ['203.0.113.5'] })[host] ?? [] };
-  for (const access of [undefined, '', 'localhost', '127.0.0.1', '[::1]', 7]) assert.deepEqual(await listenAddresses(access, network), ['127.0.0.1'], String(access));
-  assert.deepEqual(await listenAddresses('100.96.195.115', network), ['127.0.0.1', '100.96.195.115']);
-  assert.deepEqual(await listenAddresses('192.168.1.20', network), ['127.0.0.1', '192.168.1.20'], 'DSH itself is used on that network');
-  assert.deepEqual(await listenAddresses('box.local', network), ['127.0.0.1', '192.168.1.20']);
-  assert.deepEqual(await listenAddresses('box.tail.ts.net', network), ['127.0.0.1', '100.96.195.115']);
-  // Behind a proxy or a resolver that hides the address, the private network is still reachable; the local network is not offered.
-  assert.deepEqual(await listenAddresses('proxy.example.com', network), ['127.0.0.1', '100.96.195.115']);
-  assert.deepEqual(await listenAddresses('nowhere.example.com', { addresses: () => ['192.168.1.20'], lookup: async () => { throw new Error('no such host'); } }), ['127.0.0.1']);
-  const both = tunnelArguments('ssh://box', { id: 'tunnel-test-1', hostId: 'host', direction: 'local', listenPort: 38081, targetPort: 3000, targetHost: '127.0.0.1' }, ['127.0.0.1', '100.96.195.115', 'fd7a::1']);
-  assert.deepEqual(both.flatMap((arg, i) => both[i - 1] === '-L' ? [arg] : []), ['127.0.0.1:38081:127.0.0.1:3000', '100.96.195.115:38081:127.0.0.1:3000', '[fd7a::1]:38081:127.0.0.1:3000']);
-});
-
-test('a tunnel started from another address listens there, and says where it listens', async t => {
-  const f = await fixture(t), launches: string[][] = [];
-  const manager = new WorkspaceTunnels(join(f.directory, 'tunnels.json'), () => f.store.hosts(), values => {
-    launches.push(values);
-    return spawn(process.execPath, ['-e', 'process.stderr.write("debug1: Entering interactive session.\\n");setInterval(()=>{},1000)'], { stdio: ['pipe', 'pipe', 'pipe'] });
-  }, { addresses: () => ['100.96.195.115'], lookup: async () => [] });
-  t.after(() => manager.close()); await manager.open();
-  await manager.add({ id: 'tunnel-test-2', hostId: f.hostId, direction: 'local', listenPort: 38082, targetPort: 3000 });
-  const running = await manager.start('tunnel-test-2', f.hostId, '100.96.195.115');
-  assert.deepEqual(running.listening, ['127.0.0.1', '100.96.195.115']);
-  assert.ok(launches[0].includes('100.96.195.115:38082:127.0.0.1:3000'));
-  assert.deepEqual(manager.list(f.hostId)[0].listening, ['127.0.0.1', '100.96.195.115']);
-  assert.equal(await manager.start('tunnel-test-2', f.hostId, 'localhost').then(() => launches.length), 1, 'one that runs is left as it is');
-});
-
-test('a tunnel that failed to start listens again when it is retried', async t => {
-  const f = await fixture(t), launches: string[][] = [];
-  const manager = new WorkspaceTunnels(join(f.directory, 'tunnels.json'), () => f.store.hosts(), values => {
-    launches.push(values);
-    return spawn(process.execPath, ['-e', launches.length === 1 ? 'process.exit(1)' : 'process.stderr.write("debug1: Entering interactive session.\\n");setInterval(()=>{},1000)'], { stdio: ['pipe', 'pipe', 'pipe'] });
-  });
-  t.after(() => manager.close()); await manager.open();
-  await manager.add({ id: 'tunnel-test-3', hostId: f.hostId, direction: 'local', listenPort: 38083, targetPort: 3000 });
-  await assert.rejects(manager.start('tunnel-test-3', f.hostId));
-  assert.equal(manager.list(f.hostId)[0].status, 'error');
-  assert.deepEqual((await manager.start('tunnel-test-3', f.hostId)).listening, ['127.0.0.1']);
-  assert.ok(launches[1].includes('127.0.0.1:38083:127.0.0.1:3000'));
-});
-
-test('tunnel startup, stop, saved definitions and host removal are independent of remote agents', async t => {
-  const f = await fixture(t), path = join(f.directory, 'tunnels.json'); let args: string[] = [];
-  const manager = new WorkspaceTunnels(path, () => f.store.hosts(), values => {
-    args = values;
-    return spawn(process.execPath, ['-e', 'process.stderr.write("debug1: Entering interactive session.\\n");setInterval(()=>{},1000)'], { stdio: ['pipe', 'pipe', 'pipe'] });
-  });
-  t.after(() => manager.close()); await manager.open();
-  const config = { id: 'tunnel-test-1', hostId: f.hostId, direction: 'local', listenPort: 38081, targetPort: 3000, targetHost: '127.0.0.1' };
-  await manager.add(config); const running = await manager.start(config.id, f.hostId);
-  assert.equal(running.status, 'running'); assert.ok(args.includes('127.0.0.1:38081:127.0.0.1:3000')); assert.equal(args.join(' ').includes('0.0.0.0'), false); assert.ok(args.includes('StrictHostKeyChecking=yes'));
-  await assert.rejects(manager.add({ ...config, id: 'tunnel-other' }), /already saved/);
-  assert.throws(() => manager.stop(config.id, 'other-host'), /not found/);
-  manager.stop(config.id, f.hostId); assert.equal(manager.list(f.hostId)[0].status, 'stopped');
-  const restarted = new WorkspaceTunnels(path, () => f.store.hosts()); await restarted.open(); t.after(() => restarted.close());
-  assert.equal(restarted.list(f.hostId)[0].status, 'stopped');
-  await manager.start(config.id, f.hostId); await manager.removeHost(f.hostId); assert.deepEqual(manager.list(f.hostId), []);
-  assert.equal(f.remote.stops, 0); assert.equal(f.remote.closes, 0);
-  const reverse = tunnelArguments('ssh://jump-alias', { ...running, direction: 'reverse' });
-  assert.ok(reverse.includes('-R')); assert.ok(reverse.includes('127.0.0.1:38081:127.0.0.1:3000')); assert.equal(reverse.at(-1), 'jump-alias');
-});
 
 test('native terminal launcher resolves the workspace, refuses an invalid binding and opens the local shell elsewhere', async t => {
   if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }

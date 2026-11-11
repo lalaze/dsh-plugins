@@ -52,7 +52,7 @@ export async function apply(ctx: Context, config: { stateDir?: string; claudeGoa
   sharing.goals = claudeGoals;
   service.sharing = sharing;
   // Close the store last: a reloaded plugin's new instance owns the state from then on.
-  ctx.effect(() => async () => { await sharing.close(); await workspace.features.tunnels.close(); await service.close(); await store.close(); });
+  ctx.effect(() => async () => { await sharing.close(); await service.close(); await store.close(); });
   // Every finished turn is announced for usage statistics. Main chat does not report usage to DSH: a CLI turn's total
   // spans many model calls and would misstate the conversation's context size.
   store.usageListeners.add((taskId, usage, turn) => {

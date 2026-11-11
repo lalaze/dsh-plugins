@@ -18,7 +18,6 @@ import { TuiFiles } from './tui-files.js';
 import { TuiUsage } from './tui-usage.js';
 import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
-import { WorkspaceTunnels } from './tunnels.js';
 import { WorktreeService, type DshWorkspaceController } from './worktrees.js';
 import type { ArchiveCheck, ArchiveRequest, CreateRequest, JobAction, WorkspaceMachine, WorktreeJob, WorktreeProject, WorktreeProjectDetail } from './worktrees.js';
 
@@ -66,12 +65,12 @@ export interface Workspaces {
   /** The verified placement of a DSH conversation, rechecked so a workspace switch during verification yields none. */
   placement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
   workspaces: RemoteWorkspaces;
-  features: WorkspaceFeatures & { tunnels: WorkspaceTunnels; worktrees: WorktreeService };
+  features: WorkspaceFeatures & { worktrees: WorktreeService };
 }
 
 /**
- * Remote workspace tools on the saved machines: files, sync, tunnels, the native terminal's Remote workspace shell, the
- * `remote_workspace` tool and its system prompt. The caller closes `features.tunnels`.
+ * Remote workspace tools on the saved machines: files, sync, the native terminal's Remote workspace shell, the
+ * `remote_workspace` tool and its system prompt.
  */
 export async function installWorkspaces(ctx: Context, store: Store, machines: WorkspaceHosts): Promise<Workspaces> {
   const access = new WorkspaceAccess(() => store.hosts(), { runtime: () => ctx.get('subprocess') as WorkspaceRuntime | undefined });
@@ -104,8 +103,6 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     list: async (id, path, signal = unbounded(), expected) => await files.operate(id, { op: 'list', path }, signal, expected) as { path: string; entries: WorkspaceEntry[] },
     remove: async (id, path, revision, signal = unbounded(), expected) => await files.operate(id, { op: 'remove', path, revision }, signal, expected) as { path: string },
   } satisfies RemoteAgentsWorkspaces);
-  const tunnels = new WorkspaceTunnels(join(store.directory, 'workspace-tunnels.json'), () => store.hosts());
-  await tunnels.open();
   const terminal: { shell?: string } = {};
   // Uploads stream; downloads need their own buffered route, because DSH builds every request of a streaming route
   // with the request stream as its body, and a GET request with a body cannot be built.
@@ -180,7 +177,7 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
   });
   ctx.connection.fetch.register({ path: '/api/remote-agents/tui-files', methods: ['POST'], requestBody: 'streaming',
     fetch: tuiFilesHandler(new TuiFiles({ isTui: id => tui.list().includes(id), directory: store.directory, attach: (...file) => files.attach(...file) })) });
-  return { access, placement, workspaces, features: { files, tunnels, terminal, worktrees, tui } };
+  return { access, placement, workspaces, features: { files, terminal, worktrees, tui } };
 }
 
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */

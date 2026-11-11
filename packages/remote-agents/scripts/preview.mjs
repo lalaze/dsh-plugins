@@ -19,7 +19,6 @@ import { randomUUID } from 'node:crypto';
 import { OpenSshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { WorkspaceFiles } from '../src/workspace/files.ts';
 import { WorkspaceService } from '../src/workspace/service.ts';
-import { WorkspaceTunnels } from '../src/workspace/tunnels.ts';
 import { workspaceTransferHandler } from '../src/workspace/http.ts';
 import { editorHandler } from '../src/workspace/editor-route.ts';
 import { WorktreeService } from '../src/workspace/worktrees.ts';
@@ -76,7 +75,6 @@ const placement = async sessionId => sessionId === 'current'
   ? { hostIds: store.hosts().filter(h => h.connection === 'ssh://build-box').map(h => h.id), cwd: '/srv/main-chat' }
   : { hostIds: workspaceHostIds };
 const workspaceService = new WorkspaceService(service, placement, async () => mirrorRoot);
-const tunnels = new WorkspaceTunnels(join(directory, 'tunnels.json'), () => store.hosts(), () => spawn(process.execPath, ['-e', 'process.stderr.write("debug1: Entering interactive session.\\n");setInterval(()=>{},1000)'], { stdio: ['pipe', 'pipe', 'pipe'] })); await tunnels.open();
 // DSH's tool and skill registries for the sharing settings: two MCP servers and three personal skills.
 const sharing = new Sharing(store);
 Object.assign(sharing.host, {
@@ -108,7 +106,7 @@ const dshWorkspaces = { items: [], next: 1,
 const worktrees = new WorktreeService({ machines: service, access, anchors: workspaces, dsh: () => dshWorkspaces, home: join(directory, 'dsh-home') });
 const handler = createHandler(service, undefined, placement, {
   create: async (...args) => { if (createDelay) await new Promise(resolve => setTimeout(resolve, createDelay)); return workspaces.create(...args); },
-}, { files: workspaceService, tunnels, worktrees }, sharing);
+}, { files: workspaceService, worktrees }, sharing);
 const transfer = workspaceTransferHandler(workspaceService);
 // The code editor bundle file views load, built as the package build writes it.
 execFileSync(process.execPath, [fileURLToPath(new URL('../../../scripts/build-editor.mjs', import.meta.url)), join(directory, 'editor.js')], { stdio: 'ignore' });
@@ -221,7 +219,7 @@ async function stop() {
   if (stopping) return; stopping = true;
   for (const timer of timers) clearTimeout(timer);
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-  await tunnels.close(); await service.close(); await rm(directory, { recursive: true, force: true });
+  await service.close(); await rm(directory, { recursive: true, force: true });
 }
 process.on('SIGTERM', () => void stop().then(() => process.exit(0)));
 process.on('SIGINT', () => void stop().then(() => process.exit(0)));

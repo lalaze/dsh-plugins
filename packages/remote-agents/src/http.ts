@@ -96,8 +96,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
           }
           break;
         }
-        case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync': case 'tuiSessions': case 'tuiScroll': case 'tuiStart': case 'tuiTitle': case 'tuiEnd':
-        case 'workspaceTunnels': case 'addWorkspaceTunnel': case 'startWorkspaceTunnel': case 'stopWorkspaceTunnel': case 'removeWorkspaceTunnel': {
+        case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync': case 'tuiSessions': case 'tuiScroll': case 'tuiStart': case 'tuiTitle': case 'tuiEnd': {
           if (!features) throw new RemoteError('Remote workspaces are unavailable', 501);
           result = await workspaceAction(features, action, input, request.signal); break;
         }
@@ -146,8 +145,7 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'removeHost': {
           const id = hostId();
           if (native?.status().hosts.includes(id)) throw new RemoteError('Handoff native conversations and disable ordinary sharing before removing this host', 409);
-          result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true, everywhere: input.everywhere === true });
-          await features?.tunnels.removeHost(id); break;
+          result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true, everywhere: input.everywhere === true }); break;
         }
         case 'connect': result = await service.connect(hostId()); break;
         case 'browse': result = await service.browse(hostId(), input.path === undefined ? undefined : browsePath(input.path)); break;

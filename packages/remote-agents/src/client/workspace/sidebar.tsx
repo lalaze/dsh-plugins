@@ -84,7 +84,7 @@ export function installWorkspaceSidebar(ctx: Client): void {
       };
       const explorerType = (guide: boolean): TabDefinition => ({
         id: explorer, kind: explorer, title: () => ui('Remote workspace'),
-        ...guide ? { guide: [{ id: 'remote-workspace', order: 55, title: () => ui('Remote workspace'), description: () => ui('Sync, tunnels and remote DSH'), icon: RemoteWorkspaceArtwork }] } : {},
+        ...guide ? { guide: [{ id: 'remote-workspace', order: 55, title: () => ui('Remote workspace'), description: () => ui('Sync with the local mirror'), icon: RemoteWorkspaceArtwork }] } : {},
       });
       // Keep the native entry's title, icon, position and shortcut, so Workspace files looks the same in a remote conversation.
       const filesType = (): TabDefinition => {
@@ -125,7 +125,7 @@ export function installWorkspaceSidebar(ctx: Client): void {
           } } };
           const useCwd = (id: string) => React.useSyncExternalStore(listener => sessions.list.subscribe(listener), () => sessions.list.getSnapshot()?.byId?.[id]?.cwd);
           // Workspace files already shows the remote files, so Remote workspace keeps the other tools unless that view is unavailable.
-          const Explorer: React.FC<Props> = ({ sessionId }) => { const cwd = useCwd(sessionId); return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} tools={live.files ? ['sync', 'tunnels', 'web'] : undefined} /></>; };
+          const Explorer: React.FC<Props> = ({ sessionId }) => { const cwd = useCwd(sessionId); return <><style>{styles}</style><WorkspacePanel key={JSON.stringify([sessionId, cwd])} sessionId={sessionId} tools={live.files ? ['sync'] : undefined} /></>; };
           // As in DSH's own Workspace files, each file opens in a tab of its own beside the list.
           const Files: React.FC<Props> = ({ sessionId, useTabInfo }) => {
             const cwd = useCwd(sessionId), actions = useTabInfo().tab.actions;
