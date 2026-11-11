@@ -200,7 +200,7 @@ export function delegationTools(host, service, accessOf = () => ({ unattended: f
     return [
         {
             name: 'remote_agent_list',
-            description: 'List saved remote SSH hosts, recently used remote project directories, and remote coding agents (Claude Code, Codex, DSH, Grok, CodeBuddy or Antigravity CLIs running on those hosts) with their status. Use it to find a host name, project path or agent ID.',
+            description: 'List saved remote SSH hosts, recently used remote project directories, and remote coding agents (Claude Code, Codex, DSH, Grok or CodeBuddy CLIs running on those hosts) with their status. Use it to find a host name, project path or agent ID.',
             parameters: params({ includeArchived: { type: 'boolean', description: 'Include archived agents (default false).' } }, []),
             output: { schema: {}, render: (_args, value) => {
                     const v = value;
@@ -227,14 +227,14 @@ export function delegationTools(host, service, accessOf = () => ({ unattended: f
             parameters: params({ host: string('Saved host name, SSH alias or host ID.'), cwd: string('Absolute project directory on that host.'), refresh: { type: 'boolean', description: 'Ignore the 30-second discovery cache.' } }, ['host', 'cwd']),
             output: { schema: {}, render: (_args, value) => text(value.providers.map(p => p.status !== 'ready'
                     ? `${p.id} (${p.label}): ${p.status}${p.error ? ` — ${p.error}` : ''}`
-                    : [`${p.id} (${p.label}): ready${p.notice ? ` — ${p.notice}` : ''}`, `  models: ${p.models.map(m => `${m.id}${m.thinking.length ? ` [thinking: ${m.thinking.join('/')}]` : ''}${m.speeds?.length ? ` [speed: ${m.speeds.join('/')}]` : ''}`).join(', ')}`, `  modes: ${p.modes.map(m => `${m.id}${m.id === p.defaultMode ? ' (default)' : ''}`).join(', ') || 'CLI settings'}`].join('\n')).join('\n')) },
+                    : [`${p.id} (${p.label}): ready`, `  models: ${p.models.map(m => `${m.id}${m.thinking.length ? ` [thinking: ${m.thinking.join('/')}]` : ''}${m.speeds?.length ? ` [speed: ${m.speeds.join('/')}]` : ''}`).join(', ')}`, `  modes: ${p.modes.map(m => `${m.id}${m.id === p.defaultMode ? ' (default)' : ''}`).join(', ') || 'CLI settings'}`].join('\n')).join('\n')) },
             isConcurrencySafe: () => true,
             async execute(raw) {
                 const args = input(raw), target = findHost(required(args.host, 'host'));
                 const providers = await service.providers(target.id, remotePath(args.cwd), args.refresh === true);
                 return { providers: providers.map(p => {
                         const modes = permissionModes(p.id, p.modes), defaultMode = modes.some(m => m.id === 'inherit') ? 'inherit' : p.defaultModeId;
-                        return { id: p.id, label: p.label, status: p.status, ...(p.error ? { error: p.error } : {}), ...(p.notice ? { notice: p.notice } : {}),
+                        return { id: p.id, label: p.label, status: p.status, ...(p.error ? { error: p.error } : {}),
                             models: p.models.map(m => ({ id: m.id, label: m.label, ...(m.isDefault ? { default: true } : {}), thinking: (m.thinkingOptions ?? []).map(o => o.id), ...(m.serviceTiers?.length ? { speeds: m.serviceTiers.map(o => o.label) } : {}) })),
                             modes: modes.map(m => ({ id: m.id, label: m.label })), ...(defaultMode ? { defaultMode } : {}) };
                     }) };
@@ -245,7 +245,7 @@ export function delegationTools(host, service, accessOf = () => ({ unattended: f
             description: 'Start a coding CLI agent on a remote SSH host, in an absolute project directory on that machine, with an initial task. The agent works with its own tools, credentials and configuration and cannot see this conversation, so `prompt` must be self-contained: the goal, relevant context and file paths, constraints, and exactly what to report back. By default this waits for the agent to finish its turn and returns its reply. Use remote_agent_list to inspect agents and remote_agent_send to steer them.',
             parameters: params({
                 host: string('Saved host name, SSH alias or host ID.'), cwd: string('Absolute project directory on the remote host.'),
-                provider: string('CLI provider ID: claude, codex, dsh, grok, codebuddy or antigravity.'), prompt: string('Complete, self-contained task for the agent.'),
+                provider: string('CLI provider ID: claude, codex, dsh, grok or codebuddy.'), prompt: string('Complete, self-contained task for the agent.'),
                 model: string('Model ID or name. Defaults to the CLI default model.'), mode: string('Permission mode ID. Defaults to the remote CLI\'s own permission settings.'),
                 thinking: string('Thinking level ID, when the model supports it.'), speed: string('Speed tier, such as Fast for Codex, when the model offers one. Faster tiers use more of the remote account\'s quota. Defaults to the CLI setting.'),
                 title: string('Short title (at most 100 characters).'),

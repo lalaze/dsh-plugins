@@ -406,21 +406,6 @@ export class JsonlPeer {
     onMessage(listener) { this.listeners.add(listener); }
     onExit(listener) { this.exits.add(listener); if (this.ended)
         listener(this.ended); }
-    waitForMessage(predicate, timeout = 20_000) {
-        return new Promise((resolve, reject) => {
-            const cleanup = () => { clearTimeout(timer); this.listeners.delete(message); this.exits.delete(failed); };
-            const message = (value) => { if (predicate(value)) {
-                cleanup();
-                resolve(value);
-            } };
-            const failed = (error) => { cleanup(); reject(error); };
-            const timer = setTimeout(() => failed(new Error('Remote CLI initialization timed out')), timeout);
-            this.listeners.add(message);
-            this.exits.add(failed);
-            if (this.ended)
-                failed(this.ended);
-        });
-    }
     send(message, inputId) { if (this.ended)
         throw this.ended; this.child.write(`${JSON.stringify(message)}\n`, inputId); }
     request(method, params = {}, timeout = 20_000) {

@@ -1,4 +1,4 @@
-/** Where a task's files are: a worktree of the repository, on this computer or a saved machine, through dsh-remote-agents. */
+/** Where a task's files are: a worktree of the repository, on this computer or a saved machine, through dsh-remote-terminals. */
 import { setTimeout as delay } from 'node:timers/promises';
 const said = (message) => message.key.replace(/\{(\w+)\}/gu, (whole, name) => message.values?.[name] ?? whole) + (message.detail ? `\n${message.detail.trim()}` : '');
 export class Workplaces {
@@ -11,7 +11,7 @@ export class Workplaces {
     worktrees() {
         const value = this.service('remoteAgentsWorktrees');
         if (!value)
-            throw new Error('Worktree workspaces are not available: install or update dsh-remote-agents (0.2.129 or newer)');
+            throw new Error('Worktree workspaces are not available: install dsh-remote-terminals beside dsh-remote-agents (0.2.130 or newer)');
         return value;
     }
     projects(signal) { return this.worktrees().projects(signal); }

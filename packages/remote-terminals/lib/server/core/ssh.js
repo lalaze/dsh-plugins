@@ -1,0 +1,446 @@
+import { spawn } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { chmodSync, lstatSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
+import { pipeline } from 'node:stream/promises';
+import { field, remotePath, RemoteError } from './domain.js';
+export const quote = (value) => `'${value.replace(/'/g, "'\\''")}'`;
+/** Keep a compatible configured Node; otherwise use the newest installed runtime >=22. */
+export const REMOTE_PATH = `
+dsh_initial_node="$(command -v node 2>/dev/null || true)"
+PATH="$HOME/.local/bin:$HOME/.gemini/bin:$HOME/.grok/bin:$HOME/.codebuddy/bin:$HOME/.npm-global/bin:$HOME/.bun/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"
+dsh_nvm_root="\${NVM_DIR:-$HOME/.nvm}"
+for dsh_node_bin in "$dsh_nvm_root"/versions/node/*/bin; do
+  if [ -d "$dsh_node_bin" ]; then PATH="$PATH:$dsh_node_bin"; fi
+done
+dsh_best_node=; dsh_best_major=0; dsh_best_minor=0; dsh_best_patch=0
+dsh_consider_node() {
+  [ -x "$1" ] && [ ! -d "$1" ] || return 0
+  dsh_version="$("$1" --version 2>/dev/null)" || return 0
+  dsh_version="\${dsh_version#v}"
+  dsh_major="\${dsh_version%%.*}"; dsh_remainder="\${dsh_version#*.}"
+  dsh_minor="\${dsh_remainder%%.*}"; dsh_patch="\${dsh_remainder#*.}"; dsh_patch="\${dsh_patch%%-*}"
+  case "$dsh_major:$dsh_minor:$dsh_patch" in *[!0-9:]*|*::*|:*|*:) return 0;; esac
+  [ "$dsh_major" -ge 22 ] || return 0
+  if [ "$dsh_major" -gt "$dsh_best_major" ] ||
+    { [ "$dsh_major" -eq "$dsh_best_major" ] && [ "$dsh_minor" -gt "$dsh_best_minor" ]; } ||
+    { [ "$dsh_major" -eq "$dsh_best_major" ] && [ "$dsh_minor" -eq "$dsh_best_minor" ] && [ "$dsh_patch" -gt "$dsh_best_patch" ]; }; then
+    dsh_best_node="$1"; dsh_best_major="$dsh_major"; dsh_best_minor="$dsh_minor"; dsh_best_patch="$dsh_patch"
+  fi
+}
+dsh_consider_node "$dsh_initial_node"
+if [ -z "$dsh_best_node" ]; then
+  for dsh_node_candidate in "$(command -v node 2>/dev/null || true)" /opt/homebrew/bin/node /usr/local/bin/node /opt/homebrew/opt/node@22/bin/node /opt/homebrew/opt/node@24/bin/node /usr/local/opt/node@22/bin/node /usr/local/opt/node@24/bin/node "$dsh_nvm_root"/versions/node/*/bin/node; do
+    dsh_consider_node "$dsh_node_candidate"
+  done
+fi
+if [ -n "$dsh_best_node" ]; then PATH="\${dsh_best_node%/*}:$PATH"; fi
+export PATH
+`;
+export function connectionInput(value) {
+    let connection = field(value, 'SSH connection', 2048);
+    if (!connection.includes('://'))
+        connection = `ssh://${connection}`;
+    let url;
+    try {
+        url = new URL(connection);
+    }
+    catch {
+        throw new RemoteError('Invalid SSH connection');
+    }
+    if (url.protocol !== 'ssh:' || !url.hostname || url.hostname.startsWith('-') || url.password || url.search || url.hash || (url.pathname && url.pathname !== '/'))
+        throw new RemoteError('Enter an SSH host or ssh://user@host:port');
+    const username = decodeURIComponent(url.username);
+    if (username && !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(username))
+        throw new RemoteError('Invalid SSH username');
+    if (!/^(?:[a-zA-Z0-9_][a-zA-Z0-9_.-]*|\[[a-fA-F0-9:]+\])$/.test(url.hostname))
+        throw new RemoteError('Invalid SSH hostname');
+    if (url.port && (Number(url.port) < 1 || Number(url.port) > 65535))
+        throw new RemoteError('Invalid SSH port');
+    return `ssh://${username ? `${username}@` : ''}${url.hostname}${url.port ? `:${url.port}` : ''}`;
+}
+/**
+ * Runs a CLI so that it ends with its SSH session. Over a plain pipe the remote side gets no hangup when the session
+ * closes, only the end of its input, and some CLIs keep running after that (CodeBuddy in ACP mode): every model probe left
+ * one behind on the host. This keeps the CLI as its child with its own input pipe. When the session's input ends, the
+ * CLI's input ends too; a CLI still running 2 seconds later gets TERM, and KILL 5 seconds after that. The CLI's output
+ * goes straight to the session, its exit status comes back as before, and TERM, HUP or INT sent here is passed on.
+ * The CLI's input stays an ordinary pipe: Node on macOS did not see the end of input from a named FIFO, so a FIFO fed by
+ * a shell `cat` cannot stand in.
+ * It avoids newer syntax, as the host's Node may be old; without Node the CLI runs as it did before.
+ */
+const ENDS_WITH_INPUT = `var spawn = require('child_process').spawn, signals = require('os').constants.signals;
+var child = spawn(process.argv[1], process.argv.slice(2), { stdio: ['pipe', 'inherit', 'inherit'] });
+child.on('error', function (error) { process.stderr.write(error.message + '\\n'); process.exit(127); });
+child.on('exit', function (code, signal) { process.exit(code !== null ? code : 128 + (signals[signal] || 15)); });
+child.stdin.on('error', function () { process.stdin.unpipe(child.stdin); process.stdin.resume(); });
+process.stdin.pipe(child.stdin);
+process.stdin.on('end', function () {
+  setTimeout(function () { child.kill('SIGTERM'); setTimeout(function () { child.kill('SIGKILL'); }, 5000); }, 2000);
+});
+['SIGTERM', 'SIGHUP', 'SIGINT'].forEach(function (name) { process.on(name, function () { child.kill(name); }); });`;
+/**
+ * Ends a connection that stopped answering within about 45 seconds, as after the computer slept or changed networks.
+ * Without it a relay attachment or the shared registry waits on a dead connection until TCP gives up, which can take hours.
+ */
+const KEEPALIVE = ['-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3'];
+/**
+ * ssh binds a control socket as `<path>.<16 random characters>` before renaming it, and Unix socket paths are limited to
+ * 104 bytes on macOS. Only plain ASCII paths are used: ssh expands `%`, `$` and `~` and splits on spaces and quotes.
+ */
+const CONTROL_PATH_LIMIT = 104 - 1 - 17;
+const CONTROL_PATH = /^[A-Za-z0-9_./@+,:=-]+$/;
+/** How long a shared connection stays open after its last command; commands in that time skip the SSH handshake. */
+const CONTROL_PERSIST = 60;
+export class OpenSshTransport {
+    binary;
+    relays = true;
+    args;
+    control;
+    /** The connection-sharing options once the socket directory was checked; empty when sharing is unavailable. */
+    sharing;
+    constructor(connection, binary = 'ssh', options = {}) {
+        this.binary = binary;
+        const canonical = connectionInput(connection), url = new URL(canonical);
+        this.args = ['-T', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', ...KEEPALIVE, ...(url.port ? ['-p', url.port] : []), '--', `${decodeURIComponent(url.username) ? `${decodeURIComponent(url.username)}@` : ''}${url.hostname}`];
+        const directory = options.controlDirectory;
+        if (directory && process.platform !== 'win32') {
+            const socket = join(directory, createHash('sha256').update(canonical).digest('hex').slice(0, 16));
+            if (CONTROL_PATH.test(socket) && Buffer.byteLength(socket) <= CONTROL_PATH_LIMIT)
+                this.control = { directory, socket };
+        }
+    }
+    /** OpenSSH connection sharing, once its socket directory is known to be private to this user. */
+    multiplexing() {
+        if (this.sharing)
+            return this.sharing;
+        this.sharing = [];
+        if (!this.control)
+            return this.sharing;
+        try {
+            mkdirSync(this.control.directory, { recursive: true, mode: 0o700 });
+            const info = lstatSync(this.control.directory);
+            // Another user's directory, or a link to one, could hand ssh a socket that is not this user's connection.
+            if (!info.isDirectory() || (process.getuid && info.uid !== process.getuid()))
+                return this.sharing;
+            if (info.mode & 0o077)
+                chmodSync(this.control.directory, 0o700);
+        }
+        catch {
+            return this.sharing;
+        }
+        // `auto` falls back to a connection of its own when the shared one is missing, stale or refuses another session.
+        this.sharing = ['-o', 'ControlMaster=auto', '-o', `ControlPath=${this.control.socket}`, '-o', `ControlPersist=${CONTROL_PERSIST}`];
+        return this.sharing;
+    }
+    spawn(script) {
+        // Auth/proxy exports often live after an interactive-shell guard in the user's rc file.
+        // Load exported variables in a separate process: shell startup files may close
+        // inherited descriptors. The parent retains the CLI streams throughout startup.
+        // A private, short-lived directory keeps exports off stdout and out of argv.
+        // The capture is cached per shell for ~1 minute so a burst of commands pays the ~0.5s login shell once.
+        // Trade-off: the exported environment (which may hold secrets) sits in a 0600 file for up to that minute,
+        // and a value changed in the rc takes up to that long to apply; the window is kept near the connection's own.
+        const command = `
+dsh_login_shell="\${SHELL:-/bin/sh}"
+case "\${dsh_login_shell##*/}" in
+  bash|zsh|fish)
+    dsh_env_cache_dir="$HOME/.dsh-remote-agents/env"
+    dsh_env_cache="$dsh_env_cache_dir/\${dsh_login_shell##*/}"
+    if [ -f "$dsh_env_cache" ] && [ -n "$(find "$dsh_env_cache" -mmin -1 2>/dev/null)" ]; then . "$dsh_env_cache"; else
+    dsh_environment_dir="$(mktemp -d "\${TMPDIR:-/tmp}/dsh-cli-env.XXXXXXXXXX")" || exit "$?"
+    set -- "$dsh_environment_dir"
+    trap 'rm -rf -- "$1"' 0
+    trap 'exit 1' 1 2 15
+    printf '%s\\n' 'umask 077; export -p > "$0.env"' > "$1/capture.sh" || exit "$?"
+    case "\${dsh_login_shell##*/}" in
+      fish) dsh_capture='exec /bin/sh "$argv[2]"' ;;
+      *) dsh_capture='exec /bin/sh "$1"' ;;
+    esac
+    "$dsh_login_shell" -lic "$dsh_capture" dsh-login "$1/capture.sh" </dev/null 1>&2 || exit "$?"
+    [ -s "$1/capture.sh.env" ] || { printf '%s\\n' 'Remote login shell did not export its environment' >&2; exit 1; }
+    . "$1/capture.sh.env" || exit "$?"
+    (umask 077; mkdir -p "$dsh_env_cache_dir" && cp "$1/capture.sh.env" "$dsh_env_cache.$$" && mv -f "$dsh_env_cache.$$" "$dsh_env_cache") 2>/dev/null || true
+    rm -rf -- "$1"
+    trap - 0 1 2 15
+    fi
+    ;;
+esac
+exec /bin/sh -c ${quote(REMOTE_PATH + script)}
+`;
+        return this.spawnRemote(command);
+    }
+    async transfer(script, options) {
+        options.signal?.throwIfAborted();
+        const child = options.login === false ? this.spawnRemote(script) : this.spawn(script), chunks = [];
+        let size = 0, stderr = '', failure;
+        const stop = () => child.kill('SIGTERM');
+        const timer = setTimeout(() => { failure = new Error('SSH transfer timed out'); stop(); }, 300_000);
+        options.signal?.addEventListener('abort', stop, { once: true });
+        child.stdout.on('data', (data) => { size += data.length; if (size > options.maxBytes) {
+            failure = new Error('SSH transfer exceeds its size limit');
+            stop();
+        }
+        else
+            chunks.push(data); });
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', data => { stderr = (stderr + data).slice(-4000); });
+        const completed = new Promise((accept, reject) => {
+            child.on('error', reject);
+            child.on('close', code => failure ? reject(failure) : code === 0 ? accept() : reject(new Error(stderr.trim() || `SSH transfer failed (${code})`)));
+        });
+        try {
+            await Promise.all([completed, pipeline(Readable.from(options.input ?? []), child.stdin, { signal: options.signal })]);
+            options.signal?.throwIfAborted();
+            return Buffer.concat(chunks);
+        }
+        catch (error) {
+            stop();
+            await completed.catch(() => { });
+            options.signal?.throwIfAborted();
+            throw error;
+        }
+        finally {
+            clearTimeout(timer);
+            options.signal?.removeEventListener('abort', stop);
+        }
+    }
+    /** Runs a POSIX shell command on the SSH host. */
+    spawnRemote(command) {
+        return spawn(this.binary, [...this.multiplexing(), ...this.args, `sh -c ${quote(command)}`], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    }
+    exec(script, timeout = 20_000, options = {}) {
+        return new Promise((resolve, reject) => {
+            const child = options.login === false ? this.spawnRemote(script) : this.spawn(script), chunks = [];
+            let stderr = '', bytes = 0;
+            child.stderr.setEncoding('utf8');
+            const timer = setTimeout(() => { child.kill(); reject(new Error('SSH probe timed out')); }, timeout);
+            // Decoded once at the end: a character split between two reads would otherwise turn into replacement characters.
+            child.stdout.on('data', (data) => { bytes += data.length; if (bytes > 2_000_000) {
+                child.kill();
+                reject(new Error('SSH probe exceeded output limit'));
+            }
+            else
+                chunks.push(data); });
+            child.stderr.on('data', data => { stderr = (stderr + data).slice(-4000); });
+            child.on('error', error => { clearTimeout(timer); reject(error); });
+            child.on('close', code => { clearTimeout(timer); if (code === 0)
+                resolve(Buffer.concat(chunks).toString('utf8'));
+            else
+                reject(new Error(stderr.trim() || `SSH exited (${code})`)); });
+            child.stdin.on('error', () => { });
+            child.stdin.end();
+        });
+    }
+    /** Binary stdin with backpressure; atomic, private, digest-verified remote copies. */
+    async upload(cwd, relativePath, data, bytes, sha256, signal) {
+        signal?.throwIfAborted();
+        remotePath(cwd);
+        const parts = relativePath.split('/');
+        if (!relativePath.startsWith('.dsh-remote-agents/attachments/') || parts.some(p => !p || p === '.' || p === '..') || /[\\\0\r\n]/.test(relativePath) || !/^[a-f0-9]{64}$/.test(sha256) || !Number.isSafeInteger(bytes) || bytes < 0)
+            throw new RemoteError('Invalid attachment destination');
+        const dirs = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join('/'));
+        const script = `set -e
+cd ${quote(cwd)}
+umask 077
+for dsh_upload_dir in ${dirs.map(quote).join(' ')}; do
+  [ ! -L "$dsh_upload_dir" ] || { printf '%s\\n' 'Attachment destination is a symbolic link' >&2; exit 1; }
+  mkdir -p -- "$dsh_upload_dir"
+  chmod 700 "$dsh_upload_dir"
+done
+# Keeps what is uploaded out of the project's status and of any \`git add -A\`.
+[ -e .dsh-remote-agents/.gitignore ] || [ -L .dsh-remote-agents/.gitignore ] || printf '*\\n' > .dsh-remote-agents/.gitignore || :
+[ ! -L ${quote(relativePath)} ] && { [ ! -e ${quote(relativePath)} ] || [ -f ${quote(relativePath)} ]; } || { printf '%s\\n' 'Invalid attachment destination' >&2; exit 1; }
+dsh_upload_tmp="$(mktemp ${quote(`${dirs.at(-1)}/.upload.XXXXXXXXXX`)})"
+trap 'rm -f -- "$dsh_upload_tmp"' 0
+trap 'exit 1' 1 2 15
+cat > "$dsh_upload_tmp"
+[ "$(wc -c < "$dsh_upload_tmp" | tr -d ' ')" = ${quote(String(bytes))} ] || { printf '%s\\n' 'Attachment byte count mismatch' >&2; exit 1; }
+if command -v sha256sum >/dev/null 2>&1; then dsh_upload_digest="$(sha256sum "$dsh_upload_tmp")"; else dsh_upload_digest="$(shasum -a 256 "$dsh_upload_tmp")"; fi
+case "$dsh_upload_digest" in ${sha256}' '*) ;; *) printf '%s\\n' 'Attachment checksum mismatch' >&2; exit 1;; esac
+chmod 400 "$dsh_upload_tmp"
+mv -f -- "$dsh_upload_tmp" ${quote(relativePath)}
+printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
+`;
+        const child = this.spawn(script);
+        let stdout = '', stderr = '', ended = false;
+        child.stdout.setEncoding('utf8');
+        child.stderr.setEncoding('utf8');
+        const abort = () => child.kill('SIGTERM');
+        const timer = setTimeout(abort, 300_000);
+        signal?.addEventListener('abort', abort, { once: true });
+        child.stdout.on('data', chunk => { stdout = (stdout + chunk).slice(-16_000); });
+        child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-4000); });
+        const completion = new Promise((resolve, reject) => {
+            child.on('error', reject);
+            child.on('close', code => { ended = true; if (code === 0)
+                resolve();
+            else
+                reject(new Error(stderr.trim() || `SSH attachment upload failed (${code})`)); });
+        });
+        try {
+            await Promise.all([pipeline(Readable.from(data), child.stdin, { signal }), completion]);
+            signal?.throwIfAborted();
+            return remotePath(stdout.trim());
+        }
+        catch (error) {
+            if (!ended && !['EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(String(error.code)))
+                child.kill('SIGTERM');
+            await completion.catch(() => { });
+            signal?.throwIfAborted();
+            throw stderr.trim() ? new Error(stderr.trim()) : error;
+        }
+        finally {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', abort);
+            if (!ended)
+                child.kill('SIGTERM');
+        }
+    }
+    start(cwd, argv, options = {}) {
+        const command = argv.map(quote).join(' ');
+        const process = this.spawn(`${options.prefix ?? ''}cd ${quote(cwd)} || exit\n${options.endWithSession
+            ? `if command -v node >/dev/null 2>&1; then exec node --no-warnings -e ${quote(ENDS_WITH_INPUT)} -- ${command}; fi\n`
+            : ''}exec ${command}`);
+        let stderr = '', exited;
+        const data = new Set(), exits = new Set();
+        const end = (error) => { if (exited)
+            return; exited = error; for (const listener of exits)
+            listener(error); };
+        process.stdout.on('data', chunk => { for (const listener of data)
+            listener(chunk); });
+        const decoder = new StringDecoder('utf8');
+        process.stderr.on('data', (chunk) => { stderr = (stderr + decoder.write(chunk)).slice(-4000); options.stderr?.(chunk); });
+        process.stdin.on('error', error => end(error));
+        process.on('error', end);
+        process.on('close', code => end(new Error(stderr.trim() || `Remote CLI exited (${code})`)));
+        return {
+            write(value) { if (exited || process.stdin.destroyed)
+                throw exited ?? new Error('Remote CLI input closed'); process.stdin.write(value); },
+            stop() { process.stdin.end(); process.kill('SIGTERM'); },
+            onData(listener) { data.add(listener); },
+            onExit(listener) { exits.add(listener); if (exited)
+                listener(exited); },
+        };
+    }
+}
+const FRAME_LIMIT = 64_000_000;
+/** JSONL supports native Codex, ACP JSON-RPC and Claude's control frames. */
+export class JsonlPeer {
+    child;
+    /** Request IDs stay unique across reconnections: a replayed response can never answer a newer request. */
+    prefix = `dsh-${randomUUID().slice(0, 8)}`;
+    nextId = 0;
+    pending = new Map();
+    listeners = new Set();
+    exits = new Set();
+    ended;
+    processed;
+    constructor(child) {
+        this.child = child;
+        // Split on bytes: a newline never occurs inside a UTF-8 sequence, so offsets stay exact.
+        this.processed = child.offset ?? 0;
+        let parts = [], size = 0;
+        child.onData(data => {
+            let index = 0;
+            while (index < data.length && !this.ended) {
+                const newline = data.indexOf(10, index);
+                if (newline < 0) {
+                    parts.push(data.subarray(index));
+                    size += data.length - index;
+                    if (size > FRAME_LIMIT) {
+                        this.finish(new Error('Remote CLI frame exceeded output limit'));
+                        child.stop();
+                    }
+                    return;
+                }
+                const line = parts.length ? Buffer.concat([...parts, data.subarray(index, newline)]) : data.subarray(index, newline);
+                parts = [];
+                size = 0;
+                index = newline + 1;
+                const frame = { start: this.processed, end: this.processed + line.length + 1 };
+                this.dispatch(line.toString('utf8'), frame);
+                this.processed = frame.end;
+            }
+        });
+        child.onExit(error => this.finish(error));
+    }
+    /** Byte offset after the last dispatched line. */
+    get position() { return this.processed; }
+    dispatch(line, frame) {
+        let message;
+        try {
+            message = JSON.parse(line);
+        }
+        catch {
+            return;
+        }
+        if (!message || typeof message !== 'object' || Array.isArray(message))
+            return;
+        const key = message.type === 'control_response' ? String(message.response?.request_id) : message.id !== undefined && !message.method ? String(message.id) : undefined;
+        const request = key ? this.pending.get(key) : undefined;
+        if (request && key) {
+            this.pending.delete(key);
+            clearTimeout(request.timer);
+            const error = message.error ?? (message.response?.subtype === 'error' ? { message: message.response.error } : null);
+            if (error)
+                request.reject(new Error(typeof error.message === 'string' ? error.message : JSON.stringify(error)));
+            else
+                request.resolve(message.type === 'control_response' ? message.response?.response : message.result);
+        }
+        else
+            for (const listener of this.listeners) {
+                try {
+                    listener(message, frame);
+                }
+                catch (error) {
+                    this.finish(error instanceof Error ? error : new Error(String(error)));
+                    this.child.stop();
+                    return;
+                }
+            }
+    }
+    get alive() { return !this.ended; }
+    onMessage(listener) { this.listeners.add(listener); }
+    onExit(listener) { this.exits.add(listener); if (this.ended)
+        listener(this.ended); }
+    send(message, inputId) { if (this.ended)
+        throw this.ended; this.child.write(`${JSON.stringify(message)}\n`, inputId); }
+    request(method, params = {}, timeout = 20_000) {
+        const id = `${this.prefix}-${++this.nextId}`;
+        return this.wait(id, { jsonrpc: '2.0', id, method, params }, timeout);
+    }
+    control(request, timeout = 20_000) {
+        const request_id = `${this.prefix}-${++this.nextId}`;
+        return this.wait(request_id, { type: 'control_request', request_id, request }, timeout);
+    }
+    wait(id, message, timeout) {
+        return new Promise((resolve, reject) => {
+            const timer = timeout > 0 ? setTimeout(() => { this.pending.delete(id); reject(new Error(`Remote CLI request timed out: ${message.method ?? message.request?.subtype}`)); }, timeout) : undefined;
+            this.pending.set(id, { resolve, reject, timer });
+            try {
+                this.send(message);
+            }
+            catch (error) {
+                this.pending.delete(id);
+                clearTimeout(timer);
+                reject(error);
+            }
+        });
+    }
+    close() { this.finish(new Error('Remote CLI connection closed')); this.child.stop(); }
+    finish(error) {
+        if (this.ended)
+            return;
+        this.ended = error;
+        for (const request of this.pending.values()) {
+            clearTimeout(request.timer);
+            request.reject(error);
+        }
+        this.pending.clear();
+        for (const listener of this.exits)
+            listener(error);
+    }
+}

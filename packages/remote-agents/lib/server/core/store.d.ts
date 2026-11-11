@@ -1,5 +1,4 @@
 import { type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from './domain.js';
-import type { TuiUsageCursor } from '../workspace/tui-usage.js';
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup {
     hostId: string;
@@ -40,23 +39,13 @@ export interface State {
     seenWorkspaces?: Record<string, string[]>;
     sharedDeletions?: SharedDeletion[];
     tagSync?: Record<string, TagSyncRecord>;
+    /**
+     * What 0.2.129 and earlier saved about TUI conversations. dsh-remote-terminals took them over and keeps them now; they
+     * stay here untouched, so that it can find them on its first start and an older version still has them.
+     */
     tuiSessions?: string[];
-    tuiDetails?: Record<string, TuiDetails>;
-    /** Whether Claude Code in a terminal leaves scrolling to that terminal; on unless false. See TuiSessions.localScroll. */
+    tuiDetails?: Record<string, unknown>;
     tuiLocalScroll?: boolean;
-}
-/**
- * A TUI conversation's first launch of its CLI, the title the plugin last gave it, and whether DSH has been told the
- * conversation's model. A Codex conversation also names its CLI and thread; one without them runs Claude Code.
- */
-export interface TuiDetails {
-    cli?: 'codex';
-    thread?: string;
-    model?: string;
-    effort?: string;
-    title?: string;
-    modelRecorded?: boolean;
-    usage?: TuiUsageCursor;
 }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord {

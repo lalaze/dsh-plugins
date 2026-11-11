@@ -29,7 +29,7 @@ const LAPSE_MS = 120_000;
  * A block longer than this is real thinking from another model or release: the rest of it stays reasoning.
  */
 const PROGRESS_LIMIT = 1000;
-const CLI_NAMES = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
+const CLI_NAMES = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
 export const chatProviderId = (cli) => `remote-cli-${cli}`;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
 export const CHAT_PROVIDERS = [CHAT_PROVIDER, ...Object.keys(CLI_NAMES).map(chatProviderId)];

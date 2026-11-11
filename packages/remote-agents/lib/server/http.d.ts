@@ -2,7 +2,7 @@ import type { RemoteAgentsService } from './agents/service.js';
 import type { adoptModel } from './chat/adopt-model.js';
 import { ChatProjects } from './chat/projects.js';
 import type { NativeSharing } from './chat/native-service.js';
-import type { WorkspacePlacement } from './workspace/access.js';
+import type { WorkspacePlacement } from './core/access.js';
 import type { RemoteWorkspaces } from './workspace/remote-workspaces.js';
 import { type WorkspaceFeatures } from './workspace/http.js';
 import type { Sharing } from './sharing/sharing.js';

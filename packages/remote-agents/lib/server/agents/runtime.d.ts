@@ -4,7 +4,6 @@ import { JsonlPeer } from '../core/ssh.js';
 import { type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
-export declare function initializeCodex(peer: JsonlPeer, capabilities?: Record<string, unknown>): Promise<void>;
 export declare function initializeAcp(peer: JsonlPeer): Promise<any>;
 export interface SessionHooks {
     /** Revoke the exact goal grant before surfacing a native session failure. */
@@ -53,7 +52,6 @@ export declare class CliSession {
     private intentionalClose;
     private diskFailed;
     private admitting;
-    private interrupting;
     private stopping;
     private released;
     private endedSent;

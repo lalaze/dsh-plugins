@@ -1,0 +1,192 @@
+import { randomUUID } from 'node:crypto';
+import { list } from './domain.js';
+const count = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : undefined;
+const capitalize = (value) => value ? value[0].toUpperCase() + value.slice(1) : value;
+/** Context fill, or nothing until the CLI has reported a window size. */
+export function contextUsage(used, max) {
+    const tokens = count(used), size = count(max);
+    return tokens !== undefined && size ? { used: tokens, max: size } : undefined;
+}
+/** Codex `thread/tokenUsage/updated`: the last request's total is what the context window holds. */
+export const codexContext = (usage) => contextUsage(usage?.last?.totalTokens ?? usage?.last?.total_tokens, usage?.modelContextWindow ?? usage?.model_context_window);
+const optional = (key, value) => value ? { [key]: value } : {};
+/**
+ * Providers match the `remote-cli-<cli>` chat routes; sessions are the DSH conversation, or the agent for other turns.
+ * The model is the one the CLI reported running, or the task's selection when it named none.
+ */
+export function remoteUsageRecord(task, hosts, usage, turn, now = Date.now()) {
+    const started = turn.startedAt ? Date.parse(turn.startedAt) : NaN, host = hosts.find(h => h.id === task.hostId);
+    return {
+        id: randomUUID(), startedAt: new Date(Number.isFinite(started) ? started : now).toISOString(),
+        provider: `remote-cli-${task.provider}`, model: turn.model ?? task.model, sessionId: task.chat?.sessionId ?? `remote-agent:${task.id}`,
+        purpose: task.chat ? 'conversation' : task.origin === 'dsh' ? 'delegation' : 'remote-session', status: turn.failed ? 'error' : 'completed',
+        durationMs: Number.isFinite(started) ? Math.max(0, now - started) : 0, usage,
+        ...(host ? { host: host.label } : {}), workspace: task.executionCwd ?? task.cwd,
+    };
+}
+/**
+ * A turn's records: one per model when the CLI reported each model's share, so a turn that changed model, or whose
+ * subagents ran another one, is not all counted as its last model. Otherwise one record of the turn's own total.
+ */
+export function remoteUsageRecords(task, hosts, usage, turn, now = Date.now()) {
+    if (!turn.models?.length)
+        return [remoteUsageRecord(task, hosts, usage, turn, now)];
+    return turn.models.map(share => remoteUsageRecord(task, hosts, share.usage, { ...turn, model: share.model }, now));
+}
+/** Claude's `result.usage`: the main thread's model calls this turn. Subagents are only in `claudeModelUsage`. */
+export function claudeTurnUsage(usage) {
+    const input = count(usage?.input_tokens), output = count(usage?.output_tokens);
+    if (input === undefined || output === undefined)
+        return undefined;
+    return { inputTokens: input, outputTokens: output, ...optional('cacheReadTokens', count(usage?.cache_read_input_tokens)), ...optional('cacheWriteTokens', count(usage?.cache_creation_input_tokens)) };
+}
+/**
+ * Claude's `result.model_usage_since_last_result`: what each model used since the previous result, including subagents
+ * and a refused request retried on another model. Newer CLIs send it; older ones leave this undefined.
+ */
+export function claudeModelUsage(models) {
+    if (!models || typeof models !== 'object')
+        return undefined;
+    const shares = Object.entries(models).flatMap(([model, used]) => {
+        const usage = claudeTurnUsage({ input_tokens: used?.inputTokens, output_tokens: used?.outputTokens, cache_read_input_tokens: used?.cacheReadInputTokens, cache_creation_input_tokens: used?.cacheCreationInputTokens });
+        // Claude's own notices, such as API errors, are `<synthetic>` and use nothing.
+        return usage && model && !model.startsWith('<') && usage.inputTokens + usage.outputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0) > 0 ? [{ model, usage }] : [];
+    });
+    return shares.length ? shares : undefined;
+}
+/** Codex counters, whose input includes cached input. */
+function codexCounters(value) {
+    const pick = (camel, snake) => count(value?.[camel] ?? value?.[snake]) ?? 0;
+    return { input: pick('inputTokens', 'input_tokens'), cached: pick('cachedInputTokens', 'cached_input_tokens'), output: pick('outputTokens', 'output_tokens'), reasoning: pick('reasoningOutputTokens', 'reasoning_output_tokens'), total: pick('totalTokens', 'total_tokens') };
+}
+/**
+ * Codex's `thread/tokenUsage/updated` follows every model request: the thread's running totals before that request
+ * (`total` less `last`). Undefined when the report leaves out the request's own share.
+ */
+export function codexTotalBefore(usage) {
+    if (!usage?.total || !usage?.last)
+        return undefined;
+    const now = codexCounters(usage.total), last = codexCounters(usage.last), less = (key) => Math.max(0, now[key] - last[key]);
+    return { inputTokens: less('input'), cachedInputTokens: less('cached'), outputTokens: less('output'), reasoningOutputTokens: less('reasoning'), totalTokens: less('total') };
+}
+/** Codex reports running thread totals; a turn used the difference since the previous turn ended. */
+export function codexTurnUsage(total, before) {
+    if (!total)
+        return undefined;
+    const now = codexCounters(total), then = codexCounters(before);
+    // A new or compacted thread restarts its counters; its total is then this turn's usage.
+    const base = Object.values(now).some((value, i) => value < Object.values(then)[i]) ? codexCounters(undefined) : then;
+    const input = now.input - base.input, cached = now.cached - base.cached, output = now.output - base.output;
+    if (input + output <= 0)
+        return undefined;
+    return { inputTokens: Math.max(0, input - cached), outputTokens: output, ...optional('cacheReadTokens', cached), ...optional('reasoningTokens', now.reasoning - base.reasoning), ...optional('totalTokens', now.total - base.total) };
+}
+/** ACP's optional `PromptResponse.usage` for one prompt turn. */
+export function acpTurnUsage(usage) {
+    const input = count(usage?.inputTokens), output = count(usage?.outputTokens);
+    if (input === undefined || output === undefined)
+        return undefined;
+    const read = count(usage?.cachedReadTokens), write = count(usage?.cachedWriteTokens), total = count(usage?.totalTokens);
+    // ACP leaves open whether input includes cached tokens; a total that adds up with them listed separately says it does not.
+    const separate = total !== undefined && input + output + (read ?? 0) + (write ?? 0) === total;
+    return { inputTokens: separate ? input : Math.max(0, input - (read ?? 0) - (write ?? 0)), outputTokens: output, ...optional('cacheReadTokens', read), ...optional('cacheWriteTokens', write), ...optional('reasoningTokens', count(usage?.thoughtTokens)), ...optional('totalTokens', count(usage?.totalTokens)) };
+}
+/** Claude API usage of one assistant message: everything sent plus what it generated. */
+export function claudeMessageTokens(usage) {
+    const parts = [usage?.input_tokens, usage?.cache_creation_input_tokens, usage?.cache_read_input_tokens, usage?.output_tokens].map(count);
+    return parts[0] === undefined ? undefined : parts.reduce((sum, part) => sum + (part ?? 0), 0);
+}
+function tokenBreakdown(input, read, write, output) {
+    const fields = { inputTokens: count(input), cachedInputTokens: count(read), cacheWriteInputTokens: count(write), outputTokens: count(output) };
+    const reported = Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
+    return Object.keys(reported).length ? reported : undefined;
+}
+/** Codex input already includes cached input; snapshots must not be added together. */
+export function codexTokenUsage(usage) {
+    const parse = (value) => tokenBreakdown(value?.inputTokens ?? value?.input_tokens, value?.cachedInputTokens ?? value?.cached_input_tokens, value?.cacheWriteInputTokens ?? value?.cache_write_input_tokens, value?.outputTokens ?? value?.output_tokens);
+    const last = parse(usage?.last), total = parse(usage?.total);
+    return last || total ? { ...(last ? { last } : {}), ...(total ? { total } : {}) } : undefined;
+}
+/** Claude's uncached input, cache reads and cache writes are disjoint counters. */
+export function claudeTokenUsage(usage) {
+    const input = [usage?.input_tokens, usage?.cache_read_input_tokens, usage?.cache_creation_input_tokens].map(count);
+    // Without all three counters the complete input denominator is unknown.
+    const totalInput = input.every(value => value !== undefined) ? input.reduce((sum, value) => sum + value, 0) : undefined;
+    const last = tokenBreakdown(totalInput, usage?.cache_read_input_tokens, usage?.cache_creation_input_tokens, usage?.output_tokens);
+    return last ? { last } : undefined;
+}
+function windowLabel(minutes) {
+    if (minutes === 300)
+        return 'Session';
+    if (minutes === 10_080)
+        return 'Weekly';
+    if (!minutes)
+        return 'Limit';
+    return minutes % 1440 === 0 ? `${minutes / 1440}d` : minutes % 60 === 0 ? `${minutes / 60}h` : `${minutes}m`;
+}
+function percent(value) {
+    return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : undefined;
+}
+function codexWindows(snapshot, prefix) {
+    return ['primary', 'secondary'].flatMap(key => {
+        const window = snapshot?.[key], used = percent(window?.usedPercent);
+        if (used === undefined)
+            return [];
+        const label = windowLabel(count(window.windowDurationMins));
+        const resetsAt = count(window.resetsAt);
+        return [{ id: `${prefix ?? 'codex'}:${key}`, label: prefix ? `${prefix} · ${label}` : label, usedPercent: used, ...(resetsAt ? { resetsAt: new Date(resetsAt * 1000).toISOString() } : {}) }];
+    });
+}
+/** Codex `account/read` and `account/rateLimits/read`. Extra metered buckets follow the main one. */
+export function codexAccountUsage(account, limits, checkedAt = new Date().toISOString()) {
+    const main = limits?.rateLimits, plan = account?.account?.planType ?? main?.planType;
+    const others = Object.entries(limits?.rateLimitsByLimitId ?? {}).filter(([id]) => id !== (main?.limitId ?? 'codex'));
+    const credits = main?.credits;
+    return {
+        provider: 'codex', checkedAt,
+        ...(typeof plan === 'string' && plan !== 'unknown' ? { plan: capitalize(plan) } : {}),
+        ...(typeof account?.account?.email === 'string' ? { email: account.account.email } : {}),
+        windows: [...codexWindows(main), ...others.flatMap(([id, snapshot]) => codexWindows(snapshot, String(snapshot?.limitName ?? id)))],
+        ...(credits?.unlimited ? { credits: 'Unlimited' } : credits?.hasCredits && typeof credits.balance === 'string' ? { credits: credits.balance } : {}),
+    };
+}
+const CLAUDE_WINDOWS = [['five_hour', 'Session'], ['seven_day', 'Weekly'], ['seven_day_opus', 'Weekly · Opus'], ['seven_day_sonnet', 'Weekly · Sonnet']];
+/**
+ * The CLI keeps the plan it saw at sign-in, so an upgraded account still reports Pro until it signs in again.
+ * Pro pays for Fable with usage credits; only Max gives it a weekly window of its own, so that window decides first.
+ * The CLI leaves per-model windows out when the usage endpoint did not answer (it read its last request's headers or a snapshot
+ * instead); such an answer says nothing about the plan, so the plan shown last stands.
+ */
+function claudePlan(plan, limits, last) {
+    if (!Array.isArray(limits?.model_scoped))
+        return last ?? plan;
+    return limits.model_scoped.some((window) => /^fable\b/i.test(String(window?.display_name ?? ''))) ? 'Max' : plan;
+}
+/** Claude `initialize` account details and the `get_usage` control response behind `/usage`. */
+export function claudeAccountUsage(account, usage, checkedAt = new Date().toISOString(), lastPlan) {
+    const limits = usage?.rate_limits;
+    const plan = claudePlan(typeof usage?.subscription_type === 'string' ? capitalize(usage.subscription_type) : account?.subscriptionType, limits, lastPlan);
+    const windows = [
+        ...CLAUDE_WINDOWS.map(([id, label]) => ({ id, label, window: limits?.[id] })),
+        ...list(limits?.model_scoped).map((window, index) => ({ id: `model_scoped:${index}`, label: `Weekly · ${window?.display_name ?? 'Model'}`, window })),
+    ].flatMap(({ id, label, window }) => {
+        const used = percent(window?.utilization);
+        return used === undefined ? [] : [{ id, label, usedPercent: used, ...(typeof window.resets_at === 'string' ? { resetsAt: window.resets_at } : {}) }];
+    });
+    return {
+        provider: 'claude', checkedAt, windows,
+        ...(typeof plan === 'string' && plan ? { plan } : {}),
+        ...(typeof account?.email === 'string' ? { email: account.email } : {}),
+        ...(typeof limits?.extra_usage?.is_enabled === 'boolean' ? { extraUsage: limits.extra_usage.is_enabled } : {}),
+    };
+}
+/** Read plan limits through the CLI itself, so credentials never leave the SSH host. */
+export async function readAccountUsage(peer, protocol, claudeAccount, lastPlan) {
+    if (protocol === 'codex') {
+        const [account, limits] = await Promise.all([peer.request('account/read', {}, 20_000).catch(() => undefined), peer.request('account/rateLimits/read', {}, 20_000)]);
+        return codexAccountUsage(account, limits);
+    }
+    if (protocol === 'claude')
+        return claudeAccountUsage(claudeAccount, await peer.control({ subtype: 'get_usage' }, 20_000), undefined, lastPlan);
+    throw new Error('This CLI does not report plan limits');
+}

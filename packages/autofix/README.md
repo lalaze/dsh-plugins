@@ -29,7 +29,7 @@ For working in the DSH on a laptop while a machine that is always on runs the fi
 - The laptop's DSH only needs this plugin: no repository to add, no address or password of the other one.
 - Type `/fix` in a conversation of that project on the laptop. The bug is handed over through the machine that holds the repository; the card stays in that conversation, with the progress, the report, the changes, and accepting or sending back.
 
-Both DSHes reach the machine that holds the repository, and the handover happens there, in `~/.dsh-autofix` of your own account. Whoever can sign in to that account can file and accept bugs, which is the boundary that already lets them change the repository. Both DSHes need `dsh-remote-agents` 0.2.129 or newer; only the one that runs fixes needs `dsh-model-flow`.
+Both DSHes reach the machine that holds the repository, and the handover happens there, in `~/.dsh-autofix` of your own account. Whoever can sign in to that account can file and accept bugs, which is the boundary that already lets them change the repository. Both DSHes need `dsh-remote-agents` 0.2.130 or newer and `dsh-remote-terminals`; only the one that runs fixes needs `dsh-model-flow`.
 
 ## Sources
 
@@ -54,7 +54,7 @@ The board opens from the **Bugs** button in a conversation's header, or from **S
 ## Requirements
 
 - DSH 0.2.2-rc.1 or newer.
-- `dsh-remote-agents` 0.2.129 or newer, for worktrees on this computer and on saved SSH machines.
+- `dsh-remote-agents` 0.2.130 or newer with `dsh-remote-terminals`, for worktrees on this computer and on saved SSH machines.
 - `dsh-model-flow` 0.1.7 or newer, with models chosen in **Settings → Model flow**.
 - Git 2.38 or newer on the machine that holds the repository (accepting uses `git merge-tree --write-tree`).
 - At least one source plugin.

@@ -1,6 +1,6 @@
 import { type RemoteWorkspace } from '../core/domain.js';
 import type { WorkspaceHosts } from './hosts.js';
-import { sshEndpoint, type Endpoint, type WorkspaceAccess } from './access.js';
+import { sshEndpoint, type Endpoint, type WorkspaceAccess } from '../core/access.js';
 /** dsh-remote's POSIX normalization: `.` and `..` segments resolve lexically. */
 export declare function normalizeRemotePath(path: string): string;
 /** dsh-remote's 32-bit string hash, which separates folders whose basenames are equal. */

@@ -3,9 +3,9 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { RemoteAgentsService } from './agents/service.js';
 import { delegationTools } from './agents/tools.js';
-import { remoteUsageRecords } from './agents/usage.js';
+import { remoteUsageRecords } from './core/usage.js';
 import { adoptModel } from './chat/adopt-model.js';
-import { installChat, scheduleSessionRepair } from './chat/install.js';
+import { installChat } from './chat/install.js';
 import { ClaudeGoalBridge } from './chat/claude-goal.js';
 import { ChatProjects } from './chat/projects.js';
 import { installNativeSharing } from './chat/native-install.js';
@@ -25,7 +25,6 @@ export const Config = Schema.object({
 export async function apply(ctx, config = {}) {
     const store = new Store(join(config.stateDir ?? stateDir(), 'state.json'));
     await store.open();
-    scheduleSessionRepair(ctx, store);
     const service = new RemoteAgentsService(store);
     const projects = new ChatProjects(service);
     const workspace = await installWorkspaces(ctx, store, service);
@@ -36,7 +35,7 @@ export async function apply(ctx, config = {}) {
     sharing.goals = claudeGoals;
     service.sharing = sharing;
     // Close the store last: a reloaded plugin's new instance owns the state from then on.
-    ctx.effect(() => async () => { await sharing.close(); await workspace.features.tunnels.close(); await service.close(); await store.close(); });
+    ctx.effect(() => async () => { await sharing.close(); await service.close(); await store.close(); });
     // Every finished turn is announced for usage statistics. Main chat does not report usage to DSH: a CLI turn's total
     // spans many model calls and would misstate the conversation's context size.
     store.usageListeners.add((taskId, usage, turn) => {

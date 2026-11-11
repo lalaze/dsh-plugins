@@ -94,7 +94,6 @@ export declare class JsonlPeer {
     get alive(): boolean;
     onMessage(listener: (message: WireMessage, frame: Frame) => void): void;
     onExit(listener: (error: Error) => void): void;
-    waitForMessage(predicate: (message: WireMessage) => boolean, timeout?: number): Promise<WireMessage>;
     send(message: WireMessage, inputId?: string): void;
     request(method: string, params?: Record<string, unknown>, timeout?: number): Promise<any>;
     control(request: Record<string, unknown>, timeout?: number): Promise<any>;

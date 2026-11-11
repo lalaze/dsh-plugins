@@ -1,26 +1,9 @@
-import { join } from 'node:path';
 import { busy } from '../core/domain.js';
 import { accessOf, loggerOf } from '../core/dsh-host.js';
-import { dshHome } from '../workspace/access.js';
 import { SharedChatAdoption } from './adopt.js';
 import { isTeamPrompt, teamMemberOf } from './agent-teams.js';
 import { CHAT_IMAGE_LIMIT } from './images.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from './native-chat.js';
-import { repairStoredSessions } from './session-repair.js';
-/** Conversations saved by 0.2.53 and earlier stored a remote tool row out of order, and DSH refuses to reopen them. */
-export function scheduleSessionRepair(ctx, store) {
-    const persistence = ctx.get('sessionPersistence');
-    const open = (id) => !!ctx.get('sessions')?.get?.(id);
-    // Let DSH finish opening before a one-time scan competes for filesystem and compression workers.
-    const repairTimer = setTimeout(() => {
-        void repairStoredSessions(typeof persistence?.root === 'string' ? persistence.root : join(dshHome(), 'sessions'), store.directory, open)
-            .then(paths => { if (paths.length)
-            loggerOf(ctx)?.info?.(`Repaired ${paths.length} remote CLI conversation log(s) DSH could not reopen; originals kept in ${join(store.directory, 'session-backups')}`); })
-            .catch(error => loggerOf(ctx)?.warn?.(`Remote CLI conversation repair failed: ${String(error)}`));
-    }, 2000);
-    repairTimer.unref?.();
-    ctx.effect(() => () => clearTimeout(repairTimer));
-}
 /** Remote CLI models in DSH's model picker and main conversation. */
 export function installChat(ctx, service, projects, workspace, claudeGoals) {
     const { access, files, workspaces } = workspace;
@@ -40,7 +23,8 @@ export function installChat(ctx, service, projects, workspace, claudeGoals) {
             unattended: id => accessOf(scoped, sessionOf(id)).unattended,
             subagent: id => !!sessionOf(id)?.header.parentSession,
             teamMember: id => teamMemberOf(sessionOf(id)),
-            tui: id => service.store.snapshot().tuiSessions?.includes(id) === true,
+            // dsh-remote-terminals knows; without it there are no TUI conversations.
+            tui: id => scoped.get('remoteTerminals')?.isTui?.(id) === true,
             userContent: (id, messageId) => sessionOf(id)?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source)))?.content,
             attachments: {
                 image: async (ref, signal) => {

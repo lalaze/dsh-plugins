@@ -94,12 +94,6 @@ export declare const CLI_PROVIDERS: ({
     command: string;
     protocol: "acp";
     args: string[];
-} | {
-    id: string;
-    label: string;
-    command: string;
-    protocol: "antigravity";
-    args: never[];
 })[];
 /** Claude's `list_models` control response: `supportedEffortLevels` holds per-model reasoning choices. */
 export declare function claudeModels(result: unknown): Model[];

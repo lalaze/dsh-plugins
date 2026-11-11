@@ -4,6 +4,16 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.130 — Terminals, TUI conversations and worktree workspaces move to Remote Terminals; tunnels, remote DSH and Antigravity are removed
+
+- **Install [Remote Terminals](../remote-terminals/README.md) beside this plugin and restart DSH** to keep remote terminals that outlive DSH, **Remote Claude** and **Remote Codex** in the terminal's shell menu, TUI conversations and **Add workspace › From a project**. They are that plugin now and work as before. Without it they are missing; chat, delegation, sharing, files and sync are unchanged.
+- Your TUI conversations are taken over by Remote Terminals on its first start, and the terminals and CLIs running on the remote machines keep running.
+- Removed: the **Tunnels** and **Remote DSH** tabs of the remote workspace panel. Saved tunnel definitions are no longer used; **Remote workspace** in the sidebar opens Sync.
+- Removed: the **Antigravity** CLI. A machine that had it enabled keeps its other CLIs. A saved Antigravity session stays in the list and can no longer run.
+- Removed: the repair of conversation logs written by 0.2.53 and earlier. A conversation from then that was never reopened since is repaired by any version up to 0.2.129.
+- The page loads less: its bundle goes from 678 KB to 463 KB.
+- For other plugins: the new service `remoteAgentsMachines` gives another plugin the saved machines, a conversation's verified machine and directory, and the machine's shared SSH connection. `remoteAgentsWorktrees` is provided by Remote Terminals from now on, under the same name.
+
 ## 0.2.128 — TUI conversations count in usage statistics
 
 - A TUI conversation's Claude Code or Codex runs in a terminal, so none of its turns passed through the relay that reports a chat's usage, and Usage statistics recorded nothing for them. A day of TUI work showed 0.

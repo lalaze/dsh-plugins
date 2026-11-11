@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import Schema from '@deepseek-ai/schemastery';
-import { type RemoteUsageRecord } from './agents/usage.js';
+import { type RemoteUsageRecord } from './core/usage.js';
 import type { SyncAgent } from './chat/native-chat.js';
 declare module '@deepseek-ai/cordis' {
     interface Events {

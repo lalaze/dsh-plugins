@@ -72,7 +72,6 @@ export interface Provider {
     label: string;
     status: 'loading' | 'ready' | 'unavailable' | 'error';
     error?: string;
-    notice?: string;
     models: Model[];
     modes: Choice[];
     defaultModeId?: string | null;
@@ -331,7 +330,7 @@ export interface Task extends TaskInput {
     state: 'creating' | 'ready' | 'uncertain';
     error?: string;
 }
-export type NativeProtocol = 'codex' | 'claude' | 'acp' | 'antigravity';
+export type NativeProtocol = 'codex' | 'claude' | 'acp';
 /**
  * Marks the line naming the tool a CLI is running, which the chat receives as markdown. DSH's markdown keeps only http(s) and
  * mailto links, so this is one. The client draws it as a tool row that takes no clicks, and `.invalid` names no site.

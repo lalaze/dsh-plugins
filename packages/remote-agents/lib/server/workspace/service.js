@@ -2,30 +2,15 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { RemoteError, field, record } from '../core/domain.js';
-import { under } from './access.js';
-import { FILE_LIMIT, TEXT_LIMIT } from './domain.js';
+import { under } from '../core/access.js';
+import { FILE_LIMIT, TEXT_LIMIT, workspacePath } from '../core/workspace.js';
+export { workspacePath };
 export const hash = (data) => createHash('sha256').update(data).digest('hex');
 const ignore = new Set(['.git', 'node_modules', 'dist', 'build', 'target', '.dsh-remote-agents', '.dsh-remote-meta.json']);
-/** A path exactly as given: names may begin or end with spaces, so trimming would address a different file. */
-export function workspacePath(value, label) {
-    if (typeof value !== 'string' || !value || value.length > 4096 || /[\0\r]/.test(value))
-        throw new RemoteError(`Invalid ${label}`);
-    return value;
-}
 export function fileOperation(raw) {
     const v = record(raw), op = field(v.op, 'workspace operation', 40), path = v.path === '' ? '' : workspacePath(v.path ?? '.', 'workspace path');
     if (op === 'list' || op === 'read' || op === 'stat' || op === 'mkdir' || op === 'manifest')
         return { op, path };
-    if (op === 'webStart' || op === 'webStop') {
-        if (typeof v.port !== 'number' || !Number.isInteger(v.port) || v.port < 1024 || v.port > 65535)
-            throw new RemoteError('Enter a port between 1024 and 65535');
-        if (op === 'webStop')
-            return { op, path, port: v.port };
-        // Passed to dsh as --trusted-host, so it must not read as an option.
-        if (typeof v.host !== 'string' || v.host.length > 253 || !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(v.host))
-            throw new RemoteError('Invalid remote DSH access address');
-        return { op, path, port: v.port, host: v.host };
-    }
     if (op === 'write') {
         if (typeof v.content !== 'string' || Buffer.byteLength(v.content) > TEXT_LIMIT)
             throw new RemoteError('File exceeds the 256 KB editor limit', 413);
@@ -88,35 +73,6 @@ export class WorkspaceService {
     async readViewed(sessionId, path, limit, signal) {
         const target = await this.target(sessionId, signal);
         return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
-    }
-    /** Ends a terminal the user closed, which otherwise keeps running on the conversation's machine. */
-    async endHolder(sessionId, holder, signal) {
-        const target = await this.target(sessionId, signal);
-        await this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.endHolder(holder));
-    }
-    /** The title records of a Claude Code session on the conversation's verified machine. */
-    async claudeTitleRecords(sessionId, claudeSession, signal) {
-        const target = await this.target(sessionId, signal);
-        return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.claudeTitleRecords(claudeSession));
-    }
-    /**
-     * What TUI conversations' CLIs logged on one machine since the last read, for their usage; every conversation is
-     * verified to be on it again first. See WorkspaceFiles.tuiUsageLines.
-     */
-    async tuiUsageLines(hostId, sessions, entries, signal) {
-        const verify = async () => { for (const { sessionId, target } of sessions)
-            await this.target(sessionId, signal, target); };
-        return this.machines.withWorkspace(hostId, verify, files => files.tuiUsageLines(entries, signal));
-    }
-    /** A new Codex thread in the conversation's verified remote directory. */
-    async codexThread(sessionId, name, signal) {
-        const target = await this.target(sessionId, signal);
-        return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.codexThread(target.cwd, name, signal));
-    }
-    /** The title records of a Codex thread on the conversation's verified machine. */
-    async codexTitleRecords(sessionId, thread, signal) {
-        const target = await this.target(sessionId, signal);
-        return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.codexTitleRecords(thread));
     }
     async upload(sessionId, path, rev, size, input, signal, expected) {
         revision(rev);

@@ -6,7 +6,7 @@ import { type AttachmentAccess } from '../agents/attachments.js';
 import { ChatProjects } from './projects.js';
 import { type TeamMember } from './agent-teams.js';
 import type { ToolHost } from '../core/dsh-host.js';
-import type { WorkspacePlacement } from '../workspace/access.js';
+import type { WorkspacePlacement } from '../core/access.js';
 export declare const CHAT_PROVIDER = "remote-cli";
 /** Wakes a conversation whose remote turn outlived DSH, so the missed output streams in without a new message. */
 export declare const SYNC_SOURCE = "remote-cli-sync";

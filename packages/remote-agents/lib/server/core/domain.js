@@ -46,7 +46,7 @@ export const inputModalitiesOf = (provider, model) => model.inputModalities ?? (
  * mailto links, so this is one. The client draws it as a tool row that takes no clicks, and `.invalid` names no site.
  */
 export const TOOL_STATUS_URL = 'https://remote-agents.invalid/running-tool';
-export const PROVIDER_LABELS = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };
+export const PROVIDER_LABELS = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', grok: 'Grok', codebuddy: 'CodeBuddy' };
 /** Older machines retain their providers until the user explicitly changes the selection. */
 export const enabledProvidersOf = (host) => host.enabledProviders ?? Object.keys(PROVIDER_LABELS);
 export function providerSelection(value) {

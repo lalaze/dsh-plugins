@@ -1,7 +1,7 @@
 import { browsePath, cursorInput, field, identifier, PROVIDER_LABELS, record, remotePath, RemoteError, taskInput } from './core/domain.js';
 import { ChatProjects } from './chat/projects.js';
 import { nativeSharingStatus, setNativeSharing } from './chat/native-sharing.js';
-import { workspaceAction, worktreeAction } from './workspace/http.js';
+import { workspaceAction } from './workspace/http.js';
 export function createHandler(service, projects = new ChatProjects(service), workspace, workspaces, features, sharing, adopt, native) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
@@ -173,32 +173,10 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 }
                 case 'workspaceTarget':
                 case 'workspaceFiles':
-                case 'workspaceSync':
-                case 'tuiSessions':
-                case 'tuiScroll':
-                case 'tuiStart':
-                case 'tuiTitle':
-                case 'tuiEnd':
-                case 'workspaceTunnels':
-                case 'addWorkspaceTunnel':
-                case 'startWorkspaceTunnel':
-                case 'stopWorkspaceTunnel':
-                case 'removeWorkspaceTunnel': {
+                case 'workspaceSync': {
                     if (!features)
                         throw new RemoteError('Remote workspaces are unavailable', 501);
                     result = await workspaceAction(features, action, input, request.signal);
-                    break;
-                }
-                case 'worktreeProjects':
-                case 'worktreeInspect':
-                case 'createWorktree':
-                case 'worktreeJob':
-                case 'worktreeJobAction':
-                case 'worktreeArchiveCheck':
-                case 'archiveWorktree': {
-                    if (!features?.worktrees)
-                        throw new RemoteError('Worktree workspaces are unavailable', 501);
-                    result = await worktreeAction(features.worktrees, action, input, request.signal);
                     break;
                 }
                 case 'workspaceModels':
@@ -236,9 +214,6 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                 case 'setHostProviders':
                     result = await service.setHostProviders(hostId(), input.providers);
                     break;
-                case 'chatProjects':
-                    result = projects.list();
-                    break;
                 case 'markChatRead':
                     await service.markChatRead(field(input.sessionId, 'session ID', 256));
                     result = { ok: true };
@@ -266,15 +241,6 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     await projects.setEffort(field(input.provider, 'provider', 200), field(input.model, 'model', 1000), field(input.reasoningEffort, 'reasoning effort', 200));
                     result = { ok: true };
                     break;
-                case 'addChatProject':
-                    result = await projects.add(input.project);
-                    break;
-                case 'refreshChatProject':
-                    result = await projects.refresh(identifier(input.projectId));
-                    break;
-                case 'removeChatProject':
-                    result = await projects.remove(identifier(input.projectId));
-                    break;
                 case 'sshConfig':
                     result = await service.sshConfig();
                     break;
@@ -286,7 +252,6 @@ export function createHandler(service, projects = new ChatProjects(service), wor
                     if (native?.status().hosts.includes(id))
                         throw new RemoteError('Handoff native conversations and disable ordinary sharing before removing this host', 409);
                     result = await service.removeHost(id, { deleteAgents: input.deleteAgents === true, everywhere: input.everywhere === true });
-                    await features?.tunnels.removeHost(id);
                     break;
                 }
                 case 'connect':

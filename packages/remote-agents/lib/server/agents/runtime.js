@@ -3,9 +3,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { CHAT_IMAGE_LIMIT, CHAT_IMAGES, chatImageName, imageExtensionOf, viewedImageExtension, viewedImagePath, writeChatImage } from '../chat/images.js';
 import { list, questionsOf } from '../core/domain.js';
+import { initializeCodex } from '../core/codex.js';
 import { RelayExit, RelayReleased } from './relay.js';
 import { configureAcpSession } from './acp.js';
-import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, contextUsage } from './usage.js';
+import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, contextUsage } from '../core/usage.js';
 /** The file name an image is shown with, from the remote path it was read from. */
 const imageName = (path) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
 const contentText = (content) => typeof content === 'string' ? content : list(content).map(c => c?.text ?? c?.content?.text ?? '').join('\n');
@@ -16,10 +17,6 @@ const claudeResultError = (message) => {
     const error = typeof message.error === 'string' ? message.error : message.error?.message;
     return errors || (typeof error === 'string' && error) || contentText(message.result) || 'Claude turn failed';
 };
-export async function initializeCodex(peer, capabilities = {}) {
-    await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.1.0' }, capabilities });
-    peer.send({ method: 'initialized', params: {} });
-}
 export async function initializeAcp(peer) {
     const result = await peer.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'dsh-remote-agents', version: '0.1.0' } });
     if (result?.protocolVersion !== 1)
@@ -63,7 +60,6 @@ export class CliSession {
     intentionalClose = false;
     diskFailed = false;
     admitting = false;
-    interrupting = false;
     stopping = false;
     released = false;
     endedSent = false;
@@ -103,9 +99,7 @@ export class CliSession {
                 this.intentionalClose = true;
                 this.agent.status = 'closed';
             }
-            if (this.interrupting)
-                this.close();
-            else if (!this.intentionalClose)
+            if (!this.intentionalClose)
                 this.fail(error);
             this.ended();
         });
@@ -233,12 +227,6 @@ export class CliSession {
             this.nativeId = resume ? this.task.native.sessionId : response?.sessionId;
             await configureAcpSession(this.peer, this.nativeId, this.task, response);
         }
-        else if (protocol === 'antigravity') {
-            const init = await this.peer.waitForMessage(message => message.event === 'init');
-            this.nativeId = init.conversation_id;
-            if (resume && this.nativeId !== this.task.native.sessionId)
-                throw new Error('Antigravity resumed a different conversation');
-        }
         else {
             this.nativeId = this.task.native?.sessionId ?? argv[argv.indexOf('--session-id') + 1];
             if (goalIdentity)
@@ -327,7 +315,7 @@ export class CliSession {
             if (await this.history.hasMessage(messageId))
                 return; // Durable at-most-once admission.
             const protocol = this.protocol(), images = attachments.filter(a => a.kind === 'image');
-            if (images.length && (protocol === 'antigravity' || (protocol === 'acp' && !this.imageInput)))
+            if (images.length && protocol === 'acp' && !this.imageInput)
                 throw new Error('This remote CLI does not support image input');
             const claudeUuid = protocol === 'claude' ? randomUUID() : undefined;
             const goalSend = this.goalOrigins ? this.goalIdentity?.messageId === messageId ? this.goalIdentity : { epoch: `ungranted-${randomUUID()}`, messageId } : undefined;
@@ -351,8 +339,6 @@ export class CliSession {
                 this.write({ jsonrpc: '2.0', id: promptRequestId(messageId), method: 'turn/start', params: { threadId: this.nativeId, cwd: this.agent.cwd, model: this.task.model, input: [{ type: 'text', text }, ...images.map(a => ({ type: 'localImage', path: a.path }))], ...(this.task.thinkingOptionId ? { effort: this.task.thinkingOptionId } : {}), ...(this.task.serviceTier ? { serviceTier: this.task.serviceTier } : {}) } }, id);
             else if (protocol === 'acp')
                 this.write({ jsonrpc: '2.0', id: promptRequestId(messageId), method: 'session/prompt', params: { sessionId: this.nativeId, prompt: [{ type: 'text', text }, ...images.map(a => ({ type: 'image', mimeType: a.mediaType, data: a.data }))] } }, id);
-            else if (protocol === 'antigravity')
-                this.write({ event: 'user', message: { content: text } }, id);
             else
                 this.write({ type: 'user', session_id: this.nativeId, uuid: claudeUuid, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text }, ...images.map(a => ({ type: 'image', source: { type: 'base64', media_type: a.mediaType, data: a.data } }))] } }, id);
         }
@@ -395,7 +381,7 @@ export class CliSession {
      * Only Claude's own output counts: a subagent it left running in the background may still stream while it is idle.
      */
     continueUnprompted(subagent = false) {
-        if (subagent || this.activeMessage || this.admitting || this.restoring || this.stopping || this.interrupting)
+        if (subagent || this.activeMessage || this.admitting || this.restoring || this.stopping)
             return;
         const id = `cli-${randomUUID()}`;
         this.append({ type: 'user_message', text: this.notices.join('\n'), clientMessageId: id, unprompted: true });
@@ -561,30 +547,6 @@ export class CliSession {
         if (m.type === 'system' && m.subtype === 'model_refusal_fallback' && m.direction === 'retry' && m.scope !== 'local' && typeof m.original_model === 'string' && typeof m.fallback_model === 'string') {
             this.continueUnprompted();
             this.append({ type: 'model_switch', from: m.original_model, to: m.fallback_model, ...(typeof m.api_refusal_category === 'string' && m.api_refusal_category ? { category: m.api_refusal_category } : {}) });
-        }
-        if (m.event === 'step_update') {
-            const step = m.step_update ?? {};
-            this.confirm();
-            if (step.step_type === 'agent_response' && typeof step.text_delta === 'string') {
-                this.partialText = true;
-                this.append({ type: 'assistant_message', text: step.text_delta });
-            }
-            if (step.step_type === 'tool')
-                this.tool(`${this.nativeId}:${step.step_index}`, String(step.tool_name ?? 'Tool'), step.state === 'DONE' ? 'completed' : step.state === 'ERROR' ? 'failed' : 'running', step);
-        }
-        if (m.event === 'result') {
-            const result = m.result ?? {};
-            if (this.interrupting) {
-                this.close();
-                return;
-            }
-            this.confirm();
-            if (typeof result.response === 'string' && result.response && !this.partialText)
-                this.append({ type: 'assistant_message', text: result.response });
-            if (result.status === 'SUCCESS')
-                this.complete();
-            else
-                this.fail(result.error || 'Antigravity turn failed');
         }
         const p = m.params ?? {};
         if (m.method === 'turn/started') {
@@ -825,10 +787,6 @@ export class CliSession {
                 await this.peer.request('turn/interrupt', { threadId: this.nativeId, turnId: this.agent.activeTurn?.turnId }, 5000);
             else if (protocol === 'acp')
                 this.write({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: this.nativeId } });
-            else if (protocol === 'antigravity') {
-                this.interrupting = true;
-                this.write({ event: 'dsh_interrupt' });
-            }
             else
                 await this.peer.control({ subtype: 'interrupt' }, 5000);
             let timer;

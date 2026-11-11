@@ -1,10 +1,9 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import { attachmentInput, identifier, RemoteError } from '../core/domain.js';
+import { stage } from '../core/staging.js';
+export { stage };
 export const attachmentDirectory = (directory, taskId, messageId) => join(directory, 'attachments', identifier(taskId), identifier(messageId));
 /** The LLM runtime projects files to text; recover only the session's authorized file blocks. */
 export function restoreFiles(content, original) {
@@ -13,20 +12,6 @@ export function restoreFiles(content, original) {
     if (original.length !== content.length)
         throw new RemoteError('Cannot recover this message’s file attachments. Attach the files again.');
     return content.map((block, index) => original[index].type === 'file' ? original[index] : block);
-}
-/** Stream one source into private staging; `describe` may reject the bytes before they are published. */
-export async function stage(dir, source, describe, signal) {
-    const temp = join(dir, `${randomUUID()}.tmp`), hash = createHash('sha256');
-    let bytes = 0;
-    try {
-        await pipeline(Readable.from(source), new Transform({ transform(chunk, _encoding, callback) { bytes += chunk.length; hash.update(chunk); callback(null, chunk); } }), createWriteStream(temp, { flags: 'wx', mode: 0o600 }), { signal });
-        const attachment = describe(hash.digest('hex'), bytes);
-        await rename(temp, join(dir, attachment.sha256));
-        return attachment;
-    }
-    finally {
-        await rm(temp, { force: true });
-    }
 }
 /** Stream files to private local staging; only bounded request-image versions are buffered. */
 export async function stageAttachments(directory, taskId, messageId, blocks, access, signal) {

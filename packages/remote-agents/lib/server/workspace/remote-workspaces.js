@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { RemoteError, remotePath, sharesSessions } from '../core/domain.js';
-import { dshHome, sameEndpoint, sshEndpoint, under } from './access.js';
+import { dshHome, sameEndpoint, sshEndpoint, under } from '../core/access.js';
 /** dsh-remote's anchor format: either plugin finds and reuses the other's workspace folders. */
 const META = '.dsh-remote-meta.json';
 /** dsh-remote's POSIX normalization: `.` and `..` segments resolve lexically. */

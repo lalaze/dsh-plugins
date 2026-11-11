@@ -648,7 +648,7 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
     }
     async prepare(host, transport, task, protocol, signal) {
         const servers = [], launch = { servers };
-        if (protocol === 'antigravity' || this.closed)
+        if (this.closed)
             return launch;
         const owner = this.owner(task);
         const team = this.teamOwner(task), candidate = protocol === 'claude' ? this.goalOwner(task) : undefined;
