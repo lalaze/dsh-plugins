@@ -41,7 +41,7 @@ const VALID: Record<Field, (v: unknown) => boolean> = {
   agentId: v => valid(() => identifier(v)), relay: v => !!v && typeof v === 'object' && valid(() => identifier((v as { id?: unknown }).id)),
   native: v => {
     const n = v as Record<string, unknown> | null;
-    return !!n && typeof n === 'object' && ['codex', 'claude', 'acp', 'antigravity'].includes(String(n.protocol)) && text(500)(n.sessionId) && typeof n.initialSent === 'boolean'
+    return !!n && typeof n === 'object' && ['codex', 'claude', 'acp'].includes(String(n.protocol)) && text(500)(n.sessionId) && typeof n.initialSent === 'boolean'
       && Array.isArray(n.argv) && n.argv.length > 0 && n.argv.length <= 200 && n.argv.every(a => typeof a === 'string' && a.length <= 4096 && !a.includes('\0'))
       && (n.resumable === undefined || typeof n.resumable === 'boolean') && (n.imageInput === undefined || n.imageInput === true);
   },

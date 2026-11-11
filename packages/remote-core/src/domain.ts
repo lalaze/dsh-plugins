@@ -64,7 +64,6 @@ export interface Provider {
   label: string;
   status: 'loading' | 'ready' | 'unavailable' | 'error';
   error?: string;
-  notice?: string;
   models: Model[];
   modes: Choice[];
   defaultModeId?: string | null;
@@ -223,13 +222,13 @@ export interface Task extends TaskInput {
   state: 'creating' | 'ready' | 'uncertain';
   error?: string;
 }
-export type NativeProtocol = 'codex' | 'claude' | 'acp' | 'antigravity';
+export type NativeProtocol = 'codex' | 'claude' | 'acp';
 /**
  * Marks the line naming the tool a CLI is running, which the chat receives as markdown. DSH's markdown keeps only http(s) and
  * mailto links, so this is one. The client draws it as a tool row that takes no clicks, and `.invalid` names no site.
  */
 export const TOOL_STATUS_URL = 'https://remote-agents.invalid/running-tool';
-export const PROVIDER_LABELS: Readonly<Record<string, string>> = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy' };
+export const PROVIDER_LABELS: Readonly<Record<string, string>> = { claude: 'Claude Code', codex: 'Codex', dsh: 'DSH', grok: 'Grok', codebuddy: 'CodeBuddy' };
 /** Older machines retain their providers until the user explicitly changes the selection. */
 export const enabledProvidersOf = (host: Pick<HostConfig, 'enabledProviders'>): string[] => host.enabledProviders ?? Object.keys(PROVIDER_LABELS);
 export function providerSelection(value: unknown): string[] {

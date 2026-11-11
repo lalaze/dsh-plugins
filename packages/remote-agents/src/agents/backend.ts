@@ -7,7 +7,6 @@ import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
 import { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
 import { discoverAcpCatalog } from './acp.js';
-import { antigravityArguments, ANTIGRAVITY_NOTICE, ANTIGRAVITY_RUNNER, decodeAntigravityModels } from './antigravity.js';
 import { attachmentPrompt, transferAttachments } from './attachments.js';
 import { RelayClient, RelayLink } from './relay.js';
 import { readAccountUsage } from './usage.js';
@@ -85,7 +84,6 @@ export const CLI_PROVIDERS = [
   { id: 'claude', label: PROVIDER_LABELS.claude, command: 'claude', protocol: 'claude' as const, args: [] },
   { id: 'codex', label: PROVIDER_LABELS.codex, command: 'codex', protocol: 'codex' as const, args: ['app-server'] },
   { id: 'dsh', label: PROVIDER_LABELS.dsh, command: 'dsh', protocol: 'acp' as const, args: ['--profile', 'acp'] },
-  { id: 'antigravity', label: PROVIDER_LABELS.antigravity, command: 'agy', protocol: 'antigravity' as const, args: [] },
   { id: 'grok', label: PROVIDER_LABELS.grok, command: 'grok', protocol: 'acp' as const, args: ['agent', '--no-leader', 'stdio'] },
   { id: 'codebuddy', label: PROVIDER_LABELS.codebuddy, command: 'codebuddy', protocol: 'acp' as const, args: ['--acp'] },
 ];
@@ -315,19 +313,11 @@ done`}`, 15_000, { login: false });
   }
   /** Probe one CLI in its canonical cwd: its models and modes, and the launch profile when it is ready. */
   private async probeDefinition(definition: typeof CLI_PROVIDERS[number], canonical: string, path: string | undefined): Promise<{ provider: Provider; profile?: Profile }> {
-    const unavailable: Provider = { id: definition.id, label: definition.label, status: 'unavailable', models: [], modes: [], ...(definition.id === 'antigravity' ? { notice: ANTIGRAVITY_NOTICE } : {}) };
+    const unavailable: Provider = { id: definition.id, label: definition.label, status: 'unavailable', models: [], modes: [] };
     if (!path) return { provider: unavailable };
     let peer: JsonlPeer | undefined;
     try {
       const argv = [path, ...definition.args];
-      if (definition.protocol === 'antigravity') {
-        const version = await this.transport.exec('node --version');
-        if (Number(version.trim().match(/^v(\d+)/)?.[1] ?? 0) < 22) throw new Error('Antigravity remote control requires Node.js 22 or newer on the SSH host');
-        const models = decodeAntigravityModels(await this.transport.exec(`cd ${quote(canonical)} && ${quote(path)} models`, 40_000));
-        if (!models.length) throw new Error('Antigravity returned no models. Sign in with agy and check agy models on the remote host.');
-        const provider: Provider = { ...unavailable, status: 'ready', models, defaultModeId: 'default', modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }, { id: 'accept-edits', label: 'Accept edits' }, { id: 'auto', label: 'Auto' }] };
-        return { provider, profile: { argv, protocol: definition.protocol, cwd: canonical, provider } };
-      }
       const launch = definition.protocol === 'claude' ? claudeProbe(path) : argv;
       this.assertOpen();
       peer = new JsonlPeer(this.transport.start(canonical, launch, { endWithSession: true, ...(definition.protocol === 'claude' ? { prefix: CLAUDE_ROOT_ENV } : {}) })); this.probes.add(peer);
@@ -588,7 +578,6 @@ done`}`, 15_000, { login: false });
       const saved = state.tasks.find(t => t.id === task.id);
       if (saved && confined) saved.sandboxed = true; else if (saved) delete saved.sandboxed;
     });
-    if (profile.protocol === 'antigravity') argv = antigravityArguments(argv[0], task, resume);
     if (profile.protocol === 'claude') argv = [argv[0], '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--permission-prompt-tool', 'stdio', '--model', task.model, ...(resume ? ['--resume', task.native!.sessionId] : ['--session-id', randomUUID()]), ...(task.modeId && task.modeId !== 'inherit' ? ['--permission-mode', task.modeId] : []), ...(task.thinkingOptionId ? ['--effort', task.thinkingOptionId] : []), ...unattendedClaude(task, confined)];
     const relay = await this.relays();
     this.assertOpen(); signal?.throwIfAborted();
@@ -606,7 +595,7 @@ done`}`, 15_000, { login: false });
       const shared = await this.sharing()?.prepare(this.store.hosts().find(h => h.id === this.host.id) ?? this.host, this.transport, saved, profile.protocol, signal)
         .catch(error => { signal?.throwIfAborted(); console.warn(`[remote-agents] Sharing with ${this.host.label} failed: ${String(error)}`); return undefined; });
       signal?.throwIfAborted(); this.assertOpen();
-      const launch = profile.protocol === 'antigravity' ? ['node', '--input-type=module', '-e', ANTIGRAVITY_RUNNER, '--', ...argv] : sharedArguments(profile.protocol, argv, shared);
+      const launch = sharedArguments(profile.protocol, argv, shared);
       const prefix = profile.protocol === 'claude' && maySkipPermissions(task.modeId) ? CLAUDE_ROOT_ENV : undefined;
       let link: RelayLink | undefined;
       if (relay) {

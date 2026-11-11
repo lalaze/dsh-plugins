@@ -24,7 +24,7 @@ export function SharingSettings({ dashboard, sessionId, sessionTitle, openChat }
   return <div className="ra-page ra-sharing">
     <NativeSharingSettings dashboard={dashboard} sessionId={sessionId} sessionTitle={sessionTitle} openChat={openChat} />
     <h2>{ui('Share with remote CLIs')}</h2>
-    <p className="ra-muted">{ui('Remote CLIs started afterwards receive what is selected here. Antigravity cannot receive them.')}</p>
+    <p className="ra-muted">{ui('Remote CLIs started afterwards receive what is selected here.')}</p>
     {error && <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}</div>}
     {catalog && Object.entries(catalog.errors).map(([hostId, message]) => <div key={hostId} className="ra-banner" data-tone="error" role="alert">
       {ui('{host}: DSH MCP servers are unreachable from this machine. {error}', { host: hosts.get(hostId) ?? hostId, error: localizeError(message) })}</div>)}

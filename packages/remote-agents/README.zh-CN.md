@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-在 DSH 原生模型选择器和主对话中直接使用远程 Claude Code、Codex、DSH、Grok、CodeBuddy 和反重力。DSH 通过系统 OpenSSH 直连每个 CLI 的原生协议，**不需要 Paseo daemon、SDK 或任何远端服务**。
+在 DSH 原生模型选择器和主对话中直接使用远程 Claude Code、Codex、DSH、Grok 和 CodeBuddy。DSH 通过系统 OpenSSH 直连每个 CLI 的原生协议，**不需要 Paseo daemon、SDK 或任何远端服务**。
 
 远程 Claude 主聊天提供默认关闭的原生 DSH goal 桥，需通过 `claudeGoalSessions` 按会话启用（启用后每轮重启 CLI，结束进程内后台任务）：[Claude goal 用法](docs/claude-goal.zh-CN.md)。这是不转发本地工具 schema 的明确例外，不会转发本地 system prompt。
 
@@ -142,7 +142,7 @@ DSH 自己的智能体会获得 6 个工具，用来把任务交给远程 CLI，
 - **MCP 服务器（默认关闭）。**工具在本机的 DSH 里执行，远程 CLI 只拿到一个代理。调用以启动该 CLI 的 DSH 对话的身份运行：主对话会话归属它自己的对话，分派任务归属分派它的对话。所以 DSH 的权限规则、审批和 hooks 照常生效，MCP 凭据不会离开本机。CLI 那边预先放行这些代理工具，只由 DSH 决定是否询问。远程 CLI 看到的服务器名为 `dsh-<名称>`，例如 `mcp__dsh-github__create_issue`。从会话面板直接新建、不属于任何 DSH 对话的会话不会收到 MCP 服务器。
 - **Skill（默认开启）。**个人、DSH 自带和插件提供的 skill 会复制到每台机器的 `~/.dsh-remote-agents/shared`，包括 `scripts/` 等资源文件，未改动的不会重复传输。项目 skill 不复制：远程项目自己的 skill 由远程 CLI 直接发现。Claude Code 把它们作为 `dsh` 插件加载（如 `dsh:release-notes`）；Codex、DSH、Grok 和 CodeBuddy 通过名为 `dsh` 的 MCP 服务器提供的 `load_skill` 工具加载，这个服务器在远程运行，不依赖 DSH 连接。
 - **连接方式。**每台机器使用一条 SSH 反向转发，远端是 `~/.dsh-remote-agents/bridge` 下仅本人可访问的 Unix socket；每个任务带独立令牌，多台电脑上的 DSH 可共用同一个远程账号。DSH 未连接时，代理仍列出上次看到的工具，调用会返回 DSH 未连接的说明；重新连上后自动恢复。服务器若禁止 Unix socket 转发（`AllowStreamLocalForwarding no`），设置页会显示错误，skill 不受影响。
-- **各 CLI 的接入方式：**Claude Code 使用 `--plugin-dir`、`--mcp-config` 和 `--allowedTools`；Codex 使用 `-c mcp_servers.<名称>…` 覆盖配置，并设置 `default_tools_approval_mode = "approve"`；ACP CLI（DSH、Grok、CodeBuddy）使用 `session/new` 的 `mcpServers`。这些只是本次启动的参数，不修改远程 CLI 的配置文件。Antigravity 没有按启动传入 MCP 或 skill 的方式，因此不支持。
+- **各 CLI 的接入方式：**Claude Code 使用 `--plugin-dir`、`--mcp-config` 和 `--allowedTools`；Codex 使用 `-c mcp_servers.<名称>…` 覆盖配置，并设置 `default_tools_approval_mode = "approve"`；ACP CLI（DSH、Grok、CodeBuddy）使用 `session/new` 的 `mcpServers`。这些只是本次启动的参数，不修改远程 CLI 的配置文件。
 
 ## 智能体团队
 
@@ -161,13 +161,12 @@ DSH 自己的智能体会获得 6 个工具，用来把任务交给远程 CLI，
 | Claude Code | 原生 stream-json / 控制通道 |
 | Codex | 原生 `codex app-server`（stdio） |
 | DSH | ACP v1 `dsh --profile acp` |
-| 反重力 | 原生 `agy` stream-json |
 | Grok | ACP v1 `grok agent --no-leader stdio` |
 | CodeBuddy | ACP v1 `codebuddy --acp` |
 
 检测会初始化各 CLI 的协议并读取模型和模式列表，不会发送提示。ACP 同时支持旧的模型/模式字段和 `configOptions`，包括随模型变化的思考强度。列出的模型不代表账号一定有权限或额度。请先在远程机器上安装并登录各 CLI。
 
-DSH 使用远程 `acp` profile 的供应商、模型和凭据。反重力需要远程机器上有 Node.js 22+，用于一个内联的进程转发器；**它的无头模式会拒绝需要交互授权的操作**，请先在 `agy` 中配置权限。Grok 以关闭 leader 模式的方式运行。参考：[DSH ACP](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md)、[反重力无头模式](https://antigravity.google/docs/cli/headless/)、[Grok Build](https://docs.x.ai/build/overview)、[CodeBuddy ACP](https://www.codebuddy.cn/docs/cli/acp)、[ACP 配置项](https://agentclientprotocol.com/protocol/v1/session-config-options)。
+DSH 使用远程 `acp` profile 的供应商、模型和凭据。Grok 以关闭 leader 模式的方式运行。参考：[DSH ACP](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md)、[Grok Build](https://docs.x.ai/build/overview)、[CodeBuddy ACP](https://www.codebuddy.cn/docs/cli/acp)、[ACP 配置项](https://agentclientprotocol.com/protocol/v1/session-config-options)。
 
 ## 远程机器
 
@@ -236,6 +235,6 @@ pnpm --filter dsh-remote-agents test:ui   # 会话、审批、设置、SSH 选�
 pnpm --filter dsh-remote-agents preview:ui
 ```
 
-测试通过伪造的 SSH 传输和模拟 CLI 覆盖各原生协议（包括发送时中断与恢复），以及服务层、使用模拟 DSH 宿主的分派工具。主对话测试还会加载本地安装的 DSH LLM 注册器和会话实现，验证重试、停止、原生审批，并让六种模型入口通过真实后端连接模拟 SSH CLI。反重力转发器测试使用真实子进程。这些测试没有在真实 SSH 机器上运行远程 CLI。
+测试通过伪造的 SSH 传输和模拟 CLI 覆盖各原生协议（包括发送时中断与恢复），以及服务层、使用模拟 DSH 宿主的分派工具。主对话测试还会加载本地安装的 DSH LLM 注册器和会话实现，验证重试、停止、原生审批，并让五种模型入口通过真实后端连接模拟 SSH CLI。这些测试没有在真实 SSH 机器上运行远程 CLI。
 
 浏览器测试加载未经修改的官方 DSH 0.2.1-rc.3 模型菜单和真实插槽注册器，模型目录的远程传输使用模拟数据，并按 DSH 的加载方式载入构建好的 `dsh-model-groups` 客户端；请先运行 `pnpm --filter dsh-model-groups build`。验证原生注册、折叠状态保存、搜索、隐藏模型的键盘保护、推理等级、错误恢复、窄屏布局及停用插件后的恢复；不会启动桌面应用本身。可运行 `pnpm --filter dsh-remote-agents test:models` 单独验证。折叠依赖原生 MenuGroup 和公开模型标签的 DOM 属性，遇到未知的新版本结构会保留原样。

@@ -359,7 +359,7 @@ export const zh: Record<string, string> = {
   "Enabled CLIs": "启用的 CLI",
   "Only selected CLIs are detected and shown in the model picker.": "只检测并显示勾选的 CLI。",
   "Share with remote CLIs": "共享给远程 CLI",
-  "Remote CLIs started afterwards receive what is selected here. Antigravity cannot receive them.": "之后启动的远程 CLI 会收到这里勾选的内容。Antigravity 暂不支持。",
+  "Remote CLIs started afterwards receive what is selected here.": "之后启动的远程 CLI 会收到这里勾选的内容。",
   "{host}: DSH MCP servers are unreachable from this machine. {error}": "{host}：这台机器连不上 DSH 的 MCP 服务器。{error}",
   "Loading…": "正在加载…",
   "MCP servers": "MCP 服务器",

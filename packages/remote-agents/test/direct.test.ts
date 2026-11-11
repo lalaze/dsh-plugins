@@ -10,7 +10,6 @@ import { Store } from '../src/core/store.js';
 import type { FinishedTurn } from '@dsh-plugins/remote-core/domain.js';
 import { TaskHistory } from '../src/agents/history.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
-import { decodeAntigravityModels } from '../src/agents/antigravity.js';
 
 class FakeCli implements Child {
   sent: WireMessage[] = [];
@@ -21,11 +20,7 @@ class FakeCli implements Child {
   prompt?: WireMessage;
   configOptions?: any[];
   options?: StartOptions;
-  readonly conversationId: string;
-  constructor(readonly provider: string, readonly argv: string[], readonly transport: FakeSsh) {
-    this.conversationId = argv.includes('--conversation') ? argv[argv.indexOf('--conversation') + 1] : randomUUID();
-    if (provider === 'agy') queueMicrotask(() => this.emit({ event: 'init', conversation_id: this.conversationId, init: {} }));
-  }
+  constructor(readonly provider: string, readonly argv: string[], readonly transport: FakeSsh) {}
   write(line: string) {
     const m = JSON.parse(line); this.sent.push(m);
     queueMicrotask(() => this.handle(m));
@@ -35,7 +30,6 @@ class FakeCli implements Child {
   control(m: WireMessage, response: unknown) { this.emit({ type: 'control_response', response: { subtype: 'success', request_id: m.request_id, response } }); }
   handle(m: WireMessage) {
     if (this.stopped) return;
-    if (m.event === 'dsh_interrupt') { this.emit({ event: 'result', result: { status: 'ERROR', error: 'cancelled' } }); this.exit(new Error('Antigravity interrupted')); return; }
     if (m.type === 'control_request') {
       if (m.request.subtype === 'interrupt') { if (this.transport.claudeInterruptError) this.emit({ type: 'result', subtype: 'error_during_execution', is_error: true }); else this.finish(); }
       const usage: Record<string, unknown> = { initialize: { account: { email: 'dev@example.com', subscriptionType: 'Claude Pro' } }, get_context_usage: this.transport.claudeContext, get_usage: this.transport.claudeUsage };
@@ -77,10 +71,7 @@ class FakeCli implements Child {
     if (m.method === 'session/cancel') this.finish();
   }
   finish() {
-    if (this.provider === 'agy') {
-      this.emit({ event: 'step_update', step_update: { step_type: 'agent_response', step_index: 1, text_delta: '远程结果 🌏', state: 'DONE' } });
-      this.emit({ event: 'result', result: { conversation_id: this.conversationId, status: 'SUCCESS', response: '远程结果 🌏' } });
-    } else if (this.provider === 'codex') {
+    if (this.provider === 'codex') {
       this.emit({ method: 'item/agentMessage/delta', params: { delta: '远程结果 🌏' } });
       this.emit({ method: 'turn/completed', params: { turn: { status: 'completed' } } });
     } else if (this.provider === 'claude') {
@@ -116,8 +107,6 @@ class FakeSsh implements SshTransport {
     if (script === 'printf \'%s\' "$HOME"') return '/home/builder';
     if (script.startsWith('uname -s;')) return this.hostInfo;
     if (script.includes('uname -n')) return 'machine\0builder\0machine-id-1\0';
-    if (script === 'node --version') return 'v22.23.2\n';
-    if (script.endsWith("' models")) return 'Fetching available models...\nagy-remote\tAntigravity remote\n';
     return '/srv/canonical\0' + CLI_PROVIDERS.map(p => `${p.id}\0${this.installed.includes(p.id) ? `/usr/bin/${p.command}` : ''}\0`).join('');
   }
   start(_cwd: string, argv: string[], options?: StartOptions) {
@@ -134,7 +123,7 @@ async function fixture(t: TestContext, provider = 'codex') {
   const service = new RemoteAgentsService(store, host => backend = new SshBackend(host, store, ssh));
   t.after(async () => { await service.close(); await rm(directory, { recursive: true, force: true }); });
   const hostId = (await service.addHost({ label: 'SSH host', connection: 'builder@machine' })).hosts[0].id;
-  const request = { id: randomUUID(), hostId, cwd: '/srv/project', provider, model: provider === 'codex' ? ssh.model : provider === 'claude' ? 'claude-remote' : provider === 'antigravity' ? 'agy-remote' : 'acp-remote', prompt: 'Fix remote project' };
+  const request = { id: randomUUID(), hostId, cwd: '/srv/project', provider, model: provider === 'codex' ? ssh.model : provider === 'claude' ? 'claude-remote' : 'acp-remote', prompt: 'Fix remote project' };
   return { directory, store, ssh, service, hostId, request, backend: () => backend };
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
@@ -143,12 +132,12 @@ const types = (entries: { item: { type: string } }[]) => entries.map(e => e.item
 
 test('disabled CLI executables are never probed and changing selection invalidates the catalog cache', async t => {
   const { service, ssh, hostId, store } = await fixture(t);
-  ssh.installed.push('codebuddy', 'antigravity');
+  ssh.installed.push('codebuddy');
   await store.update(s => { s.hosts[0].enabledProviders = ['codex']; });
   const first = await service.providers(hostId, '/srv/project');
   assert.deepEqual(first.map(p => p.id), ['codex']);
   assert.ok(ssh.children.every(c => c.provider === 'codex'));
-  assert.ok(ssh.scripts.every(s => !s.includes("command -v 'agy'") && !s.includes("command -v 'codebuddy'")));
+  assert.ok(ssh.scripts.every(s => !s.includes("command -v 'codebuddy'")));
   const before = ssh.children.length;
   await store.update(s => { s.hosts[0].enabledProviders = ['codebuddy']; });
   const next = await service.providers(hostId, '/srv/project');
@@ -438,9 +427,9 @@ test('a non-resumable CLI refuses a model change without closing its live sessio
 
 test('SSH discovery asks each installed native CLI for models without sending a prompt', async t => {
   const { ssh, service, hostId } = await fixture(t);
-  ssh.installed.splice(0, 1, 'codex', 'claude', 'dsh', 'antigravity', 'grok', 'codebuddy');
+  ssh.installed.splice(0, 1, 'codex', 'claude', 'dsh', 'grok', 'codebuddy');
   const catalog = await service.providers(hostId, "/srv/project's $(touch ignored)");
-  assert.equal(catalog.length, 6); assert.ok(catalog.every(p => p.status === 'ready'));
+  assert.equal(catalog.length, 5); assert.ok(catalog.every(p => p.status === 'ready'));
   assert.equal(catalog.find(p => p.id === 'claude')!.models[0].thinkingOptions![0].id, 'high');
   assert.equal(ssh.admissions.length, 0);
   assert.ok(ssh.children.every(c => c.stopped));
@@ -668,40 +657,6 @@ test('ACP agents without model discovery use CLI default, and unsupported resume
   ssh.live.exit(new Error('closed'));
   await assert.rejects(service.retry(agent.id), /cannot resume/);
   assert.equal(ssh.admissions.length, 1);
-});
-
-test('Antigravity uses its native JSONL, persists the conversation before prompting, and interrupts through the SSH runner', async t => {
-  const { service, ssh, request, hostId, store } = await fixture(t, 'antigravity');
-  const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'antigravity')!;
-  assert.equal(provider.status, 'ready'); assert.match(provider.notice!, /interactive approval/);
-  assert.deepEqual(decodeAntigravityModels('Fetching available models...\ngemini-model\tGemini model\nclaude-model\tClaude model\n').map(m => m.id), ['gemini-model', 'claude-model']);
-  const agent = await service.create({ ...request, modeId: 'plan' }), cli = ssh.live;
-  assert.notEqual(agent.status, 'error', agent.error);
-  assert.equal(native(store, agent.id).sessionId, cli.conversationId);
-  assert.equal((ssh.admissions[0].binding as any).sessionId, cli.conversationId);
-  assert.equal((ssh.admissions[0].binding as any).initialSent, true);
-  assert.deepEqual(cli.sent[0], { event: 'user', message: { content: request.prompt } });
-  assert.equal(cli.argv[0], 'node'); assert.ok(cli.argv.includes('stream-json'));
-  assert.equal(native(store, agent.id).argv[0], '/usr/bin/agy');
-  cli.finish(); await tick();
-  assert.equal((await service.detail(agent.id)).timeline!.entries.filter(e => e.item.type === 'assistant_message').length, 1);
-  await service.send(agent.id, { id: randomUUID(), text: 'Continue the native conversation' });
-  await service.stop(agent.id);
-  assert.ok(cli.sent.some(m => m.event === 'dsh_interrupt')); assert.ok(cli.stopped);
-  assert.equal((await service.detail(agent.id)).agent.status, 'idle');
-  await service.send(agent.id, { id: randomUUID(), text: 'Resume after the runner stopped' });
-  assert.equal(ssh.live.argv[ssh.live.argv.indexOf('--conversation') + 1], native(store, agent.id).sessionId);
-  assert.equal(ssh.admissions.length, 3);
-  assert.ok(!ssh.live.sent.some(m => m.type === 'control_request' || m.method));
-});
-
-test('Antigravity reports a missing remote Node runtime without starting an agent', async t => {
-  const { service, ssh, request, hostId } = await fixture(t, 'antigravity');
-  const exec = ssh.exec.bind(ssh); ssh.exec = async script => script === 'node --version' ? 'v20.0.0\n' : exec(script);
-  const provider = (await service.providers(hostId, request.cwd)).find(p => p.id === 'antigravity')!;
-  assert.equal(provider.status, 'error'); assert.match(provider.error!, /Node.js 22/);
-  await assert.rejects(service.create(request), /CLI is not ready/);
-  assert.equal(ssh.admissions.length, 0);
 });
 
 test('Claude streams once, returns structured questions and resumes its UUID over the same SSH transport', async t => {
@@ -1090,7 +1045,7 @@ test('a missing workspace path is reported without executing in the discovery di
   assert.equal(ssh.admissions.length, 0); assert.equal(store.snapshot().tasks.length, 0);
 });
 
-for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigravity']) test(`${provider}: DSH native model streams through the real SSH backend and resumes the same conversation`, async t => {
+for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy']) test(`${provider}: DSH native model streams through the real SSH backend and resumes the same conversation`, async t => {
   const { ChatProjects } = await import('../src/chat/projects.js');
   const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/chat/native-chat.js');
   const { createUserMessage } = await import('@deepseek-ai/dsh-llm');

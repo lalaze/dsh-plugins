@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { ChatProjects } from '../src/chat/projects.js';
 import { Store } from '../src/core/store.js';
+import { readFile, writeFile } from 'node:fs/promises';
 import { createHandler } from '../src/http.js';
 import { fixture } from './fakes.js';
 
@@ -16,7 +17,7 @@ test('a machine can be saved without starting discovery until a CLI is selected'
 
 test('CLI selection persists, hides disabled errors and leaves existing agents running', async t => {
   const { service, remote, hostId, request, path } = await fixture(t);
-  remote.catalog.push({ id: 'antigravity', label: 'Antigravity', status: 'error', error: 'Old Node', models: [], modes: [] });
+  remote.catalog.push({ id: 'grok', label: 'Grok', status: 'error', error: 'Not signed in', models: [], modes: [] });
   await service.discoverHost(hostId);
   assert.equal(service.hosts()[0].providerErrors?.length, 1);
   const host = (await service.setHostProviders(hostId, ['codex'])).hosts[0];
@@ -41,4 +42,20 @@ test('the HTTP selection action validates IDs and scans only the selected catalo
   assert.equal((await post('codex')).status, 400);
   assert.equal((await post(['codex', 'codex'])).status, 200);
   assert.deepEqual(service.hosts()[0].enabledProviders, ['codex']);
+});
+
+test('a saved selection naming a CLI the plugin no longer has still opens, without that CLI', async t => {
+  const { service, hostId, path, store } = await fixture(t);
+  await service.setHostProviders(hostId, ['codex', 'grok']);
+  // As 0.2.129 and earlier saved it: Antigravity enabled, with its models in the catalog.
+  const saved = JSON.parse(await readFile(path, 'utf8'));
+  saved.hosts[0].enabledProviders.push('antigravity');
+  saved.hosts[0].catalog.providers.push({ id: 'antigravity', label: 'Antigravity', status: 'ready', models: [{ id: 'agy-model', label: 'Agy model' }], modes: [] });
+  await store.close(); await writeFile(path, JSON.stringify(saved));
+  const reopened = new Store(path); await reopened.open(); t.after(() => reopened.close());
+  assert.deepEqual(reopened.hosts()[0].enabledProviders, ['codex', 'grok']);
+  // A machine left on "all CLIs" offers what this version has.
+  delete saved.hosts[0].enabledProviders; await reopened.close(); await writeFile(path, JSON.stringify(saved));
+  const all = new Store(path); await all.open(); t.after(() => all.close());
+  assert.ok(!new ChatProjects({ store: all, onCatalogChange: () => () => {} } as never).hosts()[0].providers.some(p => p.id === 'antigravity'));
 });

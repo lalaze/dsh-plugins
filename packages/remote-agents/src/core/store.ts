@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
-import { identifier, record, remotePath, field, taskInput, providerSelection, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from '@dsh-plugins/remote-core/domain.js';
+import { identifier, record, remotePath, field, taskInput, providerSelection, PROVIDER_LABELS, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from '@dsh-plugins/remote-core/domain.js';
 import type { TuiUsageCursor } from '../workspace/tui-usage.js';
 
 /** A relay to stop and delete on its SSH host once it is reachable. */
@@ -59,6 +59,8 @@ export class Store {
       identifier(host.id);
       if (typeof host.connection !== 'string' || typeof host.label !== 'string' || (host.password !== undefined && typeof host.password !== 'string') || (host.serverId !== undefined && typeof host.serverId !== 'string')) throw new Error('Invalid saved remote host');
       if (host.modelError !== undefined && typeof host.modelError !== 'string') throw new Error('Invalid saved host discovery error');
+      // A CLI this version no longer has, as Antigravity after 0.2.129, is dropped from a saved selection.
+      if (Array.isArray(host.enabledProviders)) host.enabledProviders = host.enabledProviders.filter(id => Object.hasOwn(PROVIDER_LABELS, String(id)));
       if (host.enabledProviders !== undefined) host.enabledProviders = providerSelection(host.enabledProviders);
       if (host.share !== undefined && typeof host.share !== 'boolean') throw new Error('Invalid saved session sharing setting');
       if (host.catalog !== undefined) {

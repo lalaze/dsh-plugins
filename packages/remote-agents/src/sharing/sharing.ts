@@ -576,7 +576,7 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
 
   async prepare(host: HostConfig, transport: SshTransport, task: Task, protocol: NativeProtocol, signal?: AbortSignal): Promise<SharedLaunch> {
     const servers: SharedServer[] = [], launch: SharedLaunch = { servers };
-    if (protocol === 'antigravity' || this.closed) return launch;
+    if (this.closed) return launch;
     const owner = this.owner(task);
     const team = this.teamOwner(task), candidate = protocol === 'claude' ? this.goalOwner(task) : undefined;
     const identity = candidate ? this.goals?.launchIdentity(task.id, candidate) : undefined, goal = identity ? candidate : undefined;

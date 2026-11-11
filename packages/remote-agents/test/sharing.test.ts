@@ -144,7 +144,6 @@ test('skills are copied once and shared natively with Claude and as load_skill e
   assert.deepEqual(JSON.parse(await readFile(join(shared, '.claude-plugin', 'plugin.json'), 'utf8')).name, 'dsh');
   const claude = await sharing.prepare(host, transport, task('chat-task'), 'claude');
   assert.equal(claude.pluginDir, shared); assert.deepEqual(claude.servers, []);
-  assert.deepEqual(await sharing.prepare(host, transport, task('chat-task'), 'antigravity'), { servers: [] });
 
   const skills = mcp(t, codex.servers[0].command, codex.servers[0].args, home);
   assert.equal((await skills.request('initialize', { protocolVersion: '2025-06-18' })).result.serverInfo.name, 'dsh');

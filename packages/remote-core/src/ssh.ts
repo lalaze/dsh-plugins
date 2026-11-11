@@ -349,16 +349,6 @@ export class JsonlPeer {
   get alive(): boolean { return !this.ended; }
   onMessage(listener: (message: WireMessage, frame: Frame) => void): void { this.listeners.add(listener); }
   onExit(listener: (error: Error) => void): void { this.exits.add(listener); if (this.ended) listener(this.ended); }
-  waitForMessage(predicate: (message: WireMessage) => boolean, timeout = 20_000): Promise<WireMessage> {
-    return new Promise((resolve, reject) => {
-      const cleanup = () => { clearTimeout(timer); this.listeners.delete(message); this.exits.delete(failed); };
-      const message = (value: WireMessage) => { if (predicate(value)) { cleanup(); resolve(value); } };
-      const failed = (error: Error) => { cleanup(); reject(error); };
-      const timer = setTimeout(() => failed(new Error('Remote CLI initialization timed out')), timeout);
-      this.listeners.add(message); this.exits.add(failed);
-      if (this.ended) failed(this.ended);
-    });
-  }
   send(message: WireMessage, inputId?: string): void { if (this.ended) throw this.ended; this.child.write(`${JSON.stringify(message)}\n`, inputId); }
   request(method: string, params: Record<string, unknown> = {}, timeout = 20_000): Promise<any> {
     const id = `${this.prefix}-${++this.nextId}`;

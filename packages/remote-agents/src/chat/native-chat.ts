@@ -56,7 +56,7 @@ const PROGRESS_LIMIT = 1000;
 /** Finished turns this conversation did not send, ready to show: one markdown block and the last message among them. */
 /** `running`: the last turn has not ended; its output so far is in `text`, and what it writes next follows this cursor. */
 interface Elsewhere { text: string; summary: string; lastMessageId: string; turns: number; writing?: boolean; running?: Cursor }
-const CLI_NAMES: Readonly<Record<string, string>> = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', antigravity: 'Antigravity', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
+const CLI_NAMES: Readonly<Record<string, string>> = { claude: 'Claude', codex: 'Codex', dsh: 'DeepSeek Harness', grok: 'Grok', codebuddy: 'CodeBuddy Code' };
 export const chatProviderId = (cli: string) => `remote-cli-${cli}`;
 /** The old aggregate route stays resolvable for saved conversations, with an empty picker catalog. */
 export const CHAT_PROVIDERS = [CHAT_PROVIDER, ...Object.keys(CLI_NAMES).map(chatProviderId)];

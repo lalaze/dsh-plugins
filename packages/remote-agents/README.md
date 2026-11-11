@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-Use remote Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity directly in DSH's ordinary model picker and main conversation. DSH connects to each CLI's native protocol over system OpenSSH. **No Paseo daemon, SDK or remote service is required.**
+Use remote Claude Code, Codex, DSH, Grok and CodeBuddy directly in DSH's ordinary model picker and main conversation. DSH connects to each CLI's native protocol over system OpenSSH. **No Paseo daemon, SDK or remote service is required.**
 
 Remote Claude main chat has a default-off native DSH goal bridge, enabled per session with `claudeGoalSessions` (opted-in turns restart the CLI and end in-process background tasks): [Claude goal guide](docs/claude-goal.md). This is the narrow exception to excluding local tool schemas; it does not forward the local system prompt.
 
@@ -143,7 +143,7 @@ Ask DSH something like *"have Codex on build-box fix the failing tests in /srv/a
 - **MCP servers (off by default).** Tools run in DSH on this computer; the remote CLI gets a proxy. A call runs as the DSH conversation that started the CLI: a main-chat session's own conversation, or the conversation that delegated the task. DSH permission rules, approvals and hooks therefore apply, and MCP credentials never leave this computer. The CLI pre-approves these proxies, so DSH alone decides whether to ask. Remote CLIs see each server as `dsh-<name>`, for example `mcp__dsh-github__create_issue`. Sessions created directly in the sessions panel belong to no DSH conversation and receive no MCP servers.
 - **Skills (on by default).** Personal, bundled and plugin skills are copied to `~/.dsh-remote-agents/shared` on each machine, including resources such as `scripts/`; unchanged skills are not sent again. Project skills are not copied: the remote CLI finds the remote project's own skills. Claude Code loads them as the `dsh` plugin (for example `dsh:release-notes`). Codex, DSH, Grok and CodeBuddy load them with the `load_skill` tool of an MCP server named `dsh`, which runs on the remote machine and needs no DSH connection.
 - **Connection.** Each machine uses one SSH reverse forward to a Unix socket under `~/.dsh-remote-agents/bridge` that only your account can open; each task has its own token, and DSH on several computers can share one remote account. While DSH is not connected, a proxy still lists the tools it last saw and calls return a message saying DSH is disconnected; they recover once DSH reconnects. If the server forbids Unix socket forwarding (`AllowStreamLocalForwarding no`), the settings page shows the error; skills are unaffected.
-- **Per CLI:** Claude Code uses `--plugin-dir`, `--mcp-config` and `--allowedTools`; Codex uses `-c mcp_servers.<name>…` overrides with `default_tools_approval_mode = "approve"`; ACP CLIs (DSH, Grok, CodeBuddy) use `mcpServers` in `session/new`. These are launch options only; the remote CLI's own configuration files are not changed. Antigravity has no way to receive MCP servers or skills at launch and is not supported.
+- **Per CLI:** Claude Code uses `--plugin-dir`, `--mcp-config` and `--allowedTools`; Codex uses `-c mcp_servers.<name>…` overrides with `default_tools_approval_mode = "approve"`; ACP CLIs (DSH, Grok, CodeBuddy) use `mcpServers` in `session/new`. These are launch options only; the remote CLI's own configuration files are not changed.
 
 ## Agent teams
 
@@ -162,13 +162,12 @@ With NanmiCoder's [`dsh-agent-teams`](https://github.com/NanmiCoder/dsh-agent-te
 | Claude Code | Native stream-json / control channel |
 | Codex | Native `codex app-server` over stdio |
 | DSH | ACP v1 `dsh --profile acp` |
-| Antigravity | Native `agy` stream-json |
 | Grok | ACP v1 `grok agent --no-leader stdio` |
 | CodeBuddy | ACP v1 `codebuddy --acp` |
 
 Detection initializes each CLI's protocol and reads its model and mode catalogs without sending a prompt. ACP supports both legacy model/mode fields and `configOptions`, including model-specific reasoning choices. A listed model does not guarantee account access or quota. Install and sign in to each CLI on the remote machine first.
 
-DSH uses the remote `acp` profile's providers, models and credentials. Antigravity needs Node.js 22+ on the remote host for a small inline process forwarder, and **its headless mode denies operations that need interactive approval**. Configure permissions in `agy` first. Grok runs with leader mode disabled. References: [DSH ACP](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md), [Antigravity headless](https://antigravity.google/docs/cli/headless/), [Grok Build](https://docs.x.ai/build/overview), [CodeBuddy ACP](https://www.codebuddy.cn/docs/cli/acp), [ACP config options](https://agentclientprotocol.com/protocol/v1/session-config-options).
+DSH uses the remote `acp` profile's providers, models and credentials. Grok runs with leader mode disabled. References: [DSH ACP](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md), [Grok Build](https://docs.x.ai/build/overview), [CodeBuddy ACP](https://www.codebuddy.cn/docs/cli/acp), [ACP config options](https://agentclientprotocol.com/protocol/v1/session-config-options).
 
 ## Hosts
 
@@ -237,6 +236,6 @@ pnpm --filter dsh-remote-agents test:ui   # sessions, approvals, settings, SSH p
 pnpm --filter dsh-remote-agents preview:ui
 ```
 
-Tests cover the native protocols with simulated CLIs over a fake SSH transport, including interrupt-on-send and resume, plus the service and delegation tools with a simulated DSH host. Native-chat tests also load the installed DSH LLM registry and session implementation, exercise durable retry/cancellation/approvals, and connect all six model routes through the real backend to simulated SSH CLIs. The Antigravity forwarder test uses a real child process. Real remote CLIs over SSH have not been exercised by these tests.
+Tests cover the native protocols with simulated CLIs over a fake SSH transport, including interrupt-on-send and resume, plus the service and delegation tools with a simulated DSH host. Native-chat tests also load the installed DSH LLM registry and session implementation, exercise durable retry/cancellation/approvals, and connect all five model routes through the real backend to simulated SSH CLIs. Real remote CLIs over SSH have not been exercised by these tests.
 
 Browser tests load the unmodified official DSH 0.2.1-rc.3 model menu bundle and the real slot registry, with a simulated directory transport, plus the built `dsh-model-groups` client as DSH loads it; build that first with `pnpm --filter dsh-model-groups build`. They verify native registration, folding persistence, search, hidden-option keyboard protection, reasoning selection, failure recovery, narrow layouts and plugin disposal. The Desktop app itself is not launched by these tests. Run `pnpm --filter dsh-remote-agents test:models` for this focused regression. Folding uses the native MenuGroup and documented model-label DOM attributes; unrecognized future markup is left unchanged.
