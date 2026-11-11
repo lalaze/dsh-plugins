@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.3 — No scrollbar in TUI conversations
+
+- A TUI conversation showed a grey scrollbar on its right edge whenever it scrolled or the pointer came near. It is gone; the wheel and the trackpad scroll as before.
+- The text also takes the strip the scrollbar used, and stays centered.
+- Nothing to do after upgrading but restart DSH. Remote Agents 0.2.130 stays as it is.
+
 ## 0.1.2 — Terminals opened before the upgrade start again
 
 - A sidebar terminal that was open in a remote workspace before the upgrade showed **Selected shell is not available in this execution environment** after DSH restarted, and **Retry** gave the same. The browser remembers the full path of the shell it started, and that path was still the one in Remote Agents' folder, which DSH no longer offers.
