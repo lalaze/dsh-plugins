@@ -31,15 +31,20 @@ const CJK_RANGE = 'U+2E80-2FDF,U+3000-30FF,U+3100-312F,U+31A0-31BF,U+3400-4DBF,U
 const cjkFace = (weight: number, faces: string[]) => `@font-face{font-family:"${CJK_FONT}";font-weight:${weight};size-adjust:${CJK_SCALE};unicode-range:${CJK_RANGE};src:${faces.map(face => `local("${face}")`).join(',')}}`;
 const fontStyles = `${cjkFace(400, ['PingFang SC', 'PingFang SC Regular', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Hiragino Sans GB'])}
 ${cjkFace(700, ['PingFang SC Semibold', 'Microsoft YaHei Bold', 'Noto Sans CJK SC Bold', 'Hiragino Sans GB W6'])}`;
+/** The width xterm 6 gives its scrollbar, and its fit addon leaves free, when a terminal has scrollback. */
+const XTERM_SCROLLBAR = 14;
 /**
  * The terminal as the conversation area: a centered column over a faint trace of whatever wallpaper the window has (more
  * than this and a busy image turns the background muddy), up to
  * the window's edge rather than the chat's scrollbar gutter, as it scrolls by itself. Each
  * background is a literal rgba(): DSH hands the computed color to xterm, whose parser rejects other translucent forms,
  * and xterm drops the alpha to get the opaque color it checks text contrast against.
+ * xterm's scrollbar is hidden, as the wheel scrolls anyway; DSH's fit still leaves its 14px free on the right, so the
+ * right padding is that much smaller to keep the text centered.
  */
 const terminalStyles = `[data-remote-agents-tui] [data-sidebar-terminal]{padding-top:0}
-[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(255,255,255,.92)!important;padding:18px max(24px,calc((100% - 900px)/2))!important}
+[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(255,255,255,.92)!important;padding:18px calc(max(24px,(100% - 900px)/2) - ${XTERM_SCROLLBAR}px) 18px max(24px,calc((100% - 900px)/2))!important}
+[data-remote-agents-tui] .xterm-scrollable-element>.scrollbar{display:none!important}
 body[data-ds-dark-theme] [data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(21,21,23,.92)!important}
 [data-remote-agents-tui] .xterm-scrollable-element,[data-remote-agents-tui] .xterm-viewport,[data-remote-agents-tui] .xterm-screen{background:transparent!important}`;
 const blurStyles = '[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}';
