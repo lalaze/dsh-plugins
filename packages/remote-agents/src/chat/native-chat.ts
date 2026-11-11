@@ -15,7 +15,7 @@ import { modelSwitchNote, ownTurnWaitNote, toolStatus, transcript, type TurnSour
 import { decidePermission, unattendedAnswer } from '../agents/tools.js';
 import { isTeamPrompt, teamMemberNote, type TeamMember } from './agent-teams.js';
 import type { ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
-import type { WorkspacePlacement } from '../workspace/access.js';
+import type { WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
 
 export const CHAT_PROVIDER = 'remote-cli';
 /** Wakes a conversation whose remote turn outlived DSH, so the missed output streams in without a new message. */

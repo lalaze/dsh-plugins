@@ -3,8 +3,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from '@dsh-plugins/remote-core/ssh.js';
-import { dshHome } from './access.js';
-import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from './domain.js';
+import { dshHome } from '@dsh-plugins/remote-core/access.js';
+import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from '@dsh-plugins/remote-core/workspace.js';
 import { tabHolder, TERMINAL_ID_ENV } from './holder-protocol.js';
 
 /** Replaces a property, usually a method of the object's class. The returned function restores it, unless it has been replaced again since. */
@@ -84,7 +84,7 @@ export async function installWorkspaceTerminal(controller: TerminalSpawner & { c
 import { realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { Store } from ${JSON.stringify(new URL('core/store.js', modules).href)};
-import { WorkspaceAccess, omcStateDir, under } from ${JSON.stringify(new URL('workspace/access.js', modules).href)};
+import { WorkspaceAccess, omcStateDir, under } from ${JSON.stringify(new URL('core/access.js', modules).href)};
 import { connectionInput, quote } from ${JSON.stringify(new URL('core/ssh.js', modules).href)};
 import { tuiClaudeSession } from ${JSON.stringify(new URL('workspace/tui.js', modules).href)};
 import { holdTerminal, TERMINAL_KEEPALIVE, TERMINAL_TYPING } from ${JSON.stringify(new URL('workspace/terminal-hold.js', modules).href)};

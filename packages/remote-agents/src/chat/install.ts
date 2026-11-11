@@ -4,7 +4,7 @@ import type { Session } from '@deepseek-ai/dsh-session';
 import type { RemoteAgentsService } from '../agents/service.js';
 import { busy } from '@dsh-plugins/remote-core/domain.js';
 import { accessOf, loggerOf, type ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
-import type { WorkspaceAccess } from '../workspace/access.js';
+import type { WorkspaceAccess } from '@dsh-plugins/remote-core/access.js';
 import type { RemoteWorkspaces } from '../workspace/remote-workspaces.js';
 import type { WorkspaceService } from '../workspace/service.js';
 import { SharedChatAdoption } from './adopt.js';

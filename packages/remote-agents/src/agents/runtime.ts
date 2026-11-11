@@ -5,11 +5,12 @@ import { join } from 'node:path';
 import { CHAT_IMAGE_LIMIT, CHAT_IMAGES, chatImageName, imageExtensionOf, viewedImageExtension, viewedImagePath, writeChatImage, type ViewedImage } from '../chat/images.js';
 import { list, questionsOf, type Agent, type ContextUsage, type FinishedTurn, type TurnUsage, type NativeAttachment, type NativeProtocol, type Permission, type PermissionAnswer, type Task, type TimelineEntry, type TokenUsage } from '@dsh-plugins/remote-core/domain.js';
 import { JsonlPeer, type Frame, type WireMessage } from '@dsh-plugins/remote-core/ssh.js';
+import { initializeCodex } from '@dsh-plugins/remote-core/codex.js';
 import { RelayExit, RelayReleased, type RelayLink } from './relay.js';
 import { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
 import { configureAcpSession } from './acp.js';
-import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, contextUsage } from './usage.js';
+import { acpTurnUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, contextUsage } from '@dsh-plugins/remote-core/usage.js';
 
 /** The file name an image is shown with, from the remote path it was read from. */
 const imageName = (path: unknown) => typeof path === 'string' ? path.split(/[\\/]/).pop() ?? '' : '';
@@ -21,10 +22,6 @@ const claudeResultError = (message: WireMessage): string => {
   const error = typeof message.error === 'string' ? message.error : message.error?.message;
   return errors || (typeof error === 'string' && error) || contentText(message.result) || 'Claude turn failed';
 };
-export async function initializeCodex(peer: JsonlPeer, capabilities: Record<string, unknown> = {}): Promise<void> {
-  await peer.request('initialize', { clientInfo: { name: 'dsh-remote-agents', title: 'DSH Remote Agents', version: '0.1.0' }, capabilities });
-  peer.send({ method: 'initialized', params: {} });
-}
 export async function initializeAcp(peer: JsonlPeer): Promise<any> {
   const result = await peer.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'dsh-remote-agents', version: '0.1.0' } });
   if (result?.protocolVersion !== 1) throw new Error(`Unsupported ACP protocol version: ${result?.protocolVersion}. This client supports ACP v1.`);

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { TUI_LAUNCHERS, type TuiCli } from '../../workspace/domain.js';
+import { TUI_LAUNCHERS, type TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { api } from '../api.js';
 import { useCurrentModel } from '../composer/usage.js';
 import { localizeError, ui, useLocale } from '../i18n.js';

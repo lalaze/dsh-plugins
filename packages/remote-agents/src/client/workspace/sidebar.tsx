@@ -5,7 +5,7 @@ import { styles } from '../styles.js';
 import { WorkspacePanel } from './panel.js';
 import { preferTerminalShell } from './terminal-preference.js';
 import type { Client } from '../index.js';
-import type { WorkspaceTarget } from '../../workspace/domain.js';
+import type { WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
 
 export function workspaceFileAddress(address: string): { sessionId: string; path: string } | undefined {
   try {

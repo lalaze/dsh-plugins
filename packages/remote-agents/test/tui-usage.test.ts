@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenSshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import type { State } from '../src/core/store.js';
-import type { RemoteUsageRecord } from '../src/agents/usage.js';
+import type { RemoteUsageRecord } from '@dsh-plugins/remote-core/usage.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';
 import { tuiClaudeSession } from '../src/workspace/tui.js';
 import { QUIET_MS, readClaudeUsage, readCodexUsage, TuiUsage, tuiUsageChunks, type TuiUsageChunk, type TuiUsageEntry } from '../src/workspace/tui-usage.js';

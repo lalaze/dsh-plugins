@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { RemoteAgentsService } from './agents/service.js';
 import { delegationTools } from './agents/tools.js';
-import { remoteUsageRecords, type RemoteUsageRecord } from './agents/usage.js';
+import { remoteUsageRecords, type RemoteUsageRecord } from '@dsh-plugins/remote-core/usage.js';
 import { adoptModel } from './chat/adopt-model.js';
 import { installChat } from './chat/install.js';
 import { ClaudeGoalBridge } from './chat/claude-goal.js';

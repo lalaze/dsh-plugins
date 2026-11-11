@@ -12,7 +12,7 @@ import { chatModelId, chatProviderId, RemoteCliAdapter, type SyncAgent } from '.
 import { ChatProjects } from '../src/chat/projects.js';
 import type { SharedSessions } from '../src/agents/shared-sessions.js';
 import { RemoteWorkspaces } from '../src/workspace/remote-workspaces.js';
-import { WorkspaceAccess } from '../src/workspace/access.js';
+import { WorkspaceAccess } from '@dsh-plugins/remote-core/access.js';
 import { Store } from '../src/core/store.js';
 
 const supported = process.platform !== 'win32';

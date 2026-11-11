@@ -3,9 +3,9 @@ import { chmod, lstat, mkdir, readFile, readdir, realpath, rename, rm, writeFile
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { RemoteError, field, record } from '@dsh-plugins/remote-core/domain.js';
 import type { WorkspaceHosts } from './hosts.js';
-import { under, type WorkspacePlacement } from './access.js';
+import { under, type WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
 import type { TuiUsageEntry } from './tui-usage.js';
-import { FILE_LIMIT, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type SyncResult, type WorkspaceManifest, type WorkspaceTarget } from './domain.js';
+import { FILE_LIMIT, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type SyncResult, type WorkspaceManifest, type WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
 
 export type SessionPlacement = (id: string, signal: AbortSignal) => Promise<WorkspacePlacement>;
 export const hash = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');

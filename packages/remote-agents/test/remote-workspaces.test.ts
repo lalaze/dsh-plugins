@@ -5,7 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { SshBackend } from '../src/agents/backend.js';
 import { createHandler } from '../src/http.js';
 import { anchorCandidates, ensureAnchor, RemoteWorkspaces, shortHash } from '../src/workspace/remote-workspaces.js';
-import { WorkspaceAccess } from '../src/workspace/access.js';
+import { WorkspaceAccess } from '@dsh-plugins/remote-core/access.js';
 import { fixture } from './fakes.js';
 import { LocalTransport } from './relay-harness.js';
 

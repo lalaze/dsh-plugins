@@ -3,13 +3,14 @@ import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing,
 import { enabledProvidersOf, list, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError, sharesSessions } from '@dsh-plugins/remote-core/domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { MACHINE_IDENTITY, serverIdOf } from '@dsh-plugins/remote-core/remote-host.js';
-import { CliSession, initializeAcp, initializeCodex } from './runtime.js';
+import { CliSession, initializeAcp } from './runtime.js';
+import { initializeCodex } from '@dsh-plugins/remote-core/codex.js';
 import { TaskHistory } from './history.js';
 import type { Store } from '../core/store.js';
 import { discoverAcpCatalog } from './acp.js';
 import { attachmentPrompt, transferAttachments } from './attachments.js';
 import { RelayClient, RelayLink } from './relay.js';
-import { readAccountUsage } from './usage.js';
+import { readAccountUsage } from '@dsh-plugins/remote-core/usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WorkspaceFiles } from '../workspace/files.js';

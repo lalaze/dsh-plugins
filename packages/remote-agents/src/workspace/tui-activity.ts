@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Store } from '../core/store.js';
-import { TUI_LAUNCHERS } from './domain.js';
+import { TUI_LAUNCHERS } from '@dsh-plugins/remote-core/workspace.js';
 
 /** What a TUI conversation's CLI is doing. Approval and question are the kinds DSH's sidebar shows as waiting on the user. */
 export type TuiActivity = 'idle' | 'running' | 'approval' | 'question';

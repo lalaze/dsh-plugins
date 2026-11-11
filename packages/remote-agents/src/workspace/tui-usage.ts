@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { TurnUsage } from '@dsh-plugins/remote-core/domain.js';
 import type { Store, TuiDetails } from '../core/store.js';
-import { claudeTurnUsage, codexTurnUsage, type RemoteUsageRecord } from '../agents/usage.js';
-import type { TuiCli } from './domain.js';
+import { claudeTurnUsage, codexTurnUsage, type RemoteUsageRecord } from '@dsh-plugins/remote-core/usage.js';
+import type { TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { tuiClaudeSession } from './tui.js';
 
 /**

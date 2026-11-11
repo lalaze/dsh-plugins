@@ -1,10 +1,10 @@
 import { RemoteError, remotePath } from '@dsh-plugins/remote-core/domain.js';
-import { FILE_LIMIT, GIT_LIMITS, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceFile, type WorkspaceManifest } from './domain.js';
+import { FILE_LIMIT, GIT_LIMITS, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceFile, type WorkspaceManifest } from '@dsh-plugins/remote-core/workspace.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { WORKSPACE_SHELL } from './shell.js';
 import { nativeRpc } from '../chat/native-registry.js';
-import { initializeCodex } from '../agents/runtime.js';
+import { initializeCodex } from '@dsh-plugins/remote-core/codex.js';
 import { JsonlPeer, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { endHolderScript } from './holder-protocol.js';
 import { TUI_CODEX_CHILD, TUI_SUBAGENT_FILE, TUI_USAGE_CAP, type TuiUsageEntry } from './tui-usage.js';

@@ -1,4 +1,4 @@
-import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from '../../workspace/domain.js';
+import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from '@dsh-plugins/remote-core/workspace.js';
 
 const LAUNCHERS = new Set<string>([TERMINAL_LAUNCHER, CLAUDE_LAUNCHER, CODEX_LAUNCHER]);
 const KEY = 'remote-agents.terminal.shell.';

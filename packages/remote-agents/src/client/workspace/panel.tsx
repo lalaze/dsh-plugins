@@ -3,7 +3,7 @@ import { CodeEditor, ImagePreview, MarkdownPreview, imageType, isMarkdown } from
 import { api, EDITOR_SRC } from '../api.js';
 import { i18n, ui, localizeError, useLocale } from '../i18n.js';
 import { workspaceStyles } from './styles.js';
-import { type SyncResult, type WorkspaceEntry, type WorkspaceFile, type WorkspaceTarget } from '../../workspace/domain.js';
+import { type SyncResult, type WorkspaceEntry, type WorkspaceFile, type WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
 
 const TOOLS = { files: 'Files', sync: 'Sync' } as const;
 export type WorkspaceTool = keyof typeof TOOLS;

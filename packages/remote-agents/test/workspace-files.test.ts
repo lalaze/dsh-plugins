@@ -10,7 +10,7 @@ import { WorkspaceFiles } from '../src/workspace/files.js';
 import { fileOperation, hash, WorkspaceService } from '../src/workspace/service.js';
 import { RemoteAgentsService } from '../src/agents/service.js';
 import { expectedTarget, workspaceTransferHandler } from '../src/workspace/http.js';
-import type { WorkspaceFile, WorkspaceManifest } from '../src/workspace/domain.js';
+import type { WorkspaceFile, WorkspaceManifest } from '@dsh-plugins/remote-core/workspace.js';
 import { fixture } from './fakes.js';
 import { codexTitle, CODEX_THREAD_NAME } from '../src/workspace/tui.js';
 

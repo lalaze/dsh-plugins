@@ -13,7 +13,7 @@ import { FakeRemote } from '../test/fakes.ts';
 import { CHAT_PROVIDERS, RemoteCliAdapter } from '../src/chat/native-chat.ts';
 import { ChatProjects } from '../src/chat/projects.ts';
 import { RemoteWorkspaces } from '../src/workspace/remote-workspaces.ts';
-import { WorkspaceAccess } from '../src/workspace/access.ts';
+import { WorkspaceAccess } from '@dsh-plugins/remote-core/access.js';
 import { randomUUID } from 'node:crypto';
 import { OpenSshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { WorkspaceFiles } from '../src/workspace/files.ts';

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenSshTransport, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';
-import type { GitBatch } from '../src/workspace/domain.js';
+import type { GitBatch } from '@dsh-plugins/remote-core/workspace.js';
 
 const supported = process.platform !== 'win32';
 

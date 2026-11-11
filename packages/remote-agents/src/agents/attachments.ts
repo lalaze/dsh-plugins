@@ -7,6 +7,8 @@ import { pipeline } from 'node:stream/promises';
 import type { ContentBlock, FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm';
 import { attachmentInput, identifier, RemoteError, type Attachment, type NativeAttachment } from '@dsh-plugins/remote-core/domain.js';
 import type { SshTransport } from '@dsh-plugins/remote-core/ssh.js';
+import { stage } from '@dsh-plugins/remote-core/staging.js';
+export { stage };
 
 export interface AttachmentAccess {
   image(ref: ImageBlock['attachment'], signal?: AbortSignal): Promise<{ data: Uint8Array; mediaType: string }>;
@@ -19,16 +21,6 @@ export function restoreFiles(content: readonly ContentBlock[], original?: readon
   if (!original?.some(b => b.type === 'file')) return content;
   if (original.length !== content.length) throw new RemoteError('Cannot recover this message’s file attachments. Attach the files again.');
   return content.map((block, index) => original[index].type === 'file' ? original[index] : block);
-}
-
-/** Stream one source into private staging; `describe` may reject the bytes before they are published. */
-export async function stage(dir: string, source: Iterable<Uint8Array> | AsyncIterable<Uint8Array>, describe: (sha256: string, bytes: number) => Attachment, signal?: AbortSignal): Promise<Attachment> {
-  const temp = join(dir, `${randomUUID()}.tmp`), hash = createHash('sha256'); let bytes = 0;
-  try {
-    await pipeline(Readable.from(source), new Transform({ transform(chunk: Buffer, _encoding, callback) { bytes += chunk.length; hash.update(chunk); callback(null, chunk); } }), createWriteStream(temp, { flags: 'wx', mode: 0o600 }), { signal });
-    const attachment = describe(hash.digest('hex'), bytes);
-    await rename(temp, join(dir, attachment.sha256)); return attachment;
-  } finally { await rm(temp, { force: true }); }
 }
 
 /** Stream files to private local staging; only bounded request-image versions are buffered. */

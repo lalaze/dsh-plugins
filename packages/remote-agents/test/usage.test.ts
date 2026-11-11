@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, remoteUsageRecord, remoteUsageRecords } from '../src/agents/usage.js';
+import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, remoteUsageRecord, remoteUsageRecords } from '@dsh-plugins/remote-core/usage.js';
 import type { HostConfig, Task } from '@dsh-plugins/remote-core/domain.js';
 import { CacheSection, formatReset, formatTokens } from '../src/client/composer/usage.js';
 import { fixture } from './fakes.js';

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import type { Store } from '../core/store.js';
-import type { TuiCli } from './domain.js';
+import type { TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { tuiHolder } from './holder-protocol.js';
 
 /** The part of a DSH session this needs. */

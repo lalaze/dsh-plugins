@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import path, { posix } from 'node:path';
 import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { quote } from '@dsh-plugins/remote-core/ssh.js';
-import { GIT_LIMITS } from './domain.js';
+import { GIT_LIMITS } from '@dsh-plugins/remote-core/workspace.js';
 import type { WorkspaceFiles } from './files.js';
 import type { WorkspaceHosts } from './hosts.js';
 

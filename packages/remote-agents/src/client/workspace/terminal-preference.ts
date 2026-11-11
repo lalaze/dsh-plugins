@@ -1,4 +1,4 @@
-import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from '../../workspace/domain.js';
+import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from '@dsh-plugins/remote-core/workspace.js';
 
 /**
  * DSH's New terminal opens one browser-remembered shell in every conversation (dsh-api-terminal-controller's

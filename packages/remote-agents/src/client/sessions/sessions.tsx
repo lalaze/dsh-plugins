@@ -18,7 +18,7 @@ import { PaperPlaneTiltIcon } from '@phosphor-icons/react/dist/csr/PaperPlaneTil
 import { PauseIcon } from '@phosphor-icons/react/dist/csr/Pause';
 import { TerminalIcon } from '@phosphor-icons/react/dist/csr/Terminal';
 import { needsAttention, projectName, sessionPriority, sessionView, visibleSession, type SessionView } from './session-list.js';
-import type { WorkspacePlacement } from '../../workspace/access.js';
+import type { WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
 
 export function useDashboard() {
   const [dashboard, setDashboard] = useState<Dashboard>(), [error, setError] = useState(''), [revision, setRevision] = useState(0);

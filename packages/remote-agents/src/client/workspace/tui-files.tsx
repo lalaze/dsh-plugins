@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { FILE_LIMIT, type TuiCli } from '../../workspace/domain.js';
+import { FILE_LIMIT, type TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 
 /** The part of a browser's DataTransfer this reads, for a drop or a paste alike. */

@@ -1,4 +1,4 @@
-import { TERMINAL_LAUNCHER } from '../../workspace/domain.js';
+import { TERMINAL_LAUNCHER } from '@dsh-plugins/remote-core/workspace.js';
 import { affectsElements } from '../dom-mutations.js';
 
 // DSH's New terminal shell menu ends at its chevron and spreads left over the card's icon and text.

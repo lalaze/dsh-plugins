@@ -4,7 +4,7 @@ import type { adoptModel } from './chat/adopt-model.js';
 import { ChatProjects } from './chat/projects.js';
 import { nativeSharingStatus, setNativeSharing } from './chat/native-sharing.js';
 import type { NativeSharing } from './chat/native-service.js';
-import type { WorkspacePlacement } from './workspace/access.js';
+import type { WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
 import type { RemoteWorkspaces } from './workspace/remote-workspaces.js';
 import { workspaceAction, worktreeAction, type WorkspaceFeatures } from './workspace/http.js';
 import type { Sharing } from './sharing/sharing.js';
