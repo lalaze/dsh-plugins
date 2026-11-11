@@ -6,7 +6,7 @@ import { dshHome, under, type WorkspaceAccess, type WorkspacePlacement } from '.
 import type { WorkspaceHosts } from './hosts.js';
 import type { RemoteWorkspaces } from './remote-workspaces.js';
 import type { WorkspaceTagsService } from './tag-sync.js';
-import { LocalMachine, RemoteMachine, type GitStep, type WorktreeMachine } from './worktree-machine.js';
+import { LocalMachine, RemoteMachine, type GitResult, type GitStep, type WorktreeMachine } from './worktree-machine.js';
 
 /**
  * Workspaces that start from a project: a Git worktree on the project's machine, adopted as a DSH workspace of its own.
@@ -86,6 +86,18 @@ export interface CreateRequest {
   setup?: readonly string[];
 }
 export interface ArchiveRequest { path: string; worktree: string; deleteBranch?: boolean }
+/**
+ * The folder a DSH workspace stands for, on its machine, for another plugin to work in: Git, shell commands and text
+ * files there. Commands run in that folder; `read` takes a path inside it.
+ */
+export interface WorkspaceMachine {
+  location: WorktreeLocation; folder: string;
+  git(steps: GitStep[], options?: { reads?: boolean; signal?: AbortSignal }): Promise<GitResult[]>;
+  /** A shell command for as long as it takes; both output streams go to `output`. Resolves the exit code, null when stopped. */
+  shell(command: string, env: Record<string, string>, output: (text: string) => void, signal: AbortSignal): Promise<number | null>;
+  /** A text file, or undefined when it is missing or larger than `limit` bytes. */
+  read(file: string, limit: number, signal?: AbortSignal): Promise<string | undefined>;
+}
 
 /** DSH's host workspace registry, as far as worktree workspaces use it. */
 export interface DshWorkspace { workspaceId: string; path: string; title: string; sessionIds: readonly string[] }
@@ -269,6 +281,22 @@ export class WorktreeService {
     }
     if (this.anchored(path)) throw new RemoteError('This workspace\'s machine is not saved in Remote agents', 409);
     return { machine: this.local, location: { kind: 'local' }, cwd: path };
+  }
+  /** Only a folder DSH lists as a workspace: a plugin works where the user's conversations do, not anywhere on a machine. */
+  async machine(path: string, signal?: AbortSignal): Promise<WorkspaceMachine> {
+    if (!(await this.workspaces(signal)).some(view => view.path === path)) throw new RemoteError('This folder is not a DSH workspace', 409);
+    const { machine, location, cwd } = await this.place(path, signal);
+    const inside = (file: string) => {
+      const target = machine.path.resolve(cwd, file), from = machine.path.relative(cwd, target);
+      if (!from || from.startsWith('..') || machine.path.isAbsolute(from)) throw new RemoteError('The file is outside this workspace');
+      return target;
+    };
+    return {
+      location, folder: cwd,
+      git: (steps, options) => machine.git(cwd, steps, options),
+      shell: (command, env, output, stop) => machine.shell(cwd, command, env, output, stop),
+      read: async (file, limit, stop) => machine.read(inside(file), limit, stop),
+    };
   }
   /** The folder holding a machine's worktrees. */
   private async machineRoot(machine: WorktreeMachine, signal?: AbortSignal): Promise<string> {

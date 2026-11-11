@@ -359,3 +359,23 @@ test('this computer\'s shell reports exit codes and stops the whole command', as
   const [missing] = await machine.git(join(root, 'nowhere'), [{ argv: ['status'] }]).catch(error => [error]);
   assert.match(String(missing.message), /No such file or directory/);
 });
+
+test('another plugin works in a workspace\'s folder: Git, shell commands and files there, and nowhere else', async t => {
+  const { project, home, root } = await repository(t);
+  const { worktrees, dsh } = service(home);
+  dsh.add(project, 'project');
+  const job = await settle(worktrees, await formCreate(worktrees, { path: project, mode: 'new', base: 'main', branch: 'tapd/1001' }));
+  assert.equal(job.state, 'done');
+  const machine = await worktrees.machine(job.result!.path!);
+  assert.deepEqual([machine.location.kind, machine.folder], ['local', job.result!.worktree]);
+  let output = '';
+  assert.equal(await machine.shell('echo fixed > fix.txt && pwd', {}, text => { output += text; }, new AbortController().signal), 0);
+  assert.equal(output.trim(), job.result!.worktree);
+  const [status, branch] = await machine.git([{ argv: ['status', '--porcelain'] }, { argv: ['rev-parse', '--abbrev-ref', 'HEAD'] }], { reads: true });
+  assert.match(status.stdout, /\?\? fix\.txt/);
+  assert.equal(branch.stdout.trim(), 'tapd/1001');
+  assert.equal(await machine.read('fix.txt', 100), 'fixed\n');
+  assert.equal(await machine.read('missing.txt', 100), undefined);
+  await assert.rejects(machine.read('../../outside.txt', 100), /outside this workspace/);
+  await assert.rejects(worktrees.machine(join(root, 'seed')), /not a DSH workspace/, 'a folder DSH does not list');
+});

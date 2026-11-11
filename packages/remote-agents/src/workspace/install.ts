@@ -20,6 +20,7 @@ import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
 import { WorkspaceTunnels } from './tunnels.js';
 import { WorktreeService, type DshWorkspaceController } from './worktrees.js';
+import type { ArchiveCheck, ArchiveRequest, CreateRequest, JobAction, WorkspaceMachine, WorktreeJob, WorktreeProject, WorktreeProjectDetail } from './worktrees.js';
 
 /**
  * What other DSH plugins on this host may do in a conversation's remote workspace, as the service `remoteAgentsWorkspaces`:
@@ -41,6 +42,23 @@ export interface RemoteAgentsWorkspaces {
   list?(sessionId: string, path: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{ path: string; entries: WorkspaceEntry[] }>;
   /** Deletes the file read at `revision`; a file changed since is refused. Absent before Remote Agents 0.2.64. */
   remove?(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{ path: string }>;
+}
+/**
+ * Worktree workspaces for other DSH plugins, as the service `remoteAgentsWorktrees`: what "New workspace from a project"
+ * does, for a project on this computer or on a saved machine, and a way to run Git and shell commands in a workspace's
+ * folder. A create or archive answers with a job; `job` reads how far it is and `act` answers what it stopped to ask.
+ */
+export interface RemoteAgentsWorktrees {
+  readonly version: 1;
+  projects(signal?: AbortSignal): Promise<WorktreeProject[]>;
+  inspect(path: string, signal?: AbortSignal): Promise<WorktreeProjectDetail>;
+  create(request: CreateRequest): WorktreeJob;
+  job(id: string): WorktreeJob;
+  act(id: string, action: JobAction): Promise<WorktreeJob>;
+  archiveCheck(path: string, worktree: string, signal?: AbortSignal): Promise<ArchiveCheck>;
+  archive(request: ArchiveRequest): WorktreeJob;
+  /** `path` is a DSH workspace's path, as in a project or a finished create. */
+  machine(path: string, signal?: AbortSignal): Promise<WorkspaceMachine>;
 }
 export interface Workspaces {
   /** Which saved machines and remote directory a local workspace path stands for. */
@@ -136,6 +154,13 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     stopRemoteSessions: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
   });
   ctx.effect(() => () => worktrees.close());
+  ctx.provide('remoteAgentsWorktrees', {
+    version: 1,
+    projects: signal => worktrees.projects(signal), inspect: (path, signal) => worktrees.inspect(path, signal),
+    create: request => worktrees.create(request), job: id => worktrees.job(id), act: (id, action) => worktrees.act(id, action),
+    archiveCheck: (path, worktree, signal) => worktrees.archiveCheck(path, worktree, signal), archive: request => worktrees.archive(request),
+    machine: (path, signal) => worktrees.machine(path, signal),
+  } satisfies RemoteAgentsWorktrees);
   const sessionController = () => ctx.get('sessionController') as { list(input: object): Promise<{ items?: { sessionId: string; blank?: boolean }[] }>; rename(input: { sessionId: string; title: string }): Promise<unknown>; selectModel(input: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown> } | undefined;
   const tui = new TuiSessions(store, {
     verify: (id, signal) => files.target(id, signal),
