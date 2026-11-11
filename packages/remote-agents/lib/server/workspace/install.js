@@ -106,6 +106,13 @@ export async function installWorkspaces(ctx, store, machines) {
         stopRemoteSessions: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
     });
     ctx.effect(() => () => worktrees.close());
+    ctx.provide('remoteAgentsWorktrees', {
+        version: 1,
+        projects: signal => worktrees.projects(signal), inspect: (path, signal) => worktrees.inspect(path, signal),
+        create: request => worktrees.create(request), job: id => worktrees.job(id), act: (id, action) => worktrees.act(id, action),
+        archiveCheck: (path, worktree, signal) => worktrees.archiveCheck(path, worktree, signal), archive: request => worktrees.archive(request),
+        machine: (path, signal) => worktrees.machine(path, signal),
+    });
     const sessionController = () => ctx.get('sessionController');
     const tui = new TuiSessions(store, {
         verify: (id, signal) => files.target(id, signal),

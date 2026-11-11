@@ -57,6 +57,10 @@ A review with no verdict is asked once more. If there is still none the flow sto
 - With remote CLIs, each step uploads its own copy of the attachments to the remote workspace. These copies are not cleaned up automatically.
 - Needs DSH 0.2.1-rc.3 or later (tested on rc.5 and 0.2.2-rc.1). With remote CLIs, use dsh-remote-agents 0.2.114 or later: older versions do not end the commands Codex started when you stop, and Claude Code cannot search the web while planning or reviewing; those before 0.2.113 do not pass the flow's result to a remote CLI conversation or show which tool a delegated Codex is running, and those before 0.2.102 leave each finished subagent's process running on the remote machine.
 
+## For other plugins
+
+The service `modelFlow` (version 1) runs a flow in a conversation, as a typed `/flow` does, and answers how it ended: `start(agent, { goal, rounds?, models?, attachments? })` resolves to `{ done, stop }`, where `done` gives the ending, the report and the steps. A flow whose model cannot read attached images is refused with the code `flow/images-unsupported`.
+
 ## License
 
 MIT

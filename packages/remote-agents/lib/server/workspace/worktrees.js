@@ -223,6 +223,24 @@ export class WorktreeService {
             throw new RemoteError('This workspace\'s machine is not saved in Remote agents', 409);
         return { machine: this.local, location: { kind: 'local' }, cwd: path };
     }
+    /** Only a folder DSH lists as a workspace: a plugin works where the user's conversations do, not anywhere on a machine. */
+    async machine(path, signal) {
+        if (!(await this.workspaces(signal)).some(view => view.path === path))
+            throw new RemoteError('This folder is not a DSH workspace', 409);
+        const { machine, location, cwd } = await this.place(path, signal);
+        const inside = (file) => {
+            const target = machine.path.resolve(cwd, file), from = machine.path.relative(cwd, target);
+            if (!from || from.startsWith('..') || machine.path.isAbsolute(from))
+                throw new RemoteError('The file is outside this workspace');
+            return target;
+        };
+        return {
+            location, folder: cwd,
+            git: (steps, options) => machine.git(cwd, steps, options),
+            shell: (command, env, output, stop) => machine.shell(cwd, command, env, output, stop),
+            read: async (file, limit, stop) => machine.read(inside(file), limit, stop),
+        };
+    }
     /** The folder holding a machine's worktrees. */
     async machineRoot(machine, signal) {
         if (machine.kind !== 'local')

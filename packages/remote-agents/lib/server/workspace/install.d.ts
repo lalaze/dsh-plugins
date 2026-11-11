@@ -7,6 +7,7 @@ import { type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceTarget }
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTunnels } from './tunnels.js';
 import { WorktreeService } from './worktrees.js';
+import type { ArchiveCheck, ArchiveRequest, CreateRequest, JobAction, WorkspaceMachine, WorktreeJob, WorktreeProject, WorktreeProjectDetail } from './worktrees.js';
 /**
  * What other DSH plugins on this host may do in a conversation's remote workspace, as the service `remoteAgentsWorkspaces`:
  * always on its verified machine and in its verified directory, which every call checks again. dsh-git-view runs Git
@@ -40,6 +41,23 @@ export interface RemoteAgentsWorkspaces {
     remove?(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{
         path: string;
     }>;
+}
+/**
+ * Worktree workspaces for other DSH plugins, as the service `remoteAgentsWorktrees`: what "New workspace from a project"
+ * does, for a project on this computer or on a saved machine, and a way to run Git and shell commands in a workspace's
+ * folder. A create or archive answers with a job; `job` reads how far it is and `act` answers what it stopped to ask.
+ */
+export interface RemoteAgentsWorktrees {
+    readonly version: 1;
+    projects(signal?: AbortSignal): Promise<WorktreeProject[]>;
+    inspect(path: string, signal?: AbortSignal): Promise<WorktreeProjectDetail>;
+    create(request: CreateRequest): WorktreeJob;
+    job(id: string): WorktreeJob;
+    act(id: string, action: JobAction): Promise<WorktreeJob>;
+    archiveCheck(path: string, worktree: string, signal?: AbortSignal): Promise<ArchiveCheck>;
+    archive(request: ArchiveRequest): WorktreeJob;
+    /** `path` is a DSH workspace's path, as in a project or a finished create. */
+    machine(path: string, signal?: AbortSignal): Promise<WorkspaceMachine>;
 }
 export interface Workspaces {
     /** Which saved machines and remote directory a local workspace path stands for. */

@@ -2,7 +2,7 @@ import { type WorkspaceAccess } from './access.js';
 import type { WorkspaceHosts } from './hosts.js';
 import type { RemoteWorkspaces } from './remote-workspaces.js';
 import type { WorkspaceTagsService } from './tag-sync.js';
-import { type WorktreeMachine } from './worktree-machine.js';
+import { type GitResult, type GitStep, type WorktreeMachine } from './worktree-machine.js';
 /**
  * Workspaces that start from a project: a Git worktree on the project's machine, adopted as a DSH workspace of its own.
  * Worktrees live outside the repository, under `~/.dsh/worktrees` on this computer and `~/.dsh-remote-agents/worktrees`
@@ -123,6 +123,22 @@ export interface ArchiveRequest {
     worktree: string;
     deleteBranch?: boolean;
 }
+/**
+ * The folder a DSH workspace stands for, on its machine, for another plugin to work in: Git, shell commands and text
+ * files there. Commands run in that folder; `read` takes a path inside it.
+ */
+export interface WorkspaceMachine {
+    location: WorktreeLocation;
+    folder: string;
+    git(steps: GitStep[], options?: {
+        reads?: boolean;
+        signal?: AbortSignal;
+    }): Promise<GitResult[]>;
+    /** A shell command for as long as it takes; both output streams go to `output`. Resolves the exit code, null when stopped. */
+    shell(command: string, env: Record<string, string>, output: (text: string) => void, signal: AbortSignal): Promise<number | null>;
+    /** A text file, or undefined when it is missing or larger than `limit` bytes. */
+    read(file: string, limit: number, signal?: AbortSignal): Promise<string | undefined>;
+}
 /** DSH's host workspace registry, as far as worktree workspaces use it. */
 export interface DshWorkspace {
     workspaceId: string;
@@ -208,6 +224,8 @@ export declare class WorktreeService {
     private anchored;
     /** The machine and folder a DSH workspace stands for. */
     private place;
+    /** Only a folder DSH lists as a workspace: a plugin works where the user's conversations do, not anywhere on a machine. */
+    machine(path: string, signal?: AbortSignal): Promise<WorkspaceMachine>;
     /** The folder holding a machine's worktrees. */
     private machineRoot;
     /** Whether a folder is a worktree this plugin made: two levels under the machine's worktree folder. */
