@@ -1,13 +1,10 @@
 import type { ClaudeGoalBridge } from './claude-goal.js';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
-import { join } from 'node:path';
 import type { RemoteAgentsService } from '../agents/service.js';
 import { busy } from '@dsh-plugins/remote-core/domain.js';
 import { accessOf, loggerOf, type ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
-import type { Store } from '../core/store.js';
 import type { WorkspaceAccess } from '../workspace/access.js';
-import { dshHome } from '../workspace/access.js';
 import type { RemoteWorkspaces } from '../workspace/remote-workspaces.js';
 import type { WorkspaceService } from '../workspace/service.js';
 import { SharedChatAdoption } from './adopt.js';
@@ -15,21 +12,6 @@ import { isTeamPrompt, teamMemberOf } from './agent-teams.js';
 import { CHAT_IMAGE_LIMIT } from './images.js';
 import { CHAT_PROVIDERS, RemoteCliAdapter, type SyncAgent } from './native-chat.js';
 import type { ChatProjects } from './projects.js';
-import { repairStoredSessions } from './session-repair.js';
-
-/** Conversations saved by 0.2.53 and earlier stored a remote tool row out of order, and DSH refuses to reopen them. */
-export function scheduleSessionRepair(ctx: Context, store: Store): void {
-  const persistence = ctx.get('sessionPersistence') as { root?: unknown } | undefined;
-  const open = (id: string) => !!(ctx.get('sessions') as { get?(id: string): unknown } | undefined)?.get?.(id);
-  // Let DSH finish opening before a one-time scan competes for filesystem and compression workers.
-  const repairTimer = setTimeout(() => {
-    void repairStoredSessions(typeof persistence?.root === 'string' ? persistence.root : join(dshHome(), 'sessions'), store.directory, open)
-      .then(paths => { if (paths.length) loggerOf(ctx)?.info?.(`Repaired ${paths.length} remote CLI conversation log(s) DSH could not reopen; originals kept in ${join(store.directory, 'session-backups')}`); })
-      .catch(error => loggerOf(ctx)?.warn?.(`Remote CLI conversation repair failed: ${String(error)}`));
-  }, 2000);
-  repairTimer.unref?.();
-  ctx.effect(() => () => clearTimeout(repairTimer));
-}
 
 /** Remote CLI models in DSH's model picker and main conversation. */
 export function installChat(ctx: Context, service: RemoteAgentsService, projects: ChatProjects, workspace: { access: WorkspaceAccess; files: WorkspaceService; workspaces: RemoteWorkspaces }, claudeGoals?: ClaudeGoalBridge): void {

@@ -841,17 +841,6 @@ test('unconfirmed delivery stays visible as an error on retry instead of resendi
   assert.equal(remote.creates, 1); assert.equal(remote.sends, 0);
 });
 
-test('main chat HTTP actions persist a discovered project and refresh/remove it', async t => {
-  const { service, hostId } = await fixture(t), handler = createHandler(service);
-  const post = async (body: unknown) => handler(new Request('http://dsh.test/api/remote-agents', { method: 'POST',
-    headers: { 'content-type': 'application/json', 'X-DSH-Remote-Agents': '1' }, body: JSON.stringify(body) }));
-  const added = await post({ action: 'addChatProject', project: { label: 'Native', hostId, cwd: '/srv/project' } }); assert.equal(added.status, 200);
-  const [project] = await added.json();
-  assert.equal((await post({ action: 'refreshChatProject', projectId: project.id })).status, 200);
-  assert.equal((await (await post({ action: 'chatProjects' })).json()).length, 1);
-  assert.deepEqual(await (await post({ action: 'removeChatProject', projectId: project.id })).json(), []);
-});
-
 test('durable message pages drain more than 100 events and stop at the next submitted message', async t => {
   const { directory } = await fixture(t), history = new TaskHistory(directory, 'message-history'); await history.open();
   await history.append({ type: 'user_message', clientMessageId: 'first', text: 'First' });

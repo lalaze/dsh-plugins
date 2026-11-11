@@ -8,7 +8,7 @@ import { RemoteAgentsService } from './agents/service.js';
 import { delegationTools } from './agents/tools.js';
 import { remoteUsageRecords, type RemoteUsageRecord } from './agents/usage.js';
 import { adoptModel } from './chat/adopt-model.js';
-import { installChat, scheduleSessionRepair } from './chat/install.js';
+import { installChat } from './chat/install.js';
 import { ClaudeGoalBridge } from './chat/claude-goal.js';
 import { ChatProjects } from './chat/projects.js';
 import { installNativeSharing } from './chat/native-install.js';
@@ -41,7 +41,6 @@ export const Config: Schema<{ stateDir?: string; claudeGoalSessions?: string[] }
 export async function apply(ctx: Context, config: { stateDir?: string; claudeGoalSessions?: string[] } = {}): Promise<void> {
   const store = new Store(join(config.stateDir ?? stateDir(), 'state.json'));
   await store.open();
-  scheduleSessionRepair(ctx, store);
   const service = new RemoteAgentsService(store);
   const projects = new ChatProjects(service);
   const workspace = await installWorkspaces(ctx, store, service);
