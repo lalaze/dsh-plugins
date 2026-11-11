@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-autofix
+      name: dsh-autofix
+      config: {}
