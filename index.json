@@ -13,7 +13,7 @@
       "name": "dsh-remote-agents",
       "title": "DSH Remote Agents",
       "description": {
-        "en": "Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them",
+        "en": "Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok and CodeBuddy on remote machines, steer them, and let DSH delegate tasks to them",
         "zh": "DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务"
       },
       "author": "lalaze",
@@ -27,13 +27,50 @@
       },
       "versions": [
         {
-          "version": "0.2.129",
-          "publishTimestamp": 1794367647,
+          "version": "0.2.130",
+          "publishTimestamp": 1794386819,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "cb94bd6e1b0209959d8a830fc6edf4ea2a719484",
+            "commit": "70fa8f498842eb6d6be9808e3ee95de50719c969",
             "path": "packages/remote-agents"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-remote-terminals",
+      "title": "DSH Remote Terminals",
+      "description": {
+        "en": "Remote terminals that outlive DSH, Claude Code and Codex TUI conversations, and worktree workspaces, on the machines saved in Remote Agents",
+        "zh": "不随 DSH 结束的远程终端、Claude Code 与 Codex 的 TUI 对话、基于 worktree 的工作区，使用远程智能体里保存的机器"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/remote-terminals",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/remote-terminals"
+      },
+      "metadata": {
+        "keywords": [
+          "ssh",
+          "terminal",
+          "tui",
+          "worktree"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794386819,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "70fa8f498842eb6d6be9808e3ee95de50719c969",
+            "path": "packages/remote-terminals"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.2 <0.3.0"
@@ -179,12 +216,12 @@
       },
       "versions": [
         {
-          "version": "0.1.0",
-          "publishTimestamp": 1794367647,
+          "version": "0.1.1",
+          "publishTimestamp": 1794386819,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "cb94bd6e1b0209959d8a830fc6edf4ea2a719484",
+            "commit": "70fa8f498842eb6d6be9808e3ee95de50719c969",
             "path": "packages/autofix"
           },
           "engines": {
