@@ -12,7 +12,7 @@ const text = (value: unknown, label: string): string => {
 const summary = (scan: ScanResult<ScannedAsset>): ScanResult => ({ ...scan, assets: scan.assets.map(({ refs: _refs, ...asset }): Asset => asset) });
 
 /**
- * `GET ?sessionId&path` answers an image's bytes; `POST` takes a JSON `action`: `scan`, `detail` and `configure` read a workspace;
+ * `GET ?sessionId&path` answers an image's bytes; `POST` takes a JSON `action`: `scan`, `detail`, `images` and `configure` read a workspace;
  * `retire`, `restore`, `tag` and `note` change it (see manage.ts);
  * `project`, `setProject`, `mode` and `setMode` decide where the tab appears. */
 export function createHandler(service: AssetService, log?: (message: string) => void) {
@@ -47,6 +47,7 @@ export function createHandler(service: AssetService, log?: (message: string) => 
           return Response.json(await service.setProject(sessionId, input.game), { headers });
         case 'scan': return Response.json(summary(await service.scan(sessionId, input.refresh === true)), { headers });
         case 'detail': return Response.json(await service.detail(sessionId, text(input.path, 'file path')), { headers });
+        case 'images': return Response.json({ images: await service.images(sessionId, input.paths) }, { headers });
         case 'configure': return Response.json(summary(await service.configure(sessionId, parseRules(input.folders), input.retireDir)), { headers });
         case 'retire': case 'restore': {
           const result = await (input.action === 'retire' ? service.retire(sessionId, input.paths) : service.restore(sessionId, input.paths));

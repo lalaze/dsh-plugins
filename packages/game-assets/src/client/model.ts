@@ -115,6 +115,23 @@ export function fitScale(width: number | undefined, height: number | undefined, 
   return scale >= 2 ? scale : undefined;
 }
 
+/**
+ * The part of a grid's rows that is on screen, in the rows' own coordinates: where the grid's box, the window and the
+ * rows overlap. It holds whichever element scrolls, the grid itself or a page around it.
+ */
+export function visibleSpan(grid: { top: number; bottom: number }, rows: { top: number }, viewport: number): { top: number; height: number } {
+  const top = Math.max(grid.top, 0), bottom = Math.min(grid.bottom, viewport);
+  return { top: Math.max(0, top - rows.top), height: Math.max(0, bottom - top) };
+}
+
+/**
+ * The height that lets a view fill what is left of a scrolling area without making it scroll: the area's visible height,
+ * less where the view starts in its content and the composer docked below it.
+ */
+export function availableHeight(area: { top: number; scrollTop: number; clientHeight: number }, viewTop: number, below: number, minimum = 320): number {
+  return Math.max(minimum, Math.floor(area.clientHeight - (viewTop - area.top + area.scrollTop) - below));
+}
+
 /** Rows of a grid that are on screen, with `overscan` rows of margin. */
 export function visibleRows(count: number, columns: number, rowHeight: number, scrollTop: number, viewHeight: number, overscan = 2) {
   const rows = Math.ceil(count / columns);

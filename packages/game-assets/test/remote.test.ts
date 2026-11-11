@@ -114,6 +114,22 @@ test('thumbnails asked for together reach the machine in one run; paths outside 
   assert.equal(hero.headers.get('content-type'), 'application/octet-stream');
 });
 
+test('a batch of thumbnails is one run on the machine, and a full answer leaves the rest for another request', async () => {
+  const game = await remoteGame();
+  for (let i = 0; i < 3; i++) await game.put(`public/art/big-${i}.png`, png(5 + i, 10 * 1024 * 1024));
+  const before = game.runs.length;
+  const answer = await game.call<{ images: { path: string; data?: string; error?: string; status?: number }[] }>({ action: 'images',
+    paths: ['public/art/hero.png', 'public/art/big-0.png', 'public/art/big-1.png', 'public/art/big-2.png', 'public/art/none.png', 'public/art/hero.png'] });
+  assert.equal(game.runs.length, before + 1);
+  assert.deepEqual(answer.body.images.map(image => [image.path, image.data ? Buffer.from(image.data, 'base64').length : image.status]),
+    [['public/art/hero.png', 64], ['public/art/big-0.png', 10485760], ['public/art/big-1.png', 10485760], ['public/art/big-2.png', 10485760], ['public/art/none.png', 413]]);
+  for (const paths of [[], 'public/art/hero.png', Array(65).fill('public/art/hero.png')]) assert.equal((await game.call({ action: 'images', paths })).status, 400);
+  // A local workspace answers the same request in the host's own process.
+  const local = await game.call<{ images: { path: string; data?: string; status?: number }[] }>({ action: 'images', sessionId: 'local', paths: ['public/art/hero.png', '../secret.png'] });
+  assert.deepEqual(local.body.images.map(image => image.data ? 'data' : image.status), ['data', 403]);
+  assert.equal(game.runs.length, before + 1);
+});
+
 test('images of a remote workspace are retired, restored and tagged on its machine', async () => {
   const game = await remoteGame();
   await game.call<ScanResult>({ action: 'scan' });

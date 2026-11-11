@@ -45,6 +45,8 @@ beforeEach(() => {
     assert.equal(init.headers['X-DSH-Game-Assets'], '1');
     if (!init.body) { requests.push({ image: new URL(url, 'http://localhost/').searchParams.get('path') }); return new Response(new Uint8Array([1, 2, 3])); }
     const body = JSON.parse(init.body);
+    // Thumbnails come in batches; they are kept apart from the requests the tests look at.
+    if (body.action === 'images') { requests.push({ image: body.paths }); return Response.json({ images: body.paths.map((path: string) => ({ path, data: 'AQID' })) }); }
     if (saved.down) return Response.json({ error: 'The workspace could not be scanned' }, { status: 500 });
     if (body.action === 'mode') return Response.json({ mode: saved.mode });
     if (body.action === 'project') return Response.json(project(body.sessionId));
@@ -269,6 +271,38 @@ test('the view follows DSH’s language and reports why a workspace cannot be sh
   await mount('broken', 'zh-CN');
   assert.equal(container.querySelector('[role=alert]')!.textContent, '此对话没有工作区文件夹');
   assert.equal(container.querySelectorAll('.ga-seg button')[0].textContent, '浏览');
+});
+
+test('the grid’s thumbnails reach the host as one batch', async () => {
+  await mount('s8');
+  const batches = requests.filter(request => 'image' in request).map(request => request.image);
+  assert.deepEqual(batches, [['public/art/npc.png', 'public/art/hero.gif', 'assets/cast-v2/hero.png', 'assets/cast-v1/hero.png']]);
+  assert.equal(container.querySelectorAll('.ga-cell img').length, 4);
+});
+
+test('inside DSH’s conversation area, the view takes the height left on screen so its grid scrolls by itself', async () => {
+  // DSH's markup: a scrolling area holding the conversation's views and, docked below them, the composer.
+  const area = document.createElement('div'), slot = document.createElement('div'), views = document.createElement('div'), seat = document.createElement('div');
+  area.setAttribute('data-conversation-scroll', ''); slot.setAttribute('data-slot', 'conversation.session'); seat.setAttribute('data-composer-seat', '');
+  slot.append(views); area.append(slot, seat); container.append(area);
+  area.scrollTop = 500;
+  Object.defineProperty(area, 'clientHeight', { configurable: true, value: 900 });
+  Object.defineProperty(seat, 'offsetHeight', { configurable: true, value: 80 });
+  area.getBoundingClientRect = () => ({ top: 100, bottom: 1000, left: 0, right: 1200, width: 1200, height: 900, x: 0, y: 100, toJSON() {} }) as DOMRect;
+  const before = window.HTMLElement.prototype.getBoundingClientRect;
+  window.HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    return (this.classList.contains('ga-root') ? { top: 140, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 140, toJSON() {} } : before.call(this)) as DOMRect;
+  };
+  try {
+    const { AssetsPanel } = await import('../src/client/panel.js');
+    const { createRoot } = await import('react-dom/client');
+    root = createRoot(views);
+    await act(async () => root!.render(React.createElement(AssetsPanel, { sessionId: 's1' })));
+    await settle();
+    // 900 visible, less the 40 above the view and the 80 of the composer.
+    assert.equal(area.scrollTop, 0);
+    assert.equal(views.querySelector<HTMLElement>('.ga-root')!.style.height, '780px');
+  } finally { window.HTMLElement.prototype.getBoundingClientRect = before; }
 });
 
 test('without a conversation there is nothing to scan', async () => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Asset } from '../src/domain.js';
-import { UNTAGGED, agentMessage, buildTree, filterAssets, fitScale, formatBytes, sameName, sortAssets, tagCounts, usageCounts, visibleRows, type Filter } from '../src/client/model.js';
+import { UNTAGGED, agentMessage, availableHeight, buildTree, filterAssets, fitScale, formatBytes, sameName, sortAssets, tagCounts, usageCounts, visibleRows, visibleSpan, type Filter } from '../src/client/model.js';
 
 const asset = (path: string, usage: Asset['usage'] = 'unused', extra: Partial<Asset> = {}): Asset => ({ path, usage, size: 10, mtimeMs: 0, refCount: 0, ...extra });
 const assets = [
@@ -55,6 +55,18 @@ test('sorting, same-name files and how values read', () => {
   assert.deepEqual(sameName(assets)(assets[4]), []);
   assert.deepEqual([0, 1023, 1024, 1536, 150 * 1024, 5 * 1024 ** 2, 3 * 1024 ** 3].map(formatBytes), ['0 B', '1023 B', '1.0 KB', '1.5 KB', '150 KB', '5.0 MB', '3.0 GB']);
   assert.deepEqual([fitScale(16, 16, 96), fitScale(40, 20, 96), fitScale(64, 64, 96), fitScale(undefined, 16, 96)], [6, 2, undefined, undefined]);
+});
+
+test('what is on screen is where the grid, the window and the rows overlap, whichever of them scrolls', () => {
+  // The grid scrolls by itself: its box is on screen and its rows have moved up by 3000.
+  assert.deepEqual(visibleSpan({ top: 120, bottom: 820 }, { top: -2880 }, 900), { top: 3000, height: 700 });
+  // The grid grew with its rows and the page around it scrolled by 5000: only the window's 900 are on screen.
+  assert.deepEqual(visibleSpan({ top: -4900, bottom: 110000 }, { top: -4892 }, 900), { top: 4892, height: 900 });
+  // Scrolled out of sight.
+  assert.deepEqual(visibleSpan({ top: 1200, bottom: 1800 }, { top: 1200 }, 900), { top: 0, height: 0 });
+  // A scrolling area 900 high, scrolled by 300, with the view 40 into its content and a composer of 80 below.
+  assert.equal(availableHeight({ top: 100, scrollTop: 300, clientHeight: 900 }, -160, 80), 780);
+  assert.equal(availableHeight({ top: 0, scrollTop: 0, clientHeight: 200 }, 0, 80), 320);
 });
 
 test('only the rows on screen, with a margin, are rendered', () => {

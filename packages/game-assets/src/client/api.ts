@@ -1,4 +1,4 @@
-import { CLIENT_HEADER, ROUTE, type AssetDetail, type FolderRule, type MoveResult, type ProjectStatus, type ScanResult, type TabMode, type TagResult } from '../domain.js';
+import { CLIENT_HEADER, ROUTE, type AssetDetail, type FolderRule, type ImageAnswer, type MoveResult, type ProjectStatus, type ScanResult, type TabMode, type TagResult } from '../domain.js';
 
 export class AssetRequestError extends Error { constructor(message: string, readonly status: number) { super(message); } }
 
@@ -14,6 +14,7 @@ export const configureFolders = (sessionId: string, folders: Record<string, Fold
 export const moveAssets = (sessionId: string, action: 'retire' | 'restore', paths: string[]) => post<MoveResult>({ action, sessionId, paths });
 export const tagAssets = (sessionId: string, paths: string[], add: string[], remove: string[]) => post<TagResult>({ action: 'tag', sessionId, paths, add, remove });
 export const noteAsset = (sessionId: string, path: string, note: string) => post<{ note: string }>({ action: 'note', sessionId, path, note });
+export const imageBatch = (sessionId: string, paths: string[], signal?: AbortSignal) => post<{ images: ImageAnswer[] }>({ action: 'images', sessionId, paths }, signal);
 export const assetDetail = (sessionId: string, path: string, signal?: AbortSignal) => post<AssetDetail>({ action: 'detail', sessionId, path }, signal);
 
 /** An image's bytes. The header keeps other pages from embedding workspace images, so `<img src>` cannot fetch them. */

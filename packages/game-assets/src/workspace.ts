@@ -5,7 +5,7 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { detectEngine } from './detect.js';
-import { RAW_LIMIT, isImage, type ScanResult, type ScannedAsset } from './domain.js';
+import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage, type ImageAnswer, type ScanResult, type ScannedAsset } from './domain.js';
 import type { Library, Moved } from './manage.js';
 import type { Rules, Scanner } from './scan.js';
 
@@ -18,8 +18,7 @@ export type WorkspaceRequest =
   | { op: 'tag'; paths: string[]; add: string[]; remove: string[] }
   | { op: 'note'; path: string; note: string }
   | { op: 'read'; paths: string[] };
-/** One image of a `read` request: its bytes in base64, or why it could not be read. */
-export interface ReadAnswer { path: string; data?: string; error?: string; status?: number }
+export type ReadAnswer = ImageAnswer;
 export interface WorkspaceAnswers {
   scan: ScanResult<ScannedAsset>; detect: { engine: string | null }; retire: Moved; restore: Moved;
   tag: Record<string, string[]>; note: { note: string }; read: ReadAnswer[];
@@ -59,8 +58,11 @@ export async function handle(root: string, request: WorkspaceRequest, scanner: S
     case 'note': return { note: await library.note(request.path, request.note) };
     case 'read': {
       const answers: ReadAnswer[] = [];
+      let bytes = 0;
       for (const path of request.paths) {
-        try { answers.push({ path, data: (await readImage(root, path)).toString('base64') }); }
+        // One answer stays a size a browser and an SSH channel take in stride; what is left is asked for again.
+        if (bytes >= IMAGE_BATCH_BYTES) { answers.push({ path, error: 'Ask for this image in another request', status: 413 }); continue; }
+        try { const data = await readImage(root, path); bytes += data.length; answers.push({ path, data: data.toString('base64') }); }
         catch (error) { answers.push({ path, error: error instanceof Error ? error.message : String(error), status: error instanceof AssetError ? error.status : 500 }); }
       }
       return answers;

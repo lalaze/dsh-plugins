@@ -7,7 +7,7 @@ import { Detail } from './detail.js';
 import { Grid } from './grid.js';
 import { i18n, localizeError, ui } from './i18n.js';
 import { chooseProject, useProject } from './projects.js';
-import { UNTAGGED, USAGE_FILTERS, buildTree, filterAssets, formatBytes, sameName, sortAssets, tagCounts, usageCounts, type Filter, type Sort, type UsageFilter } from './model.js';
+import { UNTAGGED, USAGE_FILTERS, availableHeight, buildTree, filterAssets, formatBytes, sameName, sortAssets, tagCounts, usageCounts, type Filter, type Sort, type UsageFilter } from './model.js';
 import { styles } from './styles.js';
 import { FolderSettings, Tree, Versions } from './views.js';
 
@@ -63,6 +63,32 @@ export function AssetsPanel({ sessionId, openFile, sendToChat }: PanelProps) {
 
 type DialogKind = 'retire' | 'tag' | 'send';
 
+/**
+ * DSH lets a conversation's view grow with its content and scrolls the conversation instead. The Assets view keeps to
+ * the height that is left on screen, so that its own grid scrolls and draws only what is visible.
+ */
+function useFitToConversation(ref: React.RefObject<HTMLElement>) {
+  useLayoutEffect(() => {
+    const root = ref.current, area = root?.parentElement?.closest<HTMLElement>('[data-conversation-scroll]');
+    if (!root || !area) return;
+    const seat = () => [...area.children].find(child => child.hasAttribute('data-composer-seat')) as HTMLElement | undefined;
+    const fit = () => {
+      const box = area.getBoundingClientRect();
+      const height = `${availableHeight({ top: box.top, scrollTop: area.scrollTop, clientHeight: area.clientHeight }, root.getBoundingClientRect().top, seat()?.offsetHeight ?? 0)}px`;
+      if (root.style.height !== height) root.style.height = height;
+    };
+    // The conversation may have been scrolled down in Chat; this view starts at the top.
+    area.scrollTop = 0;
+    fit();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(fit);
+    observer?.observe(area);
+    const docked = seat();
+    if (docked) observer?.observe(docked);
+    window.addEventListener('resize', fit);
+    return () => { observer?.disconnect(); window.removeEventListener('resize', fit); root.style.height = ''; };
+  }, [ref]);
+}
+
 function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; openFile?: PanelProps['openFile']; sendToChat?: PanelProps['sendToChat'] }) {
   const [result, setResult] = useState(scans.get(sessionId)), [error, setError] = useState(''), [busy, setBusy] = useState(false);
   const [view, setView] = useState<'browse' | 'versions'>('browse');
@@ -74,6 +100,7 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
   const [checked, setChecked] = useState<ReadonlySet<string>>(new Set()), [dialog, setDialog] = useState<{ kind: DialogKind; paths: string[] }>();
   const root = useRef<HTMLElement>(null), alive = useRef(true), lastChecked = useRef<string>();
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useFitToConversation(root);
   useLayoutEffect(() => {
     const element = root.current!;
     const measure = () => setNarrow(element.clientWidth > 0 && element.clientWidth < NARROW);
