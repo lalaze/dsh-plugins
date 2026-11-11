@@ -10,6 +10,8 @@
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.zh-CN.md) | 在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型 |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.zh-CN.md) | DSH 模型选择器中的提供方分组可折叠，并在各浏览器中记住选择 |
 | `dsh-model-flow` | [packages/model-flow](packages/model-flow/README.zh-CN.md) | 一条命令：一个模型计划，一个实现，一个审核，不通过就打回 |
+| `dsh-autofix` | [packages/autofix](packages/autofix/README.zh-CN.md) | 在对话里输入 /fix：模型在独立的 worktree 里修复缺陷，你验收之前不会推送任何东西 |
+| `dsh-tapd` | [packages/tapd](packages/tapd/README.zh-CN.md) | 把 TAPD 作为「自动修复」的缺陷来源：拉取你名下的缺陷，并回写状态和评论 |
 | `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.zh-CN.md) | 用 VS Code 的编辑器（Monaco）编辑本地工作区的代码和文本文件，并预览 Markdown 与 SVG |
 | `dsh-git-view` | [packages/git-view](packages/git-view/README.zh-CN.md) | 移植自 dsh-git-panel 的 IDE 风格 Git 面板（分支树与提交图总览、提交与 Amend、文件浏览、AI 生成提交信息、输入框标记），适用于本地与远程工作区，并提供 Monaco 差异与冲突处理；远程功能需搭配 Remote Agents 0.2.62 或更新版本 |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
