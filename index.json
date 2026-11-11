@@ -27,12 +27,12 @@
       },
       "versions": [
         {
-          "version": "0.2.128",
-          "publishTimestamp": 1794330746,
+          "version": "0.2.129",
+          "publishTimestamp": 1794367647,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "84bf10ecc46dca0b13c1576f2275f503b8467adf",
+            "commit": "cb94bd6e1b0209959d8a830fc6edf4ea2a719484",
             "path": "packages/remote-agents"
           },
           "engines": {
@@ -139,16 +139,91 @@
       },
       "versions": [
         {
-          "version": "0.1.6",
-          "publishTimestamp": 1794156268,
+          "version": "0.1.7",
+          "publishTimestamp": 1794367647,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "2845f80255cbfe987722c620afc2360b34ad8520",
+            "commit": "cb94bd6e1b0209959d8a830fc6edf4ea2a719484",
             "path": "packages/model-flow"
           },
           "engines": {
             "dsh": ">=0.2.1-rc.3 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-autofix",
+      "title": {
+        "en": "Autofix",
+        "zh": "自动修复"
+      },
+      "description": {
+        "en": "Type /fix in a conversation: models fix the bug in its own worktree, and nothing is pushed before you accept it",
+        "zh": "在对话里输入 /fix：模型在独立的 worktree 里修复缺陷，你验收之前不会推送任何东西"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/autofix",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/autofix"
+      },
+      "metadata": {
+        "keywords": [
+          "bugs",
+          "worktree",
+          "review",
+          "workflow"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794367647,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "cb94bd6e1b0209959d8a830fc6edf4ea2a719484",
+            "path": "packages/autofix"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
+      "name": "dsh-tapd",
+      "title": "TAPD",
+      "description": {
+        "en": "TAPD as a source of bugs for Autofix: fetches the bugs under your name and writes status and comments back",
+        "zh": "把 TAPD 作为「自动修复」的缺陷来源：拉取你名下的缺陷，并回写状态和评论"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/tapd",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/tapd"
+      },
+      "metadata": {
+        "keywords": [
+          "tapd",
+          "bugs"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1794367647,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "cb94bd6e1b0209959d8a830fc6edf4ea2a719484",
+            "path": "packages/tapd"
+          },
+          "engines": {
+            "dsh": ">=0.2.2-rc.1 <0.3.0"
           }
         }
       ]
