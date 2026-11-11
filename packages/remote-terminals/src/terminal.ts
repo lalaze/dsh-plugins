@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from '@dsh-plugins/remote-core/ssh.js';
 import { dshHome } from '@dsh-plugins/remote-core/access.js';
@@ -19,7 +19,7 @@ function override<T extends object, K extends keyof T>(target: T, key: K, value:
 
 /** The part of DSH's terminal controller that starts a terminal's process. */
 interface TerminalSpawner {
-  spawn?(this: TerminalSpawner, agent: unknown, owner: unknown, request: { id: string }, signal: AbortSignal): unknown;
+  spawn?(this: TerminalSpawner, agent: unknown, owner: unknown, request: { id: string; shellPath?: string }, signal: AbortSignal): unknown;
   execution?(this: TerminalSpawner, agent: unknown): { subprocess: object };
 }
 
@@ -42,6 +42,22 @@ export function passTerminalId(controller: TerminalSpawner): () => void {
       } }) };
     });
     try { return spawn.call(this, agent, owner, request, signal); } finally { restore(); }
+  });
+}
+
+/**
+ * A browser remembers a launcher by its full path: for a sidebar terminal to start again after DSH restarts, and for what
+ * New terminal opens. The folder is the installed plugin's, and it moved when terminals left Remote Agents. DSH refuses a
+ * path it does not offer now, so one that names a launcher in another folder starts today's launcher of that name.
+ * Stop this before whatever replaced `spawn` earlier.
+ */
+export function followMovedLaunchers(controller: TerminalSpawner, launchers: readonly string[]): () => void {
+  const { spawn } = controller;
+  if (typeof spawn !== 'function') return () => {};
+  const current = new Map(launchers.map(path => [basename(path), path]));
+  return override(controller, 'spawn', function (agent, owner, request, signal) {
+    const launcher = request.shellPath === undefined ? undefined : current.get(basename(request.shellPath));
+    return spawn.call(this, agent, owner, launcher && launcher !== request.shellPath ? { ...request, shellPath: launcher } : request, signal);
   });
 }
 
@@ -157,7 +173,7 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   await installLauncher(launcher, ''); await installLauncher(claudeLauncher, 'claude'); await installLauncher(codexLauncher, 'codex');
   const launchers = [launcher, claudeLauncher, codexLauncher];
   for (const path of launchers) if (!candidates.includes(path)) candidates.push(path);
-  const stopPassing = passTerminalId(controller);
+  const stopPassing = passTerminalId(controller), stopFollowing = followMovedLaunchers(controller, launchers);
   // Leave the launchers on disk until the next boot: an already open native terminal may still start them.
-  return { shell: launcher, dispose: () => { stopPassing(); for (const path of launchers) { const index = candidates.indexOf(path); if (index >= 0) candidates.splice(index, 1); } } };
+  return { shell: launcher, dispose: () => { stopFollowing(); stopPassing(); for (const path of launchers) { const index = candidates.indexOf(path); if (index >= 0) candidates.splice(index, 1); } } };
 }

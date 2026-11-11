@@ -2,6 +2,9 @@ import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from '@dsh-plugins
 
 const LAUNCHERS = new Set<string>([TERMINAL_LAUNCHER, CLAUDE_LAUNCHER, CODEX_LAUNCHER]);
 const KEY = 'remote-agents.terminal.shell.';
+/** What DSH's New terminal opens; see terminal-preference.ts. */
+const DSH_KEY = 'dsh.terminal.shell';
+const fileName = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
 
 interface TerminalState { info?: { shell?: { path?: string; name?: string } } }
 /** A DSH terminal's view. Its last three fields are internal to DSH; a version without them keeps its own behaviour. */
@@ -36,7 +39,12 @@ export function restoreRemoteTerminals(terminals: TerminalViews): () => void {
     if (shell && model.createWhenMissing === false) { model.createWhenMissing = true; model.shellPath = shell; }
     const remember = () => {
       const running = model.state.getSnapshot().info?.shell;
-      if (running?.path && isRemoteLauncher(running.name)) write(stored, running.path);
+      if (!running?.path || !isRemoteLauncher(running.name)) return;
+      write(stored, running.path);
+      // The server starts a launcher remembered in a folder an update left behind, but DSH has by then remembered that
+      // path for New terminal, where it would find nothing and open the local shell.
+      const preferred = read(DSH_KEY);
+      if (preferred && preferred !== running.path && fileName(preferred) === fileName(running.path)) write(DSH_KEY, running.path);
     };
     remember();
     if (!seen.has(model)) { seen.add(model); model.state.subscribe(remember); }
