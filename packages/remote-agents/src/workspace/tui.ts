@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
-import type { Store } from '../core/store.js';
+import type { TuiStore } from './tui-state.js';
 import type { TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { tuiHolder } from './holder-protocol.js';
 
@@ -90,7 +90,7 @@ function routeModel(route: unknown, expected: TuiCli): string | undefined {
  * records an empty turn. The conversation itself lives in the remote CLI; see the launchers in terminal.ts.
  */
 export class TuiSessions {
-  constructor(private readonly store: Store, private readonly dsh: {
+  constructor(private readonly store: TuiStore, private readonly dsh: {
     /** Rejects a conversation that is not a verified remote workspace. */
     verify(sessionId: string, signal: AbortSignal): Promise<{ hostId: string }>;
     session(sessionId: string): TuiSession | undefined;

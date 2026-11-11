@@ -6,8 +6,7 @@ import path, { posix } from 'node:path';
 import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { quote } from '@dsh-plugins/remote-core/ssh.js';
 import { GIT_LIMITS } from '@dsh-plugins/remote-core/workspace.js';
-import type { WorkspaceFiles } from './files.js';
-import type { WorkspaceHosts } from './hosts.js';
+import type { MachineFiles, RemoteAgentsMachines } from '@dsh-plugins/remote-core/machines.js';
 
 /** One Git command's outcome; `code` is null for a command that was stopped or timed out. */
 export interface GitResult { code: number | null; stdout: string; stderr: string }
@@ -108,8 +107,8 @@ export class RemoteMachine implements WorktreeMachine {
   readonly kind = 'remote' as const;
   readonly path: PathModule = posix;
   private homePath?: string;
-  constructor(private readonly machines: WorkspaceHosts, readonly hostId: string) {}
-  private files<T>(action: (files: WorkspaceFiles) => Promise<T>): Promise<T> {
+  constructor(private readonly machines: Pick<RemoteAgentsMachines, 'browse' | 'withWorkspace'>, readonly hostId: string) {}
+  private files<T>(action: (files: MachineFiles) => Promise<T>): Promise<T> {
     return this.machines.withWorkspace(this.hostId, async () => {}, action);
   }
   async home(): Promise<string> {

@@ -4,17 +4,12 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { RemoteError, field, record } from '@dsh-plugins/remote-core/domain.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { under, type WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
-import type { TuiUsageEntry } from './tui-usage.js';
-import { FILE_LIMIT, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type SyncResult, type WorkspaceManifest, type WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
+import { FILE_LIMIT, TEXT_LIMIT, type FileOperation, type GitBatch, type GitRun, type SyncResult, type WorkspaceManifest, type WorkspaceTarget, workspacePath } from '@dsh-plugins/remote-core/workspace.js';
+export { workspacePath };
 
 export type SessionPlacement = (id: string, signal: AbortSignal) => Promise<WorkspacePlacement>;
 export const hash = (data: Uint8Array | string) => createHash('sha256').update(data).digest('hex');
 const ignore = new Set(['.git', 'node_modules', 'dist', 'build', 'target', '.dsh-remote-agents', '.dsh-remote-meta.json']);
-/** A path exactly as given: names may begin or end with spaces, so trimming would address a different file. */
-export function workspacePath(value: unknown, label: string): string {
-  if (typeof value !== 'string' || !value || value.length > 4096 || /[\0\r]/.test(value)) throw new RemoteError(`Invalid ${label}`);
-  return value;
-}
 export function fileOperation(raw: unknown): FileOperation {
   const v = record(raw), op = field(v.op, 'workspace operation', 40), path = v.path === '' ? '' : workspacePath(v.path ?? '.', 'workspace path');
   if (op === 'list' || op === 'read' || op === 'stat' || op === 'mkdir' || op === 'manifest') return { op, path };
@@ -64,34 +59,6 @@ export class WorkspaceService {
   async readViewed(sessionId: string, path: string, limit: number, signal: AbortSignal): Promise<Buffer | undefined> {
     const target = await this.target(sessionId, signal);
     return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
-  }
-  /** Ends a terminal the user closed, which otherwise keeps running on the conversation's machine. */
-  async endHolder(sessionId: string, holder: string, signal: AbortSignal): Promise<void> {
-    const target = await this.target(sessionId, signal);
-    await this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.endHolder(holder));
-  }
-  /** The title records of a Claude Code session on the conversation's verified machine. */
-  async claudeTitleRecords(sessionId: string, claudeSession: string, signal: AbortSignal): Promise<string> {
-    const target = await this.target(sessionId, signal);
-    return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.claudeTitleRecords(claudeSession));
-  }
-  /**
-   * What TUI conversations' CLIs logged on one machine since the last read, for their usage; every conversation is
-   * verified to be on it again first. See WorkspaceFiles.tuiUsageLines.
-   */
-  async tuiUsageLines(hostId: string, sessions: readonly { sessionId: string; target: WorkspaceTarget }[], entries: readonly TuiUsageEntry[], signal: AbortSignal): Promise<Buffer> {
-    const verify = async () => { for (const { sessionId, target } of sessions) await this.target(sessionId, signal, target); };
-    return this.machines.withWorkspace(hostId, verify, files => files.tuiUsageLines(entries, signal));
-  }
-  /** A new Codex thread in the conversation's verified remote directory. */
-  async codexThread(sessionId: string, name: string, signal: AbortSignal): Promise<string> {
-    const target = await this.target(sessionId, signal);
-    return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.codexThread(target.cwd, name, signal));
-  }
-  /** The title records of a Codex thread on the conversation's verified machine. */
-  async codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string> {
-    const target = await this.target(sessionId, signal);
-    return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.codexTitleRecords(thread));
   }
   async upload(sessionId: string, path: string, rev: string | null, size: number, input: AsyncIterable<Uint8Array>, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown> {
     revision(rev); const target = await this.target(sessionId, signal, expected);

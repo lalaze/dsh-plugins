@@ -7,19 +7,14 @@ import type { Store } from '../core/store.js';
 import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type WorkspaceRuntime } from '@dsh-plugins/remote-core/access.js';
 import { editorHandler } from './editor-route.js';
 import type { WorkspaceHosts } from './hosts.js';
-import { tuiFilesHandler, workspaceTransferHandler, type WorkspaceFeatures } from './http.js';
+import { workspaceTransferHandler } from './http.js';
+import type { RemoteAgentsMachines } from '@dsh-plugins/remote-core/machines.js';
+import { installTerminals, type Terminals } from './terminals.js';
 import { type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync, type WorkspaceTagsService } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
-import { endClosedTerminals, installWorkspaceTerminal, type ClosableTerminals } from './terminal.js';
-import { installTuiActivity } from './tui-activity.js';
-import { TuiFiles } from './tui-files.js';
-import { TuiUsage } from './tui-usage.js';
-import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
 import { workspaceTools } from './tools.js';
-import { WorktreeService, type DshWorkspaceController } from './worktrees.js';
-import type { ArchiveCheck, ArchiveRequest, CreateRequest, JobAction, WorkspaceMachine, WorktreeJob, WorktreeProject, WorktreeProjectDetail } from './worktrees.js';
 
 /**
  * What other DSH plugins on this host may do in a conversation's remote workspace, as the service `remoteAgentsWorkspaces`:
@@ -42,35 +37,18 @@ export interface RemoteAgentsWorkspaces {
   /** Deletes the file read at `revision`; a file changed since is refused. Absent before Remote Agents 0.2.64. */
   remove?(sessionId: string, path: string, revision: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<{ path: string }>;
 }
-/**
- * Worktree workspaces for other DSH plugins, as the service `remoteAgentsWorktrees`: what "New workspace from a project"
- * does, for a project on this computer or on a saved machine, and a way to run Git and shell commands in a workspace's
- * folder. A create or archive answers with a job; `job` reads how far it is and `act` answers what it stopped to ask.
- */
-export interface RemoteAgentsWorktrees {
-  readonly version: 1;
-  projects(signal?: AbortSignal): Promise<WorktreeProject[]>;
-  inspect(path: string, signal?: AbortSignal): Promise<WorktreeProjectDetail>;
-  create(request: CreateRequest): WorktreeJob;
-  job(id: string): WorktreeJob;
-  act(id: string, action: JobAction): Promise<WorktreeJob>;
-  archiveCheck(path: string, worktree: string, signal?: AbortSignal): Promise<ArchiveCheck>;
-  archive(request: ArchiveRequest): WorktreeJob;
-  /** `path` is a DSH workspace's path, as in a project or a finished create. */
-  machine(path: string, signal?: AbortSignal): Promise<WorkspaceMachine>;
-}
 export interface Workspaces {
   /** Which saved machines and remote directory a local workspace path stands for. */
   access: WorkspaceAccess;
   /** The verified placement of a DSH conversation, rechecked so a workspace switch during verification yields none. */
   placement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
   workspaces: RemoteWorkspaces;
-  features: WorkspaceFeatures & { worktrees: WorktreeService };
+  features: { files: WorkspaceService } & Terminals;
 }
 
 /**
- * Remote workspace tools on the saved machines: files, sync, the native terminal's Remote workspace shell, the
- * `remote_workspace` tool and its system prompt.
+ * Remote workspaces on the saved machines: files, sync, the `remote_workspace` tool and its system prompt, and the
+ * service other plugins work on those machines through.
  */
 export async function installWorkspaces(ctx: Context, store: Store, machines: WorkspaceHosts): Promise<Workspaces> {
   const access = new WorkspaceAccess(() => store.hosts(), { runtime: () => ctx.get('subprocess') as WorkspaceRuntime | undefined });
@@ -103,7 +81,6 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     list: async (id, path, signal = unbounded(), expected) => await files.operate(id, { op: 'list', path }, signal, expected) as { path: string; entries: WorkspaceEntry[] },
     remove: async (id, path, revision, signal = unbounded(), expected) => await files.operate(id, { op: 'remove', path, revision }, signal, expected) as { path: string },
   } satisfies RemoteAgentsWorkspaces);
-  const terminal: { shell?: string } = {};
   // Uploads stream; downloads need their own buffered route, because DSH builds every request of a streaming route
   // with the request stream as its body, and a GET request with a body cannot be built.
   const transfer = workspaceTransferHandler(files);
@@ -111,24 +88,6 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
   ctx.connection.fetch.register({ path: '/api/remote-agents/download', methods: ['GET'], requestBody: 'buffered', fetch: transfer });
   // The client's EDITOR_SRC; the build writes the bundle next to lib/server.
   ctx.connection.fetch.register({ path: '/api/remote-agents/editor.js', methods: ['GET'], requestBody: 'buffered', fetch: editorHandler(new URL('../../editor.js', import.meta.url)) });
-  // TUI conversations' usage, read from their CLIs' logs, as no relay sees their turns.
-  const tuiUsage = new TuiUsage(store, {
-    target: (id, signal) => files.target(id, signal),
-    read: (hostId, sessions, entries, signal) => files.tuiUsageLines(hostId, sessions, entries, signal),
-    emit: record => ctx.emit('remote-agents/usage', record),
-    warn: message => (ctx.get('logger') as { warn?(text: string): void } | undefined)?.warn?.(message),
-  });
-  tuiUsage.start();
-  ctx.effect(() => () => tuiUsage.close());
-  installTuiActivity(ctx, store, id => tuiUsage.finished(id));
-  ctx.inject(['terminalController'], scoped => {
-    scoped.effect(() => endClosedTerminals(scoped.get('terminalController') as ClosableTerminals, (sessionId, holder) => files.endHolder(sessionId, holder, AbortSignal.timeout(20_000))));
-    let disposed = false, cleanup: (() => void) | undefined;
-    void installWorkspaceTerminal(scoped.get('terminalController'), join(store.directory, 'terminal'), join(store.directory, 'state.json'))
-      .then(({ shell, dispose }) => { if (disposed) dispose(); else { cleanup = () => { delete terminal.shell; dispose(); }; terminal.shell = shell; } })
-      .catch(error => scoped.get('logger')?.warn?.(`Remote workspace terminal unavailable: ${String(error)}`));
-    scoped.effect(() => () => { disposed = true; cleanup?.(); });
-  });
   ctx.inject(['systemPrompt'], scoped => {
     (scoped.get('systemPrompt') as { section(value: unknown): void }).section({ name: 'remote-agents-workspace', order: 88,
       text: ({ agent }: { agent?: { session?: { header?: { cwd?: string } } } }) => {
@@ -143,41 +102,18 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     for (const tool of workspaceTools(files, host, agent => accessOf(scoped, (agent as { session?: Session } | undefined)?.session).permission)) host.tools.register(tool);
   });
   installTagSync(ctx, store, machines, access);
-  // New workspaces from a project: a Git worktree here or on a saved machine.
-  const worktrees = new WorktreeService({
-    machines, access, anchors: workspaces,
-    dsh: () => ctx.get('workspaceController') as DshWorkspaceController | undefined,
-    tags: () => ctx.get('workspaceTags') as WorkspaceTagsService | undefined,
-    stopRemoteSessions: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
-  });
-  ctx.effect(() => () => worktrees.close());
-  ctx.provide('remoteAgentsWorktrees', {
-    version: 1,
-    projects: signal => worktrees.projects(signal), inspect: (path, signal) => worktrees.inspect(path, signal),
-    create: request => worktrees.create(request), job: id => worktrees.job(id), act: (id, action) => worktrees.act(id, action),
-    archiveCheck: (path, worktree, signal) => worktrees.archiveCheck(path, worktree, signal), archive: request => worktrees.archive(request),
-    machine: (path, signal) => worktrees.machine(path, signal),
-  } satisfies RemoteAgentsWorktrees);
-  const sessionController = () => ctx.get('sessionController') as { list(input: object): Promise<{ items?: { sessionId: string; blank?: boolean }[] }>; rename(input: { sessionId: string; title: string }): Promise<unknown>; selectModel(input: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown> } | undefined;
-  const tui = new TuiSessions(store, {
-    verify: (id, signal) => files.target(id, signal),
-    session: id => (ctx.get('sessions') as { get?(id: string): { append(type: string, data: unknown): unknown } | undefined } | undefined)?.get?.(id),
-    agent: id => (ctx.get('agents') as { get?(id: string): unknown } | undefined)?.get?.(id),
-    list: async () => (await sessionController()?.list({}))?.items ?? [],
-    rename: async (sessionId, title) => { await sessionController()?.rename({ sessionId, title }); },
-    selectModel: async selection => {
-      const controller = sessionController();
-      if (!controller) throw new Error('DSH sessions are not available yet');
-      await controller.selectModel(selection);
-    },
-    titleRecords: (id, claudeSession, signal) => files.claudeTitleRecords(id, claudeSession, signal),
-    codexThread: (id, signal) => files.codexThread(id, CODEX_THREAD_NAME, signal),
-    codexTitleRecords: (id, thread, signal) => files.codexTitleRecords(id, thread, signal),
-    endHolder: (id, holder, signal) => files.endHolder(id, holder, signal),
-  });
-  ctx.connection.fetch.register({ path: '/api/remote-agents/tui-files', methods: ['POST'], requestBody: 'streaming',
-    fetch: tuiFilesHandler(new TuiFiles({ isTui: id => tui.list().includes(id), directory: store.directory, attach: (...file) => files.attach(...file) })) });
-  return { access, placement, workspaces, features: { files, terminal, worktrees, tui } };
+  // Terminals, TUI conversations and worktrees reach the machines through this service alone.
+  const remote: RemoteAgentsMachines = {
+    version: 1, stateFile: join(store.directory, 'state.json'),
+    hosts: () => machines.hosts(), browse: (hostId, path, options) => machines.browse(hostId, path, options),
+    withWorkspace: (hostId, verify, action) => machines.withWorkspace(hostId, verify, action),
+    target: (sessionId, signal = unbounded(), expected) => files.target(sessionId, signal, expected),
+    resolve: (path, signal) => access.resolve(path, signal),
+    createWorkspace: (hostId, path, signal) => workspaces.create(hostId, path, signal),
+    archiveSessionsIn: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
+  };
+  ctx.provide('remoteAgentsMachines', remote);
+  return { access, placement, workspaces, features: { files, ...installTerminals(ctx, remote, store, remote.stateFile) } };
 }
 
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */

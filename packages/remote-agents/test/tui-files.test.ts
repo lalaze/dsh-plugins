@@ -7,7 +7,7 @@ import { test, type TestContext } from 'node:test';
 import { clipboardImage, pastedFiles, pastesFor, pickFiles, terminalPath, TuiUploads } from '../src/client/workspace/tui-files.js';
 import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { FILE_LIMIT } from '@dsh-plugins/remote-core/workspace.js';
-import { tuiFilesHandler } from '../src/workspace/http.js';
+import { tuiFilesHandler } from '../src/workspace/terminals.js';
 import { TuiFiles, tuiFileName, tuiFilePath } from '../src/workspace/tui-files.js';
 
 const signal = new AbortController().signal;

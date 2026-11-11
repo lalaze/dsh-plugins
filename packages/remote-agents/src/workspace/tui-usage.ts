@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { TurnUsage } from '@dsh-plugins/remote-core/domain.js';
-import type { Store, TuiDetails } from '../core/store.js';
+import type { TuiDetails, TuiStore } from './tui-state.js';
 import { claudeTurnUsage, codexTurnUsage, type RemoteUsageRecord } from '@dsh-plugins/remote-core/usage.js';
 import type { TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { tuiClaudeSession } from './tui.js';
@@ -267,7 +267,7 @@ export class TuiUsage {
   private soon?: ReturnType<typeof setTimeout>;
   private closed = false;
   private readonly abort = new AbortController();
-  constructor(private readonly store: Pick<Store, 'snapshot' | 'update'>, private readonly deps: {
+  constructor(private readonly store: Pick<TuiStore, 'snapshot' | 'update'>, private readonly deps: {
     /** The conversation's verified machine and remote directory. */
     target(sessionId: string, signal: AbortSignal): Promise<Target>;
     /** Runs one read on a machine, once every conversation in it is verified again. */

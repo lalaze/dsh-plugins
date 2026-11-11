@@ -2,10 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, realpath, rm } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
-import { dshHome, under, type WorkspaceAccess, type WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
-import type { WorkspaceHosts } from './hosts.js';
-import type { RemoteWorkspaces } from './remote-workspaces.js';
-import type { WorkspaceTagsService } from './tag-sync.js';
+import { dshHome, under, type WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
+import type { RemoteAgentsMachines } from '@dsh-plugins/remote-core/machines.js';
 import { LocalMachine, RemoteMachine, type GitResult, type GitStep, type WorktreeMachine } from './worktree-machine.js';
 
 /**
@@ -109,12 +107,18 @@ export interface DshWorkspaceController {
   archiveSession(request: { sessionId: string; stopActivity?: boolean }): Promise<unknown>;
   follow(signal: AbortSignal): AsyncIterable<{ type: string; value?: { items?: readonly DshWorkspace[] } }>;
 }
+/** The part of dsh-workspace-tags' service a new workspace takes its tags through. */
+export interface WorkspaceTags {
+  snapshot(): TagAssignments;
+  replace(state: TagAssignments): Promise<unknown>;
+}
+interface TagAssignments { assignments: Record<string, string[]>; [other: string]: unknown }
 export interface WorktreeHost {
-  machines: WorkspaceHosts;
-  access: Pick<WorkspaceAccess, 'resolve'>;
-  anchors: Pick<RemoteWorkspaces, 'create'>;
+  machines: Pick<RemoteAgentsMachines, 'hosts' | 'browse' | 'withWorkspace'>;
+  access: { resolve: RemoteAgentsMachines['resolve'] };
+  anchors: { create: RemoteAgentsMachines['createWorkspace'] };
   dsh(): DshWorkspaceController | undefined;
-  tags?(): WorkspaceTagsService | undefined;
+  tags?(): WorkspaceTags | undefined;
   /** Stops and archives remote CLI sessions working in a folder on a machine. */
   stopRemoteSessions?(hostId: string, folder: string): Promise<void>;
   /** DSH's home folder; holds this computer's worktrees and the remote workspace anchors. */

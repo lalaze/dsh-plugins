@@ -1,36 +1,12 @@
 import { field, identifier, RemoteError } from '@dsh-plugins/remote-core/domain.js';
-import { FILE_LIMIT, type WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
+import { requireClient, transferBody, transferFailure, transferSize } from '@dsh-plugins/remote-core/transfer.js';
+import type { WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
 import type { WorkspaceService } from './service.js';
 import { revision, workspacePath } from './service.js';
-import type { TuiFiles } from './tui-files.js';
-import type { TuiSessions } from './tui.js';
-import type { JobAction, WorktreeService } from './worktrees.js';
+import type { Terminals } from './terminals.js';
 
 /** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
-export interface WorkspaceFeatures { files: WorkspaceService; terminal?: { shell?: string }; worktrees?: WorktreeService; tui?: TuiSessions }
-const JOB_ACTIONS: readonly JobAction[] = ['cancel', 'retry', 'skip', 'discard', 'confirm'];
-/** Worktree workspaces: a project's DSH workspace path, a worktree's path on its machine, and operation IDs. */
-export async function worktreeAction(worktrees: WorktreeService, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-  const path = () => workspacePath(input.path, 'workspace path'), job = () => identifier(input.jobId);
-  const name = (value: unknown, label: string) => value === undefined || value === '' ? undefined : field(value, label, 250);
-  switch (action) {
-    case 'worktreeProjects': return worktrees.projects(signal);
-    case 'worktreeInspect': return worktrees.inspect(path(), signal);
-    case 'createWorktree': {
-      if (input.mode !== 'new' && input.mode !== 'existing') throw new RemoteError('Invalid worktree mode');
-      const setup = Array.isArray(input.setup) && input.setup.every(command => typeof command === 'string') ? input.setup as string[] : undefined;
-      return worktrees.create({ path: path(), mode: input.mode, base: name(input.base, 'branch'), branch: name(input.branch, 'branch'), setup });
-    }
-    case 'worktreeJob': return worktrees.job(job());
-    case 'worktreeJobAction': {
-      if (!JOB_ACTIONS.includes(input.jobAction as JobAction)) throw new RemoteError('Invalid worktree action');
-      return worktrees.act(job(), input.jobAction as JobAction);
-    }
-    case 'worktreeArchiveCheck': return worktrees.archiveCheck(path(), workspacePath(input.worktree, 'worktree'), signal);
-    case 'archiveWorktree': return worktrees.archive({ path: path(), worktree: workspacePath(input.worktree, 'worktree'), deleteBranch: input.deleteBranch === true });
-  }
-  throw new RemoteError('Unknown workspace action');
-}
+export interface WorkspaceFeatures extends Partial<Terminals> { files: WorkspaceService }
 export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   if (value === undefined) return;
   if (!value || typeof value !== 'object') throw new RemoteError('Invalid workspace target');
@@ -38,21 +14,7 @@ export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   return { hostId: identifier(v.hostId), cwd: workspacePath(v.cwd, 'remote workspace'), label: '' };
 }
 export async function workspaceAction(features: WorkspaceFeatures, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-  if (action === 'tuiSessions') return { sessions: features.tui?.list() ?? [], codex: features.tui?.codex() ?? [], localScroll: features.tui?.localScroll() ?? true };
-  if (action === 'tuiScroll') {
-    if (!features.tui) throw new RemoteError('The TUI is unavailable', 501);
-    if (typeof input.local !== 'boolean') throw new RemoteError('Invalid scrolling choice');
-    await features.tui.setLocalScroll(input.local);
-    return { localScroll: input.local };
-  }
   const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
-  if (action === 'tuiStart') {
-    if (!features.tui) throw new RemoteError('The TUI is unavailable', 501);
-    await features.tui.start(sessionId, { cli: input.cli, model: input.model, effort: input.effort }, signal);
-    return { sessionId };
-  }
-  if (action === 'tuiTitle') return { title: await features.tui?.syncTitle(sessionId, input.current, signal) };
-  if (action === 'tuiEnd') { await features.tui?.end(sessionId, signal); return { ok: true }; }
   if (action === 'workspaceTarget') {
     const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
     return shell ? { ...target, terminalShell: shell } : target;
@@ -64,24 +26,6 @@ export async function workspaceAction(features: WorkspaceFeatures, action: strin
     return features.files.sync(sessionId, input.direction, input.apply !== true, signal, expected, plan);
   }
   throw new RemoteError('Unknown workspace action');
-}
-const requireClient = (request: Request) => { if (request.headers.get('X-DSH-Remote-Agents') !== '1') throw new RemoteError('Use the remote agents client to submit requests', 403); };
-const transferFailure = (error: unknown) => Response.json({ error: error instanceof Error ? error.message : 'File transfer failed' }, { status: error instanceof RemoteError ? error.status : 502 });
-/** The size an upload declares. */
-function transferSize(request: Request): number {
-  const size = Number(request.headers.get('X-File-Size'));
-  if (!request.headers.has('X-File-Size') || !Number.isSafeInteger(size) || size < 0 || size > FILE_LIMIT) throw new RemoteError('File exceeds the 50 MB transfer limit', 413);
-  return size;
-}
-/** An upload's body as it arrives, held to exactly the size it declared. */
-async function* transferBody(request: Request, size: number): AsyncGenerator<Uint8Array> {
-  const reader = request.body?.getReader();
-  let bytes = 0;
-  if (reader) {
-    try { while (true) { const { done, value } = await reader.read(); if (done) break; bytes += value.length; if (bytes > size) throw new RemoteError('Upload byte count mismatch', 413); yield value; } }
-    finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-  }
-  if (bytes !== size) throw new RemoteError('Upload byte count mismatch');
 }
 export function workspaceTransferHandler(files: WorkspaceService) {
   return async (request: Request): Promise<Response> => {
@@ -99,16 +43,6 @@ export function workspaceTransferHandler(files: WorkspaceService) {
       const size = transferSize(request);
       const rev = revision(request.headers.get('X-File-Revision') === 'new' ? null : request.headers.get('X-File-Revision'));
       return Response.json(await files.upload(sessionId, path, rev, size, transferBody(request, size), request.signal, target), { headers: { 'Cache-Control': 'no-store' } });
-    } catch (error) { return transferFailure(error); }
-  };
-}
-/** A file dropped or pasted into a TUI conversation, which comes back as its absolute path on the conversation's machine. */
-export function tuiFilesHandler(files: TuiFiles) {
-  return async (request: Request): Promise<Response> => {
-    try {
-      requireClient(request);
-      const q = new URL(request.url).searchParams, sessionId = field(q.get('sessionId'), 'session ID', 256), size = transferSize(request);
-      return Response.json({ path: await files.upload(sessionId, q.get('name'), transferBody(request, size), request.signal) }, { headers: { 'Cache-Control': 'no-store' } });
     } catch (error) { return transferFailure(error); }
   };
 }

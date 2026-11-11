@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TuiScrollChoice } from '../src/client/workspace/tui-scroll.js';
-import { workspaceAction, type WorkspaceFeatures } from '../src/workspace/http.js';
+import { tuiAction } from '../src/workspace/terminals.js';
 import { endHolderScript } from '../src/workspace/holder-protocol.js';
 import { TuiSessions } from '../src/workspace/tui.js';
 import { fixture } from './fakes.js';
@@ -15,16 +15,15 @@ const settled = () => new Promise(resolve => setImmediate(resolve));
 test('local scrolling is on until switched off, and the server keeps the choice', async t => {
   const f = await fixture(t);
   const tui = new TuiSessions(f.store, {} as ConstructorParameters<typeof TuiSessions>[1]);
-  const features = { tui } as unknown as WorkspaceFeatures, signal = new AbortController().signal;
+  const signal = new AbortController().signal;
   assert.equal(tui.localScroll(), true);
-  assert.deepEqual(await workspaceAction(features, 'tuiSessions', {}, signal), { sessions: [], codex: [], localScroll: true });
-  assert.deepEqual(await workspaceAction(features, 'tuiScroll', { local: false }, signal), { localScroll: false });
+  assert.deepEqual(await tuiAction(tui, 'tuiSessions', {}, signal), { sessions: [], codex: [], localScroll: true });
+  assert.deepEqual(await tuiAction(tui, 'tuiScroll', { local: false }, signal), { localScroll: false });
   assert.equal(f.store.snapshot().tuiLocalScroll, false);
-  assert.deepEqual(await workspaceAction(features, 'tuiSessions', {}, signal), { sessions: [], codex: [], localScroll: false });
-  await workspaceAction(features, 'tuiScroll', { local: true }, signal);
+  assert.deepEqual(await tuiAction(tui, 'tuiSessions', {}, signal), { sessions: [], codex: [], localScroll: false });
+  await tuiAction(tui, 'tuiScroll', { local: true }, signal);
   assert.equal(tui.localScroll(), true);
-  await assert.rejects(workspaceAction(features, 'tuiScroll', { local: 'yes' }, signal), /Invalid scrolling choice/);
-  await assert.rejects(workspaceAction({} as WorkspaceFeatures, 'tuiScroll', { local: true }, signal), /unavailable/);
+  await assert.rejects(tuiAction(tui, 'tuiScroll', { local: 'yes' }, signal), /Invalid scrolling choice/);
 });
 
 test('the switch shows the cached choice at once, saves a change, and follows the server', async () => {

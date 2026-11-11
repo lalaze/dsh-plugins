@@ -69,9 +69,10 @@ export function endClosedTerminals(controller: ClosableTerminals, end: (sessionI
  * On the host the shell or CLI runs in a holder (see terminal-hold.ts), so it outlives DSH and the connection; a host that
  * cannot run one gets a plain connection.
  * DSH does not pass DSH_HOME to its terminals, so the launcher carries the home it was installed from.
- * `modules` is the compiled server root the launcher imports the store, SSH and workspace modules from.
+ * `state` names the files it reads the saved machines and the TUI conversations from; `modules` is the compiled server
+ * root it imports the SSH and workspace modules from.
  */
-export async function installWorkspaceTerminal(controller: TerminalSpawner & { config?: { shellCandidates?: string[] } }, directory: string, stateFile: string, modules = new URL('../', import.meta.url)): Promise<{ shell?: string; dispose(): void }> {
+export async function installWorkspaceTerminal(controller: TerminalSpawner & { config?: { shellCandidates?: string[] } }, directory: string, state: { hosts: string; tui: string }, modules = new URL('../', import.meta.url)): Promise<{ shell?: string; dispose(): void }> {
   const candidates = controller.config?.shellCandidates;
   if (!Array.isArray(candidates)) return { dispose: () => {} };
   await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -81,9 +82,9 @@ export async function installWorkspaceTerminal(controller: TerminalSpawner & { c
   const holderPath = fileURLToPath(new URL('../terminal-holder.mjs', modules));
   const holderVersion = await readFile(holderPath).then(data => createHash('sha256').update(data).digest('hex').slice(0, 16), () => undefined);
   const source = `import { spawn } from 'node:child_process';
-import { realpath } from 'node:fs/promises';
+import { readFile, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { Store } from ${JSON.stringify(new URL('core/store.js', modules).href)};
+import { savedHosts } from ${JSON.stringify(new URL('core/saved-hosts.js', modules).href)};
 import { WorkspaceAccess, omcStateDir, under } from ${JSON.stringify(new URL('core/access.js', modules).href)};
 import { connectionInput, quote } from ${JSON.stringify(new URL('core/ssh.js', modules).href)};
 import { tuiClaudeSession } from ${JSON.stringify(new URL('workspace/tui.js', modules).href)};
@@ -94,9 +95,9 @@ const run = (file, args, env) => {
   child.on('error', e => { process.stderr.write(e.message + '\\n'); process.exitCode = 1; });
   child.on('exit', code => { process.exitCode = code ?? 1; });
 };
-const store = new Store(${JSON.stringify(stateFile)}); await store.open();
+const hosts = await savedHosts(${JSON.stringify(state.hosts)});
 const cwd = process.cwd();
-const placement = await new WorkspaceAccess(() => store.hosts(), { home: await realpath(process.env.DSH_HOME?.trim() || ${JSON.stringify(dshHome())}) }).resolve(cwd);
+const placement = await new WorkspaceAccess(() => hosts, { home: await realpath(process.env.DSH_HOME?.trim() || ${JSON.stringify(dshHome())}) }).resolve(cwd);
 // A removed oh-my-claude placeholder keeps refusing: its empty folder is not the project.
 if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolve(cwd))) {
   process.stderr.write('Not a remote workspace; starting the local shell.\\n');
@@ -109,14 +110,15 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
     run(env.SHELL || '/bin/sh', ['-i'], env);
   }
 } else {
-  const host = store.hosts().find(h => placement.hostIds.includes(h.id));
+  const host = hosts.find(h => placement.hostIds.includes(h.id));
   if (!host || !placement.cwd) throw new Error('Select a verified remote workspace before using this shell.');
   const url = new URL(connectionInput(host.connection));
   const target = (url.username ? decodeURIComponent(url.username) + '@' : '') + url.hostname;
   const shell = '"\${SHELL:-/bin/sh}"';
   const cli = process.argv[2];
   const dshSession = process.env.DSH_SESSION_ID;
-  const saved = store.snapshot();
+  // What is saved about TUI conversations; see TuiState.
+  const saved = JSON.parse(await readFile(${JSON.stringify(state.tui)}, 'utf8').catch(error => { if (error.code === 'ENOENT') return '{}'; throw error; }));
   const details = (dshSession && saved.tuiDetails?.[dshSession]) || {};
   // Only a TUI conversation's own CLI is its session; the other launcher, chosen in its sidebar, is that CLI as usual.
   const own = dshSession && saved.tuiSessions?.includes(dshSession) && (details.cli ?? 'claude') === cli;

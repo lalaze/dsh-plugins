@@ -13,6 +13,9 @@ import { expectedTarget, workspaceTransferHandler } from '../src/workspace/http.
 import type { WorkspaceFile, WorkspaceManifest } from '@dsh-plugins/remote-core/workspace.js';
 import { fixture } from './fakes.js';
 import { codexTitle, CODEX_THREAD_NAME } from '../src/workspace/tui.js';
+import { TuiRemote } from '../src/workspace/tui-remote.js';
+/** A machine's TUI commands, over the same connection as its files. */
+const tui = (files: WorkspaceFiles) => new TuiRemote(files.transport);
 
 class LocalTransport extends OpenSshTransport {
   // The runner keeps its locks under the remote home; tests give it a temporary one.
@@ -253,7 +256,7 @@ const THREAD = '01a1a960-0696-7481-b86c-ea7a878c6479';
 
 test('a Codex thread is started on the app server and saved by naming it, as nothing else saves one without a message', async () => {
   const { files, sent, state } = codexServer({ initialize: {}, 'thread/start': { thread: { id: THREAD } }, 'thread/name/set': {} });
-  assert.equal(await files.codexThread('/srv/app', 'DSH TUI', new AbortController().signal), THREAD);
+  assert.equal(await tui(files).codexThread('/srv/app', 'DSH TUI', new AbortController().signal), THREAD);
   assert.deepEqual(state.started, { cwd: '/srv/app', argv: ['/usr/bin/codex', 'app-server'] });
   assert.deepEqual(sent.map(message => message.method ?? `reply ${message.id}`), ['initialize', 'initialized', 'thread/start', 'reply server-1', 'thread/name/set']);
   assert.deepEqual(sent.find(message => message.method === 'thread/start')?.params, { cwd: '/srv/app' });
@@ -265,14 +268,14 @@ test('a Codex thread is started on the app server and saved by naming it, as not
 test('starting a Codex thread reports a missing CLI or a bad answer, and leaves no app server behind', async () => {
   const signal = new AbortController().signal;
   const missing = codexServer({}, '');
-  await assert.rejects(missing.files.codexThread('/srv/app', 'x', signal), /Codex is not installed/);
+  await assert.rejects(tui(missing.files).codexThread('/srv/app', 'x', signal), /Codex is not installed/);
   assert.equal(missing.state.started, undefined);
   const odd = codexServer({ initialize: {}, 'thread/start': { thread: { id: '$(touch x)' } } });
-  await assert.rejects(odd.files.codexThread('/srv/app', 'x', signal), /did not start a thread/);
+  await assert.rejects(tui(odd.files).codexThread('/srv/app', 'x', signal), /did not start a thread/);
   assert.equal(odd.sent.some(message => message.method === 'thread/name/set'), false, 'an odd ID goes no further');
   assert.equal(odd.state.stopped, 1);
   const controller = new AbortController(), silent = codexServer({ initialize: {} });
-  const started = silent.files.codexThread('/srv/app', 'x', controller.signal);
+  const started = tui(silent.files).codexThread('/srv/app', 'x', controller.signal);
   setTimeout(() => controller.abort(), 20);
   await assert.rejects(started, /closed/);
   assert.ok(silent.state.stopped >= 1, 'giving up closes it');
@@ -284,14 +287,14 @@ test('a Codex thread\'s title records come from the name index and its own recor
   const message = (text: string) => JSON.stringify({ type: 'event_msg', payload: { type: 'item_completed', item: { type: 'UserMessage', content: [{ type: 'text', text }] } } });
   await writeFile(join(sessions, `rollout-2026-11-04T20-39-19-${THREAD}.jsonl`), [JSON.stringify({ type: 'session_meta', payload: { id: THREAD } }), message('Fix the login'), message('Second')].join('\n'));
   await writeFile(join(sessions, `rollout-2026-11-04T20-40-00-${other}.jsonl`), message('Another thread'));
-  assert.equal(codexTitle(await d.files.codexTitleRecords(THREAD)), 'Fix the login', 'no index yet');
+  assert.equal(codexTitle(await tui(d.files).codexTitleRecords(THREAD)), 'Fix the login', 'no index yet');
   const index = (id: string, name: string) => JSON.stringify({ id, thread_name: name, updated_at: 'now' });
   await writeFile(join(d.root, '.codex/session_index.jsonl'), [index(THREAD, CODEX_THREAD_NAME), index(other, 'Theirs')].join('\n'));
-  assert.equal(codexTitle(await d.files.codexTitleRecords(THREAD)), 'Fix the login');
+  assert.equal(codexTitle(await tui(d.files).codexTitleRecords(THREAD)), 'Fix the login');
   await writeFile(join(d.root, '.codex/session_index.jsonl'), [index(THREAD, CODEX_THREAD_NAME), index(other, 'Theirs'), index(THREAD, 'Login work')].join('\n'));
-  assert.equal(codexTitle(await d.files.codexTitleRecords(THREAD)), 'Login work', 'the newest name wins');
-  assert.equal(codexTitle(await d.files.codexTitleRecords('01a1a95c-0000-7df3-8065-26d0933aeb53')), undefined, 'a thread that is gone has none');
-  assert.throws(() => d.files.codexTitleRecords('$(touch x)'), /Invalid Codex thread/);
+  assert.equal(codexTitle(await tui(d.files).codexTitleRecords(THREAD)), 'Login work', 'the newest name wins');
+  assert.equal(codexTitle(await tui(d.files).codexTitleRecords('01a1a95c-0000-7df3-8065-26d0933aeb53')), undefined, 'a thread that is gone has none');
+  assert.throws(() => tui(d.files).codexTitleRecords('$(touch x)'), /Invalid Codex thread/);
 });
 
 test('sync never deletes a synced path that became a symbolic link on either side, nor anything below it', async t => {

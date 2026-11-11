@@ -1,5 +1,5 @@
 import type { Context } from '@deepseek-ai/cordis';
-import type { Store } from '../core/store.js';
+import type { TuiStore } from './tui-state.js';
 import { TUI_LAUNCHERS } from '@dsh-plugins/remote-core/workspace.js';
 
 /** What a TUI conversation's CLI is doing. Approval and question are the kinds DSH's sidebar shows as waiting on the user. */
@@ -182,7 +182,7 @@ interface DshSessionList { summaryFor?(session: unknown): { sessionId: string; r
  * Report TUI conversations' activity: running through DSH's own status event and list, waiting over a route of its own.
  * @param finished - told when a conversation stops running.
  */
-export function installTuiActivity(ctx: Context, store: Pick<Store, 'snapshot'>, finished?: (sessionId: string) => void): void {
+export function installTuiActivity(ctx: Context, store: Pick<TuiStore, 'snapshot'>, finished?: (sessionId: string) => void): void {
   const scopedCtx = ctx as unknown as {
     inject(services: string[], factory: (scoped: { get(name: string): unknown; effect(factory: () => () => void): void }) => void): unknown;
     emit(event: string, ...args: unknown[]): void;

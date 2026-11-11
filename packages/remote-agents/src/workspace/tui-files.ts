@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { stage } from '../agents/attachments.js';
+import { stage } from '@dsh-plugins/remote-core/staging.js';
 import { attachmentInput, RemoteError } from '@dsh-plugins/remote-core/domain.js';
 
 /** Below the 255 bytes file systems allow; the same limit as a chat attachment's name. */

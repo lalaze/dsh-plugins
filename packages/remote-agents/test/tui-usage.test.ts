@@ -10,6 +10,9 @@ import type { RemoteUsageRecord } from '@dsh-plugins/remote-core/usage.js';
 import { WorkspaceFiles } from '../src/workspace/files.js';
 import { tuiClaudeSession } from '../src/workspace/tui.js';
 import { QUIET_MS, readClaudeUsage, readCodexUsage, TuiUsage, tuiUsageChunks, type TuiUsageChunk, type TuiUsageEntry } from '../src/workspace/tui-usage.js';
+import { TuiRemote } from '../src/workspace/tui-remote.js';
+/** A machine's TUI commands, over the same connection as its files. */
+const tui = (files: WorkspaceFiles) => new TuiRemote(files.transport);
 
 const SESSION = '0f8c2a51-4b7e-4c3d-8e9f-1a2b3c4d5e6f', THREAD = '01a1aa8c-2934-7d21-bc0b-3d7917d3158e';
 /** A Claude Code reply line, with what its log puts around the usage. */
@@ -182,7 +185,7 @@ async function home(t: TestContext) {
   }
   return { root, files: new WorkspaceFiles(new LocalTransport()) };
 }
-const read = async (files: WorkspaceFiles, entries: TuiUsageEntry[], cap?: number) => tuiUsageChunks((await files.tuiUsageLines(entries, undefined, cap)).toString());
+const read = async (files: WorkspaceFiles, entries: TuiUsageEntry[], cap?: number) => tuiUsageChunks((await tui(files).tuiUsageLines(entries, undefined, cap)).toString());
 
 test('TUI logs are read on the real shell: whole lines only, without message text, each file from where it was left', async t => {
   const { root, files } = await home(t), project = join(root, '.claude/projects/-srv-app'), agents = join(project, SESSION, 'subagents');

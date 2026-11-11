@@ -20,10 +20,9 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
   // Every launcher invocation has a finite fallback, never the developer's interactive shell.
   await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
-  for (const name of ['core/domain', 'core/store', 'core/ssh', 'core/remote-host', 'core/access', 'workspace/tui', 'workspace/holder-protocol', 'workspace/terminal-hold']) {
+  for (const name of ['core/domain', 'core/saved-hosts', 'core/ssh', 'core/remote-host', 'core/access', 'workspace/tui', 'workspace/holder-protocol', 'workspace/terminal-hold']) {
     // As the build lays them out: the shared core's files beside the plugin's own in core/, imported by relative path.
-    const shared = name.startsWith('core/') && name !== 'core/store';
-    const source = await readFile(new URL(shared ? `../../remote-core/src/${name.slice(5)}.ts` : `../src/${name}.ts`, import.meta.url), 'utf8');
+    const source = await readFile(new URL(name.startsWith('core/') ? `../../remote-core/src/${name.slice(5)}.ts` : `../src/${name}.ts`, import.meta.url), 'utf8');
     await mkdir(dirname(join(modules, name)), { recursive: true });
     const { code } = await transform(source, { loader: 'ts', format: 'esm', target: 'node22' });
     await writeFile(join(modules, `${name}.js`), code.replace(/(["'])@dsh-plugins\/remote-core\//g, name.startsWith('core/') ? '$1./' : '$1../core/'));
@@ -31,7 +30,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await writeFile(join(bin, 'ssh'), `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv.includes('-G'))process.stdout.write('hostname build-box\\nuser builder\\nport 22\\n');else fs.writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify(process.argv.slice(2)));\n`); await chmod(join(bin, 'ssh'), 0o700);
   const anchor = await ensureAnchor(directory, { host: 'build-box', username: 'builder', port: 22 }, '/srv/app');
   const controller = { config: { shellCandidates: ['/bin/sh'] } };
-  const { shell: launcher, dispose: cleanup } = await installWorkspaceTerminal(controller, join(directory, 'terminal'), f.path, pathToFileURL(modules + '/')); t.after(cleanup);
+  const { shell: launcher, dispose: cleanup } = await installWorkspaceTerminal(controller, join(directory, 'terminal'), { hosts: f.path, tui: f.path }, pathToFileURL(modules + '/')); t.after(cleanup);
   assert.ok(launcher); assert.equal(controller.config.shellCandidates[1], launcher);
   const env = { ...process.env, HOME: directory, SHELL: shell, DSH_HOME: directory, DSH_OMC_STATE_DIR: omc, DSH_TERMINAL_CAPTURE: capture, PATH: `${bin}:${process.env.PATH}` };
   const launch = (cwd: string) => promisify(execFile)(launcher, [], { cwd, env, timeout: 5000 });

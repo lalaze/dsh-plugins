@@ -1,9 +1,6 @@
-import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
+import { mkdir, readFile, stat } from 'node:fs/promises';
 import { basename, isAbsolute, join } from 'node:path';
-import { Readable, Transform } from 'node:stream';
-import { pipeline } from 'node:stream/promises';
 import type { ContentBlock, FileBlock, ImageBlock } from '@deepseek-ai/dsh-llm';
 import { attachmentInput, identifier, RemoteError, type Attachment, type NativeAttachment } from '@dsh-plugins/remote-core/domain.js';
 import type { SshTransport } from '@dsh-plugins/remote-core/ssh.js';
