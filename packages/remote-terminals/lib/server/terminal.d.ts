@@ -2,6 +2,7 @@
 interface TerminalSpawner {
     spawn?(this: TerminalSpawner, agent: unknown, owner: unknown, request: {
         id: string;
+        shellPath?: string;
     }, signal: AbortSignal): unknown;
     execution?(this: TerminalSpawner, agent: unknown): {
         subprocess: object;
@@ -13,6 +14,13 @@ interface TerminalSpawner {
  * seen by that call. A DSH that works differently leaves terminals without the ID, which then end with their connection as before.
  */
 export declare function passTerminalId(controller: TerminalSpawner): () => void;
+/**
+ * A browser remembers a launcher by its full path: for a sidebar terminal to start again after DSH restarts, and for what
+ * New terminal opens. The folder is the installed plugin's, and it moved when terminals left Remote Agents. DSH refuses a
+ * path it does not offer now, so one that names a launcher in another folder starts today's launcher of that name.
+ * Stop this before whatever replaced `spawn` earlier.
+ */
+export declare function followMovedLaunchers(controller: TerminalSpawner, launchers: readonly string[]): () => void;
 /** The part of DSH's terminal controller the user's closing of a terminal goes through. */
 export interface ClosableTerminals {
     close?(this: ClosableTerminals, agent: {
