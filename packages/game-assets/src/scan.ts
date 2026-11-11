@@ -58,10 +58,17 @@ const topOf = (path: string) => path.includes('/') ? path.slice(0, path.indexOf(
 const DEEP_HEADER = new Set(['jpg', 'jpeg', 'svg']);
 
 interface Measured { size: number; mtimeMs: number; width?: number; height?: number; hash?: string }
+/** What a scanner learned about files, by absolute path, in a form that can be saved and given to another scanner. */
+export type MeasuredEntries = Record<string, Measured>;
 
 export class Scanner {
   /** Sizes and hashes of files unchanged since an earlier scan, by absolute path. */
   private readonly measured = new Map<string, Measured>();
+  snapshot(): MeasuredEntries { return Object.fromEntries(this.measured); }
+  /** Takes over entries saved earlier; an entry is used only while its file's size and time are unchanged. */
+  restore(entries: MeasuredEntries): void {
+    for (const [file, entry] of Object.entries(entries ?? {})) if (entry && typeof entry.size === 'number' && typeof entry.mtimeMs === 'number') this.measured.set(file, entry);
+  }
 
   private async measure(file: string): Promise<Measured | undefined> {
     const info = await stat(file).catch(() => undefined);

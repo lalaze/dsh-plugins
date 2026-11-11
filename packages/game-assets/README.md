@@ -78,13 +78,21 @@ Manifests, atlases and maps (`.json`, `.yaml`, `.xml`, `.atlas`, `.tmx` and simi
 
 - The verdict is static analysis. *Unreferenced* means no code in the folders being read mentions the file; *Maybe in use* means check before deleting.
 - Engines that refer to assets by ID rather than by path (Unity GUIDs, Cocos Creator UUIDs) are not understood. Path-based projects work: Phaser, PixiJS, Godot (`res://` paths), LÖVE, plain web games.
-- Images only: PNG, GIF, WebP, JPEG and SVG. Hidden folders, `node_modules` and symbolic links are skipped. Remote workspaces are not supported yet, and do not get the tab.
+- Images only: PNG, GIF, WebP, JPEG and SVG. Hidden folders, `node_modules` and symbolic links are skipped.
+
+## Remote workspaces
+
+A conversation whose workspace is on a machine saved in [Remote Agents](../remote-agents/README.md) works the same way: the tab, the verdicts, retiring, tags and the agent hand-off. It needs Remote Agents 0.2.130 or newer on the DSH host and Node.js 18 or newer on the remote machine, which Remote Agents asks for as well.
+
+The work is done on that machine. The plugin sends one small script to `node` over the connection Remote Agents already holds, runs it in the conversation's folder, and reads back the answer; nothing is installed there. Each scan is a new process, so what it measured (image sizes and hashes of unchanged files) is kept under `~/.dsh-remote-agents/game-assets/` on the machine to make the next scan quick. Thumbnails that are asked for together are fetched in one round trip. Expect the first scan and the first screen of thumbnails to take longer than on a local folder.
+
+Settings of a remote workspace are kept by machine and folder. Retired images and the tag file are written on the remote machine, in its copy of the project.
 
 ## Install
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.1.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.1.1.tgz"
 ```
 
 Restart the profile and refresh the browser. For Desktop, quit DSH and use its bundled `dsh` with `--profile desktop`. Requires DSH `>=0.2.1-rc.2 <0.3.0`.
@@ -97,6 +105,6 @@ pnpm --filter dsh-game-assets preview:ui   # the tab outside DSH, over the curre
 node scripts/preview.mjs /path/to/game 4184
 ```
 
-The host half (`src/`) scans and serves images through `/api/game-assets`; the client half (`src/client/`) is the tab. `src/references.ts` holds the reference rules and is the place to teach it a new way code names a file; `src/manage.ts` is everything that changes a workspace; `src/detect.ts` lists the engines that make a workspace a game project.
+The host half (`src/`) scans and serves images through `/api/game-assets`; `src/workspace.ts` is what it does in one folder, run in the host's process for a local workspace and inside `src/remote-agent.ts`, the script sent to the machine, for a remote one; the client half (`src/client/`) is the tab. `src/references.ts` holds the reference rules and is the place to teach it a new way code names a file; `src/manage.ts` is everything that changes a workspace; `src/detect.ts` lists the engines that make a workspace a game project.
 
 MIT.

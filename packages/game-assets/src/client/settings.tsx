@@ -13,11 +13,11 @@ function WorkspaceRow({ sessionId, cwd, onError }: { sessionId: string; cwd: str
   const choice: Choice = status?.override === true ? 'show' : status?.override === false ? 'hide' : 'auto';
   const change = (next: Choice) => { void chooseProject(sessionId, next === 'auto' ? null : next === 'show').then(() => onError(''), error => onError(localizeError(error))); };
   return <div className="ga-frow ga-wrow" role="row">
-    <span role="cell" className="ga-wname" title={cwd}><b>{nameOf(cwd)}</b>
-      <span className="ga-dim">{!status ? ui('Loading…') : status.engine ? ui('{engine} project', { engine: status.engine }) : ui('No game engine found')}</span>
+    <span role="cell" className="ga-wname" title={cwd}><b>{status?.root ?? nameOf(cwd)}{status?.host && <span className="ga-dim"> · {status.host}</span>}</b>
+      <span className="ga-dim">{!status ? ui('Loading…') : status.root === null ? ui('Not reachable') : status.engine ? ui('{engine} project', { engine: status.engine }) : ui('No game engine found')}</span>
     </span>
     <span role="cell" className="ga-meta">{status && <><i className="ga-dot" data-on={status.game || undefined} />{ui(status.game ? 'Tab shown' : 'Tab hidden')}</>}</span>
-    <select role="cell" className="ga-select" aria-label={ui('Assets tab in {name}', { name: nameOf(cwd) })} disabled={!status} value={choice} onChange={event => change(event.target.value as Choice)}>
+    <select role="cell" className="ga-select" aria-label={ui('Assets tab in {name}', { name: nameOf(cwd) })} disabled={!status || status.root === null} value={choice} onChange={event => change(event.target.value as Choice)}>
       <option value="auto">{ui('Automatic')}</option><option value="show">{ui('Always show')}</option><option value="hide">{ui('Never show')}</option>
     </select>
   </div>;

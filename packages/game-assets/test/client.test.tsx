@@ -34,7 +34,8 @@ const globals = ['window', 'document', 'navigator', 'MutationObserver', 'getComp
 /** `s1` is a Phaser game, `plain` a website, `broken` has no workspace folder. */
 const project = (sessionId: string) => {
   const override = saved.overrides[sessionId] ?? null;
-  if (sessionId === 'broken') return { root: null, engine: null, override: null, game: false, mode: saved.mode };
+  if (sessionId === 'broken') return { root: null, host: null, engine: null, override: null, game: false, mode: saved.mode };
+  if (sessionId === 'remote') return { root: 'app', host: 'Mac mini', engine: 'Godot', override, game: override ?? true, mode: saved.mode };
   return sessionId === 'plain' ? { root: 'site', engine: null, override, game: override ?? false, mode: saved.mode } : { root: 'game', engine: 'Phaser', override, game: override ?? true, mode: saved.mode };
 };
 beforeEach(() => {
@@ -174,14 +175,14 @@ test('a workspace can hide the tab, and the settings page chooses per workspace 
   assert.equal(settings.spec.key, BUNDLE_KEY);
   await render(settings.component, {});
   assert.deepEqual(texts('.ga-modes label'), ['In game projects only', 'In every conversation']);
-  // One row per local workspace folder: the two conversations of the game share one, the remote one has none.
-  assert.deepEqual(texts('.ga-wname'), ['gamePhaser project', 'siteNo game engine found']);
-  assert.deepEqual(texts('.ga-wrow .ga-meta'), ['Tab hidden', 'Tab hidden']);
+  // One row per workspace folder: the conversations of the game share one, and a remote workspace names its machine.
+  assert.deepEqual(texts('.ga-wname'), ['gamePhaser project', 'siteNo game engine found', 'app · Mac miniGodot project']);
+  assert.deepEqual(texts('.ga-wrow .ga-meta'), ['Tab hidden', 'Tab hidden', 'Tab shown']);
   const choose = (select: HTMLSelectElement, value: string) => act(async () => { select.value = value; select.dispatchEvent(new window.Event('change', { bubbles: true })); });
   await choose(container.querySelectorAll<HTMLSelectElement>('.ga-wrow select')[0], 'auto');
   await settle();
   assert.deepEqual(sent().at(-1), { action: 'setProject', sessionId: 's1', game: null });
-  assert.deepEqual(texts('.ga-wrow .ga-meta'), ['Tab shown', 'Tab hidden']);
+  assert.deepEqual(texts('.ga-wrow .ga-meta'), ['Tab shown', 'Tab hidden', 'Tab shown']);
   assert.equal(dsh.views().length, 1);
 
   await dsh.show(['plain']);

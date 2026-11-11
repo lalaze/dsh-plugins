@@ -78,13 +78,21 @@ DSH 的对话标签页是对所有对话统一注册的，所以插件的做法�
 
 - 结论来自静态分析。“未引用”表示被读取的代码里没有提到这个文件；“可能在用”表示删除前要先确认。
 - 不支持按 ID 而不是按路径引用素材的引擎（Unity 的 GUID、Cocos Creator 的 UUID）。按路径引用的项目可用：Phaser、PixiJS、Godot（`res://` 路径）、LÖVE、普通网页游戏。
-- 只处理图片：PNG、GIF、WebP、JPEG 和 SVG。隐藏文件夹、`node_modules` 和符号链接会被跳过。暂不支持远程工作区，远程工作区不会出现标签页。
+- 只处理图片：PNG、GIF、WebP、JPEG 和 SVG。隐藏文件夹、`node_modules` 和符号链接会被跳过。
+
+## 远程工作区
+
+工作区在 [Remote Agents](../remote-agents/README.zh-CN.md) 保存的机器上的对话，用法完全一样：标签页、在用判断、退役、标签和交给智能体都可用。要求 DSH 主机上装有 Remote Agents 0.2.130 或更新版本，远程机器上有 Node.js 18 或更新版本（Remote Agents 本身也要求这一点）。
+
+活是在那台机器上干的。插件通过 Remote Agents 已有的连接，把一个小脚本交给远程的 `node`，在对话所在的文件夹里运行并读回结果；不会在那边安装任何东西。每次扫描都是一个新进程，所以它量过的内容（未改动文件的图片尺寸和哈希）会保存在远程机器的 `~/.dsh-remote-agents/game-assets/` 下，让下一次扫描更快。同时请求的缩略图会合并成一次往返取回。第一次扫描和第一屏缩略图会比本机文件夹慢一些。
+
+远程工作区的设置按“机器 + 文件夹”保存。退役的图片和标签文件写在远程机器上的那份项目里。
 
 ## 安装
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.1.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.1.1.tgz"
 ```
 
 重启对应 profile 并刷新浏览器。桌面版请先完全退出 DSH，再用它自带的 `dsh` 加 `--profile desktop` 安装。要求 DSH `>=0.2.1-rc.2 <0.3.0`。
@@ -97,6 +105,6 @@ pnpm --filter dsh-game-assets preview:ui   # 在 DSH 之外预览标签页，扫
 node scripts/preview.mjs /path/to/game 4184
 ```
 
-宿主端（`src/`）负责扫描，并通过 `/api/game-assets` 提供图片；客户端（`src/client/`）是标签页界面。引用规则都在 `src/references.ts`，要让它识别新的引用写法就改这里；所有会改动工作区的操作都在 `src/manage.ts`；哪些引擎算游戏项目列在 `src/detect.ts`。
+宿主端（`src/`）负责扫描，并通过 `/api/game-assets` 提供图片；`src/workspace.ts` 是它在一个文件夹里做的全部事情，本机工作区在宿主进程里运行，远程工作区在发到那台机器的脚本 `src/remote-agent.ts` 里运行；客户端（`src/client/`）是标签页界面。引用规则都在 `src/references.ts`，要让它识别新的引用写法就改这里；所有会改动工作区的操作都在 `src/manage.ts`；哪些引擎算游戏项目列在 `src/detect.ts`。
 
 MIT。

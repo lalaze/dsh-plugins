@@ -97,7 +97,7 @@ test('the route refuses other pages, unknown actions, remote workspaces and miss
   assert.equal((await call(handler, { action: 'scan' })).status, 400);
   assert.equal((await call(handler, { action: 'scan', sessionId: 'unknown' })).status, 409);
   const remote = await call(handler, { action: 'scan', sessionId: 'remote' });
-  assert.deepEqual([remote.status, await remote.json()], [409, { error: 'Assets of a remote workspace are not supported yet' }]);
+  assert.deepEqual([remote.status, await remote.json()], [409, { error: 'Assets of a remote workspace need Remote Agents 0.2.130 or newer' }]);
   assert.equal((await call(handler, { action: 'scan', sessionId: 'gone' })).status, 404);
   assert.equal((await handler(new Request('http://dsh.test/api/game-assets', { method: 'PUT', headers: { [CLIENT_HEADER]: '1' } }))).status, 405);
 });

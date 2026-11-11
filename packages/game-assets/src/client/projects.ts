@@ -3,7 +3,7 @@
  * is registered only while a conversation on screen belongs to a game project, and released otherwise.
  */
 import { useSyncExternalStore } from 'react';
-import { REMOTE_ANCHOR, type ProjectStatus, type TabMode } from '../domain.js';
+import type { ProjectStatus, TabMode } from '../domain.js';
 import { projectStatus, setProject, setTabMode, tabMode } from './api.js';
 
 export interface SessionSummary { cwd?: string; retainedBy?: Record<string, number> }
@@ -26,12 +26,12 @@ export function sessionsInView(): string[] {
   const snapshot = sessions?.list.getSnapshot(), byId = snapshot?.byId ?? {};
   return (snapshot?.ids ?? Object.keys(byId)).filter(id => (byId[id]?.retainedBy?.mainView ?? 0) > 0);
 }
-/** One conversation per local workspace folder, most recent first, for the settings page. */
+/** One conversation per workspace folder, local or remote, most recent first, for the settings page. */
 export function workspaces(limit = 20): { sessionId: string; cwd: string }[] {
   const snapshot = sessions?.list.getSnapshot(), byId = snapshot?.byId ?? {}, seen = new Set<string>(), result: { sessionId: string; cwd: string }[] = [];
   for (const sessionId of snapshot?.ids ?? Object.keys(byId)) {
     const cwd = byId[sessionId]?.cwd;
-    if (!cwd || REMOTE_ANCHOR.test(cwd) || seen.has(cwd)) continue;
+    if (!cwd || seen.has(cwd)) continue;
     seen.add(cwd); result.push({ sessionId, cwd });
     if (result.length >= limit) break;
   }

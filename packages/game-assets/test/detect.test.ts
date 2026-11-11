@@ -58,13 +58,13 @@ test('the route says whether a workspace gets the tab, and keeps the user’s ch
     return { status: answer.status, body: await answer.json() as ProjectStatus & { mode: string } };
   };
   const route = handler(), name = (root: string) => root.split('/').pop()!;
-  assert.deepEqual((await ask(route, { action: 'project', sessionId: 'game' })).body, { root: name(game), engine: 'Phaser', override: null, game: true, mode: 'games' });
-  assert.deepEqual((await ask(route, { action: 'project', sessionId: 'site' })).body, { root: name(site), engine: null, override: null, game: false, mode: 'games' });
+  assert.deepEqual((await ask(route, { action: 'project', sessionId: 'game' })).body, { root: name(game), host: null, engine: 'Phaser', override: null, game: true, mode: 'games' });
+  assert.deepEqual((await ask(route, { action: 'project', sessionId: 'site' })).body, { root: name(site), host: null, engine: null, override: null, game: false, mode: 'games' });
   // Without a local workspace there is nothing to show, and nothing to refuse either.
-  for (const sessionId of ['remote', 'unknown']) assert.deepEqual(await ask(route, { action: 'project', sessionId }), { status: 200, body: { root: null, engine: null, override: null, game: false, mode: 'games' } });
+  for (const sessionId of ['remote', 'unknown']) assert.deepEqual(await ask(route, { action: 'project', sessionId }), { status: 200, body: { root: null, host: null, engine: null, override: null, game: false, mode: 'games' } });
 
-  assert.deepEqual((await ask(route, { action: 'setProject', sessionId: 'site', game: true })).body, { root: name(site), engine: null, override: true, game: true, mode: 'games' });
-  assert.deepEqual((await ask(route, { action: 'setProject', sessionId: 'game', game: false })).body, { root: name(game), engine: 'Phaser', override: false, game: false, mode: 'games' });
+  assert.deepEqual((await ask(route, { action: 'setProject', sessionId: 'site', game: true })).body, { root: name(site), host: null, engine: null, override: true, game: true, mode: 'games' });
+  assert.deepEqual((await ask(route, { action: 'setProject', sessionId: 'game', game: false })).body, { root: name(game), host: null, engine: 'Phaser', override: false, game: false, mode: 'games' });
   assert.deepEqual(await ask(route, { action: 'setMode', mode: 'all' }), { status: 200, body: { mode: 'all' } as never });
   for (const body of [{ action: 'setProject', sessionId: 'site', game: 'yes' }, { action: 'setProject', sessionId: 'site' }, { action: 'setMode', mode: 'none' }]) assert.equal((await ask(route, body)).status, 400);
   assert.equal((await ask(route, { action: 'setProject', sessionId: 'remote', game: true })).status, 409);
@@ -72,6 +72,6 @@ test('the route says whether a workspace gets the tab, and keeps the user’s ch
   // A host restarted later remembers all of it; `null` goes back to the detection.
   const later = handler();
   assert.deepEqual(await ask(later, { action: 'mode' }), { status: 200, body: { mode: 'all' } as never });
-  assert.deepEqual((await ask(later, { action: 'project', sessionId: 'site' })).body, { root: name(site), engine: null, override: true, game: true, mode: 'all' });
-  assert.deepEqual((await ask(later, { action: 'setProject', sessionId: 'game', game: null })).body, { root: name(game), engine: 'Phaser', override: null, game: true, mode: 'all' });
+  assert.deepEqual((await ask(later, { action: 'project', sessionId: 'site' })).body, { root: name(site), host: null, engine: null, override: true, game: true, mode: 'all' });
+  assert.deepEqual((await ask(later, { action: 'setProject', sessionId: 'game', game: null })).body, { root: name(game), host: null, engine: 'Phaser', override: null, game: true, mode: 'all' });
 });
