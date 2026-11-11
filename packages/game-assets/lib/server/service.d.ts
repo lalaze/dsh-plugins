@@ -2,7 +2,7 @@ import { type AssetDetail, type ProjectStatus, type ScanResult, type ScannedAsse
 import { type Failure } from './manage.js';
 import { type RemoteMachines } from './remote.js';
 import { type Rules } from './scan.js';
-import { AssetError } from './workspace.js';
+import { AssetError, type ReadAnswer } from './workspace.js';
 type FullScan = ScanResult<ScannedAsset>;
 export { AssetError };
 /** Folder names the client may switch: at most 500, each a plain name with two booleans. */
@@ -67,6 +67,8 @@ export declare class AssetService {
     note(sessionId: string, path: unknown, note: unknown): Promise<{
         note: string;
     }>;
+    /** Several images at once, as a grid asks for its thumbnails: one run on a remote machine instead of one per image. */
+    images(sessionId: string, paths: unknown): Promise<ReadAnswer[]>;
     /** An image's bytes. The path is relative to the workspace; symbolic links may not lead outside it. */
     raw(sessionId: string, path: string): Promise<Buffer>;
 }

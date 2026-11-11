@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
-import { DEFAULT_RETIRE_DIR, NOTE_LIMIT_HINT, REMOTE_ANCHOR, SELECTION_LIMIT } from './domain.js';
+import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, REMOTE_ANCHOR, SELECTION_LIMIT } from './domain.js';
 import { Library, cleanRetireDir, cleanTag } from './manage.js';
 import { REMOTE_CHUNK, runRemote } from './remote.js';
 import { Scanner } from './scan.js';
@@ -266,6 +266,12 @@ export class AssetService {
         else
             delete picked[0].note;
         return { note: saved };
+    }
+    /** Several images at once, as a grid asks for its thumbnails: one run on a remote machine instead of one per image. */
+    async images(sessionId, paths) {
+        if (!Array.isArray(paths) || !paths.length || paths.length > IMAGE_BATCH || paths.some(path => typeof path !== 'string'))
+            throw new AssetError('Invalid selection');
+        return (await this.workspace(sessionId)).call({ op: 'read', paths: [...new Set(paths)] });
     }
     /** An image's bytes. The path is relative to the workspace; symbolic links may not lead outside it. */
     async raw(sessionId, path) {

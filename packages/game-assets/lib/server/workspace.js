@@ -5,7 +5,7 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { detectEngine } from './detect.js';
-import { RAW_LIMIT, isImage } from './domain.js';
+import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage } from './domain.js';
 export class AssetError extends Error {
     status;
     constructor(message, status = 400) {
@@ -54,9 +54,17 @@ export async function handle(root, request, scanner, library) {
         case 'note': return { note: await library.note(request.path, request.note) };
         case 'read': {
             const answers = [];
+            let bytes = 0;
             for (const path of request.paths) {
+                // One answer stays a size a browser and an SSH channel take in stride; what is left is asked for again.
+                if (bytes >= IMAGE_BATCH_BYTES) {
+                    answers.push({ path, error: 'Ask for this image in another request', status: 413 });
+                    continue;
+                }
                 try {
-                    answers.push({ path, data: (await readImage(root, path)).toString('base64') });
+                    const data = await readImage(root, path);
+                    bytes += data.length;
+                    answers.push({ path, data: data.toString('base64') });
                 }
                 catch (error) {
                     answers.push({ path, error: error instanceof Error ? error.message : String(error), status: error instanceof AssetError ? error.status : 500 });

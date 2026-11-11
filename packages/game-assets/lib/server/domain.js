@@ -10,6 +10,8 @@ export const IMAGE_TYPES = {
 };
 /** Images served for previews; larger files are listed without a picture. */
 export const RAW_LIMIT = 32 * 1024 * 1024;
+/** Images one `images` request may name, and the bytes one answer carries at most; the rest are answered 413. */
+export const IMAGE_BATCH = 64, IMAGE_BATCH_BYTES = 24 * 1024 * 1024;
 /** References kept per image; `refCount` still counts all of them. */
 export const REF_LIMIT = 8;
 /** Images one scan reports; a workspace with more is reported as truncated. */

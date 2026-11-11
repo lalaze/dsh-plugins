@@ -1,4 +1,4 @@
-import { type ScanResult, type ScannedAsset } from './domain.js';
+import { type ImageAnswer, type ScanResult, type ScannedAsset } from './domain.js';
 import type { Library, Moved } from './manage.js';
 import type { Rules, Scanner } from './scan.js';
 export declare class AssetError extends Error {
@@ -28,13 +28,7 @@ export type WorkspaceRequest = {
     op: 'read';
     paths: string[];
 };
-/** One image of a `read` request: its bytes in base64, or why it could not be read. */
-export interface ReadAnswer {
-    path: string;
-    data?: string;
-    error?: string;
-    status?: number;
-}
+export type ReadAnswer = ImageAnswer;
 export interface WorkspaceAnswers {
     scan: ScanResult<ScannedAsset>;
     detect: {

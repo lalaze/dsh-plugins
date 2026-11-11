@@ -92,7 +92,7 @@ DSH 的对话标签页是对所有对话统一注册的，所以插件的做法�
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.1.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.1.2.tgz"
 ```
 
 重启对应 profile 并刷新浏览器。桌面版请先完全退出 DSH，再用它自带的 `dsh` 加 `--profile desktop` 安装。要求 DSH `>=0.2.1-rc.2 <0.3.0`。
