@@ -1,6 +1,6 @@
 {
   "name": "dsh-remote-agents",
-  "version": "0.2.135",
+  "version": "0.2.136",
   "description": "Workspace-scoped remote CLI models in the native DSH picker and SSH task delegation",
   "type": "module",
   "main": "lib/server/index.js",
@@ -28,7 +28,7 @@
   "scripts": {
     "build": "node -e \"fs.rmSync('lib', { recursive: true, force: true })\" && tsc -p ../remote-core/tsconfig.build.json --outDir lib/server/core && tsc -p tsconfig.build.json && node ../../scripts/link-remote-core.mjs && node ../../scripts/build-client.mjs && node ../../scripts/build-editor.mjs lib/editor.js",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --import ./test/setup.mjs --test --test-timeout=60000 test/*.test.ts test/*.test.tsx",
+    "test": "node --import tsx --import ./test/setup.mjs --test --test-concurrency=6 --test-timeout=120000 test/*.test.ts test/*.test.tsx",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",
     "prepack": "pnpm run build",
     "pack:plugin": "pnpm pack --pack-destination ../../dist",

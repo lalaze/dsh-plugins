@@ -120,13 +120,14 @@ test('a directly started CLI that keeps running after its input ends is stopped 
 test('input reaches the CLI and its exit ends the session with its status while input stays open', { skip: !supported }, async t => {
   const { root, ssh } = await fakeSsh(t), transport = new OpenSshTransport('ssh://host.test', ssh);
   const child = transport.start(root, ['sh', '-c', 'IFS= read -r line; printf "got %s\\n" "$line"; read -r second; printf "then %s\\n" "$second"; exit 7'], { endWithSession: true });
-  let text = ''; const start = Date.now();
-  const ended = new Promise<Error>(resolve => { child.onData(data => { text += data; }); child.onExit(resolve); });
+  // Timed from the CLI's last output: how long the connection takes to open says nothing about how the session ends.
+  let text = '', last = Date.now();
+  const ended = new Promise<Error>(resolve => { child.onData(data => { text += data; last = Date.now(); }); child.onExit(resolve); });
   child.write('中文 line\n'); child.write('two\n');
   const error = await ended;
   assert.equal(text, 'got 中文 line\nthen two\n');
   assert.equal(error.message, 'Remote CLI exited (7)');
-  assert.ok(Date.now() - start < 2_000, 'the session ends as soon as the CLI does, not when its input ends');
+  assert.ok(Date.now() - last < 2_000, 'the session ends as soon as the CLI does, not when its input ends');
 });
 
 test('a CLI that exits by itself as its input ends keeps its own exit', { skip: !supported }, async t => {

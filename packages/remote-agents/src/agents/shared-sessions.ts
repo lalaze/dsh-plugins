@@ -386,6 +386,9 @@ export class SharedSessions {
     const claim = await this.call('claim', { id, force: false, label: this.instance.label, ...(revive ? { revive: true } : {}) });
     if (claim?.deleted) { await this.owner.removed(id); return; }
     if (claim?.claimed) { this.held.add(id); this.acked.set(id, claim.head?.seq ?? 0); }
+    // The history goes first. Once the record is on the host another DSH can take the session over, and what this DSH
+    // has not copied by then is dropped here: a takeover right after publishing used to lose a new session's first turn.
+    if (this.held.has(id)) await this.push(id);
     await this.publish(id);
     if (this.held.has(id)) await this.push(id);
     // Publishing every earlier session must not keep all their histories in memory.
@@ -556,6 +559,14 @@ export class SharedSessions {
     if (!await this.ready(5000)) return;
     // What this DSH recorded while driving the session has to be on the host to count as read there.
     if (this.held.has(id)) await this.serial(id, () => this.push(id)).catch(() => {});
+    // The host's list reaches this DSH a moment after the host changes. A session published just now has no position here
+    // yet, and one another DSH drives may have ended its turn there already. The page reports a read once per turn, so a
+    // read dropped for want of a position, or taken at a stale one, would leave the other DSHes showing the turn unread.
+    if (!this.held.has(id) || !this.sessions.get(id)?.head) {
+      const current: RemoteSession | undefined = await this.call('get', { id }, 5000).catch(() => undefined);
+      if (current?.manifest && !current.deleted) await this.update({ ...current, ...(current.lease ? { lease: { ...current.lease, at: Date.now() } } : {}) }).catch(() => {});
+      await this.catchUp(id);
+    }
     const session = this.sessions.get(id);
     if (!session?.head || (session.read?.seq ?? 0) >= session.head.seq) return;
     const { read } = await this.call('markRead', { id, seq: session.head.seq, label: this.instance?.label ?? '' }, 5000);

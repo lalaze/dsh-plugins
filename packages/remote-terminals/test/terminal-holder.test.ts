@@ -95,7 +95,8 @@ test('SIGTERM ends what runs in the holder', options, async () => {
   process.kill(holder, 'SIGTERM');
   await client.exited;
   assert.ok(await until(() => { try { process.kill(shell, 0); return false; } catch { return true; } }), 'the shell is gone');
-  assert.equal(existsSync(join(base, id)), false);
+  // The holder removes its folder as its last step, a moment after the shell is gone.
+  assert.ok(await until(() => !existsSync(join(base, id))), 'its folder is removed');
 });
 
 test('a holder that died, as in a restart of the machine, is replaced', options, async () => {
