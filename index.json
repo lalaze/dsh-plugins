@@ -64,12 +64,12 @@
       },
       "versions": [
         {
-          "version": "0.1.2",
-          "publishTimestamp": 1794389388,
+          "version": "0.1.3",
+          "publishTimestamp": 1794415421,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "e98766f2275b85dc07ab7598aee6f52aec122f95",
+            "commit": "017e750a28a96c1aaf5bb6aeb25383549d312c7c",
             "path": "packages/remote-terminals"
           },
           "engines": {
