@@ -18,7 +18,7 @@
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter dsh-usage-stats check
 corepack pnpm --filter dsh-usage-stats pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.18.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.19.tgz"
 ```
 
 以上命令在仓库根目录执行。桌面端改用 `--profile desktop`，安装前完全退出 DSH，安装后重新打开；Web 端重启对应 profile 并刷新页面。远程智能体来源需安装 `dsh-remote-agents` 0.2.22 或更新版本。

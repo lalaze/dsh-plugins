@@ -16,7 +16,7 @@ From the workspace root, with Node.js ≥ 22.15.0 and DSH `>=0.2.1-rc.2 <0.3.0`:
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter dsh-usage-stats check
 corepack pnpm --filter dsh-usage-stats pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.18.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.19.tgz"
 ```
 
 For Desktop, fully quit DSH, install with `--profile desktop`, and reopen. For Web, restart the profile and refresh. Install `dsh-remote-agents` 0.2.22 or later to collect the Remote agents source.

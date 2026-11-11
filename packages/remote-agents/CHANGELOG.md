@@ -4,6 +4,11 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.131 — The published package matches the source again
+
+- Nothing you see changes. The code this plugin shares with [Remote Terminals](../remote-terminals/README.md) was changed for Remote Terminals 0.1.1, so that an error one plugin raises is still recognized, with its HTTP status, when it reaches the other plugin's copy of that code. Remote Agents 0.2.130 was published before that change; this version carries it.
+- Nothing to do after upgrading but restart DSH. Remote Terminals stays as it is.
+
 ## 0.2.130 — Terminals, TUI conversations and worktree workspaces move to Remote Terminals; tunnels, remote DSH and Antigravity are removed
 
 - **Install [Remote Terminals](../remote-terminals/README.md) beside this plugin and restart DSH** to keep remote terminals that outlive DSH, **Remote Claude** and **Remote Codex** in the terminal's shell menu, TUI conversations and **Add workspace › From a project**. They are that plugin now and work as before. Without it they are missing; chat, delegation, sharing, files and sync are unchanged.
