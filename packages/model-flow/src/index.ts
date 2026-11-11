@@ -9,7 +9,7 @@ import { API_PATH, createHandler } from './http.js';
 import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine } from './line.js';
 import { attachmentNote } from './prompts.js';
 import { machineOf, nameParts, OFF, relocate, resolveSpec, type CatalogModel, type Role, type Route, type Routes } from './routes.js';
-import { cut, MARK, MAX_STEP_BODY, rowText, type CardState, type CardStep, type EffortOption, type LiveCard, type Locale } from './shared.js';
+import { cut, MARK, MAX_STEP_BODY, rowText, type CardEnd, type CardState, type CardStep, type EffortOption, type LiveCard, type Locale } from './shared.js';
 import { CardStore, FlowStore, ReportStore } from './store.js';
 
 /** The parts of DSH this plugin uses. */
@@ -63,6 +63,19 @@ function ensureConversation(agent: LiveAgent): void {
 /** remote-agents passes messages of this kind on to a remote CLI as context. */
 const REPORT_SOURCE = 'model-flow';
 const LABELS: Readonly<Record<Role, string>> = { plan: 'flow · plan', implement: 'flow · implement', review: 'flow · review' };
+
+/** How a flow ended, with its report and the steps it went through, for a plugin that started it. */
+export interface ModelFlowResult { end: CardEnd; report?: string; steps: CardStep[] }
+export interface ModelFlowRun { done: Promise<ModelFlowResult>; stop(): void }
+/**
+ * What other DSH plugins may do, as the service `modelFlow`: run a flow in a conversation, as a typed /flow does, and
+ * learn how it ended. `agent` is the conversation's live agent; `models` are /flow's plan=, impl= and review= values.
+ * The conversation keeps its title. Starting rejects with the message /flow would show.
+ */
+export interface ModelFlowService {
+  readonly version: 1;
+  start(agent: unknown, input: { goal: string; rounds?: number; models?: Partial<Record<Role, string>>; attachments?: readonly unknown[] }): Promise<ModelFlowRun>;
+}
 
 export async function apply(ctx: Context): Promise<void> {
   const host = ctx as unknown as Context & Host;
@@ -213,8 +226,10 @@ export async function apply(ctx: Context): Promise<void> {
     if (!implement || !review) throw new Error(say(`Choose the models first: Settings → Model flow, or /${COMMAND} impl=codex review=claude <goal>`, `请先选择模型：设置 → 模型分工，或者 /${COMMAND} impl=codex review=claude <目标>`));
     return { ...(plan ? { plan } : {}), implement, review };
   }
-  function start(agent: LiveAgent, goal: string, routes: Routes, rounds: number, attachments: readonly Attachment[]): void {
+  function start(agent: LiveAgent, goal: string, routes: Routes, rounds: number, attachments: readonly Attachment[]): ModelFlowRun {
     const controller = new AbortController(), startedAt = Date.now();
+    let resolveDone: (result: ModelFlowResult) => void = () => undefined;
+    const done = new Promise<ModelFlowResult>(resolve => { resolveDone = resolve; });
     running.set(agent.id, { controller, routes, goal, startedAt });
     let settle: (result: RowResult) => void = () => undefined;
     const card: Card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, planned: !!routes.plan, steps: [] }, done: new Promise(resolve => { settle = resolve; }) };
@@ -245,6 +260,7 @@ export async function apply(ctx: Context): Promise<void> {
       card.state.end = end;
       const { parentId, zh, planned } = card.state;
       settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, planned, steps: stepsOf(card, MAX_STEP_BODY), end } }) });
+      resolveDone({ end, ...(report ? { report } : {}), steps: stepsOf(card, MAX_STEP_BODY) });
       await executed;
       cards.delete(card.id);
       for (const step of card.state.steps) if (step.childId) stepByChild.delete(step.childId);
@@ -265,6 +281,37 @@ export async function apply(ctx: Context): Promise<void> {
         // Whatever happened, the card must not stay running.
         .finally(() => { running.delete(agent.id); void finish({ kind: 'stopped', ms: Date.now() - startedAt }); });
     }, 0);
+    return { done, stop: () => controller.abort() };
+  }
+  /** The checks and choices a flow starts with, whoever asks for it. Throws what the chat should say. */
+  async function begin(agent: LiveAgent, input: { goal: string; rounds?: number; overrides: Partial<Record<Role, string>>; attachments: readonly Attachment[]; prepare?(goal: string): Promise<void> }): Promise<{ run: ModelFlowRun; goal: string; routes: Routes; rounds: number }> {
+    const { attachments } = input;
+    if (running.has(agent.id)) throw new Error(say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, input.goal));
+    if (!host.subagents.list().includes('spawn')) throw new Error('This DSH has no subagent provider "spawn".');
+    const presets = ctx.get('permissionPresets' as never) as Permissions | undefined;
+    let readOnlyParent = false;
+    try { readOnlyParent = !!presets && presets.resolve(presets.current(agent.session)).sandbox === 'read-only'; }
+    catch { /* A custom permission has no preset to read; the implementer reports what it could not do. */ }
+    if (readOnlyParent) throw new Error(say('This conversation is read-only, so the implementing model could not change files. Switch it to Workspace Write first.', '这个对话是只读权限，实现模型改不了文件。请先切换到 Workspace Write。', input.goal));
+    const routes = await chooseRoutes(agent, input.overrides), rounds = input.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
+    const goal = input.goal || say('Do what the attached images and files ask.', '按附件里的图片和文件的要求来做。');
+    if (attachments.some(block => block.type === 'image')) {
+      for (const role of ['plan', 'implement', 'review'] as const) {
+        const route = routes[role];
+        if (!route) continue;
+        let modalities: readonly string[] | undefined;
+        try { modalities = (await host.llm.resolveModelInfo(route.provider, route.model)).inputModalities; }
+        catch { /* Unknown capabilities: let the step report any model failure. */ }
+        // A caller that started the flow itself can tell this refusal apart and try again without the pictures.
+        if (modalities && !modalities.includes('image')) throw Object.assign(new Error(say(
+          `${flowText(goal).roleName(role)} model ${route.label} (${route.model}) does not support images.`,
+          `${flowText(goal).roleName(role)}模型 ${route.label}（${route.model}）不支持图片。`, goal)), { code: 'flow/images-unsupported' });
+      }
+    }
+    await input.prepare?.(goal);
+    // Another flow may have started here while the models were being looked up.
+    if (running.has(agent.id)) throw new Error(say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, goal));
+    return { run: start(agent, goal, routes, rounds, attachments), goal, routes, rounds };
   }
   const titleFor = async (agent: LiveAgent, goal: string) => {
     if (agent.session.deriveMessages?.().length) return;
@@ -310,31 +357,23 @@ export async function apply(ctx: Context): Promise<void> {
           `计划：${plan?.label ?? '跳过'}。实现：${implement?.label ?? '未选择'}。审核：${review?.label ?? '未选择'}。最多审核 ${rounds} 轮。${usage}`) };
       }
       if (current) return { kind: 'error', text: say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, line.goal) };
-      if (!host.subagents.list().includes('spawn')) return { kind: 'error', text: 'This DSH has no subagent provider "spawn".' };
-      const presets = ctx.get('permissionPresets' as never) as Permissions | undefined;
-      try { if (presets && presets.resolve(presets.current(agent.session)).sandbox === 'read-only') return { kind: 'error', text: say('This conversation is read-only, so the implementing model could not change files. Switch it to Workspace Write first.', '这个对话是只读权限，实现模型改不了文件。请先切换到 Workspace Write。', line.goal) }; }
-      catch { /* A custom permission has no preset to read; the implementer reports what it could not do. */ }
-      const routes = await chooseRoutes(agent, line.overrides), rounds = line.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
-      const goal = line.goal || say('Do what the attached images and files ask.', '按附件里的图片和文件的要求来做。');
-      if (attachments.some(block => block.type === 'image')) {
-        for (const role of ['plan', 'implement', 'review'] as const) {
-          const route = routes[role];
-          if (!route) continue;
-          let modalities: readonly string[] | undefined;
-          try { modalities = (await host.llm.resolveModelInfo(route.provider, route.model)).inputModalities; }
-          catch { /* Unknown capabilities: let the step report any model failure. */ }
-          if (modalities && !modalities.includes('image')) return { kind: 'error', text: say(
-            `${flowText(goal).roleName(role)} model ${route.label} (${route.model}) does not support images.`,
-            `${flowText(goal).roleName(role)}模型 ${route.label}（${route.model}）不支持图片。`, goal) };
-        }
-      }
-      await titleFor(agent, goal);
-      start(agent, goal, routes, rounds, attachments);
+      const { goal, routes, rounds } = await begin(agent, { goal: line.goal, ...(line.rounds ? { rounds: line.rounds } : {}), overrides: line.overrides, attachments, prepare: goal => titleFor(agent, goal) });
       // The card that follows is the flow, so this row draws nothing; the text is for DSH without this plugin.
       return { kind: 'success', text: rowText({ title: flowText(goal).started(routes, rounds, attachments.length), body: brief(goal, 160), start: true }) };
     } catch (error) {
       return { kind: 'error', text: error instanceof Error ? error.message : String(error) };
     }
   }
+  const service: ModelFlowService = {
+    version: 1,
+    async start(agent, input) {
+      const live = agent as LiveAgent, attachments = (input.attachments ?? []) as readonly Attachment[], goal = input.goal.trim();
+      if (!goal && !attachments.length) throw new Error('A flow needs a goal.');
+      if (input.rounds !== undefined && (!Number.isSafeInteger(input.rounds) || input.rounds < 1 || input.rounds > MAX_ROUNDS)) throw new Error(`rounds must be a whole number from 1 to ${MAX_ROUNDS}`);
+      ensureConversation(live);
+      return (await begin(live, { goal, ...(input.rounds ? { rounds: input.rounds } : {}), overrides: input.models ?? {}, attachments })).run;
+    },
+  };
+  ctx.provide('modelFlow', service);
   ctx.effect(() => () => { for (const flow of running.values()) flow.controller.abort(); });
 }

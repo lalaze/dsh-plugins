@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Context } from '@deepseek-ai/cordis';
-import { apply } from '../src/index.js';
+import { apply, type ModelFlowService } from '../src/index.js';
 import { attachmentNote, implementPrompt, planPrompt, reviewPrompt } from '../src/prompts.js';
 import { parseRow, type LiveCard } from '../src/shared.js';
 
@@ -51,12 +51,13 @@ async function setup(t: TestContext, settings: {
   const directory = join(home, 'storages', 'dsh-model-flow');
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, 'config.json'), JSON.stringify({ plan: route('planner'), implement: route('coder'), review: route('checker'), rounds: 3 }));
-  let command!: Command, fetch!: (request: Request) => Promise<Response>, reviews = 0, disposed = 0, commands = 0;
+  let command!: Command, fetch!: (request: Request) => Promise<Response>, service!: ModelFlowService, reviews = 0, disposed = 0, commands = 0;
   const calls: ActivationSpec[] = [], notes: string[] = [], resolved: string[] = [];
   const ctx = {
     connection: { fetch: { register(definition: { fetch: typeof fetch }) { fetch = definition.fetch; } } },
     effect(callback: () => (() => void)) { disposers.push(callback()); },
     on() {}, get() { return undefined; },
+    provide(name: string, value: ModelFlowService) { if (name === 'modelFlow') service = value; },
     commands: {
       register(definition: Command) { command = definition; return () => {}; },
       async execute(parent: typeof agent, line: string) {
@@ -88,7 +89,7 @@ async function setup(t: TestContext, settings: {
   };
   await apply(ctx as unknown as Context);
   return {
-    command, calls, notes, resolved, home, disposed: () => disposed,
+    command, calls, notes, resolved, home, disposed: () => disposed, service, agent,
     run: (rawInput: string, blocks: Invocation['attachments'] = attachments) => command.handler({ agent, rawInput, attachments: blocks }),
     async post(body: Record<string, unknown>) {
       const response = await fetch(new Request('http://test/flow', { method: 'POST', headers: { 'content-type': 'application/json', 'X-DSH-Model-Flow': '1' }, body: JSON.stringify(body) }));
@@ -277,4 +278,31 @@ test('a typed /flow being handled is known as the line that starts a card', asyn
   const host = await setup(t, { info: () => new Promise(() => {}) });
   void host.command.handler({ commandId: 'typed-1', agent, rawInput: `${options} do it`, attachments });
   await until(async () => (await host.post({ action: 'card', commandId: 'typed-1' }) as { start?: boolean }).start === true);
+});
+
+test('another plugin starts a flow through the service and learns how it ended', async t => {
+  const host = await setup(t, { verdicts: ['fix it\nFLOW_VERDICT: needs_revision', 'fine\nFLOW_VERDICT: pass'] });
+  assert.equal(host.service.version, 1);
+  const run = await host.service.start(host.agent, { goal: 'fix the bug', rounds: 2, attachments });
+  const result = await run.done;
+  assert.deepEqual({ kind: result.end.kind, round: result.end.kind === 'passed' && result.end.round }, { kind: 'passed', round: 2 });
+  assert.deepEqual(result.steps.map(step => `${step.role} ${step.round} ${step.status}`), ['plan 0 done', 'implement 1 done', 'review 1 sentBack', 'implement 2 done', 'review 2 passed']);
+  assert.match(result.report ?? '', /coder output/);
+  assertAttachments(host.calls);
+  // The conversation shows the same card a typed /flow gets.
+  await host.finished();
+});
+
+test('the service refuses what /flow refuses, and its stop ends the flow', async t => {
+  const host = await setup(t, { pending: true });
+  await assert.rejects(host.service.start(host.agent, { goal: '  ' }), /needs a goal/);
+  await assert.rejects(host.service.start(host.agent, { goal: 'x', rounds: 0 }), /rounds must be/);
+  await assert.rejects(host.service.start(host.agent, { goal: 'x', models: { implement: 'nobody' } }));
+  const run = await host.service.start(host.agent, { goal: 'fix the bug', models: { plan: 'off', implement: 'coder' } });
+  await until(() => host.calls.length === 1);
+  assert.equal(host.calls[0].label, 'flow · implement 1');
+  await assert.rejects(host.service.start(host.agent, { goal: 'again' }), /already running/);
+  run.stop();
+  assert.equal((await run.done).end.kind, 'stopped');
+  assert.equal(host.disposed(), 1);
 });
