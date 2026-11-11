@@ -1,4 +1,4 @@
-/** Where a task's files are: a worktree of the repository, on this computer or a saved machine, through dsh-remote-agents. */
+/** Where a task's files are: a worktree of the repository, on this computer or a saved machine, through dsh-remote-terminals. */
 import { setTimeout as delay } from 'node:timers/promises';
 
 export interface GitStep { argv: string[]; timeoutMs?: number }
@@ -19,7 +19,7 @@ interface Job {
   id: string; state: 'running' | 'failed' | 'done' | 'discarded'; log: string; error?: JobMessage; actions: string[];
   result?: { path?: string; branch: string | null; worktree: string; warnings: JobMessage[] };
 }
-/** dsh-remote-agents' service `remoteAgentsWorktrees`. */
+/** The service `remoteAgentsWorktrees`, which dsh-remote-terminals provides (dsh-remote-agents itself until 0.2.129). */
 interface Worktrees {
   readonly version: number;
   projects(signal?: AbortSignal): Promise<Project[]>;
@@ -37,7 +37,7 @@ export class Workplaces {
   constructor(private readonly service: (name: string) => unknown, private readonly pollMs = 300) {}
   private worktrees(): Worktrees {
     const value = this.service('remoteAgentsWorktrees') as Worktrees | undefined;
-    if (!value) throw new Error('Worktree workspaces are not available: install or update dsh-remote-agents (0.2.129 or newer)');
+    if (!value) throw new Error('Worktree workspaces are not available: install dsh-remote-terminals beside dsh-remote-agents (0.2.130 or newer)');
     return value;
   }
   projects(signal?: AbortSignal): Promise<Project[]> { return this.worktrees().projects(signal); }

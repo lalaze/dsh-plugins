@@ -1,6 +1,6 @@
 import type { ChatProject } from '@dsh-plugins/remote-core/domain.js';
 import { api } from '../api.js';
-import { affectsElements } from '../dom-mutations.js';
+import { affectsElements } from '@dsh-plugins/remote-core/client/dom-mutations.js';
 
 /** A custom picker's own caption, or the cell DSH's picker wraps around a remote model's label. */
 const CAPTIONS = '.codexModelSelectLabel, [data-provider-id^="remote-cli"]';

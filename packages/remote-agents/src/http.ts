@@ -7,7 +7,6 @@ import type { NativeSharing } from './chat/native-service.js';
 import type { WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
 import type { RemoteWorkspaces } from './workspace/remote-workspaces.js';
 import { workspaceAction, type WorkspaceFeatures } from './workspace/http.js';
-import { tuiAction, worktreeAction } from './workspace/terminals.js';
 import type { Sharing } from './sharing/sharing.js';
 
 export function createHandler(service: RemoteAgentsService, projects = new ChatProjects(service), workspace?: (sessionId: string, signal: AbortSignal) => Promise<WorkspacePlacement>, workspaces?: Partial<Pick<RemoteWorkspaces, 'create' | 'shared' | 'publish'>>, features?: WorkspaceFeatures, sharing?: Pick<Sharing, 'catalog' | 'set' | 'status'>, adopt?: ReturnType<typeof adoptModel>, native?: NativeSharing) {
@@ -100,14 +99,6 @@ export function createHandler(service: RemoteAgentsService, projects = new ChatP
         case 'workspaceTarget': case 'workspaceFiles': case 'workspaceSync': {
           if (!features) throw new RemoteError('Remote workspaces are unavailable', 501);
           result = await workspaceAction(features, action, input, request.signal); break;
-        }
-        case 'tuiSessions': case 'tuiScroll': case 'tuiStart': case 'tuiTitle': case 'tuiEnd': {
-          if (!features?.tui) throw new RemoteError('The TUI is unavailable', 501);
-          result = await tuiAction(features.tui, action, input, request.signal); break;
-        }
-        case 'worktreeProjects': case 'worktreeInspect': case 'createWorktree': case 'worktreeJob': case 'worktreeJobAction': case 'worktreeArchiveCheck': case 'archiveWorktree': {
-          if (!features?.worktrees) throw new RemoteError('Worktree workspaces are unavailable', 501);
-          result = await worktreeAction(features.worktrees, action, input, request.signal); break;
         }
         case 'workspaceModels': result = workspace ? await workspace(field(input.sessionId, 'session ID', 256), request.signal) : { hostIds: [] }; break;
         case 'hostCatalogs': result = projects.hosts(); break;

@@ -2,8 +2,6 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
 import { installWorkspaceSidebar, workspaceFileAddress } from '../src/client/workspace/sidebar.js';
-import { preferTerminalShell } from '../src/client/workspace/terminal-preference.js';
-import { closeArchived, tuiTheme } from '../src/client/workspace/tui.js';
 import type { Client } from '../src/client/index.js';
 
 test('native file addresses preserve remote relative and absolute paths and reject other scopes', () => {
@@ -15,17 +13,11 @@ test('native sidebar claims only verified remote sessions, invalidates workspace
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
   Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
   t.after(() => { if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow); else Reflect.deleteProperty(globalThis, 'window'); });
-  const storage = new Map<string, string>([['dsh.terminal.shell', '/bin/zsh']]), previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); }, removeItem: (key: string) => { storage.delete(key); },
-  } });
-  t.after(() => { if (previousStorage) Object.defineProperty(globalThis, 'localStorage', previousStorage); else Reflect.deleteProperty(globalThis, 'localStorage'); });
-  const shell = () => storage.get('dsh.terminal.shell'), launcher = '/dsh/storages/dsh-remote-agents/terminal/Remote workspace';
   let cwd = '/dsh/remote-workspaces/box/app', inView = 'remote';
   const listeners = new Set<() => void>(), effects: (() => void)[] = [], requested: string[] = [];
   t.mock.method(globalThis, 'fetch', async (_input: RequestInfo | URL, init?: RequestInit) => {
     const { sessionId } = JSON.parse(String(init?.body)); requested.push(sessionId);
-    return sessionId === 'remote' && cwd.includes('remote-workspaces') ? Response.json({ hostId: 'host-test', label: 'Box', cwd: '/srv/app', terminalShell: launcher }) : Response.json({ error: 'not remote' }, { status: 409 });
+    return sessionId === 'remote' && cwd.includes('remote-workspaces') ? Response.json({ hostId: 'host-test', label: 'Box', cwd: '/srv/app' }) : Response.json({ error: 'not remote' }, { status: 409 });
   });
   // The registry in force: DSH's own Workspace files type, plus whatever the plugin registers on top.
   const NativeIcon = () => null;
@@ -71,66 +63,19 @@ test('native sidebar claims only verified remote sessions, invalidates workspace
   assert.equal((files.title as () => string)(), 'Files');
   assert.equal(types.get('remote-agents/workspace')!.guide?.length, 1, 'Remote workspace is offered in a remote conversation');
   assert.equal(typeof types.get('remote-agents/workspace')!.guide![0]!.icon, 'function', 'Remote workspace has its own artwork, not the placeholder cube');
-  assert.equal(shell(), launcher, 'New terminal opens the remote shell in a remote conversation');
   // A local conversation gets DSH's own Workspace files back, and no Remote workspace entry.
   await show('local');
   assert.equal(types.has('remote-agents/files'), false);
   assert.equal(types.get('remote-agents/workspace')!.guide, undefined);
-  assert.equal(shell(), '/bin/zsh', 'and the user\'s own shell elsewhere');
   await show('remote');
   assert.equal(types.has('remote-agents/files'), true);
-  assert.equal(shell(), launcher);
-  // A shell chosen in the menu of a remote conversation stays remembered after leaving it.
-  storage.set('dsh.terminal.shell', '/bin/bash'); await show('local'); assert.equal(shell(), '/bin/bash');
-  await show('remote'); assert.equal(shell(), launcher); await show('local'); assert.equal(shell(), '/bin/bash');
-  await show('remote');
+  await show('local'); await show('remote');
   assert.deepEqual(requested, ['remote'], 'switching back reuses the verified workspace');
   // A workspace that is no longer remote releases the takeover.
   cwd = '/local/changed'; for (const listener of listeners) listener(); await setImmediate();
   assert.equal(claim('dsh-resource://file/session/remote/src/a.ts'), false);
   assert.equal(types.has('remote-agents/files'), false);
-  assert.equal(shell(), '/bin/bash');
-  cwd = '/dsh/remote-workspaces/box/app'; await show('remote'); assert.equal(shell(), launcher);
+  cwd = '/dsh/remote-workspaces/box/app'; await show('remote');
   for (const dispose of effects.reverse()) dispose();
-  assert.equal(shell(), '/bin/bash', 'unloading the plugin gives back the user\'s shell');
   assert.equal(listeners.size, 0); assert.equal(types.size, 0); assert.equal(slots.size, 0);
-});
-
-test('Remote Claude and Remote Codex count as remote launchers when remembering the user\'s shell', t => {
-  const storage = new Map<string, string>([['dsh.terminal.shell', '/bin/zsh']]), previous = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
-    getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => { storage.set(key, value); }, removeItem: (key: string) => { storage.delete(key); },
-  } });
-  t.after(() => { if (previous) Object.defineProperty(globalThis, 'localStorage', previous); else Reflect.deleteProperty(globalThis, 'localStorage'); });
-  const shell = () => storage.get('dsh.terminal.shell');
-  for (const [workspace, claude] of [['/dsh/terminal/Remote workspace', '/dsh/terminal/Remote Claude'], ['/dsh/terminal/Remote workspace', '/dsh/terminal/Remote Codex'], ['C:\\dsh\\terminal\\Remote workspace.cmd', 'C:\\dsh\\terminal\\Remote Claude.cmd'], ['C:\\dsh\\terminal\\Remote workspace.cmd', 'C:\\dsh\\terminal\\Remote Codex.cmd']] as const) {
-    storage.set('dsh.terminal.shell', '/bin/zsh');
-    preferTerminalShell(workspace); assert.equal(shell(), workspace);
-    // Chosen in the menu: a reload in the remote conversation keeps it, and leaving gives the user's shell back.
-    storage.set('dsh.terminal.shell', claude);
-    preferTerminalShell(workspace); assert.equal(shell(), claude);
-    preferTerminalShell(undefined); assert.equal(shell(), '/bin/zsh');
-    // Coming back opens the plain remote shell again, and the user's own shell is still the one remembered.
-    preferTerminalShell(workspace); assert.equal(shell(), workspace);
-    preferTerminalShell(undefined); assert.equal(shell(), '/bin/zsh');
-  }
-});
-
-test('archiving a TUI conversation closes its terminal once, and only a TUI one', () => {
-  const closed = new Set<string>(), ended: string[] = [], isTui = (id: string) => id !== 'chat';
-  const sync = (archived: string[]) => closeArchived(archived, isTui, id => ended.push(id), closed);
-  sync(['chat']); assert.deepEqual(ended, []);
-  sync(['chat', 'tui']); sync(['chat', 'tui']); assert.deepEqual(ended, ['tui']);
-  // Unarchived, it runs again in a new terminal, which archiving it again ends too.
-  sync(['chat']); sync(['chat', 'tui']); assert.deepEqual(ended, ['tui', 'tui']);
-});
-
-test('a TUI puts the scaled CJK font ahead of DSH\'s terminal fonts, without changing other terminals', () => {
-  const plain = { fontFamilies: { terminal: '', ui: 'sans' }, fontSizes: { terminal: 13 } };
-  const shown = tuiTheme(plain) as typeof plain;
-  assert.deepEqual(shown, { fontFamilies: { terminal: '"RA TUI CJK"', ui: 'sans' }, fontSizes: { terminal: 13 } });
-  assert.equal(plain.fontFamilies.terminal, '');
-  assert.equal(tuiTheme(plain), shown, 'the same theme gives the same object, as the terminal compares them');
-  assert.equal((tuiTheme({ fontFamilies: { terminal: 'Sarasa Mono SC' } }) as typeof plain).fontFamilies.terminal, 'Sarasa Mono SC, "RA TUI CJK"', 'a font the user chose comes first');
-  assert.equal(tuiTheme(undefined), undefined);
 });

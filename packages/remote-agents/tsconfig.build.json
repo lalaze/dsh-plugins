@@ -1,1 +1,1 @@
-{ "extends": "./tsconfig.json", "compilerOptions": { "rootDir": "src", "outDir": "lib/server", "paths": { "@dsh-plugins/remote-core/*": ["./lib/server/core/*"] } }, "include": ["src/**/*.ts"], "exclude": ["src/client", "src/terminal-holder.ts"] }
+{ "extends": "./tsconfig.json", "compilerOptions": { "rootDir": "src", "outDir": "lib/server", "paths": { "@dsh-plugins/remote-core/*": ["./lib/server/core/*"] } }, "include": ["src/**/*.ts"], "exclude": ["src/client"] }

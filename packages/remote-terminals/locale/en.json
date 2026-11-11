@@ -1,0 +1,8 @@
+{
+  "title": "Remote Terminals",
+  "description": "Terminals in a remote workspace that keep running when DSH closes, Claude Code and Codex as a conversation's own view, and new workspaces from a project's Git worktrees. Needs Remote Agents.",
+  "meta": {
+    "title": "Remote Terminals",
+    "description": "Terminals in a remote workspace that keep running when DSH closes, Claude Code and Codex as a conversation's own view, and new workspaces from a project's Git worktrees. Needs Remote Agents."
+  }
+}

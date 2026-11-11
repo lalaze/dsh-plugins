@@ -1,0 +1,13 @@
+# DSH Remote Terminals changelog
+
+**English** | [简体中文](CHANGELOG.zh-CN.md)
+
+What changed in each version and what to do after upgrading, newest first.
+
+## 0.1.0 — Terminals, TUI conversations and worktree workspaces in a plugin of their own
+
+- Remote terminals that outlive DSH, **Remote Claude** and **Remote Codex** in the terminal's shell menu, TUI conversations and **Add workspace › From a project** were part of Remote Agents until 0.2.129. They are this plugin now, and work as before.
+- **After upgrading Remote Agents to 0.2.130, install this plugin beside it and restart DSH**, on every DSH that used these features. Without it those features are missing; nothing else in Remote Agents changes.
+- Your TUI conversations are taken over on the first start. Terminals and CLIs running on the remote machines keep running, and reopening a conversation shows the same process.
+- The plugin keeps no machines of its own: it works on those saved in Remote Agents, through that plugin's connections. Without Remote Agents 0.2.130 or newer it loads and does nothing.
+- Other plugins find worktree workspaces under the same service name, `remoteAgentsWorktrees`.

@@ -8,8 +8,7 @@ export const CLAUDE_LAUNCHER = 'Remote Claude', CODEX_LAUNCHER = 'Remote Codex';
 /** The CLIs a TUI conversation can run. */
 export type TuiCli = 'claude' | 'codex';
 export const TUI_LAUNCHERS: Record<TuiCli, string> = { claude: CLAUDE_LAUNCHER, codex: CODEX_LAUNCHER };
-/** `terminalShell` is the Remote workspace launcher path, as listed in DSH's terminal shell menu. */
-export interface WorkspaceTarget { hostId: string; label: string; cwd: string; terminalShell?: string }
+export interface WorkspaceTarget { hostId: string; label: string; cwd: string }
 export interface WorkspaceEntry { name: string; path: string; kind: 'file' | 'directory' | 'symlink' | 'other'; size: number; modified: string }
 export interface WorkspaceFile { path: string; content: string; revision: string; size: number }
 export interface WorkspaceManifest { files: Record<string, { hash: string; size: number }>; skipped: string[] }

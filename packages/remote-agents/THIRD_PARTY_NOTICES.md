@@ -1,16 +1,10 @@
 # Third-party notices
 
-The browser artifact bundles this workspace's private `@dsh-plugins/i18n` and `@dsh-plugins/file-view` helpers. React, React DOM and DSH host modules remain external peer dependencies. Coding CLIs execute separately on the remote machine under their own terms.
+The browser artifact bundles this workspace's private `@dsh-plugins/i18n`, `@dsh-plugins/file-view` and `@dsh-plugins/remote-core` helpers. React, React DOM and DSH host modules remain external peer dependencies. Coding CLIs execute separately on the remote machine under their own terms.
 
 The interaction model follows [Paseo](https://github.com/getpaseo/paseo); no Paseo source, SDK or runtime dependency is included.
 
 `lib/editor.js`, the code editor the browser loads when a file opens, is built from [Monaco Editor](https://github.com/microsoft/monaco-editor) (`monaco-editor` 0.57.0, MIT License, Copyright (c) 2016 - present Microsoft Corporation). Its license and the notices of the components it includes, among them marked (MIT) and DOMPurify (Apache License 2.0), are in `lib/editor-notices.txt`.
-
-The Codex logo in `src/client/workspace/tui.tsx` is adapted from [`@lobehub/icons-static-svg`](https://github.com/lobehub/lobe-icons) (1.102.0, MIT License, Copyright (c) 2023 LobeHub).
-
-`lib/terminal-holder.mjs`, which runs on SSH hosts, bundles `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0, each under the MIT License: Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js).
-
-`lib/client.js` bundles `@xterm/addon-webgl` 0.19.0 under the same license and copyright.
 
 The browser bundle includes the packages below, each under the license of its section; their copyright notices are listed with them. Regenerate this file with `node ../../scripts/third-party-notices.mjs`.
 

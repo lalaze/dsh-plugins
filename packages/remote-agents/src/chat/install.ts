@@ -30,7 +30,8 @@ export function installChat(ctx: Context, service: RemoteAgentsService, projects
       unattended: id => accessOf(scoped, sessionOf(id)).unattended,
       subagent: id => !!sessionOf(id)?.header.parentSession,
       teamMember: id => teamMemberOf(sessionOf(id)),
-      tui: id => service.store.snapshot().tuiSessions?.includes(id) === true,
+      // dsh-remote-terminals knows; without it there are no TUI conversations.
+      tui: id => (scoped.get('remoteTerminals') as { isTui?(id: string): boolean } | undefined)?.isTui?.(id) === true,
       userContent: (id, messageId) => sessionOf(id)?.deriveMessages().find(m => m.id === messageId && m.role === 'user' && (!m.source || m.source.kind === 'user' || isTeamPrompt(m.source)))?.content,
       attachments: {
         image: async (ref, signal) => {

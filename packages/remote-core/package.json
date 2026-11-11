@@ -3,13 +3,26 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "exports": { "./*.js": "./src/*.ts" },
+  "exports": {
+    "./client/*.js": "./src/client/*.ts",
+    "./*.js": "./src/*.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "check": "pnpm run typecheck"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",
-    "@deepseek-ai/dsh-session": "0.2.1-rc.2"
+    "@deepseek-ai/dsh-session": "0.2.1-rc.2",
+    "react": "^18.3.1",
+    "@types/react": "^18.3.26"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   }
 }

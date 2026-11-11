@@ -7,6 +7,7 @@
 | 插件 | 目录 | 功能 |
 | --- | --- | --- |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务 |
+| `dsh-remote-terminals` | [packages/remote-terminals](packages/remote-terminals/README.zh-CN.md) | 不随 DSH 结束的远程终端、Claude Code 与 Codex 的 TUI 对话、基于 worktree 的工作区，使用远程智能体里保存的机器 |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.zh-CN.md) | 在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型 |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.zh-CN.md) | DSH 模型选择器中的提供方分组可折叠，并在各浏览器中记住选择 |
 | `dsh-model-flow` | [packages/model-flow](packages/model-flow/README.zh-CN.md) | 一条命令：一个模型计划，一个实现，一个审核，不通过就打回 |
@@ -27,7 +28,7 @@ Remote Agents 的普通 DSH 对话共享需单独启用：通过 `shared-native-
 
 插件界面支持英语和简体中文，以英语作为源文案和回退语言。宿主提供 DSH locale 服务时，插件跟随「设置 → 通用 → 语言」即时切换，包括已打开的面板和插件自身的错误提示；未提供该服务的旧宿主使用英语。API 诊断和 CSV 列名使用英语，用户内容、模型 ID 和命令语法保持原文。
 
-私有的 `packages/i18n` 工具在构建时打入各客户端，插件安装包仍可独立安装。私有的 `packages/file-view`（代码编辑器、差异编辑器与文件预览）以同样方式由 `dsh-file-editor`、`dsh-remote-agents` 和 `dsh-git-view` 共用，各插件打入自己使用的部分。私有的 `packages/remote-core`（已保存主机与任务的类型、SSH 传输）在构建时编译进使用它的插件的服务端，目前是 `dsh-remote-agents`。
+私有的 `packages/i18n` 工具在构建时打入各客户端，插件安装包仍可独立安装。私有的 `packages/file-view`（代码编辑器、差异编辑器与文件预览）以同样方式由 `dsh-file-editor`、`dsh-remote-agents` 和 `dsh-git-view` 共用，各插件打入自己使用的部分。私有的 `packages/remote-core`（已保存主机与任务的类型、SSH 传输）在构建时编译进使用它的插件的服务端，即 `dsh-remote-agents` 和 `dsh-remote-terminals`；后者通过前者提供的服务使用其机器，这个服务的接口定义也在这个包里。
 
 ## 初始化
 
@@ -89,6 +90,7 @@ https://raw.githubusercontent.com/lalaze/dsh-plugins/market/index.json
 ```text
 packages/
   remote-agents/        # dsh-remote-agents 的源码、测试、清单和文档
+  remote-terminals/     # dsh-remote-terminals：终端、TUI 对话与 worktree 工作区
   session-models/       # 侧栏会话的模型图标与状态徽标
   model-groups/         # 模型选择器的提供方分组折叠
   model-flow/           # /flow：计划、实现、审核、打回

@@ -7,6 +7,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | Package | Directory | Description |
 | --- | --- | --- |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok and CodeBuddy on remote machines, steer them, and let DSH delegate tasks to them |
+| `dsh-remote-terminals` | [packages/remote-terminals](packages/remote-terminals/README.md) | Remote terminals that outlive DSH, Claude Code and Codex TUI conversations, and worktree workspaces, on the machines saved in Remote Agents |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.md) | Model icons and status badges on sidebar sessions, with the exact model in the hover card |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.md) | Collapsible provider groups in DSH's model picker, remembered in each browser |
 | `dsh-model-flow` | [packages/model-flow](packages/model-flow/README.md) | One command: one model plans, one implements, one reviews, and rejected work goes back |
@@ -27,7 +28,7 @@ Ordinary DSH conversation sharing is a separate opt-in feature of Remote Agents:
 
 Plugin interfaces support English and Simplified Chinese. English is the source and fallback language. On hosts with the DSH locale service, plugins follow **Settings → General → Language** and update immediately, including open panels and known error messages. Older hosts without that service use English. API diagnostics and CSV column names use English; user content, model IDs and command syntax stay in their original language.
 
-The private `packages/i18n` helper is bundled into each client at build time, so plugin archives remain independently installable. The private `packages/file-view` code editor, diff editor and file previews are shared the same way by `dsh-file-editor`, `dsh-remote-agents` and `dsh-git-view`; each plugin bundles the parts it uses. The private `packages/remote-core` (saved-host and task types, the SSH transport) is compiled into the server of the plugin that uses it, today `dsh-remote-agents`.
+The private `packages/i18n` helper is bundled into each client at build time, so plugin archives remain independently installable. The private `packages/file-view` code editor, diff editor and file previews are shared the same way by `dsh-file-editor`, `dsh-remote-agents` and `dsh-git-view`; each plugin bundles the parts it uses. The private `packages/remote-core` (saved-host and task types, the SSH transport) is compiled into the servers of the plugins that use it, `dsh-remote-agents` and `dsh-remote-terminals`; it also holds the contract of the service the second works on the first's machines through.
 
 ## Setup
 
@@ -89,6 +90,7 @@ Discover marks a newer release **Update available** and opens the installed plug
 ```text
 packages/
   remote-agents/        # dsh-remote-agents: source, tests, manifest, docs
+  remote-terminals/     # dsh-remote-terminals: terminals, TUI conversations and worktree workspaces
   session-models/       # Model icons and status badges on sidebar sessions
   model-groups/         # Collapsible provider groups in the model picker
   model-flow/           # /flow: plan, implement, review, send back

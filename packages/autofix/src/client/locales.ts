@@ -199,7 +199,7 @@ export const zh = {
   "Choose a repository": "请选择仓库",
   "Choose a branch": "请选择分支",
   "This task has no worktree": "这个任务没有 worktree",
-  "Worktree workspaces are not available: install or update dsh-remote-agents (0.2.128 or newer)": "无法使用 worktree 工作区：请安装或更新 dsh-remote-agents（0.2.128 或更新）",
+  "Worktree workspaces are not available: install dsh-remote-terminals beside dsh-remote-agents (0.2.130 or newer)": "无法使用 worktree 工作区：请在 dsh-remote-agents（0.2.130 或更新）旁边安装 dsh-remote-terminals",
   "No changes compared with the base branch.": "和基线分支相比没有改动。",
   "Search…": "搜索…",
   "Nothing matches": "没有匹配项",

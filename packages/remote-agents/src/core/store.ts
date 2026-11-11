@@ -3,7 +3,6 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { identifier, record, remotePath, field, taskInput, providerSelection, PROVIDER_LABELS, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from '@dsh-plugins/remote-core/domain.js';
-import type { TuiDetails } from '../workspace/tui-state.js';
 
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup { hostId: string; relayId: string }
@@ -22,9 +21,12 @@ export interface Instance { id: string; label: string }
  * `instance` identifies this DSH to others sharing a host's sessions; `seenWorkspaces` lists, per host, the
  * shared remote workspaces already offered to DSH, so one removed from the sidebar is not added again.
  */
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord>; tuiSessions?: string[]; tuiDetails?: Record<string, TuiDetails>;
-  /** Whether Claude Code in a terminal leaves scrolling to that terminal; on unless false. See TuiSessions.localScroll. */
-  tuiLocalScroll?: boolean }
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; seenWorkspaces?: Record<string, string[]>; sharedDeletions?: SharedDeletion[]; tagSync?: Record<string, TagSyncRecord>;
+  /**
+   * What 0.2.129 and earlier saved about TUI conversations. dsh-remote-terminals took them over and keeps them now; they
+   * stay here untouched, so that it can find them on its first start and an older version still has them.
+   */
+  tuiSessions?: string[]; tuiDetails?: Record<string, unknown>; tuiLocalScroll?: boolean }
 /** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
 export interface TagSyncRecord { names: string[]; at?: string }
 /** A deleted shared session whose deletion has not reached its SSH host yet. */
@@ -103,7 +105,7 @@ export class Store {
       ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
       ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}),
       ...(value.instance ? { instance: value.instance as Instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces as Record<string, string[]> } : {}),
-      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails as Record<string, TuiDetails> } : {}),
+      ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions as SharedDeletion[] } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails as Record<string, unknown> } : {}),
       ...(typeof value.tuiLocalScroll === 'boolean' ? { tuiLocalScroll: value.tuiLocalScroll } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }

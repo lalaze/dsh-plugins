@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-remote-terminals
+      name: dsh-remote-terminals
+      config: {}

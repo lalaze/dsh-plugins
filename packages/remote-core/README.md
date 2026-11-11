@@ -1,8 +1,13 @@
 # Remote machine core
 
-Private build-time code for plugins that work on SSH machines: the saved-host and task types and their validation
-(`domain`), the SSH transport (`ssh`), `~/.ssh/config` reading (`ssh-config`), the plugin's directory and identity on a
-host (`remote-host`), and the narrow access to DSH's permissions and tool registry (`dsh-host`).
+Private build-time code for the plugins that work on SSH machines, `dsh-remote-agents` and `dsh-remote-terminals`:
+
+- the saved-host and task types and their validation (`domain`), the SSH transport (`ssh`), `~/.ssh/config` reading (`ssh-config`), the plugin's directory and identity on a host (`remote-host`);
+- which machine and remote directory a local workspace path stands for (`access`), the workspace contracts (`workspace`) and upload helpers (`transfer`, `staging`);
+- what the CLIs report about usage (`usage`) and the Codex handshake (`codex`);
+- the narrow access to DSH's permissions and tool registry (`dsh-host`);
+- **`machines`: the contract of the service `remoteAgentsMachines`**, which Remote Agents provides and Remote Terminals works through, and `saved-hosts`, which reads the saved machines in a process that is neither;
+- `client/`: the few things both pages need — the conversation's current model, a mutation filter, and the hand-over of the "From a project" tab between the two bundles.
 
 It is not published. A plugin lists it under `devDependencies` and imports `@dsh-plugins/remote-core/<file>.js`:
 
@@ -24,4 +29,4 @@ The plugin's `tsconfig.build.json` points the package at that output, so the plu
 Only code lives here. State stays with the plugin that owns it: two plugins in one DSH each get their own copy of these
 modules, so a connection pool or a registry file must be reached through a service of the plugin that opened it.
 
-The tests for these files are still in `packages/remote-agents/test`.
+The tests for these files are in `packages/remote-agents/test` and `packages/remote-terminals/test`.

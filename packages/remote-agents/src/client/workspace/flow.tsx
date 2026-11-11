@@ -8,11 +8,10 @@ import { XIcon } from '@phosphor-icons/react/dist/csr/X';
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Dashboard, DirectoryListing, Host, RemoteWorkspace } from '@dsh-plugins/remote-core/domain.js';
-import type { WorktreeProject } from '../../workspace/worktrees.js';
+import { worktreeTab } from '@dsh-plugins/remote-core/client/worktree-tab.js';
 import { api } from '../api.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
 import { styles } from '../styles.js';
-import { ProjectFlow } from './worktree.js';
 
 /** DSH's directory-flow owner conversation: one outcome per rising `open` edge. */
 export interface DirectoryFlowProps { open: boolean; busy: boolean; onPicked(path: string): void; onCancel(): void; onError(message: string): void }
@@ -30,6 +29,8 @@ interface Listing { path: string; home: string; parent?: string; entries: { name
 type Lister = (path: string | undefined, signal: AbortSignal) => Promise<Listing>;
 type Picked = { path: string } | { cancelled: true } | { browse: true };
 type Tab = 'local' | 'remote' | 'project';
+/** dsh-remote-terminals' "From a project" tab, shown when that plugin offers it; its projects are its own to read. */
+type ProjectTab = React.ComponentType<{ projects: readonly unknown[] | undefined; busy: boolean; onPicked(path: string): void }>;
 
 const TAB_KEY = 'dsh-remote-agents.workspace-flow.tab', HOST_KEY = 'dsh-remote-agents.workspace-flow.host';
 const pathKey = (hostId: string) => `dsh-remote-agents.workspace-flow.path.${hostId}`;
@@ -176,12 +177,12 @@ function MachineGlyph({ kind }: { kind: 'server' | 'chevron' | 'check' }) {
   return <svg aria-hidden="true" className={kind === 'chevron' ? 'ra-machine-chevron' : undefined} width={kind === 'chevron' ? 14 : 16} height={kind === 'chevron' ? 14 : 16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[kind]}</svg>;
 }
 
-function FlowDialog({ hosts, projects, initialTab, localBrowse, busy, local, onPicked, onCancel }: {
-  hosts: Host[]; projects: WorktreeProject[] | undefined; initialTab: Tab; localBrowse: boolean; busy: boolean; local: () => LocalDirectories | undefined; onPicked(path: string): void; onCancel(): void;
+function FlowDialog({ hosts, projects, ProjectFlow, initialTab, localBrowse, busy, local, onPicked, onCancel }: {
+  hosts: Host[]; projects: readonly unknown[] | undefined; ProjectFlow?: ProjectTab; initialTab: Tab; localBrowse: boolean; busy: boolean; local: () => LocalDirectories | undefined; onPicked(path: string): void; onCancel(): void;
 }) {
   useLocale();
   const dialog = useRef<HTMLDialogElement>(null);
-  const [tab, setTab] = useState<Tab>(initialTab === 'remote' && !hosts.length ? 'local' : initialTab), [browseLocal, setBrowseLocal] = useState(localBrowse);
+  const [tab, setTab] = useState<Tab>((initialTab === 'remote' && !hosts.length) || (initialTab === 'project' && !ProjectFlow) ? 'local' : initialTab), [browseLocal, setBrowseLocal] = useState(localBrowse);
   const [hostId, setHostId] = useState(() => hosts.find(host => host.id === recall(HOST_KEY))?.id ?? hosts[0]?.id);
   const [pending, setPending] = useState(false), [error, setError] = useState('');
   const action = useRef<AbortController>();
@@ -231,9 +232,9 @@ function FlowDialog({ hosts, projects, initialTab, localBrowse, busy, local, onP
       <div className="ra-flow-tabs" role="tablist" aria-label={ui('Workspace location')}>
         <button type="button" role="tab" aria-selected={tab === 'local'} onClick={() => switchTab('local')}><DesktopIcon size={16} />{ui('This computer')}</button>
         {hosts.length > 0 && <button type="button" role="tab" aria-selected={tab === 'remote'} onClick={() => switchTab('remote')}><HardDrivesIcon size={16} />{ui('Remote machine')}</button>}
-        <button type="button" role="tab" aria-selected={tab === 'project'} onClick={() => switchTab('project')}><GitBranchIcon size={16} />{ui('From a project')}</button>
+        {ProjectFlow && <button type="button" role="tab" aria-selected={tab === 'project'} onClick={() => switchTab('project')}><GitBranchIcon size={16} />{ui('From a project')}</button>}
       </div>
-      {tab === 'project' ? <ProjectFlow projects={projects} busy={locked} onPicked={onPicked} />
+      {tab === 'project' && ProjectFlow ? <ProjectFlow projects={projects} busy={locked} onPicked={onPicked} />
         : tab === 'local' ? (browseLocal ? <FolderBrowser list={localList} busy={locked} onCommit={onPicked} />
         : <div className="ra-flow-local">
           <p className="ra-muted">{ui('Open a folder on this computer with the system folder picker.')}</p>
@@ -257,7 +258,7 @@ export function workspaceFlow(local: () => LocalDirectories | undefined): React.
   return function WorkspaceFlow(props) {
     const latest = useRef(props); latest.current = props;
     const request = useRef(0), armed = useRef(false), settled = useRef(0);
-    const [dialog, setDialog] = useState<{ request: number; hosts: Host[]; projects?: WorktreeProject[]; tab: Tab; localBrowse: boolean }>();
+    const [dialog, setDialog] = useState<{ request: number; hosts: Host[]; projects?: readonly unknown[]; ProjectFlow?: ProjectTab; tab: Tab; localBrowse: boolean }>();
     /** Report one outcome for an open request; later outcomes and superseded requests are dropped. */
     const settle = (current: number, report: (owner: DirectoryFlowProps) => void) => {
       if (request.current !== current || settled.current === current || !latest.current.open) return;
@@ -272,31 +273,32 @@ export function workspaceFlow(local: () => LocalDirectories | undefined): React.
       const current = ++request.current, live = () => request.current === current && latest.current.open;
       void (async () => {
         // Projects to start a worktree from are found while the machines load; finding them may take a moment longer.
-        const listing = api<WorktreeProject[]>('worktreeProjects').catch(() => [] as WorktreeProject[]);
+        const offered = worktreeTab<ProjectTab>(), ProjectFlow = offered?.Flow;
+        const listing: Promise<readonly unknown[]> = offered ? offered.projects().catch(() => []) : Promise.resolve([]);
         let hosts: Host[] = [];
         try { hosts = (await api<Dashboard>()).hosts; } catch { /* without the settings API, behave as DSH's own picker */ }
         if (!live()) return;
         const saved = recall(TAB_KEY), tab: Tab = saved === 'remote' || saved === 'project' ? saved : 'local';
         if (hosts.length) {
-          setDialog({ request: current, hosts, tab, localBrowse: false });
+          setDialog({ request: current, hosts, ProjectFlow, tab, localBrowse: false });
           void listing.then(projects => { if (live()) setDialog(open => open?.request === current ? { ...open, projects } : open); });
           return;
         }
         // Without machines or projects to offer, Add workspace is DSH's own picker.
         const projects = await listing;
         if (!live()) return;
-        if (projects.length) { setDialog({ request: current, hosts, projects, tab, localBrowse: false }); return; }
+        if (projects.length) { setDialog({ request: current, hosts, projects, ProjectFlow, tab, localBrowse: false }); return; }
         try {
           const picked = await pickNative(local);
           if (!live()) return;
           if ('path' in picked) settle(current, owner => owner.onPicked(picked.path));
           else if ('cancelled' in picked) settle(current, owner => owner.onCancel());
-          else setDialog({ request: current, hosts, projects, tab: 'local', localBrowse: true });
+          else setDialog({ request: current, hosts, projects, ProjectFlow, tab: 'local', localBrowse: true });
         } catch (error) { settle(current, owner => owner.onError(localizeError(error))); }
       })();
     }, [props.open]);
     if (!dialog) return null;
-    return <FlowDialog hosts={dialog.hosts} projects={dialog.projects} initialTab={dialog.tab} localBrowse={dialog.localBrowse} busy={props.busy} local={local}
+    return <FlowDialog hosts={dialog.hosts} projects={dialog.projects} ProjectFlow={dialog.ProjectFlow} initialTab={dialog.tab} localBrowse={dialog.localBrowse} busy={props.busy} local={local}
       onPicked={path => settle(dialog.request, owner => owner.onPicked(path))} onCancel={() => settle(dialog.request, owner => owner.onCancel())} />;
   };
 }

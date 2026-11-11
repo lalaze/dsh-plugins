@@ -22,9 +22,6 @@ import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDire
 import { symbols } from '@deepseek-ai/cordis';
 import { WorkspacePanel } from './workspace/panel.js';
 import { installWorkspaceSidebar } from './workspace/sidebar.js';
-import { installShellMenu } from './workspace/shell-menu.js';
-import { installTuiSessions } from './workspace/tui.js';
-import { installTuiActivity } from './workspace/tui-activity.js';
 import { installReadSync } from './sessions/read-sync.js';
 import { installWorkspaceImport, type WorkspaceList } from './workspace/import.js';
 
@@ -95,10 +92,7 @@ export function apply(ctx: Client): void {
   ctx.effect(installToolStatusStyles);
   ctx.effect(installLiveImages);
   installWorkspaceSidebar(ctx);
-  installTuiSessions(ctx);
-  installTuiActivity(ctx);
   installReadSync(ctx);
-  ctx.effect(installShellMenu);
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     // Read through the service itself: this plugin's proxy would resolve dependencies from our context.
     const service = (scoped as unknown as { modelDirectories: ModelDirectories }).modelDirectories;

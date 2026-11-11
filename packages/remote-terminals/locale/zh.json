@@ -1,0 +1,8 @@
+{
+  "title": "远程终端",
+  "description": "远程工作区里的终端在 DSH 关闭后继续运行，Claude Code 与 Codex 可直接作为对话界面，并可基于项目的 Git worktree 新建工作区。需要先安装远程智能体。",
+  "meta": {
+    "title": "远程终端",
+    "description": "远程工作区里的终端在 DSH 关闭后继续运行，Claude Code 与 Codex 可直接作为对话界面，并可基于项目的 Git worktree 新建工作区。需要先安装远程智能体。"
+  }
+}

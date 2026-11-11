@@ -7,9 +7,8 @@ import type { Store } from '../core/store.js';
 import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type WorkspaceRuntime } from '@dsh-plugins/remote-core/access.js';
 import { editorHandler } from './editor-route.js';
 import type { WorkspaceHosts } from './hosts.js';
-import { workspaceTransferHandler } from './http.js';
+import { workspaceTransferHandler, type WorkspaceFeatures } from './http.js';
 import type { RemoteAgentsMachines } from '@dsh-plugins/remote-core/machines.js';
-import { installTerminals, type Terminals } from './terminals.js';
 import { type GitBatch, type GitRun, type WorkspaceEntry, type WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
 import { WorkspaceTagSync, type WorkspaceTagsService } from './tag-sync.js';
@@ -43,7 +42,7 @@ export interface Workspaces {
   /** The verified placement of a DSH conversation, rechecked so a workspace switch during verification yields none. */
   placement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
   workspaces: RemoteWorkspaces;
-  features: { files: WorkspaceService } & Terminals;
+  features: WorkspaceFeatures;
 }
 
 /**
@@ -102,7 +101,7 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     for (const tool of workspaceTools(files, host, agent => accessOf(scoped, (agent as { session?: Session } | undefined)?.session).permission)) host.tools.register(tool);
   });
   installTagSync(ctx, store, machines, access);
-  // Terminals, TUI conversations and worktrees reach the machines through this service alone.
+  // dsh-remote-terminals runs terminals, TUI conversations and worktrees on the machines through this service alone.
   const remote: RemoteAgentsMachines = {
     version: 1, stateFile: join(store.directory, 'state.json'),
     hosts: () => machines.hosts(), browse: (hostId, path, options) => machines.browse(hostId, path, options),
@@ -113,7 +112,7 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     archiveSessionsIn: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
   };
   ctx.provide('remoteAgentsMachines', remote);
-  return { access, placement, workspaces, features: { files, ...installTerminals(ctx, remote, store, remote.stateFile) } };
+  return { access, placement, workspaces, features: { files } };
 }
 
 /** Workspace Tags follow a remote workspace to every DSH sharing its machine. */

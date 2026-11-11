@@ -3,10 +3,8 @@ import { requireClient, transferBody, transferFailure, transferSize } from '@dsh
 import type { WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
 import type { WorkspaceService } from './service.js';
 import { revision, workspacePath } from './service.js';
-import type { Terminals } from './terminals.js';
 
-/** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
-export interface WorkspaceFeatures extends Partial<Terminals> { files: WorkspaceService }
+export interface WorkspaceFeatures { files: WorkspaceService }
 export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
   if (value === undefined) return;
   if (!value || typeof value !== 'object') throw new RemoteError('Invalid workspace target');
@@ -15,10 +13,7 @@ export function expectedTarget(value: unknown): WorkspaceTarget | undefined {
 }
 export async function workspaceAction(features: WorkspaceFeatures, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
   const sessionId = field(input.sessionId, 'session ID', 256), expected = expectedTarget(input.target);
-  if (action === 'workspaceTarget') {
-    const target = await features.files.target(sessionId, signal, expected), shell = features.terminal?.shell;
-    return shell ? { ...target, terminalShell: shell } : target;
-  }
+  if (action === 'workspaceTarget') return features.files.target(sessionId, signal, expected);
   if (action === 'workspaceFiles') return features.files.operate(sessionId, input.operation, signal, expected);
   if (action === 'workspaceSync') {
     if (input.direction !== 'pull' && input.direction !== 'push') throw new RemoteError('Invalid sync direction');
