@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-game-assets
+      name: dsh-game-assets
+      config: {}

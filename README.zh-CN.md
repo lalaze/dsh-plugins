@@ -18,6 +18,7 @@
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
+| `dsh-game-assets` | [packages/game-assets](packages/game-assets/README.zh-CN.md) | 游戏项目的素材标签页：浏览工作区里的 2D 素材，查看哪些图片代码还在用、每组素材哪个版本在生效，并可退役、打标签或交给智能体处理 |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Chrome 风格元素、控制台和网络调试器，在 Chrome/Edge 独立窗口中打开 |
 | `dsh-translate` | [packages/translate](packages/translate/README.zh-CN.md) | 在聊天选中文本或输入框草稿中调用 OpenAI 兼容接口进行翻译 |
 | `dsh-auth-cookie-cleanup` | [packages/auth-cookie-cleanup](packages/auth-cookie-cleanup/README.zh-CN.md) | 临时修复 Desktop 启动约 70 次后无法打开：自动清理残留的按端口 `dsh-auth-*` cookie（deepseek-harness#10598） |
@@ -101,6 +102,7 @@ packages/
   workspace-tags/       # 工作区标签，侧栏按标签或状态分组
   usage-stats/          # DSH 与 Claude SSH 使用量统计
   gallery/              # 本地图库、Bing 每日壁纸与 DSH 背景
+  game-assets/          # 素材标签页：游戏项目的图片及代码是否还在引用
   browser-devtools/     # 在独立窗口中打开的网页调试器
   translate/            # DSH 聊天选区与草稿翻译
   auth-cookie-cleanup/  # 残留 dsh-auth cookie 的临时修复
