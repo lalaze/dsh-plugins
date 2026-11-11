@@ -1,15 +1,26 @@
 import { type AssetDetail, type ProjectStatus, type ScanResult, type ScannedAsset, type TabMode } from './domain.js';
 import { type Failure } from './manage.js';
-type FullScan = ScanResult<ScannedAsset>;
+import { type RemoteMachines } from './remote.js';
 import { type Rules } from './scan.js';
-export declare class AssetError extends Error {
-    readonly status: number;
-    constructor(message: string, status?: number);
-}
+import { AssetError } from './workspace.js';
+type FullScan = ScanResult<ScannedAsset>;
+export { AssetError };
 /** Folder names the client may switch: at most 500, each a plain name with two booleans. */
 export declare function parseRules(value: unknown): Rules;
+type MoveAnswer = {
+    moved: number;
+    failed: Failure[];
+    scan: FullScan;
+};
+export interface ServiceOptions {
+    /** Remote Agents' machines service when that plugin is installed; asked for at each use, as it may load later. */
+    machines?: () => RemoteMachines | undefined;
+    /** The bundled script that runs on a remote machine. */
+    remoteScript?: () => Promise<string>;
+}
 export declare class AssetService {
     private readonly cwdOf;
+    private readonly options;
     private readonly scanner;
     private readonly settings;
     private readonly results;
@@ -17,12 +28,14 @@ export declare class AssetService {
     private readonly libraries;
     /** Engines found lately, so a tab switch does not read the workspace's manifests again. */
     private readonly engines;
-    constructor(cwdOf: (sessionId: string) => Promise<string | undefined>, settingsFile: string);
-    /** The conversation's workspace folder, with symbolic links resolved. */
-    root(sessionId: string): Promise<string>;
+    private readonly reads;
+    constructor(cwdOf: (sessionId: string) => Promise<string | undefined>, settingsFile: string, options?: ServiceOptions);
+    private library;
+    /** The conversation's workspace: a folder on this computer, or one on the machine Remote Agents keeps it on. */
+    private workspace;
     /**
      * Whether a conversation's workspace gets the Assets tab: the user's choice for it, or else whether it declares a
-     * game engine. A conversation without a local workspace is not a game project.
+     * game engine. A conversation without a workspace this plugin can reach is not a game project.
      */
     project(sessionId: string): Promise<ProjectStatus>;
     /** Shows or hides the tab for this workspace whatever is detected; null goes back to the detection. */
@@ -30,29 +43,22 @@ export declare class AssetService {
     mode(): Promise<TabMode>;
     setMode(mode: TabMode): Promise<TabMode>;
     private run;
+    /** A scan that started before a change must not be the answer to it. */
+    private fresh;
+    private last;
     /** The last scan of the workspace, or a new one when there is none or `refresh` asks for it. */
     scan(sessionId: string, refresh?: boolean): Promise<FullScan>;
     /** The references to one image of the last scan. */
     detail(sessionId: string, path: string): Promise<AssetDetail>;
     /** Saves which top-level folders are read and, when given, where retired images go; then scans with them. */
     configure(sessionId: string, rules: Rules, retireDir?: unknown): Promise<FullScan>;
-    /** A scan that started before a change must not be the answer to it. */
-    private fresh;
-    private library;
     /** The named images of the last scan that pass `allowed`; the rest are reported, never touched. */
     private chosen;
+    private move;
     /** Moves images of the last scan into the retired folder; only what the scan listed can be named. */
-    retire(sessionId: string, paths: unknown): Promise<{
-        moved: number;
-        failed: Failure[];
-        scan: FullScan;
-    }>;
+    retire(sessionId: string, paths: unknown): Promise<MoveAnswer>;
     /** Moves retired images back where they came from. */
-    restore(sessionId: string, paths: unknown): Promise<{
-        moved: number;
-        failed: Failure[];
-        scan: FullScan;
-    }>;
+    restore(sessionId: string, paths: unknown): Promise<MoveAnswer>;
     /** Adds and removes tags on images of the last scan, in the workspace's tag file. */
     tag(sessionId: string, paths: unknown, add: unknown, remove: unknown): Promise<{
         tags: Record<string, string[]>;
@@ -64,4 +70,3 @@ export declare class AssetService {
     /** An image's bytes. The path is relative to the workspace; symbolic links may not lead outside it. */
     raw(sessionId: string, path: string): Promise<Buffer>;
 }
-export {};

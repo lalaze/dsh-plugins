@@ -63,6 +63,13 @@ const DEEP_HEADER = new Set(['jpg', 'jpeg', 'svg']);
 export class Scanner {
     /** Sizes and hashes of files unchanged since an earlier scan, by absolute path. */
     measured = new Map();
+    snapshot() { return Object.fromEntries(this.measured); }
+    /** Takes over entries saved earlier; an entry is used only while its file's size and time are unchanged. */
+    restore(entries) {
+        for (const [file, entry] of Object.entries(entries ?? {}))
+            if (entry && typeof entry.size === 'number' && typeof entry.mtimeMs === 'number')
+                this.measured.set(file, entry);
+    }
     async measure(file) {
         const info = await stat(file).catch(() => undefined);
         if (!info?.isFile())

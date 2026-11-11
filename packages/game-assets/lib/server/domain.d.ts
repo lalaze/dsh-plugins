@@ -134,8 +134,10 @@ export declare function defaultRule(name: string, images?: number, codeFiles?: n
 export type TabMode = 'games' | 'all';
 /** Whether a conversation's workspace gets the Assets tab. */
 export interface ProjectStatus {
-    /** The workspace folder's name; null for a conversation without a local workspace. */
+    /** The workspace folder's name; null for a conversation without a workspace the plugin can reach. */
     root: string | null;
+    /** The machine a remote workspace is on, as Remote Agents labels it; null for a folder on this computer. */
+    host: string | null;
     /** The game engine found in the workspace, if any. */
     engine: string | null;
     /** The user's choice for this workspace; null follows the detection. */
