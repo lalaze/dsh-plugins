@@ -421,9 +421,15 @@ export interface SharedTag {
     color: string;
 }
 export declare const busy: (agent: Pick<AgentSummary, "status">) => boolean;
+/**
+ * A failure with the HTTP status that reports it. Every plugin compiles its own copy of this class, and an error one
+ * plugin throws reaches another through a service: dsh-remote-terminals gets Remote Agents' "not found" this way. So
+ * `instanceof RemoteError` also accepts an error that another copy made, told by its class name and its status.
+ */
 export declare class RemoteError extends Error {
     readonly status: number;
     constructor(message: string, status?: number);
+    static [Symbol.hasInstance](value: unknown): boolean;
 }
 /** A protocol field that should be an array; anything else reads as empty. */
 export declare const list: (value: unknown) => any[];
