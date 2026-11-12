@@ -28,6 +28,8 @@ export interface ServiceHost {
         error?: string;
     }[];
     folders: Pick<Folders, 'add' | 'repository'>;
+    /** The plugins this one works through that are not running right now, by package name. */
+    needs?(): string[];
     now?(): number;
 }
 export interface SourceView {
@@ -56,6 +58,8 @@ export interface State {
         routes: string[];
         error?: string;
     }[];
+    /** Plugins that are not running and without which repositories cannot be reached or fixes cannot run. */
+    needs: string[];
 }
 export declare class AutofixService implements Autofix {
     private readonly host;

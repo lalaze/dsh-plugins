@@ -61,6 +61,8 @@ A review with no verdict is asked once more. If there is still none the flow sto
 
 The service `modelFlow` (version 1) runs a flow in a conversation, as a typed `/flow` does, and answers how it ended: `start(agent, { goal, rounds?, models?, attachments? })` resolves to `{ done, stop }`, where `done` gives the ending, the report and the steps. A flow whose model cannot read attached images is refused with the code `flow/images-unsupported`.
 
+In the page, the client service `modelFlowSettings` (version 1) offers `Models`, a React component with the combinations and the model of each job, for another plugin's settings page whose work runs as flows. It reads and saves this plugin's own choice, the one `/flow` uses.
+
 ## License
 
 MIT

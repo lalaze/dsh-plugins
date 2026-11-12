@@ -48,6 +48,7 @@ export class AutofixService {
             pool: ordered(store.pool).map(entry => ({ ...entry, sourceName: name(entry.item.source) })),
             tasks: Object.values(store.tasks).sort((a, b) => b.updatedAt - a.updatedAt).map(task => ({ ...task, running: tasks.running(task.key), sourceName: name(task.item.source) })),
             relay: this.host.relay?.() ?? [],
+            needs: this.host.needs?.() ?? [],
         };
     }
     /** One task as the board shows it, for a card that follows only that one. */

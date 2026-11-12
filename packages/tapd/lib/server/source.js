@@ -33,7 +33,7 @@ export function tapdSource(client, settings) {
         id: SOURCE_ID, name: 'TAPD',
         unready() {
             const { auth, owner, workspaces } = settings();
-            return auth.token && owner && workspaces.length ? undefined : { key: 'Add the access token, your TAPD name and a TAPD project in Settings → TAPD first.' };
+            return auth.token && owner && workspaces.length ? undefined : { key: 'Add the access token, your TAPD name and a TAPD project first.' };
         },
         async fetch(signal) { return (await client.listBugs(signal)).map(bug => itemOf(bug, settings())); },
         async report(item, event) {

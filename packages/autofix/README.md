@@ -55,13 +55,17 @@ The board opens from the **Bugs** button in a conversation's header, or from **S
 
 - DSH 0.2.2-rc.1 or newer.
 - `dsh-remote-agents` 0.2.130 or newer with `dsh-remote-terminals`, for worktrees on this computer and on saved SSH machines.
-- `dsh-model-flow` 0.1.7 or newer, with models chosen in **Settings → Model flow**.
+- `dsh-model-flow` 0.1.7 or newer on the DSH that runs fixes; from 0.1.8 its models are chosen right in **Settings → Autofix**.
 - Git 2.38 or newer on the machine that holds the repository (accepting uses `git merge-tree --write-tree`).
 - At least one source plugin.
 
+A plugin from this list that is not running is named on the settings page, where it is needed, with a button that installs it from your plugin markets.
+
 ## Settings
 
-**Settings → Autofix**: the repositories and how tasks run. A repository is a DSH workspace that is the Git repository ("project"), on this computer or on a remote machine. For a repository DSH has not opened yet, type its folder's path on the computer DSH runs on, and DSH opens it as a workspace. Per repository:
+**Settings → Autofix** holds everything a fix depends on, also what other plugins keep: the repositories, the models that plan, implement and review (Model flow's own choice, the same one `/flow` uses), how tasks run, and where bugs come from. A source plugin such as dsh-tapd puts its settings there, under the sources, instead of on a page of its own.
+
+ A repository is a DSH workspace that is the Git repository ("project"), on this computer or on a remote machine. For a repository DSH has not opened yet, type its folder's path on the computer DSH runs on, and DSH opens it as a workspace. Per repository:
 
 - **Checks before committing**: one command per line. `{package}` and `{script}` run the line once for each package the fix touched; `{script}` is the first of **Build scripts** that package has.
 - **Package folders** (`packages/*`) and **Shared paths**: for a monorepo. The package is decided from the files the fix changed, not guessed from the bug. A fix touching several packages is shown as a warning, not refused.
@@ -95,6 +99,8 @@ ctx.inject(['autofix'], scoped => {
 - `report` is told when a task starts, when a fix waits for a person (branch, commit, checks), and when it is accepted (merge commit). What it writes back is its own business. If it rejects on `accepted`, the task keeps the event and offers **Write back again**; nothing in Git is undone.
 - `image` hands over one picture of an item that says how many it has (`images`); it is asked when a task starts. `discard` is called when an item is fixed or thrown away.
 - Items are checked on the way in; `id` and `title` are required.
+
+A source's settings belong in Autofix's page. The source plugin's client registers them with the client service `autofixSources` (version 1), which exists while Autofix 0.1.2 or newer is there: `register(id, { name, Panel, text? })` returns a function that takes them out again. `Panel` is a React component drawn under the source's line with the prop `embedded`; `text(key, values)` translates the source's own messages, such as the one `unready` returns. Without that service, the source registers a settings page of its own.
 
 ## Not there yet
 

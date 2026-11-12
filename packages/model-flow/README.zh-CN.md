@@ -61,6 +61,8 @@ DeepSeek Harness 的模型分工：一条命令，一个模型做计划，一个
 
 服务 `modelFlow`（版本 1）在一个对话里运行流程，和输入 `/flow` 一样，并告诉调用方它如何结束：`start(agent, { goal, rounds?, models?, attachments? })` 返回 `{ done, stop }`，`done` 给出结局、报告和各步骤。流程里有模型读不了附带的图片时会被拒绝，错误码是 `flow/images-unsupported`。
 
+在页面里，客户端服务 `modelFlowSettings`（版本 1）提供 React 组件 `Models`，包含常用组合和各项工作的模型，供把自己的工作作为流程运行的其他插件放进它的设置页。它读写的就是本插件自己的那份选择，`/flow` 用的也是它。
+
 ## 许可证
 
 MIT

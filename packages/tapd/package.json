@@ -1,6 +1,6 @@
 {
   "name": "dsh-tapd",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TAPD as a source of bugs for dsh-autofix: the bugs under your name in, and status and comments written back",
   "type": "module",
   "main": "lib/server/index.js",

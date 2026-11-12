@@ -8,7 +8,7 @@ TAPD as a source of bugs for [Autofix](../autofix/README.md): the open bugs unde
 
 ## Settings
 
-**Settings → TAPD**:
+**Settings → Autofix → Where bugs come from → TAPD** (with dsh-autofix 0.1.1 or older, or without it, a page of its own: **Settings → TAPD**, which then offers to install Autofix):
 
 - **Sign-in**: a personal access token, or an API account and password. Kept in `~/.dsh/storages/dsh-tapd/settings.json`, readable only by you, and never sent back to a page.
 - **Which bugs**: your TAPD name (as in a bug's current owner), the TAPD projects, and the statuses to fetch, as API values (`new`, `reopened`) or as your project shows them (`待处理`).

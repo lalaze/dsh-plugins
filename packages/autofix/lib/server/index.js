@@ -7,6 +7,7 @@ import { Conversations } from './conversations.js';
 import { Folders } from './folders.js';
 import { API_PATH, createHandler } from './http.js';
 import { ManualSource } from './manual.js';
+import { missingPlugins } from './needs.js';
 import { RelayClient, RelayServer } from './relay.js';
 import { AutofixService, Sources } from './service.js';
 import { LocalFiles, Store } from './store.js';
@@ -51,7 +52,7 @@ export async function apply(ctx) {
     // A repository can be another DSH's to fix: both reach the machine that holds it, and meet there.
     const relayClient = new RelayClient({ machine: folder => workplaces.machine(folder), inspect: folder => workplaces.inspect(folder), readImage: ref => conversations.image(ref) });
     let relayServer;
-    const service = new AutofixService({ store, tasks, sources, workplaces, manual, folders: new Folders(lookup), relay: () => relayServer?.status ?? [] });
+    const service = new AutofixService({ store, tasks, sources, workplaces, manual, folders: new Folders(lookup), relay: () => relayServer?.status ?? [], needs: () => missingPlugins(lookup) });
     const served = relayServer = new RelayServer({
         store, tasks, identity: await identityOf(join(stateDir(), 'identity.json')),
         machine: project => workplaces.machine(project), inspect: project => workplaces.inspect(project),
