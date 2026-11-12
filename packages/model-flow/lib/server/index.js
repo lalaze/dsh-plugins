@@ -6,7 +6,7 @@ import { brief, flowText, hasCjk, runFlow } from './engine.js';
 import { API_PATH, createHandler } from './http.js';
 import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine } from './line.js';
 import { attachmentNote } from './prompts.js';
-import { machineOf, nameParts, OFF, relocate, resolveSpec } from './routes.js';
+import { machineOf, machinesFor, misplaced, nameParts, OFF, resolveSpec, settle } from './routes.js';
 import { cut, MARK, MAX_STEP_BODY, rowText } from './shared.js';
 import { CardStore, FlowStore, ReportStore } from './store.js';
 export const name = 'dsh-model-flow';
@@ -185,19 +185,47 @@ export async function apply(ctx) {
             failures.delete(childId);
         }
     };
-    async function chooseRoutes(agent, overrides) {
-        const models = await catalog(), machine = machineOf({ provider: agent.provider, model: agent.model }), saved = store.config;
+    /** Where the conversation works; undefined when nobody can tell, and Remote Agents judges each step as before. */
+    async function placeOf(agent) {
+        try {
+            const machines = ctx.get('remoteAgentsMachines');
+            if (!machines?.resolve)
+                return undefined;
+            let folder;
+            try {
+                folder = ctx.get('workingDirectory')?.get(agent.session);
+            }
+            catch { /* The log's own folder below. */ }
+            folder ||= agent.session.header.cwd;
+            if (!folder)
+                return undefined;
+            const placement = await machines.resolve(folder, AbortSignal.timeout(10_000)), saved = machines.hosts();
+            const here = placement.cwd ? placement.hostIds : [], name = saved.find(host => host.id === here[0])?.label;
+            return { machines: here, saved: saved.map(host => host.id), local: !placement.cwd, ...(name ? { name } : {}) };
+        }
+        catch {
+            return undefined;
+        }
+    }
+    async function chooseRoutes(agent, overrides, goal) {
+        const [models, place] = await Promise.all([catalog(), placeOf(agent)]), saved = store.config;
+        // A remote CLI only works in workspaces of its machine, so that machine's copy of each model is the one to use.
+        const machines = machinesFor(place, machineOf({ provider: agent.provider, model: agent.model }));
         const pick = (role) => {
             const spec = overrides[role];
             if (spec !== undefined)
-                return OFF.has(spec.toLowerCase()) && role === 'plan' ? undefined : resolveSpec(spec, models, machine);
+                return OFF.has(spec.toLowerCase()) && role === 'plan' ? undefined : settle(resolveSpec(spec, models, machines[0]), models, machines);
             const route = saved[role];
-            return route && relocate(route, models, machine);
+            return route && settle(route, models, machines);
         };
         const implement = pick('implement'), review = pick('review'), plan = pick('plan');
         if (!implement || !review)
             throw new Error(say(`Choose the models first: Settings → Model flow, or /${COMMAND} impl=codex review=claude <goal>`, `请先选择模型：设置 → 模型分工，或者 /${COMMAND} impl=codex review=claude <目标>`));
-        return { ...(plan ? { plan } : {}), implement, review };
+        const routes = { ...(plan ? { plan } : {}), implement, review };
+        const refusal = place && misplaced(routes, place, models, say('en', 'zh', goal) === 'zh');
+        if (refusal)
+            throw new Error(refusal);
+        return routes;
     }
     function start(agent, goal, routes, rounds, attachments) {
         const controller = new AbortController(), startedAt = Date.now();
@@ -279,7 +307,7 @@ export async function apply(ctx) {
         catch { /* A custom permission has no preset to read; the implementer reports what it could not do. */ }
         if (readOnlyParent)
             throw new Error(say('This conversation is read-only, so the implementing model could not change files. Switch it to Workspace Write first.', '这个对话是只读权限，实现模型改不了文件。请先切换到 Workspace Write。', input.goal));
-        const routes = await chooseRoutes(agent, input.overrides), rounds = input.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
+        const routes = await chooseRoutes(agent, input.overrides, input.goal), rounds = input.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
         const goal = input.goal || say('Do what the attached images and files ask.', '按附件里的图片和文件的要求来做。');
         if (attachments.some(block => block.type === 'image')) {
             for (const role of ['plan', 'implement', 'review']) {

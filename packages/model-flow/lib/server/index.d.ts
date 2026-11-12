@@ -18,6 +18,9 @@ interface LiveAgent {
         lastTurn?: number;
     };
     session: ChildSession & {
+        header: {
+            cwd?: string;
+        };
         deriveMessages?(): unknown[];
     };
 }

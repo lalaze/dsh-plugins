@@ -39,3 +39,24 @@ export declare function mainMachine(catalog: readonly CatalogModel[]): string | 
 export declare function resolveSpec(spec: string, catalog: readonly CatalogModel[], machine?: string): Route;
 /** A saved route points at one machine: move it to the conversation's machine when that machine has the model too. */
 export declare function relocate(route: Route, catalog: readonly CatalogModel[], machine?: string): Route;
+/**
+ * Where a conversation works, as Remote Agents tells it. `machines` are the saved machines that are the workspace's
+ * computer: none when the workspace is on DSH's own computer (`local`) or on a machine that is not saved.
+ */
+export interface Place {
+    machines: readonly string[];
+    saved: readonly string[];
+    name?: string;
+    local: boolean;
+}
+/** A remote CLI runs only in workspaces of its own machine. A route that names no saved machine is not judged here. */
+export declare function runsIn(route: Route, place: Place): boolean;
+/** The machines to look for a model on, best first: the workspace's, with the conversation's own model's machine ahead. */
+export declare function machinesFor(place: Place | undefined, own: string | undefined): (string | undefined)[];
+/** `relocate` over several machines: the first that has the model. */
+export declare function settle(route: Route, catalog: readonly CatalogModel[], machines: readonly (string | undefined)[]): Route;
+/**
+ * What to say before a flow starts when models it would use cannot run where the conversation works; undefined when
+ * all of them can. Without it the step fails in a second with Remote Agents' refusal, which names neither model nor machine.
+ */
+export declare function misplaced(routes: Routes, place: Place, catalog: readonly CatalogModel[], zh: boolean): string | undefined;

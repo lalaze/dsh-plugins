@@ -53,7 +53,7 @@ A review with no verdict is asked once more. If there is still none the flow sto
 - Read-only is enforced by DSH's sandbox. A Codex reviewer can run tests; a Claude Code reviewer can read code and git state, but its test commands are refused.
 - With remote Claude Code or Codex, planning and review can search the web, and Claude Code can read pages too, so a model may send workspace content out in a search query or URL.
 - Stopping interrupts the step's model at once, and the commands it started in that step end too. The exception is Codex 0.164's workspace sandbox on Linux, where a command runs on to its end.
-- A remote CLI only works in workspaces of its own machine. When the conversation itself uses a CLI on a machine, the same model on that machine is used.
+- A remote CLI only works in workspaces of its own machine. In a workspace on a saved machine, the same model on that machine is used, whichever machine you chose it on (needs dsh-remote-agents 0.2.130 or later). When that machine does not have the model, the flow does not start, and says which model is missing and what the machine has.
 - With remote CLIs, each step uploads its own copy of the attachments to the remote workspace. These copies are not cleaned up automatically.
 - Needs DSH 0.2.1-rc.3 or later (tested on rc.5 and 0.2.2-rc.1). With remote CLIs, use dsh-remote-agents 0.2.114 or later: older versions do not end the commands Codex started when you stop, and Claude Code cannot search the web while planning or reviewing; those before 0.2.113 do not pass the flow's result to a remote CLI conversation or show which tool a delegated Codex is running, and those before 0.2.102 leave each finished subagent's process running on the remote machine.
 
