@@ -48,6 +48,7 @@ A bug's pictures are given to every model step as attachments, marked `[image N]
 4. **Checks**: after the review passes, sensitive files and secrets are refused, then the repository's check commands run. A failed check goes back to the models.
 5. **Waiting for you**: the fix is committed locally. Read the report and the diff, then **Accept** or **Send back** with what should change, in words, in screenshots (chosen, pasted or dropped), or both.
 6. **Accept** merges into the base branch and pushes (or only pushes the branch, per repository), then tells the source, which writes back whatever it writes back.
+7. **Remove workspace**: once the fix is out, the card it was accepted on asks whether its workspace can go; nothing is removed before you say yes. The worktree is deleted, its conversation archived, and its branch deleted when it was merged (a branch that was only pushed stays). A workspace holding files that are not committed or commits that are not pushed is left alone. A finished task keeps the button for later.
 
 The board opens from the **Bugs** button in a conversation's header, or from **Settings → Autofix**.
 

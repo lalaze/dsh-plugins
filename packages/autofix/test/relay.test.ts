@@ -74,6 +74,7 @@ async function setup(t: TestContext, options: { relay?: boolean } = {}) {
       async accept(key) { calls.push(['accept', key]); if (store.tasks[key].status !== 'review') throw new Failure({ key: 'Only a fix that is waiting for you can be accepted' }); return store.tasks[key]; },
       stop(key) { calls.push(['stop', key]); return true; },
       async retryReport(key) { calls.push(['retryReport', key]); return store.tasks[key]; },
+      async removeWorkspace(key) { calls.push(['removeWorkspace', key]); return store.tasks[key]; },
     },
   });
   const shot = randomBytes(70_000);
@@ -126,6 +127,8 @@ test('a bug typed in one DSH is taken by the DSH that runs fixes for that machin
   host.store.tasks['manual:1'].status = 'working';
   await assert.rejects(host.client.act('/air/web', { kind: 'accept', key: 'manual:1' }), error => (said(error) as { key: string }).key === 'Only a fix that is waiting for you can be accepted');
   await assert.rejects(host.client.act('/air/web', { kind: 'stop', key: 'manual:404' }), error => (said(error) as { key: string }).key === 'There is no task for this bug');
+  await host.client.act('/air/web', { kind: 'removeWorkspace', key: 'manual:1' });
+  assert.deepEqual(host.calls.at(-1), ['removeWorkspace', 'manual:1'], 'the workspace of a finished fix is removed where it is');
   await again();
 
   // A task that is forgotten there disappears here too.

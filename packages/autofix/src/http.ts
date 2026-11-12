@@ -15,7 +15,7 @@ const key = (value: unknown): string => {
 export interface Remote {
   task(at: string, key: string): Promise<{ task: unknown; route: unknown } | undefined>;
   diff(at: string, key: string): Promise<unknown>;
-  act(at: string, ask: { kind: 'sendBack'; key: string; feedback: string } | { kind: 'accept' | 'stop' | 'retryReport'; key: string }, pictures?: ReturnType<typeof decodePictures>): Promise<void>;
+  act(at: string, ask: { kind: 'sendBack'; key: string; feedback: string } | { kind: 'accept' | 'stop' | 'retryReport' | 'removeWorkspace'; key: string }, pictures?: ReturnType<typeof decodePictures>): Promise<void>;
 }
 export function createHandler(service: AutofixService, tasks: Tasks, chat: { lastCommand(): string | undefined } = { lastCommand: () => undefined }, remote?: Remote) {
   return async (request: Request): Promise<Response> => {
@@ -33,7 +33,7 @@ export function createHandler(service: AutofixService, tasks: Tasks, chat: { las
           case 'task': { const found = await remote.task(at, key(input.key)); return Response.json({ task: found?.task ?? null, routes: found ? [found.route] : [] }, { headers }); }
           case 'diff': return Response.json(await remote.diff(at, key(input.key)), { headers });
           case 'sendBack': await remote.act(at, { kind: 'sendBack', key: key(input.key), feedback: typeof input.feedback === 'string' ? input.feedback.slice(0, 8000) : '' }, decodePictures(input.images)); break;
-          case 'accept': case 'stop': case 'retryReport': await remote.act(at, { kind: input.action, key: key(input.key) }); break;
+          case 'accept': case 'stop': case 'retryReport': case 'removeWorkspace': await remote.act(at, { kind: input.action, key: key(input.key) }); break;
           default: return Response.json({ error: 'Unknown action' }, { status: 400, headers });
         }
         return Response.json({}, { headers });
@@ -57,6 +57,7 @@ export function createHandler(service: AutofixService, tasks: Tasks, chat: { las
         case 'sendBack': await tasks.sendBack(key(input.key), typeof input.feedback === 'string' ? input.feedback.slice(0, 8000) : '', decodePictures(input.images)); break;
         case 'accept': await tasks.accept(key(input.key)); break;
         case 'retryReport': await tasks.retryReport(key(input.key)); break;
+        case 'removeWorkspace': await tasks.removeWorkspace(key(input.key)); break;
         case 'forget': await tasks.forget(key(input.key)); break;
         case 'diff': return Response.json(await service.diff(key(input.key), request.signal), { headers });
         default: return Response.json({ error: 'Unknown action' }, { status: 400, headers });

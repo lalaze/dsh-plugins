@@ -15,7 +15,7 @@ export interface TaskHost {
   store: Store;
   /** The source an item came from, while its plugin is loaded. */
   source(id: string): Source | undefined;
-  workplaces: Pick<Workplaces, 'create' | 'machine'>;
+  workplaces: Pick<Workplaces, 'create' | 'machine' | 'remove'>;
   conversations: Pick<Conversations, 'open' | 'flow' | 'picture'>;
   now?(): number;
   /** After every saved change, for whoever is showing the tasks. */
@@ -328,6 +328,42 @@ export class Tasks {
     this.note(task, say('{source} updated', { source: source.name }));
     await this.save();
     return task;
+  }
+  /**
+   * A finished fix's worktree, with its workspace and conversation in DSH, taken away once a person says so. The task
+   * stays on the board. Its branch goes too when the fix was merged; a branch that was only pushed is kept.
+   */
+  async removeWorkspace(key: string): Promise<Task> {
+    const task = this.task(key);
+    if (this.live.has(key)) throw fail('This task is still running');
+    if (task.status !== 'done') throw fail('Only the workspace of an accepted fix can be removed here');
+    if (!task.worktree || !task.workspacePath) throw fail('This task has no workspace any more');
+    const { worktree, workspacePath, branch } = task, route = this.host.store.settings.routes.find(entry => entry.id === task.routeId);
+    task.error = undefined;
+    this.note(task, say('Removing the workspace'));
+    await this.save();
+    // Whatever goes wrong, the fix is out and the task stays done: the reason is shown on it.
+    this.drive(task, async signal => {
+      try {
+        const warnings = await this.host.workplaces.remove({ project: route?.project ?? workspacePath, worktree }, signal);
+        task.worktree = undefined; task.workspacePath = undefined; task.sessionId = undefined;
+        this.note(task, say('Workspace removed'));
+        for (const warning of warnings) this.note(task, say(warning));
+        if (route && branch && task.mergeCommit) await this.dropBranch(task, route, branch, signal).catch(() => undefined);
+      } catch (error) {
+        const reason = signal.aborted ? say('Removing the workspace was stopped') : messageOf(error);
+        task.error = reason; this.note(task, reason);
+      }
+    });
+    return task;
+  }
+  /** The fix's branch, once everything on it is in the base branch on the remote. */
+  private async dropBranch(task: Task, route: Route, branch: string, signal: AbortSignal): Promise<void> {
+    const machine = await this.host.workplaces.machine(route.project, signal);
+    const [merged] = await machine.git([{ argv: ['merge-base', '--is-ancestor', `refs/heads/${branch}`, `refs/remotes/${route.pushRemote}/${task.baseBranch}`] }], { reads: true, signal });
+    if (merged.code !== 0) return;
+    const [deleted] = await machine.git([{ argv: ['branch', '-D', branch] }], { signal });
+    if (deleted.code === 0) this.note(task, say('Branch {branch} deleted', { branch }));
   }
   /** Forgets a task that is not running. Its worktree and conversation stay in DSH. */
   async forget(key: string): Promise<void> {

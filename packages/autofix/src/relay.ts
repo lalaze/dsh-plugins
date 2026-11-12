@@ -19,7 +19,7 @@ export interface Published { executor: string; name: string; at: number; routes:
 export type RelayRequest =
   | { id: string; kind: 'file'; routeId: string; branch: string; title: string; body: string; pictures: string[] }
   | { id: string; kind: 'sendBack'; key: string; feedback: string; pictures: string[] }
-  | { id: string; kind: 'accept' | 'stop' | 'retryReport'; key: string };
+  | { id: string; kind: 'accept' | 'stop' | 'retryReport' | 'removeWorkspace'; key: string };
 type Ask = RelayRequest extends infer R ? R extends { id: string } ? Omit<R, 'id' | 'pictures'> : never : never;
 export type RelayDone = { ok: true; key?: string; ref?: string; title?: string } | { ok: false; said: Message };
 export interface RemoteTask { task: TaskView; route: Pick<Route, 'id' | 'name' | 'accept'> }
@@ -47,7 +47,7 @@ export interface ServerHost {
   diff(key: string): Promise<Diff>;
   tasks: {
     start(key: string): Promise<Task>; sendBack(key: string, feedback: string, pictures?: readonly ItemImage[]): Promise<Task>;
-    accept(key: string): Promise<Task>; stop(key: string): boolean; retryReport(key: string): Promise<Task>;
+    accept(key: string): Promise<Task>; stop(key: string): boolean; retryReport(key: string): Promise<Task>; removeWorkspace(key: string): Promise<Task>;
   };
   /** This DSH, as other DSHes will name it. */
   identity: { id: string; name: string };
@@ -150,6 +150,7 @@ export class RelayServer {
     else if (request.kind === 'accept') await tasks.accept(task.key);
     else if (request.kind === 'stop') tasks.stop(task.key);
     else if (request.kind === 'retryReport') await tasks.retryReport(task.key);
+    else if (request.kind === 'removeWorkspace') await tasks.removeWorkspace(task.key);
     else throw fail('This DSH does not know that request; update dsh-autofix on it');
     return { ok: true, key: task.key };
   }

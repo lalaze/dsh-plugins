@@ -57,9 +57,14 @@ function Title({ item }: { item: Item }) {
 
 /** A task with what can be done about it. `keep` leaves out removing it: a card in a conversation is not where a task is thrown away. `at` is set for a task another DSH runs. */
 export function TaskCard({ task, routes, busy, act, open, keep, at }: { task: TaskView; routes: readonly Pick<Route, 'id' | 'name' | 'accept'>[]; busy: boolean; act(action: string, body?: Record<string, unknown>): Promise<boolean>; open?(sessionId: string): void; keep?: boolean; at?: string }) {
-  const [mode, setMode] = useState<'idle' | 'back' | 'accept'>('idle'), [note, setNote] = useState(''), [showDiff, setShowDiff] = useState(false), added = usePictures();
+  const [mode, setMode] = useState<'idle' | 'back' | 'accept' | 'remove'>('idle'), [note, setNote] = useState(''), [showDiff, setShowDiff] = useState(false), added = usePictures();
   const route = routes.find(entry => entry.id === task.routeId), last = task.events.at(-1);
   const review = task.status === 'review', trouble = task.status === 'failed' || task.status === 'stopped', done = task.status === 'done';
+  // The worktree a finished fix was made in has no more use; it goes only when a person says so.
+  const removable = done && !!task.worktree && !task.running, accepted = useRef(false);
+  // The card a fix was accepted on asks about its workspace by itself, once the fix is out.
+  useEffect(() => { if (removable && accepted.current) { accepted.current = false; setMode('remove'); } }, [removable]);
+  useEffect(() => { if (mode === 'remove' && !removable) setMode('idle'); }, [mode, removable]);
   const send = async () => { if (await act('sendBack', { feedback: note, images: added.payload() })) { setNote(''); added.clear(); setMode('idle'); } };
   return <article className="tp-card" data-status={task.status}>
     <header>
@@ -68,12 +73,12 @@ export function TaskCard({ task, routes, busy, act, open, keep, at }: { task: Ta
     </header>
     <p className="tp-meta">{[sourceLabel(task.sourceName), route?.name ?? task.routeId, task.branch && `${task.branch} ← ${task.baseBranch}`, task.commit && task.commit.slice(0, 9), task.attempts > 1 && ui("round {0}", { 0: String(task.attempts) })].filter(Boolean).join(' · ')}</p>
     {task.error && <Said message={task.error} error />}
-    {!task.error && !review && !done && last && <p className="tp-muted">{told(last.said)}</p>}
+    {!task.error && !review && (!done || task.running) && last && <p className="tp-muted">{told(last.said)}</p>}
     {task.check && (task.check.runs.length > 0 || task.check.warnings.length > 0) && <ul className="tp-checks">
       {task.check.runs.map((run, index) => <li key={index} data-ok={run.code === 0}><code>{run.command}</code><span>{run.code === 0 ? ui("passed") : ui("failed")} · {seconds(run.ms)}</span></li>)}
       {task.check.warnings.map((warning, index) => <li key={`w${index}`} data-warning>{told(warning)}</li>)}
     </ul>}
-    {done && <p className="tp-muted">{task.mergeCommit ? ui("Merged into {0} as {1}", { 0: task.baseBranch, 1: task.mergeCommit.slice(0, 9) }) : ui("Branch {0} pushed", { 0: task.branch ?? '' })}</p>}
+    {done && <p className="tp-muted">{task.mergeCommit ? ui("Merged into {0} as {1}", { 0: task.baseBranch, 1: task.mergeCommit.slice(0, 9) }) : ui("Branch {0} pushed", { 0: task.branch ?? '' })}{!task.worktree && ` · ${ui("workspace removed")}`}</p>}
     {task.reportPending && <p className="tp-error">{ui("{0} was not told that this was accepted.", { 0: sourceLabel(task.sourceName) })}</p>}
     {task.flow?.report && (review || trouble) && <details className="tp-report"><summary>{ui("What the models reported")}</summary><div>{task.flow.report}</div></details>}
     {review && <details className="tp-report" onToggle={event => setShowDiff((event.target as HTMLDetailsElement).open)}><summary>{ui("Changes")}{task.check ? ` · ${ui("{0} files", { 0: String(task.check.files.length) })}` : ''}</summary>{showDiff && <Diff taskKey={`${task.key}`} {...(at ? { at } : {})} />}</details>}
@@ -84,13 +89,18 @@ export function TaskCard({ task, routes, busy, act, open, keep, at }: { task: Ta
     {mode === 'accept' && <div className="tp-form"><p>{task.item.source === 'manual'
         ? route?.accept === 'push-branch' ? ui("Push branch {0}?", { 0: task.branch ?? '' }) : ui("Merge into {0} and push it?", { 0: task.baseBranch })
         : route?.accept === 'push-branch' ? ui("Push branch {0} and tell {1} the bug is fixed?", { 0: task.branch ?? '', 1: task.sourceName }) : ui("Merge into {0}, push it, and tell {1} the bug is fixed?", { 0: task.baseBranch, 1: task.sourceName })}</p>
-      <div className="tp-actions"><button type="button" className="tp-button" data-primary disabled={busy} onClick={() => void act('accept').then(ok => { if (ok) setMode('idle'); })}>{ui("Yes, accept")}</button><button type="button" className="tp-button" onClick={() => setMode('idle')}>{ui("Cancel")}</button></div></div>}
+      <div className="tp-actions"><button type="button" className="tp-button" data-primary disabled={busy} onClick={() => void act('accept').then(ok => { if (ok) { accepted.current = true; setMode('idle'); } })}>{ui("Yes, accept")}</button><button type="button" className="tp-button" onClick={() => setMode('idle')}>{ui("Cancel")}</button></div></div>}
+    {mode === 'remove' && <div className="tp-form"><p>{task.mergeCommit
+        ? ui("Remove this fix's workspace? Its worktree is deleted and its conversation archived. Branch {0} is deleted too, as it is merged.", { 0: task.branch ?? '' })
+        : ui("Remove this fix's workspace? Its worktree is deleted and its conversation archived. Branch {0} stays.", { 0: task.branch ?? '' })}</p>
+      <div className="tp-actions"><button type="button" className="tp-button" data-danger disabled={busy} onClick={() => void act('removeWorkspace').then(() => setMode('idle'))}>{ui("Yes, remove it")}</button><button type="button" className="tp-button" onClick={() => setMode('idle')}>{ui("Keep it")}</button></div></div>}
     {mode === 'idle' && <div className="tp-actions">
       {review && <><button type="button" className="tp-button" data-primary disabled={busy} onClick={() => setMode('accept')}>{ui("Accept")}</button><button type="button" className="tp-button" disabled={busy} onClick={() => setMode('back')}>{ui("Send back")}</button></>}
       {trouble && task.sessionId && <><button type="button" className="tp-button" data-primary disabled={busy} onClick={() => void act('sendBack', { feedback: '' })}>{ui("Continue")}</button><button type="button" className="tp-button" disabled={busy} onClick={() => setMode('back')}>{ui("Continue with a note")}</button></>}
       {task.running && <button type="button" className="tp-button" disabled={busy} onClick={() => void act('stop')}>{ui("Stop")}</button>}
       {task.reportPending && <button type="button" className="tp-button" data-primary disabled={busy} onClick={() => void act('retryReport')}>{ui("Write back again")}</button>}
       {task.sessionId && open && <button type="button" className="tp-button" onClick={() => open(task.sessionId!)}>{ui("Open conversation")}</button>}
+      {removable && <button type="button" className="tp-button" disabled={busy} onClick={() => setMode('remove')}>{ui("Remove workspace")}</button>}
       {(trouble || done) && !keep && <button type="button" className="tp-button" data-quiet disabled={busy} onClick={() => void act('forget')}>{ui("Remove")}</button>}
     </div>}
   </article>;

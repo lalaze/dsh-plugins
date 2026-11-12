@@ -58,7 +58,7 @@ test('the settings page gets the project to choose: the folder, or the workspace
   const never = async () => { throw new Error('not used'); };
   const sources = new Sources(), listed = [{ path: '/elsewhere', title: 'other', location: { kind: 'remote' as const, hostId: 'h', host: 'code' }, folder: repo }];
   const local = (path: string) => ({ path, title: path.split('/').at(-1)!, location: { kind: 'local' as const }, folder: path });
-  const tasks = new Tasks({ store, source: id => sources.get(id), workplaces: { create: never, machine: never }, conversations: { open: never, flow: never, picture: never } });
+  const tasks = new Tasks({ store, source: id => sources.get(id), workplaces: { create: never, machine: never, remove: never }, conversations: { open: never, flow: never, picture: never } });
   const service = new AutofixService({ store, tasks, sources, manual: new ManualSource(join(home, 'manual')), folders, workplaces: { projects: async () => listed, inspect: never, machine: never } });
   const handler = createHandler(service, tasks);
   const post = async (path: unknown) => {

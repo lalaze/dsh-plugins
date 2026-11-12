@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { test, type TestContext } from 'node:test';
 import { promisify } from 'node:util';
 import type { FlowInput, FlowResult, FlowRun } from '../src/conversations.js';
-import { defaultSettings, render, type Item, type ItemEvent, type Message, type Route } from '../src/domain.js';
+import { defaultSettings, fail, render, type Item, type ItemEvent, type Message, type Route } from '../src/domain.js';
 const said = (message: Message | undefined) => message ? render(message) : undefined;
 import { refresh } from '../src/pool.js';
 import { LocalFiles, Store } from '../src/store.js';
@@ -41,7 +41,7 @@ function machine(folder: string): Machine {
 }
 const bug = (id: string, title: string, labels: string[] = []): Item => ({ source: 'tapd', id: `100/${id}`, ref: id, title, body: '加法算错了', url: `https://tapd.example/${id}`, project: { id: '100', name: 'Dana' }, labels, images: 3 });
 
-interface Options { route?: Partial<Route>; reportFails?: boolean; retries?: number; noSource?: boolean; blind?: boolean; cardFails?: boolean }
+interface Options { route?: Partial<Route>; reportFails?: boolean; retries?: number; noSource?: boolean; blind?: boolean; cardFails?: boolean; removeWarns?: boolean }
 async function setup(t: TestContext, options: Options = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-tapd-')));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -67,7 +67,7 @@ async function setup(t: TestContext, options: Options = {}) {
   const told: ItemEvent[] = [], goals: string[] = [], opened: unknown[] = [];
   /** The cards put into the task's conversation: its number and what the task said then. */
   const cards: [number | undefined, string][] = [];
-  const flows: FlowInput[] = [], discarded: string[] = [];
+  const flows: FlowInput[] = [], discarded: string[] = [], removals: string[] = [];
   const source = { id: 'tapd', name: 'TAPD',
     async image(_item: Item, index: number) { if (index === 1) throw new Error('gone'); return { data: new Uint8Array([index]), mediaType: 'image/png', name: `p${index}.png` }; },
     async discard(item: Item) { discarded.push(item.id); },
@@ -86,6 +86,15 @@ async function setup(t: TestContext, options: Options = {}) {
         return { path: worktree, worktree, branch, warnings: [] };
       },
       async machine(path) { return machine(path); },
+      // As dsh-remote-terminals does it: nothing that exists only here is thrown away, and the branch stays.
+      async remove({ project: source, worktree: folder }) {
+        removals.push(source);
+        const dirty = (await git(folder, 'status', '--porcelain')).split('\n').filter(Boolean).length, unpushed = Number(await git(folder, 'rev-list', '--count', 'HEAD', '--not', '--remotes'));
+        if (dirty) throw fail('The workspace has {count} files that are not committed. Commit them or throw them away first, or archive the workspace from the sidebar.', { count: String(dirty) });
+        if (unpushed) throw fail('The workspace has {count} commits that are not pushed. Push them first, or archive the workspace from the sidebar.', { count: String(unpushed) });
+        await git(source, 'worktree', 'remove', '--force', folder);
+        return options.removeWarns ? ['Teardown was skipped'] : [];
+      },
     },
     conversations: {
       async open(input) { opened.push(input); return { workspaceId: 'w', sessionId: 's1' }; },
@@ -106,7 +115,7 @@ async function setup(t: TestContext, options: Options = {}) {
     },
   });
   const fix = async (dir: string) => { await writeFile(join(dir, 'packages', 'act', 'math.js'), 'export const add = (a, b) => a + b;\n'); };
-  return { root, origin, project, store, tasks, told, goals, flows, discarded, opened, edits, fix, cards, worktree: () => worktree, stopFlow: () => flowing?.stop() };
+  return { root, origin, project, store, tasks, told, goals, flows, discarded, removals, opened, edits, fix, cards, worktree: () => worktree, stopFlow: () => flowing?.stop() };
 }
 
 test('a bug goes from the pool to a local commit, and reaches the remote only when accepted', async t => {
@@ -331,4 +340,54 @@ test('the task puts a card into its conversation each time it needs a person, an
   await closed.tasks.start('tapd:100/1');
   await closed.tasks.idle('tapd:100/1');
   assert.deepEqual([closed.store.tasks['tapd:100/1'].status, closed.store.tasks['tapd:100/1'].cards], ['review', 0], 'a card that could not be shown is not counted, and the task goes on');
+});
+
+test('once a fix is merged its workspace can be removed, with its branch; the task stays', async t => {
+  const host = await setup(t, { removeWarns: true });
+  host.edits.push(host.fix);
+  await host.tasks.start('tapd:100/1');
+  await host.tasks.idle('tapd:100/1');
+  const task = host.store.tasks['tapd:100/1'], folder = host.worktree();
+  await assert.rejects(host.tasks.removeWorkspace('tapd:100/1'), /Only the workspace of an accepted fix can be removed here/, 'a fix nobody accepted keeps its workspace');
+  await host.tasks.accept('tapd:100/1');
+  await host.tasks.idle('tapd:100/1');
+  assert.equal(task.status, 'done', said(task.error));
+
+  // Something a person left there after the fix: it exists nowhere else, so the workspace stays.
+  await writeFile(join(folder, 'notes.txt'), 'mine\n');
+  await host.tasks.removeWorkspace('tapd:100/1');
+  await host.tasks.idle('tapd:100/1');
+  assert.deepEqual([task.status, task.error?.key, task.error?.values, task.worktree], ['done', 'The workspace has {count} files that are not committed. Commit them or throw them away first, or archive the workspace from the sidebar.', { count: '1' }, folder]);
+  assert.equal(await git(folder, 'rev-parse', '--abbrev-ref', 'HEAD'), 'tapd/100/1', 'nothing was touched');
+
+  await rm(join(folder, 'notes.txt'));
+  await host.tasks.removeWorkspace('tapd:100/1');
+  assert.equal(host.tasks.running('tapd:100/1'), true);
+  await host.tasks.idle('tapd:100/1');
+  assert.deepEqual([task.status, said(task.error), task.worktree, task.workspacePath, task.sessionId], ['done', undefined, undefined, undefined, undefined]);
+  assert.deepEqual(host.removals, [host.project, host.project], 'asked through the repository\'s own workspace');
+  assert.deepEqual(task.events.slice(-4).map(event => said(event.said)), ['Removing the workspace', 'Workspace removed', 'Teardown was skipped', 'Branch tapd/100/1 deleted']);
+  assert.equal(await git(host.project, 'worktree', 'list', '--porcelain').then(text => text.includes(folder)), false);
+  assert.equal(await git(host.project, 'branch', '--list', 'tapd/100/1'), '', 'the merged branch is gone');
+  assert.equal(await git(host.origin, 'rev-parse', 'main'), task.mergeCommit, 'what was pushed stays');
+  await assert.rejects(host.tasks.removeWorkspace('tapd:100/1'), /This task has no workspace any more/);
+  const reopened = new Store(new LocalFiles(join(host.root, 'state')));
+  await reopened.open();
+  assert.deepEqual([reopened.tasks['tapd:100/1'].status, reopened.tasks['tapd:100/1'].worktree], ['done', undefined]);
+});
+
+test('a branch that was only pushed stays when its workspace is removed', async t => {
+  const host = await setup(t, { route: { accept: 'push-branch', tests: [] } });
+  host.edits.push(host.fix);
+  await host.tasks.start('tapd:100/1');
+  await host.tasks.idle('tapd:100/1');
+  await host.tasks.accept('tapd:100/1');
+  await host.tasks.idle('tapd:100/1');
+  const task = host.store.tasks['tapd:100/1'], folder = host.worktree();
+  await host.tasks.removeWorkspace('tapd:100/1');
+  await host.tasks.idle('tapd:100/1');
+  assert.deepEqual([task.status, said(task.error), task.worktree], ['done', undefined, undefined]);
+  assert.equal(await git(host.project, 'worktree', 'list', '--porcelain').then(text => text.includes(folder)), false);
+  assert.equal(await git(host.project, 'rev-parse', 'refs/heads/tapd/100/1'), task.commit, 'the branch waits for whoever merges it');
+  assert.equal(task.events.some(event => event.said.key === 'Branch {branch} deleted'), false);
 });

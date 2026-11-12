@@ -54,6 +54,7 @@ export const CSS = `
 .tp-button[data-primary]{border-color:transparent;background:var(--dsw-alias-brand-primary,CanvasText);color:var(--dsw-alias-label-primary-foreground,Canvas)}
 .tp-button[data-primary]:hover:not(:disabled){background:var(--dsw-alias-brand-primary,CanvasText);opacity:.88}
 .tp-button[data-quiet]{border-color:transparent;color:var(--dsw-alias-label-secondary,color-mix(in srgb,currentColor 72%,transparent))}
+.tp-button[data-danger]{color:var(--dsw-alias-state-error-primary,#d14343)}
 .tp-button:disabled{opacity:.45;cursor:default}
 :where(.tp-board,.tp-settings,.tp-chat) :is(select,input,textarea){min-width:0;height:28px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l3,color-mix(in srgb,currentColor 16%,transparent));border-radius:var(--dsw-radius-sm,8px);background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font:inherit;font-size:12.5px}
 :where(.tp-board,.tp-settings,.tp-chat) textarea{height:auto;padding:6px 8px;line-height:18px;resize:vertical;font-family:var(--dsw-font-family-mono,ui-monospace,monospace);font-size:12px}

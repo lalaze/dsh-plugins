@@ -18,7 +18,7 @@ async function setup(t: TestContext) {
   await store.open();
   const never = async () => { throw new Error('not used'); };
   const sources = new Sources(), manual = new ManualSource(join(home, 'manual'));
-  const tasks = new Tasks({ store, source: id => sources.get(id), workplaces: { create: never, machine: never }, conversations: { open: never, flow: never, picture: never } });
+  const tasks = new Tasks({ store, source: id => sources.get(id), workplaces: { create: never, machine: never, remove: never }, conversations: { open: never, flow: never, picture: never } });
   const service = new AutofixService({ store, tasks, sources, manual, workplaces: { projects: async () => [], inspect: never, machine: never }, folders: { add: never, repository: never }, now: () => 5000 });
   const handler = createHandler(service, tasks);
   const post = async (body: Record<string, unknown>, headers: Record<string, string> = { 'X-DSH-Autofix': '1' }) => {
