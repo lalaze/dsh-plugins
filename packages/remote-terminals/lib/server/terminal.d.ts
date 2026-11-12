@@ -1,17 +1,21 @@
-/** The part of DSH's terminal controller that starts a terminal's process. */
+/**
+ * The part of DSH's terminal controller that starts a terminal's process. Up to 0.2.2-rc.1 that is
+ * `spawn(agent, owner, request, signal)`; from 0.2.2-rc.2 `userLaunch(agent, request, signal)` chooses the shell and
+ * `spawn(agent, owner, id, prepare, signal)` runs what it prepared. Every argument is passed on as given, so a further
+ * change of these private methods does not take terminals down with it.
+ */
 interface TerminalSpawner {
-    spawn?(this: TerminalSpawner, agent: unknown, owner: unknown, request: {
-        id: string;
-        shellPath?: string;
-    }, signal: AbortSignal): unknown;
+    spawn?(this: TerminalSpawner, ...args: unknown[]): unknown;
+    userLaunch?(this: TerminalSpawner, ...args: unknown[]): unknown;
     execution?(this: TerminalSpawner, agent: unknown): {
         subprocess: object;
     };
 }
 /**
  * DSH tells a terminal's process its session but not which terminal it is, and that is what finds a sidebar terminal's
- * holder again. DSH reads its execution environment first thing and synchronously in `spawn`, so the replacement is only ever
- * seen by that call. A DSH that works differently leaves terminals without the ID, which then end with their connection as before.
+ * holder again. From DSH 0.2.2-rc.2 the ID joins the environment `spawn` is handed. Earlier, DSH reads its execution
+ * environment first thing and synchronously in `spawn`, so the replacement is only ever seen by that call. A DSH that
+ * works differently leaves terminals without the ID, which then end with their connection as before.
  */
 export declare function passTerminalId(controller: TerminalSpawner): () => void;
 /**

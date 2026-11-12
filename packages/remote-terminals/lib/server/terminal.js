@@ -19,16 +19,26 @@ function override(target, key, value) {
             delete target[key];
     };
 }
+const isRequest = (value) => typeof value === 'object' && value !== null && typeof value.id === 'string';
 /**
  * DSH tells a terminal's process its session but not which terminal it is, and that is what finds a sidebar terminal's
- * holder again. DSH reads its execution environment first thing and synchronously in `spawn`, so the replacement is only ever
- * seen by that call. A DSH that works differently leaves terminals without the ID, which then end with their connection as before.
+ * holder again. From DSH 0.2.2-rc.2 the ID joins the environment `spawn` is handed. Earlier, DSH reads its execution
+ * environment first thing and synchronously in `spawn`, so the replacement is only ever seen by that call. A DSH that
+ * works differently leaves terminals without the ID, which then end with their connection as before.
  */
 export function passTerminalId(controller) {
     const { spawn, execution } = controller;
     if (typeof spawn !== 'function' || typeof execution !== 'function')
         return () => { };
-    return override(controller, 'spawn', function (agent, owner, request, signal) {
+    return override(controller, 'spawn', function (...args) {
+        const [, , third, fourth] = args;
+        if (typeof third === 'string' && typeof fourth === 'function') {
+            const prepare = fourth;
+            const withId = async (signal) => { const launch = await prepare(signal); return { ...launch, env: { ...launch.env, [TERMINAL_ID_ENV]: third } }; };
+            return spawn.call(this, ...args.slice(0, 3), withId, ...args.slice(4));
+        }
+        if (!isRequest(third))
+            return spawn.call(this, ...args);
         const restore = override(this, 'execution', function (target) {
             restore();
             const running = execution.call(this, target), { subprocess } = running;
@@ -36,11 +46,11 @@ export function passTerminalId(controller) {
                         const value = Reflect.get(source, key, source);
                         if (key !== 'spawnTerminal' || typeof value !== 'function')
                             return typeof value === 'function' ? value.bind(source) : value;
-                        return (options) => value.call(source, { ...options, env: { ...options.env, [TERMINAL_ID_ENV]: request.id } });
+                        return (options) => value.call(source, { ...options, env: { ...options.env, [TERMINAL_ID_ENV]: third.id } });
                     } }) };
         });
         try {
-            return spawn.call(this, agent, owner, request, signal);
+            return spawn.call(this, ...args);
         }
         finally {
             restore();
@@ -54,14 +64,18 @@ export function passTerminalId(controller) {
  * Stop this before whatever replaced `spawn` earlier.
  */
 export function followMovedLaunchers(controller, launchers) {
-    const { spawn } = controller;
-    if (typeof spawn !== 'function')
-        return () => { };
     const current = new Map(launchers.map(path => [basename(path), path]));
-    return override(controller, 'spawn', function (agent, owner, request, signal) {
-        const launcher = request.shellPath === undefined ? undefined : current.get(basename(request.shellPath));
-        return spawn.call(this, agent, owner, launcher && launcher !== request.shellPath ? { ...request, shellPath: launcher } : request, signal);
+    const moved = (args) => args.map((value) => {
+        if (!isRequest(value) || value.shellPath === undefined)
+            return value;
+        const launcher = current.get(basename(value.shellPath));
+        return launcher && launcher !== value.shellPath ? { ...value, shellPath: launcher } : value;
     });
+    // The method that reads the request's shell: `userLaunch` where DSH has it, otherwise `spawn`.
+    const key = typeof controller.userLaunch === 'function' ? 'userLaunch' : 'spawn', start = controller[key];
+    if (typeof start !== 'function')
+        return () => { };
+    return override(controller, key, function (...args) { return start.call(this, ...moved(args)); });
 }
 /**
  * Closing a sidebar terminal should end what runs in it. DSH ends its process the same way when it quits, which must leave
