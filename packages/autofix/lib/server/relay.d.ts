@@ -34,7 +34,7 @@ export type RelayRequest = {
     pictures: string[];
 } | {
     id: string;
-    kind: 'accept' | 'stop' | 'retryReport';
+    kind: 'accept' | 'stop' | 'retryReport' | 'removeWorkspace';
     key: string;
 };
 type Ask = RelayRequest extends infer R ? R extends {
@@ -85,6 +85,7 @@ export interface ServerHost {
         accept(key: string): Promise<Task>;
         stop(key: string): boolean;
         retryReport(key: string): Promise<Task>;
+        removeWorkspace(key: string): Promise<Task>;
     };
     /** This DSH, as other DSHes will name it. */
     identity: {

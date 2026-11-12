@@ -67,4 +67,13 @@ export declare class Workplaces {
         base: string;
         branch: string;
     }, signal: AbortSignal): Promise<Created>;
+    /**
+     * Takes a worktree away: its conversations are archived, its folder is deleted and its workspace leaves DSH. The branch
+     * stays. Refused while the worktree holds anything that exists nowhere else, as nobody is shown what would be lost.
+     * `project` is a workspace of the same repository. Returns what there is to know afterwards.
+     */
+    remove(input: {
+        project: string;
+        worktree: string;
+    }, signal: AbortSignal): Promise<string[]>;
 }

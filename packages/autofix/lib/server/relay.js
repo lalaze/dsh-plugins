@@ -144,6 +144,8 @@ export class RelayServer {
             tasks.stop(task.key);
         else if (request.kind === 'retryReport')
             await tasks.retryReport(task.key);
+        else if (request.kind === 'removeWorkspace')
+            await tasks.removeWorkspace(task.key);
         else
             throw fail('This DSH does not know that request; update dsh-autofix on it');
         return { ok: true, key: task.key };

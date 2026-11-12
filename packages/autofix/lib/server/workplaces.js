@@ -1,5 +1,6 @@
 /** Where a task's files are: a worktree of the repository, on this computer or a saved machine, through dsh-remote-terminals. */
 import { setTimeout as delay } from 'node:timers/promises';
+import { fail } from './domain.js';
 const said = (message) => message.key.replace(/\{(\w+)\}/gu, (whole, name) => message.values?.[name] ?? whole) + (message.detail ? `\n${message.detail.trim()}` : '');
 export class Workplaces {
     service;
@@ -61,5 +62,37 @@ export class Workplaces {
         if (job.state !== 'done' || !job.result?.path)
             throw new Error(job.error ? said(job.error) : 'The worktree could not be created');
         return { path: job.result.path, worktree: job.result.worktree, branch: job.result.branch ?? branch, warnings: job.result.warnings.map(said) };
+    }
+    /**
+     * Takes a worktree away: its conversations are archived, its folder is deleted and its workspace leaves DSH. The branch
+     * stays. Refused while the worktree holds anything that exists nowhere else, as nobody is shown what would be lost.
+     * `project` is a workspace of the same repository. Returns what there is to know afterwards.
+     */
+    async remove(input, signal) {
+        const worktrees = this.worktrees();
+        if (typeof worktrees.archiveCheck !== 'function' || typeof worktrees.archive !== 'function')
+            throw fail('Removing a workspace needs a newer dsh-remote-terminals');
+        const check = await worktrees.archiveCheck(input.project, input.worktree, signal);
+        if (check.dirty > 0)
+            throw fail('The workspace has {count} files that are not committed. Commit them or throw them away first, or archive the workspace from the sidebar.', { count: String(check.dirty) });
+        if (check.unpushed === null)
+            throw fail('Git could not tell whether everything in the workspace is pushed. Archive the workspace from the sidebar if it can go.');
+        if (check.unpushed > 0)
+            throw fail('The workspace has {count} commits that are not pushed. Push them first, or archive the workspace from the sidebar.', { count: String(check.unpushed) });
+        let job = worktrees.archive({ path: input.project, worktree: input.worktree });
+        const stop = () => { void worktrees.act(job.id, 'cancel').catch(() => undefined); };
+        signal.addEventListener('abort', stop, { once: true });
+        try {
+            for (; (job = worktrees.job(job.id)).state === 'running';)
+                await delay(this.pollMs);
+        }
+        finally {
+            signal.removeEventListener('abort', stop);
+        }
+        signal.throwIfAborted();
+        // A teardown command that failed is the repository's to fix: nobody is here to say it may be skipped.
+        if (job.state !== 'done')
+            throw fail('The workspace could not be removed', undefined, job.error ? said(job.error) : undefined);
+        return job.result?.warnings.map(said) ?? [];
     }
 }

@@ -10,7 +10,7 @@ export interface TaskHost {
     store: Store;
     /** The source an item came from, while its plugin is loaded. */
     source(id: string): Source | undefined;
-    workplaces: Pick<Workplaces, 'create' | 'machine'>;
+    workplaces: Pick<Workplaces, 'create' | 'machine' | 'remove'>;
     conversations: Pick<Conversations, 'open' | 'flow' | 'picture'>;
     now?(): number;
     /** After every saved change, for whoever is showing the tasks. */
@@ -67,6 +67,13 @@ export declare class Tasks {
     private merge;
     /** Tells the source again what it could not be told when the fix was accepted. */
     retryReport(key: string): Promise<Task>;
+    /**
+     * A finished fix's worktree, with its workspace and conversation in DSH, taken away once a person says so. The task
+     * stays on the board. Its branch goes too when the fix was merged; a branch that was only pushed is kept.
+     */
+    removeWorkspace(key: string): Promise<Task>;
+    /** The fix's branch, once everything on it is in the base branch on the remote. */
+    private dropBranch;
     /** Forgets a task that is not running. Its worktree and conversation stay in DSH. */
     forget(key: string): Promise<void>;
     /** Stops everything, as when the plugin unloads. */

@@ -15,7 +15,7 @@ export interface Remote {
         key: string;
         feedback: string;
     } | {
-        kind: 'accept' | 'stop' | 'retryReport';
+        kind: 'accept' | 'stop' | 'retryReport' | 'removeWorkspace';
         key: string;
     }, pictures?: ReturnType<typeof decodePictures>): Promise<void>;
 }

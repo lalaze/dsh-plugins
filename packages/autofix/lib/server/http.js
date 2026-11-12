@@ -34,6 +34,7 @@ export function createHandler(service, tasks, chat = { lastCommand: () => undefi
                     case 'accept':
                     case 'stop':
                     case 'retryReport':
+                    case 'removeWorkspace':
                         await remote.act(at, { kind: input.action, key: key(input.key) });
                         break;
                     default: return Response.json({ error: 'Unknown action' }, { status: 400, headers });
@@ -86,6 +87,9 @@ export function createHandler(service, tasks, chat = { lastCommand: () => undefi
                     break;
                 case 'retryReport':
                     await tasks.retryReport(key(input.key));
+                    break;
+                case 'removeWorkspace':
+                    await tasks.removeWorkspace(key(input.key));
                     break;
                 case 'forget':
                     await tasks.forget(key(input.key));
