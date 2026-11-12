@@ -58,7 +58,7 @@ export interface Xterm {
   loadAddon(addon: unknown): void;
   element?: HTMLElement;
   options: { theme?: { background?: string } & Record<string, unknown>; scrollback?: number };
-  modes: { mouseTrackingMode: string };
+  modes: { mouseTrackingMode: string; bracketedPasteMode?: boolean };
   buffer: { active: { type: string } };
   parser: {
     registerOscHandler(ident: number, handler: (data: string) => boolean): { dispose(): void };

@@ -70,7 +70,7 @@ function pressControl(target: EventTarget | null, letter: string): void {
   target?.dispatchEvent(new KeyboardEvent('keyup', init));
 }
 /** Types into the terminal as a paste would, so an app that asked for bracketed paste receives one. */
-function pasteIntoTerminal(input: HTMLElement, text: string): void {
+export function pasteIntoTerminal(input: HTMLElement, text: string): void {
   const clipboardData = new DataTransfer();
   clipboardData.setData('text/plain', text);
   input.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
@@ -231,10 +231,27 @@ export function useFilePaste(root: React.RefObject<HTMLElement | null>, add: (pi
   }, [root]);
 }
 /**
- * Gives the terminal each uploaded file's path, once it can take input. DSH drops input until then, and coming back to a
- * conversation reports the old state until it has attached again, so this reads the current state rather than a rendered
- * one. The screen arrives just after the terminal turns writable, and with it whether the app asked for bracketed paste,
- * so a path waits one more check.
+ * Waits until the terminal can take input. DSH drops input until then, and coming back to a conversation reports the old
+ * state until it has attached again, so this reads the current state rather than a rendered one. The screen arrives just
+ * after the terminal turns writable, and with it whether the app asked for bracketed paste, so it waits one more check.
+ * @param root - an element around the terminal.
+ * @param terminal - DSH's terminal state.
+ * @param act - receives the terminal's input, once.
+ * @returns stops waiting.
+ */
+export function whenWritable(root: React.RefObject<HTMLElement | null>, terminal: { getSnapshot(): { writable?: boolean } }, act: (input: HTMLElement) => void): () => void {
+  let ready = false;
+  const timer = setInterval(() => {
+    const input = root.current?.querySelector<HTMLElement>(INPUT);
+    const usable = !!input && terminal.getSnapshot().writable !== false;
+    if (!ready || !usable) { ready = usable; return; }
+    clearInterval(timer);
+    act(input);
+  }, 150);
+  return () => clearInterval(timer);
+}
+/**
+ * Gives the terminal each uploaded file's path, once it can take input.
  * @param terminal - DSH's terminal state.
  */
 export function useUploadedPaths(root: React.RefObject<HTMLElement | null>, sessionId: string, uploads: TuiUploads, terminal: { getSnapshot(): { writable?: boolean } }, cli: TuiCli): void {
@@ -242,17 +259,11 @@ export function useUploadedPaths(root: React.RefObject<HTMLElement | null>, sess
   const afterImage = useRef(false);
   useEffect(() => {
     if (!paths.length) return;
-    let ready = false;
-    const timer = setInterval(() => {
-      const input = root.current?.querySelector<HTMLElement>(INPUT);
-      const usable = !!input && terminal.getSnapshot().writable !== false;
-      if (!ready || !usable) { ready = usable; return; }
-      clearInterval(timer);
+    return whenWritable(root, terminal, input => {
       const taken = uploads.take(sessionId);
       for (const text of pastesFor(taken, afterImage.current, cli)) pasteIntoTerminal(input, text);
       afterImage.current = taken.some(path => CLAUDE_IMAGE.test(path));
-    }, 150);
-    return () => clearInterval(timer);
+    });
   }, [root, sessionId, uploads, terminal, paths, cli]);
 }
 

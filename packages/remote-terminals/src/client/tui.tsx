@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
+import { offerTuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
 import { TUI_LAUNCHERS, type TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { api } from './api.js';
 import { useCurrentModel } from '@dsh-plugins/remote-core/client/current-model.js';
@@ -7,6 +8,7 @@ import { localizeError, ui, useLocale } from './i18n.js';
 import type { Client } from './index.js';
 import { useTerminalCopy } from './tui-copy.js';
 import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
+import { TuiPrompts, usePromptText } from './tui-prompt.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { findXterm, TuiRenderChoices, TuiRenderMenu, useWebglRenderer, type TuiScrollControl } from './tui-render.js';
 import { TuiScrollChoice, useConversationScrollback } from './tui-scroll.js';
@@ -70,7 +72,7 @@ interface Terminals {
   close(sessionId: string, key: string, contentId: string): void;
 }
 interface Services {
-  slots: Slots; terminals: Terminals; uploads: TuiUploads; t: unknown; title(sessionId: string): string | undefined; cli(sessionId: string): TuiCli;
+  slots: Slots; terminals: Terminals; uploads: TuiUploads; prompts: TuiPrompts; t: unknown; title(sessionId: string): string | undefined; cli(sessionId: string): TuiCli;
   kept: KeptTerminals;
   render: TuiRenderChoices;
   scroll: TuiScrollChoice;
@@ -174,6 +176,7 @@ export function TuiTerminal({ item, services }: { item: KeptTerminal; services: 
     if (visible && state.info?.state === 'running' && (state.phase === 'failed' || state.phase === 'connected' && !state.writable)) model.connect();
   }, [visible]);
   useUploadedPaths(root, sessionId, services.uploads, model.state, services.cli(sessionId));
+  usePromptText(root, sessionId, services.prompts, model.state);
   useWebglRenderer(item.host, visible, services.render, useSyncExternalStore(theme.subscribe, theme.getSnapshot));
   useTerminalCopy(item.host, visible);
   useConversationScrollback(item.host);
@@ -335,12 +338,14 @@ export function installTuiSessions(ctx: Client): void {
     scoped.effect(() => { document.body.append(hidden); return () => hidden.remove(); });
     const kept = new KeptTerminals<HTMLElement>(KEPT_TERMINALS, hidden, () => { const host = document.createElement('div'); host.style.display = 'contents'; return host; },
       { load: savedGeneration, save: (id, generation) => write(`${GENERATION_KEY}.${id}`, String(generation)) });
-    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title, kept, shells: new Map(), render: new TuiRenderChoices(),
+    const services: Services = { slots, terminals, uploads: new TuiUploads(sendTuiFile), prompts: new TuiPrompts(), cli: store.cli, title: id => sessions.getSnapshot()?.byId?.[id]?.title, kept, shells: new Map(), render: new TuiRenderChoices(),
       scroll: new TuiScrollChoice(local => api('tuiScroll', { local })), running: id => sessions.getSnapshot()?.byId?.[id]?.running === true,
       t: (get('locale') as { bind(namespace: string): unknown }).bind('sidebarTerminal'),
       theme: { getSnapshot: () => themes.getTheme(), subscribe: listener => on.call(scoped, 'theme/change', listener) } };
     // A restarted DSH may offer other launchers.
     scoped.effect(() => on.call(scoped, 'connection/reset', () => services.shells.clear()));
+    // Other plugins' text for a conversation's input, which here is the CLI's prompt.
+    scoped.effect(() => offerTuiPrompt({ has: store.has, paste: (sessionId, text) => services.prompts.add(sessionId, text) }));
     slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'remote-agents-tui-terminals' }, () => <TuiTerminalLayer services={services} />));
     scoped.effect(() => {
       const controller = new AbortController();
