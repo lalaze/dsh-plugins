@@ -45,7 +45,8 @@ async function setup(t: TestContext, settings: {
     for (const dispose of disposers.reverse()) dispose();
     await delay(10);
     if (oldHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = oldHome;
-    if (!settings.home) await rm(home, { recursive: true, force: true });
+    // A flow that has just ended may still be saving its card into the folder.
+    if (!settings.home) await rm(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 });
   });
   const route = (model: string) => ({ provider: 'p', model, label: model });
   const directory = join(home, 'storages', 'dsh-model-flow');

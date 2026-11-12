@@ -82,3 +82,51 @@ export function relocate(route: Route, catalog: readonly CatalogModel[], machine
   const moved = catalog.find(model => model.provider === route.provider && nativeModel(model) === wanted && onMachine(model, machine));
   return moved ? { ...route, model: moved.id, label: moved.name } : route;
 }
+
+/**
+ * Where a conversation works, as Remote Agents tells it. `machines` are the saved machines that are the workspace's
+ * computer: none when the workspace is on DSH's own computer (`local`) or on a machine that is not saved.
+ */
+export interface Place { machines: readonly string[]; saved: readonly string[]; name?: string; local: boolean }
+
+/** A remote CLI runs only in workspaces of its own machine. A route that names no saved machine is not judged here. */
+export function runsIn(route: Route, place: Place): boolean {
+  const machine = machineOf(route);
+  return !machine || !place.saved.includes(machine) || place.machines.includes(machine);
+}
+/** The machines to look for a model on, best first: the workspace's, with the conversation's own model's machine ahead. */
+export function machinesFor(place: Place | undefined, own: string | undefined): (string | undefined)[] {
+  if (!place) return [own];
+  return own && place.machines.includes(own) ? [own, ...place.machines.filter(id => id !== own)] : [...place.machines];
+}
+/** `relocate` over several machines: the first that has the model. */
+export function settle(route: Route, catalog: readonly CatalogModel[], machines: readonly (string | undefined)[]): Route {
+  for (const machine of machines) {
+    const moved = relocate(route, catalog, machine);
+    if (machine && machineOf(moved) === machine) return moved;
+  }
+  return route;
+}
+const ROLE_NAMES = { en: { plan: 'plan', implement: 'implement', review: 'review' }, zh: { plan: '计划', implement: '实现', review: '审核' } } as const;
+/**
+ * What to say before a flow starts when models it would use cannot run where the conversation works; undefined when
+ * all of them can. Without it the step fails in a second with Remote Agents' refusal, which names neither model nor machine.
+ */
+export function misplaced(routes: Routes, place: Place, catalog: readonly CatalogModel[], zh: boolean): string | undefined {
+  const lost = (['plan', 'implement', 'review'] as const).flatMap(role => routes[role] && !runsIn(routes[role]!, place) ? [{ role, ...nameParts(routes[role]!.provider, routes[role]!.label) }] : []);
+  if (!lost.length) return undefined;
+  const all = [...new Set(catalog.filter(model => place.machines.some(machine => onMachine(model, machine))).map(model => nameParts(model.provider, model.name).name))];
+  const has = all.slice(0, 5), more = all.length > has.length;
+  const { name } = place;
+  if (zh) {
+    const list = lost.map(item => `${ROLE_NAMES.zh[item.role]}模型 ${item.name}${item.machine ? `（${item.machine}）` : ''}`).join('、');
+    const start = `${list}${list.endsWith('）') ? '' : ' '}不能在这个工作区里运行：`, rule = '远程 CLI 模型只在自己那台机器的工作区里运行。';
+    if (name) return `${start}工作区在 ${name} 上，而 ${name} 上没有${lost.length > 1 ? '这些模型' : '这个模型'}。${rule}${has.length ? `${name} 上有：${has.join('、')}${more ? ' 等' : ''}。请在「设置 → 模型分工」里换一个。` : `${name} 上还没有可用的远程 CLI 模型，请在「设置 → 模型分工」里换成不带机器名的模型。`}`;
+    return `${start}工作区在${place.local ? '运行 DSH 的这台电脑上' : '一台没有保存在 Remote agents 里的机器上'}。${rule}请在「设置 → 模型分工」里换成不带机器名的模型，或者到那台机器的工作区里再开始。`;
+  }
+  const list = lost.map(item => `the ${ROLE_NAMES.en[item.role]} model ${item.name}${item.machine ? ` (${item.machine})` : ''}`).join(', ');
+  const rule = 'A remote CLI model only runs in workspaces on its own machine.';
+  const sentence = `${list[0].toUpperCase()}${list.slice(1)} cannot run in this workspace`;
+  if (name) return `${sentence}: the workspace is on ${name}, and ${name} does not have ${lost.length > 1 ? 'these models' : 'this model'}. ${rule} ${has.length ? `${name} has: ${has.join(', ')}${more ? ' and others' : ''}. Choose another in Settings → Model flow.` : `${name} has no remote CLI model ready. Choose a model without a machine in Settings → Model flow.`}`;
+  return `${sentence}: the workspace is on ${place.local ? 'the computer DSH runs on' : 'a machine that is not saved in Remote agents'}. ${rule} Choose models without a machine in Settings → Model flow, or start from a workspace on that machine.`;
+}
