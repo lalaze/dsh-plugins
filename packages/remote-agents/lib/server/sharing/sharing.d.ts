@@ -55,17 +55,24 @@ export interface SharedToolResult {
     isError: boolean;
     content: readonly SharedContent[];
 }
+/** One shared call, as DSH releases before 0.2.2 take it. */
+export interface SharedCall {
+    callId: string;
+    name: string;
+    arguments: Record<string, unknown>;
+    agent?: unknown;
+    signal: AbortSignal;
+}
 export interface SharingTools {
     /** Model-facing schemas of the tools visible without an agent scope. */
     schemas(): readonly SharedTool[];
-    /** One call through DSH's pre-execute policies, approvals, guards and post-execute policies. */
-    execute(input: {
-        callId: string;
-        name: string;
-        arguments: unknown;
-        agent?: unknown;
-        signal: AbortSignal;
-    }): Promise<SharedToolResult>;
+    /**
+     * Through DSH's pre-execute policies, approvals, guards and post-execute policies. Before DSH 0.2.2 it takes one
+     * call and returns its result; from 0.2.2 it takes `{ calls, agent, signal }` and returns the batch.
+     */
+    execute(input: any): Promise<any>;
+    /** Present from DSH 0.2.2, where `execute` runs a batch. */
+    selectExecutor?: unknown;
 }
 export interface SkillSummary {
     name: string;
@@ -103,6 +110,8 @@ export interface SharingHost {
     skills?: SharingSkills;
     attachments?: SharingAttachments;
     agent?(sessionId: string): unknown;
+    /** DSH 0.2.2: run work a conversation's CLI asked for as started by that conversation's agent. */
+    initiated?<T>(agent: unknown, work: () => Promise<T>): Promise<T>;
     /** Whether the conversation is an AgentTeams member, whose CLI then gets the member tools. */
     teamMember?(sessionId: string): boolean;
 }
@@ -148,6 +157,12 @@ export declare function bridgeForwardArguments(connection: string, remoteSocket:
  * offloaded image, or one that cannot be read, is omitted.
  */
 export declare function mcpContent(result: SharedToolResult, attachments?: SharingAttachments, signal?: AbortSignal): Promise<unknown[]>;
+/**
+ * One call through DSH's tool pipeline, in the form the running DSH takes. DSH 0.2.2 replaced the single typed call
+ * with a batch of raw model calls: its `execute` rejects the old form with "Tool batch execution failed". Context a
+ * policy or hook adds for the model follows the result as text, since the CLI is the model here.
+ */
+export declare function executeShared(host: SharingHost, call: SharedCall): Promise<SharedToolResult>;
 /**
  * Shares DSH's MCP servers (through DSH, off by default) and skills (copied to the host, on by default) with
  * remote CLIs. MCP calls reach DSH over one reverse-forwarded Unix socket per host and run with the DSH agent of

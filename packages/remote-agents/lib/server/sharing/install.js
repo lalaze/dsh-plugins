@@ -19,7 +19,10 @@ export function installSharingHost(ctx, sharing) {
     ctx.inject(['agents'], scoped => {
         const agents = scoped.get('agents');
         sharing.host.agent = id => agents.get(id);
-        scoped.effect(() => () => { delete sharing.host.agent; });
+        // DSH 0.2.2 attributes what a tool starts to the agent that initiated it; a CLI's call is its conversation's.
+        if (typeof agents.withInitiator === 'function')
+            sharing.host.initiated = (agent, work) => agents.withInitiator(agent, work);
+        scoped.effect(() => () => { delete sharing.host.agent; delete sharing.host.initiated; });
     });
     // A CLI working as an AgentTeams member reaches the team through the member tools.
     ctx.inject(['sessions'], scoped => {
