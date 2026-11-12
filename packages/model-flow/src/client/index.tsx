@@ -72,6 +72,7 @@ const styles = `
 .mf-combo-form{display:flex;gap:8px;align-items:center}
 .mf-combo-form input{flex:1;min-width:0;height:26px;box-sizing:border-box;border:1px solid var(--dsw-alias-brand-primary,#517ee8);border-radius:6px;background:transparent;color:inherit;padding:0 8px;font:inherit;outline:0}
 .mf-status{min-height:18px}
+.mf-settings[data-embedded] .mf-status:empty{display:none}
 .mf-status[data-tone=error]{color:var(--dsw-alias-state-error-primary,#dc2626)}
 .mf-status button{margin-left:8px;font:inherit;background:none;border:1px solid var(--dsw-alias-border-l3,#d1d5db);border-radius:6px;padding:1px 8px;cursor:pointer;color:inherit}
 @container (max-width:380px){.mf-row{grid-template-columns:minmax(0,1fr)}}
@@ -153,7 +154,11 @@ function Combos({ config, models, apply, store, remove }: { config: FlowConfig; 
   </div>;
 }
 interface Status { text: string; tone?: 'error'; restore?: Combo[] }
-function Settings() {
+/**
+ * The combinations and the model of each job. `embedded` is this inside another plugin's settings page: that page has
+ * its own heading and says what the models are for, and how many rounds its own work gets.
+ */
+function Setup({ embedded }: { embedded?: boolean }) {
   useLocale();
   const [data, setData] = useState<{ config: FlowConfig; models: CatalogModel[] } | null>(null), [status, setStatus] = useState<Status | null>(null), [revision, setRevision] = useState(0);
   useEffect(() => {
@@ -191,13 +196,13 @@ function Settings() {
     void save({ ...data.config, combos: before.filter(item => item !== combo) }, { text: ui('Deleted "{name}"', { name: combo.name }), restore: before });
   };
   const restore = status?.restore;
-  return <section className="mf-settings" aria-label={ui('Model flow')}><style>{styles}</style>
-    <h2>{ui('Model flow')}</h2>
-    <p className="mf-muted">{ui('Use /flow <goal> in any conversation. One model plans, one implements, one reviews, and rejected work goes back until it passes or the rounds run out. On a remote machine the same model on that machine is used.')}</p>
+  return <section className="mf-settings" aria-label={ui('Model flow')} data-embedded={embedded || undefined}><style>{styles}</style>
+    {!embedded && <h2>{ui('Model flow')}</h2>}
+    {!embedded && <p className="mf-muted">{ui('Use /flow <goal> in any conversation. One model plans, one implements, one reviews, and rejected work goes back until it passes or the rounds run out. On a remote machine the same model on that machine is used.')}</p>}
     {data && <Combos config={data.config} models={data.models} apply={applyCombo} store={storeCombo} remove={removeCombo} />}
     {data && ROLES.map(({ role, label, optional }) => <RoleRow key={role} label={label} optional={optional} route={data.config[role]} models={data.models} machines={ROLES.map(item => machineOf(data.config[item.role]))}
       change={route => { const { [role]: _old, ...rest } = data.config; void save(route ? { ...rest, [role]: route } as FlowConfig : rest as FlowConfig); }} />)}
-    {data && <div className="mf-rounds"><label>{ui('Review rounds at most')}</label>
+    {data && !embedded && <div className="mf-rounds"><label>{ui('Review rounds at most')}</label>
       <Select label={ui('Review rounds at most')} text={String(data.config.rounds)} value={String(data.config.rounds)} menuWidth={72}
         options={Array.from({ length: MAX_ROUNDS }, (_, index) => ({ id: String(index + 1), label: String(index + 1) }))}
         onChange={id => void save({ ...data.config, rounds: Number(id) })} /></div>}
@@ -243,8 +248,12 @@ function installOpenAfterCommand(ctx: Client): () => void {
   document.addEventListener('keydown', onKey, true); document.addEventListener('click', onClick, true);
   return () => { clearTimeout(timer); document.removeEventListener('keydown', onKey, true); document.removeEventListener('click', onClick, true); };
 }
+const Settings = () => <Setup />;
+/** For another plugin's settings page that runs flows of its own, as the client service `modelFlowSettings`. */
+const Models = () => <Setup embedded />;
 interface Client extends Omit<LocaleContext, 'get'> {
   get?(name: string): unknown;
+  provide?(name: string, value: unknown): () => void;
   effect(factory: () => () => void): void;
   slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC): unknown };
 }
@@ -273,4 +282,9 @@ export function apply(ctx: Client): void {
   const Row: React.FC<{ node: React.ComponentProps<typeof FlowRow>['node'] }> = ({ node }) => <FlowRow node={node} openStep={openStep} />;
   ctx.slots.inject('conversation.chat.commandview', () => ctx.slots.register({ name: 'conversation.chat.commandview', key: 'flow' }, Row as React.FC));
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'model-flow', order: 75, label: () => ui('Model flow') }, Settings));
+  // A host that refuses the service keeps the rest of the plugin working; the models are then chosen on this plugin's own page.
+  ctx.effect(() => {
+    try { return ctx.provide?.('modelFlowSettings', { version: 1, Models }) ?? (() => undefined); }
+    catch (error) { console.warn('[dsh-model-flow] Could not offer the model choice to other plugins', error); return () => undefined; }
+  });
 }
