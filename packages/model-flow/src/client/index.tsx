@@ -1,6 +1,6 @@
 import type { LocaleContext } from '@dsh-plugins/i18n';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MAX_COMBO_NAME, placeCombo, sameSetup, startersFor, type Combo, type Setup } from '../combos.js';
+import { comboName, MAX_COMBO_NAME, placeCombo, renameCombo, sameSetup, startersFor, type Combo, type Setup } from '../combos.js';
 import { API_PATH, type EffortOption } from '../shared.js';
 import { MAX_ROUNDS } from '../line.js';
 import { machineOf, mainMachine, nameParts, nativeModel, type CatalogModel, type Role, type Route } from '../routes.js';
@@ -19,7 +19,7 @@ const styles = `
 .mf-row>label,.mf-combos-title{font-weight:500}
 .mf-trigger{display:flex;align-items:center;gap:6px;min-width:0;width:100%;height:30px;box-sizing:border-box;border:1px solid var(--dsw-alias-border-l3,#d1d5db);border-radius:6px;background:transparent;color:inherit;padding:0 8px;font:inherit;text-align:left;cursor:pointer}
 .mf-trigger:hover:enabled{background:var(--dsw-alias-interactive-bg-hover,#8882)}
-.mf-trigger:focus-visible,.mf-combo-apply:focus-visible,.mf-button:focus-visible,.mf-combo-remove:focus-visible{outline:2px solid var(--dsw-focus-ring-color,#517ee8);outline-offset:1px}
+.mf-trigger:focus-visible,.mf-combo-apply:focus-visible,.mf-button:focus-visible,.mf-combo-remove:focus-visible,.mf-combo-rename:focus-visible{outline:2px solid var(--dsw-focus-ring-color,#517ee8);outline-offset:1px}
 .mf-trigger[aria-expanded=true]{border-color:var(--dsw-alias-brand-primary,#517ee8)}
 .mf-trigger:disabled{color:var(--dsw-alias-label-tertiary,#9ca3af);cursor:default}
 .mf-trigger-text{flex:0 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
@@ -58,17 +58,21 @@ const styles = `
 .mf-button:disabled{color:var(--dsw-alias-label-tertiary,#9ca3af);cursor:default}
 .mf-combo-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
 .mf-combo{position:relative;min-width:0}
-.mf-combo-apply{display:flex;flex-direction:column;gap:2px;width:100%;box-sizing:border-box;padding:7px 28px 7px 10px;border:1px solid var(--dsw-alias-border-l3,#d1d5db);border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.mf-combo-apply{display:flex;flex-direction:column;gap:2px;width:100%;box-sizing:border-box;padding:7px 50px 7px 10px;border:1px solid var(--dsw-alias-border-l3,#d1d5db);border-radius:8px;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
 .mf-combo-apply:hover{background:var(--dsw-alias-interactive-bg-hover,#8882)}
 .mf-combo-apply[aria-pressed=true]{border-color:var(--dsw-alias-brand-primary,#517ee8);box-shadow:inset 0 0 0 1px var(--dsw-alias-brand-primary,#517ee8)}
 .mf-combo-name,.mf-combo-models{display:block;width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .mf-combo-name{font-weight:500}
 .mf-combo-models{font-size:12px;color:var(--dsw-alias-label-secondary,#6b7280)}
 .mf-combo[data-missing=true] .mf-combo-name,.mf-combo[data-missing=true] .mf-combo-models{color:var(--dsw-alias-label-tertiary,#9ca3af)}
-.mf-combo-remove{position:absolute;top:5px;right:5px;width:20px;height:20px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-tertiary,#9ca3af);font-size:14px;line-height:20px;cursor:pointer;opacity:0}
-.mf-combo:hover .mf-combo-remove,.mf-combo-remove:focus-visible{opacity:1}
-.mf-combo-remove:hover{background:var(--dsw-alias-interactive-bg-hover,#8882);color:var(--dsw-alias-label-primary,inherit)}
-@media (hover:none){.mf-combo-remove{opacity:1}}
+.mf-combo-remove,.mf-combo-rename{position:absolute;top:5px;right:5px;display:grid;place-items:center;width:20px;height:20px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--dsw-alias-label-tertiary,#9ca3af);font-size:14px;line-height:20px;cursor:pointer;opacity:0}
+.mf-combo-rename{right:27px}
+.mf-combo:hover :is(.mf-combo-remove,.mf-combo-rename),:is(.mf-combo-remove,.mf-combo-rename):focus-visible{opacity:1}
+:is(.mf-combo-remove,.mf-combo-rename):hover{background:var(--dsw-alias-interactive-bg-hover,#8882);color:var(--dsw-alias-label-primary,inherit)}
+@media (hover:none){.mf-combo-remove,.mf-combo-rename{opacity:1}}
+.mf-combo-edit{grid-column:1/-1;flex-wrap:wrap}
+.mf-combo-form input[aria-invalid=true]{border-color:var(--dsw-alias-state-error-primary,#dc2626)}
+.mf-combo-taken{flex-basis:100%;font-size:12px;color:var(--dsw-alias-state-error-primary,#dc2626)}
 .mf-combo-form{display:flex;gap:8px;align-items:center}
 .mf-combo-form input{flex:1;min-width:0;height:26px;box-sizing:border-box;border:1px solid var(--dsw-alias-brand-primary,#517ee8);border-radius:6px;background:transparent;color:inherit;padding:0 8px;font:inherit;outline:0}
 .mf-status{min-height:18px}
@@ -123,9 +127,22 @@ function comboDetails(combo: Combo, missing: readonly string[]): string {
     ...(missing.length ? [ui('Not in the list right now: {models}', { models: missing.join(', ') })] : []),
   ].join('\n');
 }
-function Combos({ config, models, apply, store, remove }: { config: FlowConfig; models: CatalogModel[]; apply(combo: Combo): void; store(name: string): void; remove(combo: Combo): void }) {
+const Pencil = () => <svg aria-hidden="true" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"><path d="M8.2 1.8l2 2L4 10l-2.6.6L2 8z" /></svg>;
+/** A combo's card while its name is being changed. Enter keeps the new name; Escape, or Cancel, leaves the old one. */
+function ComboRename({ combo, combos, rename, close }: { combo: Combo; combos: readonly Combo[]; rename(name: string): void; close(): void }) {
+  const form = useRef<HTMLFormElement>(null), [draft, setDraft] = useState(combo.name);
+  useEscape(true, form, close);
+  const name = comboName(draft), taken = name !== combo.name && combos.some(item => item.name === name);
+  return <form ref={form} className="mf-combo-form mf-combo-edit" onSubmit={event => { event.preventDefault(); if (name && !taken) { if (name !== combo.name) rename(name); close(); } }}>
+    <input autoFocus value={draft} maxLength={MAX_COMBO_NAME} aria-label={ui('Combination name')} aria-invalid={taken || undefined} onFocus={event => event.currentTarget.select()} onChange={event => setDraft(event.target.value)} />
+    <button type="submit" className="mf-button" disabled={!name || taken} title={taken ? ui('Another combination has this name.') : undefined}>{ui('Save')}</button>
+    <button type="button" className="mf-button" onClick={close}>{ui('Cancel')}</button>
+    {taken && <span className="mf-combo-taken" role="alert">{ui('Another combination has this name.')}</span>}
+  </form>;
+}
+function Combos({ config, models, apply, store, remove, rename }: { config: FlowConfig; models: CatalogModel[]; apply(combo: Combo): void; store(name: string): void; remove(combo: Combo): void; rename(combo: Combo, name: string): void }) {
   const combos = config.combos ?? [], form = useRef<HTMLFormElement>(null);
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string | null>(null), [renaming, setRenaming] = useState<string | null>(null);
   useEscape(draft !== null, form, () => setDraft(null));
   const complete = !!config.implement && !!config.review, setup = withoutCombos(config), current = combos.find(combo => sameSetup(combo, setup));
   const blocked = !complete ? ui('Choose the implementing and reviewing models first.') : current ? ui('This is already saved as "{name}".', { name: current.name }) : undefined;
@@ -142,11 +159,13 @@ function Combos({ config, models, apply, store, remove }: { config: FlowConfig; 
     {combos.length
       ? <div className="mf-combo-list">{combos.map(combo => {
         const { missing } = placeCombo(combo, models);
+        if (renaming === combo.name) return <ComboRename key={combo.name} combo={combo} combos={combos} rename={name => rename(combo, name)} close={() => setRenaming(null)} />;
         return <div key={combo.name} className="mf-combo" data-missing={missing.length > 0}>
           <button type="button" className="mf-combo-apply" aria-pressed={combo === current} title={comboDetails(combo, missing)} onClick={() => apply(combo)}>
             <span className="mf-combo-name">{combo.name}</span>
             <span className="mf-combo-models">{[combo.plan, combo.implement, combo.review].flatMap(route => route ? [`${shortName(route)}${route.effort ? ` ${route.effort}` : ''}`] : []).join(' → ')}</span>
           </button>
+          <button type="button" className="mf-combo-rename" aria-label={ui('Rename "{name}"', { name: combo.name })} title={ui('Rename "{name}"', { name: combo.name })} onClick={() => setRenaming(combo.name)}><Pencil /></button>
           <button type="button" className="mf-combo-remove" aria-label={ui('Delete "{name}"', { name: combo.name })} title={ui('Delete "{name}"', { name: combo.name })} onClick={() => remove(combo)}>×</button>
         </div>;
       })}</div>
@@ -195,11 +214,15 @@ function Setup({ embedded }: { embedded?: boolean }) {
     const before = data.config.combos ?? [];
     void save({ ...data.config, combos: before.filter(item => item !== combo) }, { text: ui('Deleted "{name}"', { name: combo.name }), restore: before });
   };
+  const renameTo = (combo: Combo, name: string) => {
+    const combos = data && renameCombo(data.config.combos ?? [], combo.name, name);
+    if (data && combos) void save({ ...data.config, combos }, { text: ui('Renamed to "{name}"', { name: comboName(name) }) });
+  };
   const restore = status?.restore;
   return <section className="mf-settings" aria-label={ui('Model flow')} data-embedded={embedded || undefined}><style>{styles}</style>
     {!embedded && <h2>{ui('Model flow')}</h2>}
     {!embedded && <p className="mf-muted">{ui('Use /flow <goal> in any conversation. One model plans, one implements, one reviews, and rejected work goes back until it passes or the rounds run out. On a remote machine the same model on that machine is used.')}</p>}
-    {data && <Combos config={data.config} models={data.models} apply={applyCombo} store={storeCombo} remove={removeCombo} />}
+    {data && <Combos config={data.config} models={data.models} apply={applyCombo} store={storeCombo} remove={removeCombo} rename={renameTo} />}
     {data && ROLES.map(({ role, label, optional }) => <RoleRow key={role} label={label} optional={optional} route={data.config[role]} models={data.models} machines={ROLES.map(item => machineOf(data.config[item.role]))}
       change={route => { const { [role]: _old, ...rest } = data.config; void save(route ? { ...rest, [role]: route } as FlowConfig : rest as FlowConfig); }} />)}
     {data && !embedded && <div className="mf-rounds"><label>{ui('Review rounds at most')}</label>

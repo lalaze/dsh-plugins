@@ -23,6 +23,17 @@ export function combosFrom(values: readonly unknown[]): Combo[] {
   }
   return [...combos.values()];
 }
+/** A typed name as it is kept: trimmed, and no longer than a card can show. */
+export const comboName = (typed: string): string => [...typed.trim()].slice(0, MAX_COMBO_NAME).join('');
+/**
+ * The list with one combo under a new name, in the same place. Undefined when nothing can be done with that name: it
+ * is empty, it is the combo's own, another combo has it, or no combo is called `from`.
+ */
+export function renameCombo(combos: readonly Combo[], from: string, typed: string): Combo[] | undefined {
+  const name = comboName(typed);
+  if (!name || name === from || combos.some(combo => combo.name === name) || !combos.some(combo => combo.name === from)) return undefined;
+  return combos.map(combo => combo.name === from ? { ...combo, name } : combo);
+}
 const nativeOf = (route: Route) => `${route.provider}/${nativeModel({ provider: route.provider, id: route.model })}`;
 const sameRoute = (a?: Route, b?: Route) => a === b || (!!a && !!b && nativeOf(a) === nativeOf(b) && a.effort === b.effort);
 /** The machine does not count: a flow moves to the conversation's machine anyway. */

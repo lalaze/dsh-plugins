@@ -34,7 +34,7 @@ Attach images and files to `/flow`, with or without a written goal. Every step r
 
 ## Common combinations
 
-**Settings → Model flow** keeps named sets of models, thinking levels and rounds. Click one to use it; **Save current** adds what the rows show now, and using a name again replaces that one. A few to start from appear the first time, made from the models you have, and you can delete them.
+**Settings → Model flow** keeps named sets of models, thinking levels and rounds. Click one to use it; **Save current** adds what the rows show now, and using a name again replaces that one. The pencil on a card renames it; two cannot share a name. A few to start from appear the first time, made from the models you have, and you can delete them.
 
 ## The flow
 

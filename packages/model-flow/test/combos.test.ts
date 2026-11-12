@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { machineName, modelGroups, preferredModel } from '../src/client/model-list.js';
-import { combosFrom, placeCombo, sameSetup, startersFor, type Combo } from '../src/combos.js';
+import { combosFrom, placeCombo, renameCombo, sameSetup, startersFor, type Combo } from '../src/combos.js';
 import type { CatalogModel, Route } from '../src/routes.js';
 import { configFrom } from '../src/store.js';
 
@@ -53,6 +53,21 @@ test('combos survive a save and bad ones are dropped', () => {
 test('no combos key stays absent, and an emptied list stays empty', () => {
   assert.equal('combos' in configFrom({ rounds: 3 }), false);
   assert.deepEqual(configFrom({ rounds: 3, combos: [] }).combos, []);
+});
+test('a combo takes a new name in place, unless the name is empty, its own or another combo\'s', () => {
+  const opus = route(catalog[2]), codex = route(catalog[0]);
+  const combos: Combo[] = [{ name: '1', plan: opus, implement: codex, review: opus, rounds: 3 }, { name: 'Quick', implement: codex, review: opus, rounds: 2 }];
+  const renamed = renameCombo(combos, '1', '  Codex builds  ');
+  assert.deepEqual(renamed?.map(combo => combo.name), ['Codex builds', 'Quick'], 'same place, trimmed');
+  assert.deepEqual({ ...renamed![0], name: '1' }, combos[0], 'nothing but the name changes');
+  assert.equal(combos[0].name, '1', 'the list passed in is left alone');
+  assert.equal(renameCombo(combos, '1', '   '), undefined);
+  assert.equal(renameCombo(combos, '1', '1'), undefined);
+  assert.equal(renameCombo(combos, '1', ' Quick '), undefined, 'two combos cannot share a name');
+  assert.equal(renameCombo(combos, 'gone', 'New'), undefined);
+  assert.equal(renameCombo(combos, '1', 'x'.repeat(60))?.[0].name.length, 40, 'as long as a saved name may be');
+  // What is saved reads back unchanged.
+  assert.deepEqual(combosFrom(renamed!).map(combo => combo.name), ['Codex builds', 'Quick']);
 });
 test('a setup matches its combo on any machine, but not with another thinking level or round count', () => {
   const onCode = route(catalog[0]), onMini = route(catalog[5]), opus = route(catalog[2]);
