@@ -203,6 +203,59 @@ test('a shared MCP server runs in DSH with the owning conversation, through one 
   assert.deepEqual((await client.request('tools/list')).result.tools.map((tool: { name: string }) => tool.name), ['create_issue', 'search'], 'the last tools are listed while DSH is away');
 });
 
+test('on DSH 0.2.2 a shared call runs as a batch for its conversation; a failure inside DSH is not blamed on the connection', async t => {
+  const { home, sharing, transport, host, task, agent, tools } = await setup(t);
+  const batches: any[] = [], initiators: unknown[] = [];
+  let outcome: 'result' | 'context' | 'partial' | 'failure' = 'result';
+  const settled = { isError: false, content: [{ type: 'text', text: 'created #2' }] };
+  sharing.host.tools = { schemas: () => tools, selectExecutor: () => ({}), execute: async (input: any) => {
+    // As DSH 0.2.2 answers the single call earlier releases took.
+    if (!Array.isArray(input.calls)) throw new Error('Tool batch execution failed', { cause: new TypeError('input.calls is not iterable') });
+    batches.push(input);
+    if (outcome === 'failure') throw new Error('Tool batch execution failed', { cause: new Error('The MCP transport closed.') });
+    const batch = { results: [{ callId: input.calls[0].id, result: settled }], concluded: false,
+      additionalContexts: outcome === 'context' ? [{ source: { kind: 'hook' }, content: [{ type: 'text', text: 'Hook: label the issue.' }] }] : [] };
+    if (outcome === 'partial') throw Object.assign(new Error('Tool batch execution failed'), { partial: batch });
+    return batch;
+  } };
+  sharing.host.initiated = (who, work) => { initiators.push(who); return work(); };
+  await sharing.set('mcp', 'github', true);
+  const proxy = (await sharing.prepare(host, transport, task('chat-task'), 'acp')).servers.find(s => s.name === 'dsh-github')!;
+  const client = mcp(t, proxy.command, proxy.args, home);
+  await client.request('initialize', { protocolVersion: '2025-11-25' });
+  const call = async () => (await client.request('tools/call', { name: 'create_issue', arguments: { title: 'Bug' } })).result;
+
+  assert.deepEqual(await call(), { content: [{ type: 'text', text: 'created #2' }] });
+  const [{ calls, agent: owner, signal, ...rest }] = batches;
+  assert.equal(owner, agent); assert.ok(signal instanceof AbortSignal); assert.deepEqual(rest, {}, 'no step log: the call is not a DSH model step');
+  assert.equal(calls.length, 1); assert.match(calls[0].id, /^remote-mcp-[a-f0-9]{16}$/);
+  assert.deepEqual({ ...calls[0], id: '' }, { type: 'tool-call', id: '', name: 'mcp__github__create_issue', arguments: '{"title":"Bug"}' }, 'arguments are the raw JSON a model would send');
+  assert.deepEqual(initiators, [agent], 'what the tool starts belongs to the conversation that owns the CLI');
+
+  outcome = 'context';
+  assert.deepEqual((await call()).content.map((block: { text: string }) => block.text), ['created #2', 'Hook: label the issue.'], 'context for the model follows the result');
+  outcome = 'partial';
+  assert.deepEqual(await call(), { content: [{ type: 'text', text: 'created #2' }] }, 'a call that settled before the batch failed keeps its result');
+  outcome = 'failure';
+  const failed = await call();
+  assert.equal(failed.isError, true);
+  assert.match(failed.content[0].text, /DSH failed to run "create_issue" on the "github" MCP server: The MCP transport closed\. The connection to DSH is working/);
+  assert.doesNotMatch(failed.content[0].text, /reconnect this host/);
+});
+
+test('a request DSH answers with an error is reported as DSH\'s own answer, not as a lost connection', async t => {
+  const { home, sharing, transport, host, task } = await setup(t);
+  await sharing.set('mcp', 'github', true);
+  const proxy = (await sharing.prepare(host, transport, task('chat-task'), 'acp')).servers.find(s => s.name === 'dsh-github')!;
+  const client = mcp(t, proxy.command, proxy.args, home);
+  await client.request('initialize', { protocolVersion: '2025-11-25' });
+  (sharing as unknown as { handle: () => Promise<never> }).handle = async () => { throw new Error('Unknown bridge request'); };
+  const answered = (await client.request('tools/call', { name: 'create_issue', arguments: {} })).result;
+  assert.equal(answered.isError, true);
+  assert.match(answered.content[0].text, /DSH could not run this tool: Unknown bridge request\. DSH is connected/);
+  assert.doesNotMatch(answered.content[0].text, /reconnect this host/);
+});
+
 test('MCP content keeps DSH policies; images are read from DSH by the attachment the content names', async () => {
   const read: string[] = [];
   const attachments = { readImageRequest: async (ref: SharedImageRef, target: unknown) => {

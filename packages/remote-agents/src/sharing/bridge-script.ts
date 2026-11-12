@@ -103,7 +103,7 @@ function proxy(taskFile, server) {
           const entry = pending.get(message.id);
           if (!entry) continue;
           pending.delete(message.id);
-          if (message.error) entry.reject(new Error(message.error)); else entry.resolve(message.result);
+          if (message.error) entry.reject(Object.assign(new Error(message.error), { answered: true })); else entry.resolve(message.result);
         }
       });
       next.on('error', error => { clearTimeout(timer); if (!ready) reject(error); });
@@ -141,7 +141,11 @@ function proxy(taskFile, server) {
       const origin = goal ? { epoch: task.epoch, messageId: task.messageId, callId: meta && meta['claudecode/toolUseId'] } : {};
       if (goal && (typeof origin.callId !== 'string' || !origin.callId)) return text('This Claude version did not provide native tool-use identity; goal call refused.');
       try { return await request('call', { name, arguments: input, ...origin }, mcpId); }
-      catch (error) { return text('DSH could not run this tool: ' + error.message + '. It runs in DSH on the user\'s computer; ask the user to open DSH and reconnect this host, then retry.'); }
+      catch (error) {
+        // DSH answered with a failure: it is connected, so reconnecting would not help.
+        if (error.answered) return text('DSH could not run this tool: ' + error.message + '. DSH is connected and reported this itself.');
+        return text('DSH could not run this tool: ' + error.message + '. It runs in DSH on the user\'s computer; ask the user to open DSH and reconnect this host, then retry.');
+      }
     },
     cancel(requestId) {
       for (const [id, entry] of pending) if (entry.mcpId === requestId && socket) socket.write(JSON.stringify({ op: 'cancel', id }) + '\n');

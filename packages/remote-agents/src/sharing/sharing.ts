@@ -38,11 +38,20 @@ export interface SharedImageRef { attachmentId?: string; mediaType?: string; byt
 export interface SharedContent { type: string; text?: string; offloaded?: boolean; attachment?: SharedImageRef }
 /** A settled call: `content` is what DSH's post-execute policies left for the model. */
 export interface SharedToolResult { isError: boolean; content: readonly SharedContent[] }
+/** One shared call, as DSH releases before 0.2.2 take it. */
+export interface SharedCall { callId: string; name: string; arguments: Record<string, unknown>; agent?: unknown; signal: AbortSignal }
+/** A batch of raw model calls and its settled results, as DSH 0.2.2 runs tools. */
+interface SharedBatch { results: readonly { result: SharedToolResult }[]; additionalContexts?: readonly { source?: unknown; content: readonly SharedContent[] }[] }
 export interface SharingTools {
   /** Model-facing schemas of the tools visible without an agent scope. */
   schemas(): readonly SharedTool[];
-  /** One call through DSH's pre-execute policies, approvals, guards and post-execute policies. */
-  execute(input: { callId: string; name: string; arguments: unknown; agent?: unknown; signal: AbortSignal }): Promise<SharedToolResult>;
+  /**
+   * Through DSH's pre-execute policies, approvals, guards and post-execute policies. Before DSH 0.2.2 it takes one
+   * call and returns its result; from 0.2.2 it takes `{ calls, agent, signal }` and returns the batch.
+   */
+  execute(input: any): Promise<any>;
+  /** Present from DSH 0.2.2, where `execute` runs a batch. */
+  selectExecutor?: unknown;
 }
 export interface SkillSummary { name: string; description: string; whenToUse?: string; path?: string; source: string; invocation: { modelInvocable: boolean } }
 export interface SharingSkills {
@@ -55,6 +64,8 @@ export interface SharingAttachments {
 }
 export interface SharingHost {
   tools?: SharingTools; skills?: SharingSkills; attachments?: SharingAttachments; agent?(sessionId: string): unknown;
+  /** DSH 0.2.2: run work a conversation's CLI asked for as started by that conversation's agent. */
+  initiated?<T>(agent: unknown, work: () => Promise<T>): Promise<T>;
   /** Whether the conversation is an AgentTeams member, whose CLI then gets the member tools. */
   teamMember?(sessionId: string): boolean;
 }
@@ -131,6 +142,37 @@ export async function mcpContent(result: SharedToolResult, attachments?: Sharing
     }
     return { type: 'text', text: `[${block.type} omitted]` };
   }));
+}
+
+/**
+ * One call through DSH's tool pipeline, in the form the running DSH takes. DSH 0.2.2 replaced the single typed call
+ * with a batch of raw model calls: its `execute` rejects the old form with "Tool batch execution failed". Context a
+ * policy or hook adds for the model follows the result as text, since the CLI is the model here.
+ */
+export async function executeShared(host: SharingHost, call: SharedCall): Promise<SharedToolResult> {
+  const tools = host.tools!;
+  if (typeof tools.selectExecutor !== 'function') return tools.execute(call);
+  const run = async (): Promise<SharedBatch> => {
+    try {
+      return await tools.execute({ agent: call.agent, signal: call.signal, calls: [{ type: 'tool-call', id: call.callId, name: call.name, arguments: JSON.stringify(call.arguments) }] });
+    } catch (error) {
+      // A batch that failed inside DSH still carries the calls that settled.
+      const partial = (error as { partial?: SharedBatch } | undefined)?.partial;
+      if (partial?.results?.[0]?.result) return partial;
+      throw error;
+    }
+  };
+  const batch = await (host.initiated && call.agent ? host.initiated(call.agent, run) : run());
+  const result = batch?.results?.[0]?.result;
+  if (!result) throw new Error('DSH returned no result for this call');
+  const context = (batch.additionalContexts ?? []).map(message => message.content.filter(block => block.type === 'text' && block.text).map(block => block.text).join('\n')).filter(Boolean);
+  return context.length ? { isError: result.isError, content: [...result.content, ...context.map(text => ({ type: 'text', text }))] } : result;
+}
+/** Why a call failed inside DSH: the cause, when DSH wrapped it. */
+function failureReason(error: unknown): string {
+  const cause = (error as { cause?: unknown } | undefined)?.cause;
+  const message = cause instanceof Error && cause.message ? cause.message : error instanceof Error ? error.message : String(error);
+  return message.replace(/[.\s]+$/, '');
 }
 
 /** One file of a skill bundle: generated `data`, or a `source` file read only when its contents are needed. */
@@ -369,8 +411,12 @@ export class Sharing implements LaunchSharing {
     const controller = new AbortController(); connection.calls.set(message.id, controller);
     try {
       const input = message.arguments && typeof message.arguments === 'object' && !Array.isArray(message.arguments) ? message.arguments : {};
-      const result = await this.host.tools.execute({ callId: `remote-mcp-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
+      const result = await executeShared(this.host, { callId: `remote-mcp-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
       return { content: await mcpContent(result, this.host.attachments, controller.signal), ...(result.isError ? { isError: true } : {}) };
+    } catch (error) {
+      // The call reached DSH and failed there: the connection is fine, so the proxy must not blame it.
+      this.log(`Shared tool ${tool.name} failed in DSH: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      return failure(`DSH failed to run "${String(message.name)}" on the "${server}" MCP server: ${failureReason(error)}. The connection to DSH is working; reconnecting will not help.`);
     } finally { connection.calls.delete(message.id); }
   }
 
@@ -391,8 +437,11 @@ export class Sharing implements LaunchSharing {
     const controller = new AbortController(); connection.calls.set(message.id, controller);
     try {
       const input = message.arguments && typeof message.arguments === 'object' && !Array.isArray(message.arguments) ? message.arguments : {};
-      const result = await this.host.tools.execute({ callId: `remote-team-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
+      const result = await executeShared(this.host, { callId: `remote-team-${randomBytes(8).toString('hex')}`, name: tool.name, arguments: input, agent, signal: controller.signal });
       return { content: await mcpContent(result, this.host.attachments, controller.signal), ...(result.isError ? { isError: true } : {}) };
+    } catch (error) {
+      this.log(`Team tool ${tool.name} failed in DSH: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      return failure(`DSH failed to run the AgentTeams tool "${tool.name}": ${failureReason(error)}. The connection to DSH is working; reconnecting will not help.`);
     } finally { connection.calls.delete(message.id); }
   }
 

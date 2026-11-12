@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.132 — Shared MCP servers work again on DSH 0.2.2
+
+- On DSH 0.2.2 every call a remote CLI made to an MCP server shared from DSH failed with "DSH could not run this tool: Tool batch execution failed", and the CLI was told to ask you to reconnect the host. The connection was fine: DSH 0.2.2 runs tool calls in a different form and the plugin still sent the form of DSH 0.2.1. Calls are now sent in the form the running DSH takes, on both. The tools a CLI gets as an AgentTeams member failed the same way and are fixed with it.
+- A call that reaches DSH and fails there now says why and that the connection is working. Reconnecting is suggested only when DSH cannot be reached.
+- Restart DSH after upgrading. CLIs that are already running do not need to be started again.
+
 ## 0.2.131 — The published package matches the source again
 
 - Nothing you see changes. The code this plugin shares with [Remote Terminals](../remote-terminals/README.md) was changed for Remote Terminals 0.1.1, so that an error one plugin raises is still recognized, with its HTTP status, when it reaches the other plugin's copy of that code. Remote Agents 0.2.130 was published before that change; this version carries it.
