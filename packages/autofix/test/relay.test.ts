@@ -103,7 +103,10 @@ test('a bug typed in one DSH is taken by the DSH that runs fixes for that machin
   assert.deepEqual(handed, { key: 'manual:1', ref: 'M1', title: '活动页白屏' });
   assert.deepEqual([host.created[0].title, host.created[0].body, host.created[0].assignment], ['活动页白屏', '活动页白屏\n只在 iOS', { routeId: 'Web', branch: 'main' }]);
   assert.deepEqual(host.created[0].images.map(image => [image.name, image.mediaType, Buffer.from(image.data, 'base64').equals(host.shot)]), [['1.png', 'image/png', true]], 'the screenshot crossed over whole');
-  assert.deepEqual(await readdir(join(host.root, 'inbox')), [], 'a request that was taken is gone');
+  // The answer is written first and the request tidied away right after it, so the reply can arrive a moment earlier.
+  let left = await readdir(join(host.root, 'inbox'));
+  for (let tries = 0; left.length && tries < 200; tries++) { await new Promise(resolve => setTimeout(resolve, 10)); left = await readdir(join(host.root, 'inbox')); }
+  assert.deepEqual(left, [], 'a request that was taken is gone');
 
   // The card on the first DSH reads the task, without the steps' full text.
   await stop(); await host.server.tick();
