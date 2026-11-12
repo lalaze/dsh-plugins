@@ -11,7 +11,7 @@ import { missingPlugins } from './needs.js';
 import { RelayClient, RelayServer } from './relay.js';
 import { AutofixService, Sources } from './service.js';
 import { LocalFiles, Store } from './store.js';
-import { Tasks } from './tasks.js';
+import { runChoice, Tasks } from './tasks.js';
 import { Workplaces } from './workplaces.js';
 export const name = 'dsh-autofix';
 export const inject = ['connection', 'commands'];
@@ -62,7 +62,8 @@ export async function apply(ctx) {
     ctx.effect(() => () => served.stop());
     const fix = command = new FixCommand({
         store, tasks, createManual: input => service.createManual(input), inspect: project => workplaces.inspect(project),
-        handOver: (folder, line, pictures) => relayClient.file(folder, line, pictures),
+        handOver: (folder, line, pictures, how) => relayClient.file(folder, line, pictures, how),
+        title: async (agent, title) => { await lookup('sessionController')?.rename?.({ sessionId: agent.id, title }); },
         folder: agent => { try {
             return lookup('workingDirectory')?.get(agent.session);
         }
@@ -78,6 +79,13 @@ export async function apply(ctx) {
         handler: invocation => fix.handle(invocation),
     }));
     // Sources are plugins of their own: an issue tracker, an alert, anything that knows about bugs.
-    ctx.provide('autofix', { version: 1, register: source => service.register(source), submit: (sourceId, items) => service.submit(sourceId, items) });
+    ctx.provide('autofix', {
+        version: 1, register: source => service.register(source), submit: (sourceId, items) => service.submit(sourceId, items),
+        // Another plugin's words are checked like a page's: only what a task can carry gets through.
+        file: input => fix.take(input.agent, typeof input.text === 'string' ? input.text : '', (Array.isArray(input.attachments) ? input.attachments : []), {
+            ...(input.kind === 'feature' ? { kind: 'feature' } : {}), ...runChoice(input),
+            ...(typeof input.repo === 'string' && input.repo.trim() ? { repo: input.repo.trim().slice(0, 200) } : {}), ...(typeof input.branch === 'string' && input.branch.trim() ? { branch: input.branch.trim().slice(0, 200) } : {}),
+        }),
+    });
     ctx.effect(() => () => tasks.close());
 }

@@ -7,6 +7,7 @@ export interface ManualInput {
     labels?: unknown;
     images?: unknown;
     attached?: unknown;
+    kind?: unknown;
 }
 export declare class ManualSource implements Source {
     private readonly directory;

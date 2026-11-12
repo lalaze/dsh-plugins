@@ -11,6 +11,7 @@ export function configFrom(value) {
         ...(plan ? { plan } : {}), ...(implement ? { implement } : {}), ...(review ? { review } : {}),
         rounds: roundsFrom(raw.rounds),
         ...(Array.isArray(raw.combos) ? { combos: combosFrom(raw.combos) } : {}),
+        ...(raw.worktree === true ? { worktree: true } : {}),
     };
 }
 export class FlowStore {

@@ -108,5 +108,6 @@ export function itemFrom(raw, source) {
         ...(status ? { status } : {}), ...(priority ? { priority } : {}), ...(module ? { module } : {}),
         labels: list(input.labels, 'A bug\'s labels', 50),
         ...(images ? { images } : {}),
+        ...(input.kind === 'feature' ? { kind: 'feature' } : {}),
     };
 }

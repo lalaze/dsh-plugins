@@ -1,4 +1,4 @@
-/** What the models are told. English, as instructions for models; the bug itself stays in its own words. */
+/** What the models are told. English, as instructions for models; the bug itself stays in its own words. A feature (`kind`) is told the same way with other words. */
 import type { Item, Route } from './domain.js';
 export interface GoalInput {
     item: Item;
@@ -19,8 +19,10 @@ export interface GoalInput {
     attached?: readonly number[];
 }
 export declare function taskGoal(input: GoalInput): string;
-export declare const commitMessage: (item: Pick<Item, "source" | "ref" | "title">) => string;
-export declare const mergeMessage: (item: Pick<Item, "source" | "id" | "title">) => string;
+type Named = Pick<Item, 'source' | 'id' | 'ref' | 'title' | 'kind'>;
+export declare const commitMessage: (item: Named) => string;
+export declare const mergeMessage: (item: Named) => string;
 export declare const conversationTitle: (item: Pick<Item, "ref" | "title">) => string;
-/** A branch for the bug: the source, then what names the bug there, kept to what Git allows in a ref. */
-export declare const branchName: (item: Pick<Item, "source" | "id">) => string;
+/** A branch for the task: the source (`feat` for something to build), then what names it there, kept to what Git allows in a ref. */
+export declare const branchName: (item: Pick<Item, "source" | "id" | "kind">) => string;
+export {};

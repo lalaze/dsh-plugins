@@ -43,7 +43,10 @@ export type CardEnd = {
     kind: 'noVerdict';
     ms: number;
 };
-/** One flow, drawn as one card. `zh` is the goal's language, which the card speaks whatever the UI language is. */
+/**
+ * One flow, drawn as one card. `zh` is the goal's language, which the card speaks whatever the UI language is. `tag` is
+ * what the plugin that started the flow named it (`<plugin>:<its own words>`), so its page can add to the card.
+ */
 export interface CardState {
     parentId: string;
     zh: boolean;
@@ -51,6 +54,7 @@ export interface CardState {
     planned?: boolean;
     steps: CardStep[];
     end?: CardEnd;
+    tag?: string;
 }
 /** A running card as the client polls it: no step results (fetched on demand), plus what changes every second. */
 export interface LiveCard extends CardState {

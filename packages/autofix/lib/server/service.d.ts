@@ -2,6 +2,7 @@
 import { itemKey, messageOf, type Autofix, type Item, type Message, type PoolItem, type Settings, type Source, type Task } from './domain.js';
 import { type ManualInput, type ManualSource } from './manual.js';
 import type { Store } from './store.js';
+import type { FlowProgress } from './conversations.js';
 import type { Tasks } from './tasks.js';
 import type { Folders } from './folders.js';
 import type { Workplaces } from './workplaces.js';
@@ -49,9 +50,11 @@ export interface State {
     /** Loaded sources; a bug whose source is not among them can still be read, not started or written back. */
     sources: SourceView[];
     pool: PoolView[];
+    /** `progress` is the flow a task is in this very moment, when it runs here and can say. */
     tasks: (Task & {
         running: boolean;
         sourceName: string;
+        progress?: FlowProgress;
     })[];
     relay: {
         label: string;
@@ -61,7 +64,8 @@ export interface State {
     /** Plugins that are not running and without which repositories cannot be reached or fixes cannot run. */
     needs: string[];
 }
-export declare class AutofixService implements Autofix {
+/** `file` is the conversations' side of the service; the plugin adds it where it has the command. */
+export declare class AutofixService implements Omit<Autofix, 'file'> {
     private readonly host;
     readonly version: 1;
     private readonly fetching;
@@ -71,6 +75,7 @@ export declare class AutofixService implements Autofix {
     state(): State;
     /** One task as the board shows it, for a card that follows only that one. */
     task(key: unknown): State['tasks'][number] | undefined;
+    private view;
     saveSettings(raw: unknown): Promise<void>;
     projects(signal?: AbortSignal): Promise<import("./workplaces.js").Project[]>;
     /** A folder on the computer DSH runs on, as a project to choose. Its repository may already be one under another folder. */

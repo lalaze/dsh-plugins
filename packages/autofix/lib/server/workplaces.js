@@ -64,9 +64,10 @@ export class Workplaces {
         return { path: job.result.path, worktree: job.result.worktree, branch: job.result.branch ?? branch, warnings: job.result.warnings.map(said) };
     }
     /**
-     * Takes a worktree away: its conversations are archived, its folder is deleted and its workspace leaves DSH. The branch
-     * stays. Refused while the worktree holds anything that exists nowhere else, as nobody is shown what would be lost.
-     * `project` is a workspace of the same repository. Returns what there is to know afterwards.
+     * Takes a worktree away: its conversations are archived, its folder is deleted and its workspace leaves DSH. Refused
+     * while the worktree holds anything that exists nowhere else, as nobody is shown what would be lost. `project` is a
+     * workspace of the same repository. With `deleteBranch` the branch goes too when it is merged into the repository's
+     * default branch; `branch` says whether it did, and `kept` why not. `warnings` is what else there is to know.
      */
     async remove(input, signal) {
         const worktrees = this.worktrees();
@@ -79,7 +80,7 @@ export class Workplaces {
             throw fail('Git could not tell whether everything in the workspace is pushed. Archive the workspace from the sidebar if it can go.');
         if (check.unpushed > 0)
             throw fail('The workspace has {count} commits that are not pushed. Push them first, or archive the workspace from the sidebar.', { count: String(check.unpushed) });
-        let job = worktrees.archive({ path: input.project, worktree: input.worktree });
+        let job = worktrees.archive({ path: input.project, worktree: input.worktree, ...(input.deleteBranch ? { deleteBranch: true } : {}) });
         const stop = () => { void worktrees.act(job.id, 'cancel').catch(() => undefined); };
         signal.addEventListener('abort', stop, { once: true });
         try {
@@ -93,6 +94,7 @@ export class Workplaces {
         // A teardown command that failed is the repository's to fix: nobody is here to say it may be skipped.
         if (job.state !== 'done')
             throw fail('The workspace could not be removed', undefined, job.error ? said(job.error) : undefined);
-        return job.result?.warnings.map(said) ?? [];
+        const warnings = job.result?.warnings ?? [], kept = warnings.filter(warning => warning.key.startsWith('Branch {branch} was kept'));
+        return { warnings: warnings.filter(warning => !kept.includes(warning)).map(said), kept: kept.map(said), ...(input.deleteBranch ? { branch: kept.length || !job.result?.branch ? 'kept' : 'deleted' } : {}) };
     }
 }

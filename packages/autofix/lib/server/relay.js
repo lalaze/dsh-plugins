@@ -7,14 +7,18 @@ import { randomUUID } from 'node:crypto';
 import { fail, Failure, messageOf } from './domain.js';
 import { EXTENSIONS } from './pictures.js';
 import { fileName, Spool, SPOOL_ROOT } from './spool.js';
+import { runChoice } from './tasks.js';
 const HEARTBEAT = 20_000;
 /** Longer than a few missed beats, and than the two computers' clocks may differ. */
 const FRESH = 180_000;
 const ID = /^[0-9a-f-]{36}$/u;
 const MEDIA = Object.keys(EXTENSIONS);
 const MAX_PICTURES = 8, MAX_REPORT = 20_000;
-/** A task as another DSH's card needs it: without the steps' full results, which stay in the conversation. */
-function slim(task) {
+/**
+ * A task as another DSH's card needs it: without the steps' full results, which stay in the conversation, and without
+ * what is only true this second (a file read later would show it as now).
+ */
+function slim({ progress: _progress, ...task }) {
     const flow = task.flow && { ...task.flow, steps: task.flow.steps.map(({ body: _body, ...step }) => step), ...(task.flow.report ? { report: task.flow.report.slice(0, MAX_REPORT) } : {}) };
     return { ...task, events: task.events.slice(-8), ...(flow ? { flow } : {}) };
 }
@@ -129,8 +133,8 @@ export class RelayServer {
             if (!group.routes.some(route => route.id === request.routeId))
                 throw fail('The repository this bug was assigned to is no longer in the settings');
             const images = (await pictures()).map(picture => ({ name: picture.name, mediaType: picture.mediaType, data: picture.data.toString('base64') }));
-            const { key } = await this.host.createManual({ title: String(request.title ?? ''), body: String(request.body ?? ''), images, assignment: { routeId: request.routeId, branch: String(request.branch ?? '') } });
-            const task = await tasks.start(key);
+            const { key } = await this.host.createManual({ title: String(request.title ?? ''), body: String(request.body ?? ''), images, assignment: { routeId: request.routeId, branch: String(request.branch ?? '') }, ...(request.feature === true ? { kind: 'feature' } : {}) });
+            const task = await tasks.start(key, [], runChoice(request));
             return { ok: true, key, ref: task.item.ref, title: task.item.title };
         }
         const task = store.tasks[String(request.key)];
@@ -158,7 +162,7 @@ export class RelayServer {
             if (!route || !view)
                 continue;
             mine.add(view.key);
-            const state = `${view.updatedAt}:${view.status}:${view.running}:${view.cards ?? 0}:${view.events.length}`, before = this.published.get(view.key), name = fileName(view.key);
+            const state = `${view.updatedAt}:${view.status}:${view.running}:${view.cards ?? 0}:${view.events.length}:${view.flow?.steps.map(step => step.status).join() ?? ''}`, before = this.published.get(view.key), name = fileName(view.key);
             if (before?.state !== state)
                 await spool.writeJson(`tasks/${name}.json`, { task: slim(view), route: { id: route.id, name: route.name, accept: route.accept } });
             let commit = before?.commit;
@@ -189,7 +193,7 @@ export class RelayClient {
     now() { return this.host.now?.() ?? Date.now(); }
     async spool(folder) { return new Spool(await this.host.machine(folder), this.host.root ?? SPOOL_ROOT); }
     /** Hands a bug typed in a conversation to the DSH that runs fixes for that folder's machine. Undefined when there is none. */
-    async file(folder, line, pictures) {
+    async file(folder, line, pictures, how = {}) {
         const here = await this.host.inspect(folder).catch(() => undefined);
         if (!here?.repository)
             return undefined;
@@ -209,7 +213,8 @@ export class RelayClient {
         const read = [];
         for (const ref of pictures)
             read.push(await this.host.readImage(ref));
-        const done = await this.send(spool, published.name, { kind: 'file', routeId: route.id, branch, title: line.title || 'See the attached pictures', body: line.body }, read);
+        const done = await this.send(spool, published.name, { kind: 'file', routeId: route.id, branch, title: line.title || 'See the attached pictures', body: line.body,
+            ...(how.kind === 'feature' ? { feature: true } : {}), ...(how.models ? { models: how.models } : {}), ...(how.rounds ? { rounds: how.rounds } : {}) }, read);
         return { key: done.key, ref: done.ref ?? '', title: done.title ?? line.title };
     }
     /** Something a person decided about a task the other DSH runs. */

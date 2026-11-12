@@ -1,8 +1,12 @@
 import { type Combo, type Setup } from './combos.js';
 import type { CardState } from './shared.js';
-/** `combos` stays absent until the first ones are saved, so an emptied list is not filled again. */
+/**
+ * `combos` stays absent until the first ones are saved, so an emptied list is not filled again. `worktree` is where a
+ * typed /flow runs unless its line says otherwise: in a worktree of its own, through Autofix, instead of in the conversation.
+ */
 export interface FlowConfig extends Setup {
     combos?: Combo[];
+    worktree?: boolean;
 }
 export declare function configFrom(value: unknown): FlowConfig;
 export declare class FlowStore {

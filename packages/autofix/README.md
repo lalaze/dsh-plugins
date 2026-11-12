@@ -21,6 +21,8 @@ In any conversation of the project, type `/fix` and what is wrong; screenshots c
 
 The board still lists every bug and task; bugs from TAPD and other sources are handed out from there.
 
+Something to build goes the same road: `/flow wt=on <what to build>` ([dsh-model-flow](../model-flow/README.md) 0.1.11 or newer) makes a task here on a branch `feat/<number>`, worded for the models as a task rather than a bug, committed as `feat: …`, and with the models and rounds its line chose. With that version a task's card is the flow's own card: the same progress a `/flow` shows, then **Checks** and **Acceptance** at the end of the bar, and what you can decide under the report. In the task's own conversation the newest flow's card carries the task, so there is one card instead of two; earlier flows' cards stay as records of their rounds.
+
 ## Typing in one DSH, fixing in another
 
 For working in the DSH on a laptop while a machine that is always on runs the fixes:

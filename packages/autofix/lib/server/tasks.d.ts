@@ -2,7 +2,7 @@
  * One bug from start to done. The models only change files: this code decides when they run, checks what they left,
  * commits it, and pushes nothing until a person accepts.
  */
-import type { Conversations } from './conversations.js';
+import type { Conversations, FlowProgress, FlowRole } from './conversations.js';
 import { type Item, type ItemImage, type Source, type Task } from './domain.js';
 import type { Store } from './store.js';
 import type { Workplaces } from './workplaces.js';
@@ -17,7 +17,16 @@ export interface TaskHost {
     changed?(): void;
     /** Puts a card for the task into its conversation: it now waits for a person, or has failed. `task.cards` is that card's number. */
     announce?(task: Task): Promise<void>;
+    /** How often a running flow is asked how far it is. */
+    progressMs?: number;
 }
+/** What /flow asked for one task alone. */
+export interface RunChoice {
+    models?: Partial<Record<FlowRole, string>>;
+    rounds?: number;
+}
+/** Checked, because it may come from another computer: a model per step as short text, and a sensible number of rounds. */
+export declare function runChoice(raw: unknown): RunChoice;
 export declare class Tasks {
     private readonly host;
     private readonly live;
@@ -31,6 +40,10 @@ export declare class Tasks {
     private route;
     private task;
     running(key: string): boolean;
+    /** The flow a task is in right now, as its card shows it; undefined when no flow runs or it cannot say. */
+    progress(key: string): FlowProgress | undefined;
+    /** What one step of a task's newest flow said in full. */
+    stepBody(key: string, index: number): string | undefined;
     /** Resolves when the task's current run has ended, however it ended. */
     idle(key: string): Promise<void>;
     /** Runs in the background; a failure lands on the task instead of the caller. */
@@ -41,9 +54,10 @@ export declare class Tasks {
     private sourceName;
     /**
      * Starts the bug as its pool entry says: repository, branch, and the package if one was chosen. `pictures` are ones DSH
-     * already keeps (sent along in a conversation), in the order the bug's text names them.
+     * already keeps (sent along in a conversation), in the order the bug's text names them. `choice` is what this task
+     * alone runs with, instead of the settings.
      */
-    start(key: string, pictures?: readonly unknown[]): Promise<Task>;
+    start(key: string, pictures?: readonly unknown[], choice?: RunChoice): Promise<Task>;
     private prepare;
     /** The bug's pictures, from its source into DSH's attachment store, so every step of every flow can be given them. */
     private pictures;
@@ -72,7 +86,7 @@ export declare class Tasks {
      * stays on the board. Its branch goes too when the fix was merged; a branch that was only pushed is kept.
      */
     removeWorkspace(key: string): Promise<Task>;
-    /** The fix's branch, once everything on it is in the base branch on the remote. */
+    /** The fix's branch, once everything on it is in the base branch on the remote. True when it is gone. */
     private dropBranch;
     /** Forgets a task that is not running. Its worktree and conversation stay in DSH. */
     forget(key: string): Promise<void>;

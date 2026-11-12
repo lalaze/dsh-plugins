@@ -50,6 +50,11 @@ export interface Created {
     branch: string;
     warnings: string[];
 }
+export interface Removed {
+    warnings: string[];
+    kept: string[];
+    branch?: 'deleted' | 'kept';
+}
 export declare class Workplaces {
     private readonly service;
     private readonly pollMs;
@@ -68,12 +73,14 @@ export declare class Workplaces {
         branch: string;
     }, signal: AbortSignal): Promise<Created>;
     /**
-     * Takes a worktree away: its conversations are archived, its folder is deleted and its workspace leaves DSH. The branch
-     * stays. Refused while the worktree holds anything that exists nowhere else, as nobody is shown what would be lost.
-     * `project` is a workspace of the same repository. Returns what there is to know afterwards.
+     * Takes a worktree away: its conversations are archived, its folder is deleted and its workspace leaves DSH. Refused
+     * while the worktree holds anything that exists nowhere else, as nobody is shown what would be lost. `project` is a
+     * workspace of the same repository. With `deleteBranch` the branch goes too when it is merged into the repository's
+     * default branch; `branch` says whether it did, and `kept` why not. `warnings` is what else there is to know.
      */
     remove(input: {
         project: string;
         worktree: string;
-    }, signal: AbortSignal): Promise<string[]>;
+        deleteBranch?: boolean;
+    }, signal: AbortSignal): Promise<Removed>;
 }

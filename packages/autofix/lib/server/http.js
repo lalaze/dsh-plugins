@@ -46,6 +46,8 @@ export function createHandler(service, tasks, chat = { lastCommand: () => undefi
                 // A card in a conversation follows one task; the settings come along for the words it needs.
                 case 'task': return Response.json({ task: service.task(key(input.key)) ?? null, routes: service.state().settings.routes }, { headers });
                 case 'lastCommand': return Response.json({ sessionId: chat.lastCommand() ?? null }, { headers });
+                // What one step of the task's flow said in full, asked for when its line in the card is opened.
+                case 'stepBody': return Response.json({ body: Number.isSafeInteger(input.index) ? tasks.stepBody(key(input.key), input.index) ?? null : null }, { headers });
                 case 'saveSettings':
                     await service.saveSettings(input.settings);
                     break;

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { Activity, firstLine } from './activity.js';
 import { brief, flowText, hasCjk, runFlow } from './engine.js';
 import { API_PATH, createHandler } from './http.js';
-import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine } from './line.js';
+import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine, USAGE } from './line.js';
 import { attachmentNote } from './prompts.js';
 import { machineOf, machinesFor, misplaced, nameParts, OFF, resolveSpec, settle } from './routes.js';
 import { cut, MARK, MAX_STEP_BODY, rowText } from './shared.js';
@@ -49,11 +49,11 @@ export async function apply(ctx) {
     }));
     /** What a card can still show if DSH stops before the flow ends. */
     const snapshot = (card) => {
-        const { parentId, zh, rounds, planned } = card.state;
-        return { parentId, zh, rounds, planned, steps: stepsOf(card, 4000).map(step => step.status === 'running' ? { ...step, ms: undefined } : step) };
+        const { parentId, zh, rounds, planned, tag } = card.state;
+        return { parentId, zh, rounds, planned, ...(tag ? { tag } : {}), steps: stepsOf(card, 4000).map(step => step.status === 'running' ? { ...step, ms: undefined } : step) };
     };
     const view = (card) => {
-        const now = Date.now(), { parentId, zh, rounds, planned, end } = card.state, steps = card.state.steps;
+        const now = Date.now(), { parentId, zh, rounds, planned, end, tag } = card.state, steps = card.state.steps;
         let activity = '';
         // A model goes quiet between its outputs; the card keeps its last line until it says something new.
         for (let index = steps.length - 1; index >= 0; index--) {
@@ -66,7 +66,7 @@ export async function apply(ctx) {
             activity = step.said ?? '';
             break;
         }
-        return { parentId, zh, rounds, planned, ...(end ? { end } : {}), steps: stepsOf(card, 0, now), elapsed: (end ? card.startedAt + end.ms : now) - card.startedAt, ...(activity ? { activity } : {}) };
+        return { parentId, zh, rounds, planned, ...(tag ? { tag } : {}), ...(end ? { end } : {}), steps: stepsOf(card, 0, now), elapsed: (end ? card.startedAt + end.ms : now) - card.startedAt, ...(activity ? { activity } : {}) };
     };
     /** The newest typed /flow: the new-session page stays where it is after a command, so the client opens this conversation. */
     let lastCommand;
@@ -227,13 +227,13 @@ export async function apply(ctx) {
             throw new Error(refusal);
         return routes;
     }
-    function start(agent, goal, routes, rounds, attachments) {
+    function start(agent, goal, routes, rounds, attachments, tag) {
         const controller = new AbortController(), startedAt = Date.now();
         let resolveDone = () => undefined;
         const done = new Promise(resolve => { resolveDone = resolve; });
         running.set(agent.id, { controller, routes, goal, startedAt });
         let settle = () => undefined;
-        const card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, planned: !!routes.plan, steps: [] }, done: new Promise(resolve => { settle = resolve; }) };
+        const card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, planned: !!routes.plan, steps: [], ...(tag ? { tag } : {}) }, done: new Promise(resolve => { settle = resolve; }) };
         cards.set(card.id, card);
         const persist = () => { if (card.commandId && !card.state.end)
             saved.put(card.commandId, snapshot(card)); };
@@ -266,7 +266,7 @@ export async function apply(ctx) {
             ended = true;
             card.state.end = end;
             const { parentId, zh, planned } = card.state;
-            settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, planned, steps: stepsOf(card, MAX_STEP_BODY), end } }) });
+            settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, planned, ...(tag ? { tag } : {}), steps: stepsOf(card, MAX_STEP_BODY), end } }) });
             resolveDone({ end, ...(report ? { report } : {}), steps: stepsOf(card, MAX_STEP_BODY) });
             await executed;
             cards.delete(card.id);
@@ -290,7 +290,7 @@ export async function apply(ctx) {
                 // Whatever happened, the card must not stay running.
                 .finally(() => { running.delete(agent.id); void finish({ kind: 'stopped', ms: Date.now() - startedAt }); });
         }, 0);
-        return { done, stop: () => controller.abort() };
+        return { done, stop: () => controller.abort(), progress: () => view(card), stepBody: index => card.state.steps[index]?.body };
     }
     /** The checks and choices a flow starts with, whoever asks for it. Throws what the chat should say. */
     async function begin(agent, input) {
@@ -328,7 +328,7 @@ export async function apply(ctx) {
         // Another flow may have started here while the models were being looked up.
         if (running.has(agent.id))
             throw new Error(say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, goal));
-        return { run: start(agent, goal, routes, rounds, attachments), goal, routes, rounds };
+        return { run: start(agent, goal, routes, rounds, attachments, input.tag), goal, routes, rounds };
     }
     const titleFor = async (agent, goal) => {
         if (agent.session.deriveMessages?.().length)
@@ -341,7 +341,7 @@ export async function apply(ctx) {
     ctx.effect(() => host.commands.register({
         name: COMMAND, recordInput: false,
         description: 'one model plans, one implements, one reviews, and rejected work goes back',
-        input: { hint: '[plan=model] [impl=model] [review=model] [rounds=n] <goal> | stop', attachments: true },
+        input: { hint: '[plan=model] [impl=model] [review=model] [rounds=n] [wt=on|off] <goal> | stop', attachments: true },
         handler: async ({ commandId, agent, rawInput, attachments = [] }) => {
             const input = rawInput.trimStart();
             if (input.startsWith(cardMark)) {
@@ -366,9 +366,21 @@ export async function apply(ctx) {
     }));
     async function typedCommand(agent, rawInput, attachments) {
         lastCommand = { sessionId: agent.id, at: Date.now() };
-        ensureConversation(agent);
         try {
-            const line = parseLine(rawInput, attachments.length > 0), current = running.get(agent.id);
+            let line;
+            try {
+                line = parseLine(rawInput, attachments.length > 0);
+            }
+            catch (error) {
+                ensureConversation(agent);
+                throw error;
+            }
+            const tasks = ctx.get('autofix');
+            // A line that goes to Autofix is Autofix's to make a conversation of: it names one that began with the line.
+            const handed = line.kind === 'run' && (line.worktree ?? store.config.worktree) && typeof tasks?.file === 'function';
+            if (!handed)
+                ensureConversation(agent);
+            const current = running.get(agent.id);
             if (line.kind === 'stop') {
                 if (attachments.length)
                     return { kind: 'error', text: say('Remove the attachments before using /flow stop.', '请先移除附件，再使用 /flow stop。') };
@@ -381,9 +393,18 @@ export async function apply(ctx) {
                 if (current)
                     return { kind: 'success', text: `${flowText(current.goal).started(current.routes, store.config.rounds)}. ${brief(current.goal, 120)}` };
                 const { plan, implement, review, rounds } = store.config;
-                const usage = `/${COMMAND} [plan=model] [impl=model] [review=model] [rounds=1-${MAX_ROUNDS}] <goal>`;
-                return { kind: 'success', text: say(`Plan: ${plan?.label ?? 'skipped'}. Implement: ${implement?.label ?? 'not chosen'}. Review: ${review?.label ?? 'not chosen'}. Up to ${rounds} review rounds. ${usage}`, `计划：${plan?.label ?? '跳过'}。实现：${implement?.label ?? '未选择'}。审核：${review?.label ?? '未选择'}。最多审核 ${rounds} 轮。${usage}`) };
+                const where = store.config.worktree;
+                return { kind: 'success', text: say(`Plan: ${plan?.label ?? 'skipped'}. Implement: ${implement?.label ?? 'not chosen'}. Review: ${review?.label ?? 'not chosen'}. Up to ${rounds} review rounds. Runs in ${where ? 'a worktree of its own' : 'this conversation'}. ${USAGE}`, `计划：${plan?.label ?? '跳过'}。实现：${implement?.label ?? '未选择'}。审核：${review?.label ?? '未选择'}。最多审核 ${rounds} 轮。${where ? '在独立的 worktree 里运行' : '在当前对话里运行'}。${USAGE}`) };
             }
+            // In a worktree of its own the flow is a task of Autofix: the same steps, then checks, a commit and a person's acceptance.
+            if (line.worktree ?? store.config.worktree) {
+                if (typeof tasks?.file !== 'function')
+                    return { kind: 'error', text: say('A flow in a worktree of its own runs through Autofix (dsh-autofix 0.1.4 or newer), which is not running here. Install it, or start the line with wt=off to run in this conversation.', '在独立的 worktree 里运行要通过自动修复插件（dsh-autofix 0.1.4 或更新版本），这里没有运行它。请安装它，或者在开头加 wt=off 在当前对话里运行。', line.goal) };
+                return await tasks.file({ agent, text: line.goal, attachments, kind: 'feature', ...(line.repo ? { repo: line.repo } : {}), ...(line.branch ? { branch: line.branch } : {}),
+                    ...(Object.keys(line.overrides).length ? { models: line.overrides } : {}), ...(line.rounds ? { rounds: line.rounds } : {}) });
+            }
+            if (line.repo || line.branch)
+                return { kind: 'error', text: say('repo= and branch= say where a worktree is made: add wt=on, or leave them out to run in this conversation.', 'repo= 和 branch= 用来指定在哪里建 worktree：请加上 wt=on，或者去掉它们在当前对话里运行。', line.goal) };
             if (current)
                 return { kind: 'error', text: say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, line.goal) };
             const { goal, routes, rounds } = await begin(agent, { goal: line.goal, ...(line.rounds ? { rounds: line.rounds } : {}), overrides: line.overrides, attachments, prepare: goal => titleFor(agent, goal) });
@@ -395,7 +416,7 @@ export async function apply(ctx) {
         }
     }
     const service = {
-        version: 1,
+        version: 2,
         async start(agent, input) {
             const live = agent, attachments = (input.attachments ?? []), goal = input.goal.trim();
             if (!goal && !attachments.length)
@@ -403,7 +424,8 @@ export async function apply(ctx) {
             if (input.rounds !== undefined && (!Number.isSafeInteger(input.rounds) || input.rounds < 1 || input.rounds > MAX_ROUNDS))
                 throw new Error(`rounds must be a whole number from 1 to ${MAX_ROUNDS}`);
             ensureConversation(live);
-            return (await begin(live, { goal, ...(input.rounds ? { rounds: input.rounds } : {}), overrides: input.models ?? {}, attachments })).run;
+            const tag = typeof input.tag === 'string' && /^[a-z][a-z0-9-]{0,30}:.{1,400}$/su.test(input.tag) ? input.tag : undefined;
+            return (await begin(live, { goal, ...(input.rounds ? { rounds: input.rounds } : {}), overrides: input.models ?? {}, attachments, ...(tag ? { tag } : {}) })).run;
         },
     };
     ctx.provide('modelFlow', service);

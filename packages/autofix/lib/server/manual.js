@@ -37,7 +37,7 @@ export class ManualSource {
     async create(input) {
         const title = typeof input.title === 'string' ? input.title.trim() : '', body = typeof input.body === 'string' ? input.body.trim() : '';
         if (!title)
-            throw new Error('Give the bug a title');
+            throw new Error(input.kind === 'feature' ? 'Say what to build' : 'Give the bug a title');
         if (title.length > 300 || body.length > 100_000)
             throw new Error('The title or the description is too long');
         const pictures = decodePictures(input.images).map(picture => ({ data: picture.data, extension: EXTENSIONS[picture.mediaType] }));
@@ -50,7 +50,8 @@ export class ManualSource {
         // A picture has no place in typed text unless the person gave it one; say where they are.
         const attached = typeof input.attached === 'number' && Number.isSafeInteger(input.attached) ? Math.min(Math.max(input.attached, 0), 16) : 0;
         const marks = Array.from({ length: pictures.length + attached }, (_, index) => `[image ${index + 1}]`).filter(mark => !body.includes(mark));
-        return { source: MANUAL, id, ref: `M${number}`, title, body: [body, marks.join(' ')].filter(Boolean).join('\n\n'), labels, ...(pictures.length ? { images: pictures.length } : {}) };
+        const feature = input.kind === 'feature';
+        return { source: MANUAL, id, ref: `${feature ? 'F' : 'M'}${number}`, title, body: [body, marks.join(' ')].filter(Boolean).join('\n\n'), labels, ...(pictures.length ? { images: pictures.length } : {}), ...(feature ? { kind: 'feature' } : {}) };
     }
     async image(item, index) {
         let names;

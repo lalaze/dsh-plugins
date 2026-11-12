@@ -1,7 +1,9 @@
 import { type ItemImage, type Message, type Route, type Task } from './domain.js';
+import type { Handed } from './command.js';
 import type { FixLine } from './fixline.js';
 import type { State } from './service.js';
 import type { Store } from './store.js';
+import { type RunChoice } from './tasks.js';
 import type { Machine, ProjectDetail } from './workplaces.js';
 type TaskView = State['tasks'][number];
 export interface ServedRoute {
@@ -26,6 +28,9 @@ export type RelayRequest = {
     title: string;
     body: string;
     pictures: string[];
+    feature?: boolean;
+    models?: RunChoice['models'];
+    rounds?: number;
 } | {
     id: string;
     kind: 'sendBack';
@@ -74,13 +79,14 @@ export interface ServerHost {
             routeId: string;
             branch: string;
         };
+        kind?: 'feature';
     }): Promise<{
         key: string;
     }>;
     view(key: string): TaskView | undefined;
     diff(key: string): Promise<Diff>;
     tasks: {
-        start(key: string): Promise<Task>;
+        start(key: string, pictures?: readonly unknown[], choice?: RunChoice): Promise<Task>;
         sendBack(key: string, feedback: string, pictures?: readonly ItemImage[]): Promise<Task>;
         accept(key: string): Promise<Task>;
         stop(key: string): boolean;
@@ -144,7 +150,7 @@ export declare class RelayClient {
     private now;
     private spool;
     /** Hands a bug typed in a conversation to the DSH that runs fixes for that folder's machine. Undefined when there is none. */
-    file(folder: string, line: FixLine, pictures: readonly unknown[]): Promise<{
+    file(folder: string, line: FixLine, pictures: readonly unknown[], how?: Handed): Promise<{
         key: string;
         ref: string;
         title: string;

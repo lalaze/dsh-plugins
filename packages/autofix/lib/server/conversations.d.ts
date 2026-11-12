@@ -42,15 +42,29 @@ export interface FlowResult {
     report?: string;
     steps: FlowStep[];
 }
+/** A flow's card as it is now: what dsh-model-flow 0.1.11 and newer can say while the flow runs. */
+export interface FlowProgress {
+    steps: FlowStep[];
+    rounds: number;
+    planned?: boolean;
+    zh: boolean;
+    elapsed: number;
+    activity?: string;
+    end?: FlowEnd;
+}
 export interface FlowRun {
     done: Promise<FlowResult>;
     stop(): void;
+    progress?(): FlowProgress;
+    stepBody?(index: number): string | undefined;
 }
+/** `tag` names the flow as this plugin's, so its card in the conversation can carry the task. */
 export interface FlowInput {
     goal: string;
     rounds?: number;
     models?: Partial<Record<FlowRole, string>>;
     attachments?: readonly unknown[];
+    tag?: string;
 }
 /** What a task's conversation may do without anyone watching. */
 export type Permission = 'workspace-write' | 'auto' | 'danger-full-access';

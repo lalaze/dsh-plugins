@@ -28,6 +28,7 @@ const text = (value, what, max = 4000) => {
         throw new Error(`${what} is missing`);
     return value.trim();
 };
+/** `file` is the conversations' side of the service; the plugin adds it where it has the command. */
 export class AutofixService {
     host;
     version = 1;
@@ -46,7 +47,7 @@ export class AutofixService {
                 return { id: source.id, name: source.name, ...(unready ? { unready } : {}), fetches: !!source.fetch, ...store.fetch[source.id], busy: this.fetching.has(source.id) };
             }),
             pool: ordered(store.pool).map(entry => ({ ...entry, sourceName: name(entry.item.source) })),
-            tasks: Object.values(store.tasks).sort((a, b) => b.updatedAt - a.updatedAt).map(task => ({ ...task, running: tasks.running(task.key), sourceName: name(task.item.source) })),
+            tasks: Object.values(store.tasks).sort((a, b) => b.updatedAt - a.updatedAt).map(task => this.view(task)),
             relay: this.host.relay?.() ?? [],
             needs: this.host.needs?.() ?? [],
         };
@@ -54,7 +55,11 @@ export class AutofixService {
     /** One task as the board shows it, for a card that follows only that one. */
     task(key) {
         const task = this.host.store.tasks[text(key, 'The bug', 300)];
-        return task && { ...task, running: this.host.tasks.running(task.key), sourceName: this.host.sources.get(task.item.source)?.name ?? task.item.source };
+        return task && this.view(task);
+    }
+    view(task) {
+        const { tasks, sources } = this.host, progress = tasks.progress(task.key);
+        return { ...task, running: tasks.running(task.key), sourceName: sources.get(task.item.source)?.name ?? task.item.source, ...(progress ? { progress } : {}) };
     }
     async saveSettings(raw) { const next = settingsFrom(raw); await this.host.store.saveSettings(next); }
     projects(signal) { return this.host.workplaces.projects(signal); }

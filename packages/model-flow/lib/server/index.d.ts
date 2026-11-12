@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import { type Chunk } from './activity.js';
 import { type Role } from './routes.js';
-import { type CardEnd, type CardStep } from './shared.js';
+import { type CardEnd, type CardStep, type LiveCard } from './shared.js';
 /** The parts of DSH this plugin uses. */
 interface ChildSession {
     header: {
@@ -59,22 +59,27 @@ export interface ModelFlowResult {
     report?: string;
     steps: CardStep[];
 }
+/** `progress` is the flow's card as it is now, without the steps' results; `stepBody` is one finished step's result. */
 export interface ModelFlowRun {
     done: Promise<ModelFlowResult>;
     stop(): void;
+    progress(): LiveCard;
+    stepBody(index: number): string | undefined;
 }
 /**
  * What other DSH plugins may do, as the service `modelFlow`: run a flow in a conversation, as a typed /flow does, and
  * learn how it ended. `agent` is the conversation's live agent; `models` are /flow's plan=, impl= and review= values.
- * The conversation keeps its title. Starting rejects with the message /flow would show.
+ * The conversation keeps its title. Starting rejects with the message /flow would show. `tag` names the flow for the
+ * plugin that started it, as `<plugin>:<its own words>`: the card carries it, and that plugin's page may add to the card.
  */
 export interface ModelFlowService {
-    readonly version: 1;
+    readonly version: 2;
     start(agent: unknown, input: {
         goal: string;
         rounds?: number;
         models?: Partial<Record<Role, string>>;
         attachments?: readonly unknown[];
+        tag?: string;
     }): Promise<ModelFlowRun>;
 }
 export declare function apply(ctx: Context): Promise<void>;
