@@ -103,6 +103,8 @@ function TagMenu({ request, useWorkspaceTags, useWorkspaces, run, openMenu, open
       anchor={<span className={css.menuAnchor} />}
       portal
       getAnchorRect={() => new DOMRect(x, y, width, height)}
+      // workspace-tags: DSH 0.2.2-rc.2 dropped getAnchorRect and places a menu that has no trigger at anchorPoint.
+      {...({ anchorPoint: { x, y: y + height } } as object)}
       items={items}
       selectedIds={[...assigned].map(id => `tag:${id}`)}
       onSelect={(id) => {

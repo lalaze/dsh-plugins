@@ -80,7 +80,7 @@ async function setup(t: TestContext, settings: {
       },
     },
     subagents: {
-      list: () => ['spawn'],
+      getProvider: (name: string) => (name === 'spawn' ? {} : undefined),
       async startActivation(spec: ActivationSpec) {
         calls.push(spec);
         const text = spec.label.startsWith('flow · review') ? (settings.verdicts ?? ['FLOW_VERDICT: pass'])[reviews++] : `${spec.request.agentOptions.model} output`;

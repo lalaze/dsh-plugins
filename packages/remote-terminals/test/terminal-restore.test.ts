@@ -85,6 +85,50 @@ test('a DSH with a different controller leaves terminals as they were', () => {
   assert.deepEqual(Object.keys(controller), []);
 });
 
+/** DSH 0.2.2-rc.2: `userLaunch` chooses the shell, and `spawn` runs what it prepared under the terminal's ID. */
+function rc2Controller(candidates: string[]) {
+  const started: { id: string; shellPath?: string; env?: Record<string, string>; aborted: boolean }[] = [];
+  const subprocess = { spawnTerminal(options: { env?: Record<string, string> }) { return options.env; } };
+  type Launch = { argv: string[]; env: Record<string, string>; info: { id: string } };
+  const controller = {
+    config: { shellCandidates: candidates },
+    execution() { return { subprocess }; },
+    async userLaunch(this: { config: { shellCandidates: string[] } }, agent: { id: string }, request: { id: string; shellPath?: string }, signal: AbortSignal): Promise<Launch> {
+      signal.throwIfAborted();
+      if (request.shellPath !== undefined && !this.config.shellCandidates.includes(request.shellPath)) throw new Error('Selected shell is not available in this execution environment');
+      return { argv: [request.shellPath ?? 'sh'], env: { DSH_SESSION_ID: agent.id }, info: { id: request.id } };
+    },
+    async spawn(this: { execution(agent: unknown): { subprocess: typeof subprocess } }, agent: unknown, _owner: unknown, id: string, prepare: (signal: AbortSignal) => Promise<Launch>, signal: AbortSignal) {
+      const { argv, env } = await prepare(signal);
+      const used = this.execution(agent).subprocess.spawnTerminal({ env });
+      signal.throwIfAborted();
+      started.push({ id, shellPath: argv[0], env: used, aborted: signal.aborted });
+    },
+    /** DSH's `create`. */
+    async create(agent: { id: string }, request: { id: string; shellPath?: string }, signal: AbortSignal) {
+      await this.spawn(agent, {}, request.id, launchSignal => this.userLaunch(agent, request, launchSignal), signal);
+    },
+  };
+  return { started, controller };
+}
+
+test('DSH 0.2.2-rc.2 starts a terminal with its ID, its signal and today\'s launcher', async () => {
+  const { started, controller } = rc2Controller(['/new/terminal/Remote workspace']);
+  const original = { spawn: controller.spawn, userLaunch: controller.userLaunch };
+  const stopPassing = passTerminalId(controller as never), stopFollowing = followMovedLaunchers(controller as never, ['/new/terminal/Remote workspace']);
+  await controller.create({ id: 'session' }, { id: 'terminal-a', shellPath: '/old/terminal/Remote workspace' }, AbortSignal.timeout(1000));
+  await controller.create({ id: 'session' }, { id: 'terminal-b' }, AbortSignal.timeout(1000));
+  assert.deepEqual(started, [
+    { id: 'terminal-a', shellPath: '/new/terminal/Remote workspace', env: { DSH_SESSION_ID: 'session', [TERMINAL_ID_ENV]: 'terminal-a' }, aborted: false },
+    { id: 'terminal-b', shellPath: 'sh', env: { DSH_SESSION_ID: 'session', [TERMINAL_ID_ENV]: 'terminal-b' }, aborted: false },
+  ]);
+  await assert.rejects(controller.create({ id: 'session' }, { id: 'terminal-c', shellPath: '/elsewhere/zsh' }, AbortSignal.timeout(1000)), /Selected shell is not available/);
+  await assert.rejects(controller.create({ id: 'session' }, { id: 'terminal-d' }, AbortSignal.abort(new Error('gone'))), /gone/);
+  stopFollowing(); stopPassing();
+  assert.equal(controller.spawn, original.spawn);
+  assert.equal(controller.userLaunch, original.userLaunch);
+});
+
 /** DSH's own check in `spawn`: only a path it offers now is started. */
 function dshController(candidates: string[]) {
   const started: { id: string; shellPath?: string; terminal?: string }[] = [];

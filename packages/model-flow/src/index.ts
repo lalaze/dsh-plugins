@@ -28,7 +28,7 @@ interface Host {
     register(definition: { name: string; description: string; recordInput?: boolean; input?: { hint: string; attachments?: boolean }; handler(invocation: { commandId: string; agent: LiveAgent; rawInput: string; attachments?: readonly Attachment[] }): RowResult | Promise<RowResult> }): () => void;
     execute(agent: LiveAgent, line: string, attachments: readonly never[], signal: AbortSignal): Promise<unknown>;
   };
-  subagents: { list(): readonly string[]; startActivation(spec: Record<string, unknown>): Promise<Activation> };
+  subagents: { getProvider(name: string): unknown; startActivation(spec: Record<string, unknown>): Promise<Activation> };
   llm: {
     listProviders(): { id: string; name: string }[];
     listModels(provider: string): Promise<{ provider: string; id: string; name: string }[]>;
@@ -202,14 +202,16 @@ export async function apply(ctx: Context): Promise<void> {
     if (request.readOnly) readOnly.add(childId);
     failures.set(childId, undefined);
     let activation: Activation;
+    const task = {
+      prompt: [{ type: 'text', text: request.prompt + (attachments.length ? `\n\n${attachmentNote}` : '') }, ...attachments], parent,
+      agentOptions: { provider: request.route.provider, model: request.route.model, ...(request.route.effort ? { reasoningEffort: request.route.effort } : {}) },
+    };
     try {
       activation = await host.subagents.startActivation({
         provider: 'spawn', childId, delivery: 'caller', signal: request.signal,
         label: `${LABELS[request.role]}${request.round > 0 ? ` ${request.round}` : ''}`,
-        request: {
-          prompt: [{ type: 'text', text: request.prompt + (attachments.length ? `\n\n${attachmentNote}` : '') }, ...attachments], parent,
-          agentOptions: { provider: request.route.provider, model: request.route.model, ...(request.route.effort ? { reasoningEffort: request.route.effort } : {}) },
-        },
+        // DSH 0.2.2-rc.2 reads the task from the spec itself, earlier releases from `request`.
+        ...task, request: task,
       });
     } catch (error) { failures.delete(childId); throw error; }
     finally { readOnly.delete(childId); }
@@ -317,7 +319,7 @@ export async function apply(ctx: Context): Promise<void> {
   async function begin(agent: LiveAgent, input: { goal: string; rounds?: number; overrides: Partial<Record<Role, string>>; attachments: readonly Attachment[]; tag?: string; prepare?(goal: string): Promise<void> }): Promise<{ run: ModelFlowRun; goal: string; routes: Routes; rounds: number }> {
     const { attachments } = input;
     if (running.has(agent.id)) throw new Error(say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, input.goal));
-    if (!host.subagents.list().includes('spawn')) throw new Error('This DSH has no subagent provider "spawn".');
+    if (!host.subagents.getProvider('spawn')) throw new Error('This DSH has no subagent provider "spawn".');
     const presets = ctx.get('permissionPresets' as never) as Permissions | undefined;
     let readOnlyParent = false;
     try { readOnlyParent = !!presets && presets.resolve(presets.current(agent.session)).sandbox === 'read-only'; }

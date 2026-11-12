@@ -17,31 +17,50 @@ function override<T extends object, K extends keyof T>(target: T, key: K, value:
   };
 }
 
-/** The part of DSH's terminal controller that starts a terminal's process. */
+/** What a terminal asks DSH to start: the page's request up to DSH 0.2.2-rc.1. */
+interface TerminalRequest { id: string; shellPath?: string }
+/** From DSH 0.2.2-rc.2 `spawn` is given the terminal's ID and a function that prepares what to run. */
+type TerminalLaunch = (signal: AbortSignal) => Promise<{ env?: Record<string, string> }>;
+/**
+ * The part of DSH's terminal controller that starts a terminal's process. Up to 0.2.2-rc.1 that is
+ * `spawn(agent, owner, request, signal)`; from 0.2.2-rc.2 `userLaunch(agent, request, signal)` chooses the shell and
+ * `spawn(agent, owner, id, prepare, signal)` runs what it prepared. Every argument is passed on as given, so a further
+ * change of these private methods does not take terminals down with it.
+ */
 interface TerminalSpawner {
-  spawn?(this: TerminalSpawner, agent: unknown, owner: unknown, request: { id: string; shellPath?: string }, signal: AbortSignal): unknown;
+  spawn?(this: TerminalSpawner, ...args: unknown[]): unknown;
+  userLaunch?(this: TerminalSpawner, ...args: unknown[]): unknown;
   execution?(this: TerminalSpawner, agent: unknown): { subprocess: object };
 }
+const isRequest = (value: unknown): value is TerminalRequest => typeof value === 'object' && value !== null && typeof (value as TerminalRequest).id === 'string';
 
 /**
  * DSH tells a terminal's process its session but not which terminal it is, and that is what finds a sidebar terminal's
- * holder again. DSH reads its execution environment first thing and synchronously in `spawn`, so the replacement is only ever
- * seen by that call. A DSH that works differently leaves terminals without the ID, which then end with their connection as before.
+ * holder again. From DSH 0.2.2-rc.2 the ID joins the environment `spawn` is handed. Earlier, DSH reads its execution
+ * environment first thing and synchronously in `spawn`, so the replacement is only ever seen by that call. A DSH that
+ * works differently leaves terminals without the ID, which then end with their connection as before.
  */
 export function passTerminalId(controller: TerminalSpawner): () => void {
   const { spawn, execution } = controller;
   if (typeof spawn !== 'function' || typeof execution !== 'function') return () => {};
-  return override(controller, 'spawn', function (agent, owner, request, signal) {
+  return override(controller, 'spawn', function (...args) {
+    const [, , third, fourth] = args;
+    if (typeof third === 'string' && typeof fourth === 'function') {
+      const prepare = fourth as TerminalLaunch;
+      const withId: TerminalLaunch = async (signal) => { const launch = await prepare(signal); return { ...launch, env: { ...launch.env, [TERMINAL_ID_ENV]: third } }; };
+      return spawn.call(this, ...args.slice(0, 3), withId, ...args.slice(4));
+    }
+    if (!isRequest(third)) return spawn.call(this, ...args);
     const restore = override(this, 'execution', function (target) {
       restore();
       const running = execution.call(this, target), { subprocess } = running;
       return { ...running, subprocess: new Proxy(subprocess, { get(source, key) {
         const value = Reflect.get(source, key, source) as unknown;
         if (key !== 'spawnTerminal' || typeof value !== 'function') return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(source) : value;
-        return (options: { env?: Record<string, string> }) => (value as (input: unknown) => unknown).call(source, { ...options, env: { ...options.env, [TERMINAL_ID_ENV]: request.id } });
+        return (options: { env?: Record<string, string> }) => (value as (input: unknown) => unknown).call(source, { ...options, env: { ...options.env, [TERMINAL_ID_ENV]: third.id } });
       } }) };
     });
-    try { return spawn.call(this, agent, owner, request, signal); } finally { restore(); }
+    try { return spawn.call(this, ...args); } finally { restore(); }
   });
 }
 
@@ -52,13 +71,16 @@ export function passTerminalId(controller: TerminalSpawner): () => void {
  * Stop this before whatever replaced `spawn` earlier.
  */
 export function followMovedLaunchers(controller: TerminalSpawner, launchers: readonly string[]): () => void {
-  const { spawn } = controller;
-  if (typeof spawn !== 'function') return () => {};
   const current = new Map(launchers.map(path => [basename(path), path]));
-  return override(controller, 'spawn', function (agent, owner, request, signal) {
-    const launcher = request.shellPath === undefined ? undefined : current.get(basename(request.shellPath));
-    return spawn.call(this, agent, owner, launcher && launcher !== request.shellPath ? { ...request, shellPath: launcher } : request, signal);
+  const moved = (args: unknown[]): unknown[] => args.map((value) => {
+    if (!isRequest(value) || value.shellPath === undefined) return value;
+    const launcher = current.get(basename(value.shellPath));
+    return launcher && launcher !== value.shellPath ? { ...value, shellPath: launcher } : value;
   });
+  // The method that reads the request's shell: `userLaunch` where DSH has it, otherwise `spawn`.
+  const key = typeof controller.userLaunch === 'function' ? 'userLaunch' : 'spawn', start = controller[key];
+  if (typeof start !== 'function') return () => {};
+  return override(controller, key, function (...args) { return start.call(this, ...moved(args)); });
 }
 
 /** The part of DSH's terminal controller the user's closing of a terminal goes through. */

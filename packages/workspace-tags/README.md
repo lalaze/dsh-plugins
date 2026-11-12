@@ -25,6 +25,11 @@ dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.2.0.tgz"
 
 Requires DSH 0.2.2-rc.1 or a later 0.2 release. On DSH 0.2.1, stay on 0.2.4: DSH refuses to install this version there.
 
+## 0.3.2 The tag panel on DSH 0.2.2-rc.2
+
+- On DSH 0.2.2-rc.2 the **Tags…** panel opened in the top-left corner of the window. It opens where you clicked again. Earlier DSH versions are unchanged.
+- Still off on DSH 0.2.2-rc.2: the workspace picker of a new conversation opens beside its button, not under it. The sidebar is still the copy of DSH 0.2.2-rc.1's, so it does not have rc.2's sidebar changes yet.
+
 ## 0.3.0 The sidebar of DSH 0.2.2
 
 - The sidebar is now built on DSH 0.2.2-rc.1's, so it has that release's improvements: the right-click menu on sessions and workspaces, **Show in folder**, the official worktree and pull request icons on session rows, the working directory in a session's hover card, and better keyboard and touch use.

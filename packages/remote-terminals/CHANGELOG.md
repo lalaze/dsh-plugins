@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.5 — Terminals work on DSH 0.2.2-rc.2
+
+- DSH 0.2.2-rc.2 changed how it starts a terminal. With 0.1.4 installed there, a terminal failed to open with "Cannot read properties of undefined (reading 'throwIfAborted')": TUI conversations, and by the same path the sidebar's terminals, local ones included.
+- Terminals start again on 0.2.2-rc.2, keep running after DSH closes, and a terminal saved by an older version still finds its launcher. Earlier DSH versions work as before.
+- Upgrade this plugin before DSH, then restart DSH. Remote Agents stays as it is.
+
 ## 0.1.4 — Other plugins can type at a TUI conversation's prompt
 
 - A TUI conversation has a terminal where a chat has its input, and DSH keeps the chat input hidden underneath. A plugin that put text into the chat input, such as Game Assets' **Ask the agent…**, wrote into that hidden input, so nothing appeared.

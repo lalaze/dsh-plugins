@@ -106,7 +106,7 @@ async function setup(t: TestContext, config: Record<string, unknown>, placement:
       resolveModelInfo: async () => ({ inputModalities: ['text', 'image'] }),
     },
     subagents: {
-      list: () => ['spawn'],
+      getProvider: (name: string) => (name === 'spawn' ? {} : undefined),
       async startActivation(spec: Spec) {
         calls.push(spec);
         return { childId: `child-${calls.length}`, result: Promise.resolve({ output: [{ type: 'text', text: 'FLOW_VERDICT: pass' }], stopReason: 'completed' }), async dispose() {} };
