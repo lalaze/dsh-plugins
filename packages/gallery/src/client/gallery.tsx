@@ -119,7 +119,7 @@ export function GalleryPage({ controller }: { controller: GalleryController }) {
   useEffect(() => { setVisible(24); }, [filter, search]);
   const activeId = preferences.enabled ? current?.id : undefined;
   return <section className="dsh-gallery" aria-label={ui("Gallery")}><style>{styles}</style>
-    <header className="gg-header"><div className="gg-heading"><span className="gg-mark"><Icon size={25} /></span><div><h2>{ui("Gallery")}</h2><p className="gg-hint">{ui("A new view for DSH")}</p></div></div><div className="gg-actions">
+    <header className="gg-header"><div className="gg-actions">
       <button className="gg-button" disabled={busy || loading} onClick={() => upload.current?.click()}><Icon kind="upload" />{ui("Upload images")}</button>
       <button className="gg-button" disabled={busy || loading} onClick={() => void controller.refresh()}><span className={busy ? 'gg-spin' : undefined}><Icon kind="refresh" /></span>{busy ? ui("Working…") : ui("Update wallpapers")}</button>
     </div></header>

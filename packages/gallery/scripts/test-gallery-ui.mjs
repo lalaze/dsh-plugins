@@ -36,10 +36,10 @@ const taskStrips = ['_saveFooter', '_saveFailure', '_detailNotice'].map(name => 
 try {
   browser('--executable-path', process.env.DSH_TEST_BROWSER_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', 'open', url);
   wait(ready); browser('snapshot', '-i');
-  evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".gg-heading h2").textContent === "Gallery"');
+  evaluate('window.fixture.setLocale("en")'); wait('document.querySelector(".gg-header .gg-button").textContent === "Upload images"');
   browser('set', 'viewport', '390', '844');
   expect('document.documentElement.scrollWidth <= innerWidth');
-  evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".gg-heading h2").textContent === "图库"');
+  evaluate('window.fixture.setLocale("zh")'); wait('document.querySelector(".gg-header .gg-button").textContent === "上传图片"');
   browser('set', 'viewport', '1120', '900');
   expect('!document.body.hasAttribute("data-dsh-gallery-active")');
   expect(`${pluginBarPaint}.backgroundColor !== "rgba(0, 0, 0, 0)" && ${pluginBarPaint}.backdropFilter === "none"`);
@@ -47,7 +47,7 @@ try {
   browser('click', 'button:text-is("获取 Bing 壁纸")'); wait(count(8));
   expect('document.querySelectorAll(".gg-card").length === 8 && !document.body.hasAttribute("data-dsh-gallery-active")');
   // A narrow desktop settings column must retain photo-only cards and hover overlays.
-  browser('set', 'viewport', '800', '1000'); browser('hover', '.gg-heading');
+  browser('set', 'viewport', '800', '1000'); browser('hover', '.gg-header');
   wait('getComputedStyle(document.querySelector(".gg-card-actions")).opacity === "0"');
   expect('getComputedStyle(document.querySelector(".gg-card-actions")).position === "absolute"');
   expect('(()=>{const card=document.querySelector(".gg-card").getBoundingClientRect();return Math.abs(card.height-card.width*9/16)<1})()');
@@ -55,7 +55,7 @@ try {
   wait('getComputedStyle(document.querySelector(".gg-card:nth-child(2) .gg-card-info")).opacity === "1"');
   expect('(()=>{const c=document.querySelector(".gg-card:nth-child(2)");const card=c.getBoundingClientRect();const actions=c.querySelector(".gg-card-actions").getBoundingClientRect();return actions.top>=card.top && actions.bottom<=card.bottom && c.querySelector(".gg-card-date").textContent==="2026-10-22"})()');
   if (process.env.DSH_GALLERY_SCREENSHOT_DIR) browser('screenshot', join(process.env.DSH_GALLERY_SCREENSHOT_DIR, 'gallery-hover.png'));
-  browser('hover', '.gg-heading'); wait('getComputedStyle(document.querySelector(".gg-card:nth-child(2) .gg-card-actions")).opacity === "0"');
+  browser('hover', '.gg-header'); wait('getComputedStyle(document.querySelector(".gg-card:nth-child(2) .gg-card-actions")).opacity === "0"');
   browser('click', '[role=switch]'); wait(`${current}?.naturalWidth === 960`);
   expect('getComputedStyle(document.querySelector(".fixture-frame")).backgroundColor === "rgba(0, 0, 0, 0)"');
   expect('getComputedStyle(document.querySelector(".fixture-page")).backgroundColor === "rgba(0, 0, 0, 0)"');
@@ -158,7 +158,7 @@ try {
   browser('set', 'media', 'light');
   if (process.env.DSH_GALLERY_SCREENSHOT_DIR) browser('screenshot', '--full', join(process.env.DSH_GALLERY_SCREENSHOT_DIR, 'gallery-light.png'));
   browser('set', 'media', 'dark'); browser('set', 'viewport', '390', '844');
-  browser('hover', '.gg-heading');
+  browser('hover', '.gg-header');
   expect('document.documentElement.scrollWidth <= 390');
   wait('getComputedStyle(document.querySelector(".gg-card-actions")).opacity === "0"');
   if (process.env.DSH_GALLERY_SCREENSHOT_DIR) browser('screenshot', '--full', join(process.env.DSH_GALLERY_SCREENSHOT_DIR, 'gallery-mobile.png'));

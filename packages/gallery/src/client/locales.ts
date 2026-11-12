@@ -43,7 +43,7 @@ export const zh = {
   "Currently in use": "正在使用",
   "Set as DSH background": "设为 DSH 背景",
   "Gallery": "图库",
-  "A new view for DSH": "给 DSH 换一片风景",
+  "Wallpapers for chat and the sidebar": "聊天和侧栏的壁纸",
   "Upload images": "上传图片",
   "Working…": "处理中…",
   "Update wallpapers": "更新壁纸",

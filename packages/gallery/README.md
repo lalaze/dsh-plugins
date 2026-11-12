@@ -4,7 +4,7 @@
 
 Supports English and Simplified Chinese, following DSH’s language setting with live updates. English is the fallback when the host has no locale service.
 
-A device-local wallpaper library for DeepSeek Harness, inspired by Paseo's wallpaper interactions and implemented independently for DSH. Open **Settings → Gallery** to browse and apply backgrounds to chat and the sidebar.
+A device-local wallpaper library for DeepSeek Harness, inspired by Paseo's wallpaper interactions and implemented independently for DSH. Open **Plugins → Gallery** to browse and apply backgrounds to chat and the sidebar.
 
 - Archive the latest eight Bing daily wallpapers, preserving dates and attribution.
 - Check hourly while the application is visible and backgrounds are enabled.
@@ -24,7 +24,7 @@ pnpm --filter dsh-gallery pack:plugin
 dsh plugin --profile web add "$PWD/dist/dsh-gallery-0.1.1.tgz"
 ```
 
-Restart the profile and refresh. In Settings → Gallery, fetch wallpapers or upload images, then enable the background switch. Click a photo to open its full-size preview and save the original. Hover a card to reveal apply/delete actions and metadata; touch devices show the overlay directly. Backgrounds default to off; applying an image pins it and enables backgrounds. For desktop, fully quit the application and use its bundled `dsh` command with `--profile desktop`, then reopen it. The npm CLI cannot manage the reserved `desktop` profile.
+Restart the profile and refresh. On the plugin's own page, **Plugins → Gallery**, fetch wallpapers or upload images, then enable the background switch. Click a photo to open its full-size preview and save the original. Hover a card to reveal apply/delete actions and metadata; touch devices show the overlay directly. Backgrounds default to off; applying an image pins it and enables backgrounds. For desktop, fully quit the application and use its bundled `dsh` command with `--profile desktop`, then reopen it. The npm CLI cannot manage the reserved `desktop` profile.
 
 ## Data
 
