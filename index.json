@@ -176,12 +176,12 @@
       },
       "versions": [
         {
-          "version": "0.1.10",
-          "publishTimestamp": 1794453353,
+          "version": "0.1.11",
+          "publishTimestamp": 1794468994,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "c1d23481e707200d729e6e7e0cdd3227faccf442",
+            "commit": "6b3be58725b0fb1e02a3dc460de0bc3313c53009",
             "path": "packages/model-flow"
           },
           "engines": {
@@ -216,12 +216,12 @@
       },
       "versions": [
         {
-          "version": "0.1.3",
-          "publishTimestamp": 1794465515,
+          "version": "0.1.4",
+          "publishTimestamp": 1794468994,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "336f0b0434fe154d862998bc803b3fac8a46aaad",
+            "commit": "6b3be58725b0fb1e02a3dc460de0bc3313c53009",
             "path": "packages/autofix"
           },
           "engines": {
