@@ -41,7 +41,7 @@ Tick the box in an image's corner to select it; Shift extends the selection, Ctr
 
 - **Retire…** moves the selection into the retired folder, each image under its present path, after a dialog that says how many of them the code still refers to. The **Retired** filter lists what is there; **Restore** puts images back where they came from. The Versions view retires a whole version from its row, and the detail pane retires or restores one image.
 - **Tag…** adds a tag to every selected image or removes one. The detail pane edits one image's tags and its note. A tag menu filters the grid, and the search looks in tags and notes too.
-- **Ask the agent…** writes a request (check and remove, find where they are used, redraw, or your own words) followed by the selected paths into the conversation's chat input. Nothing is sent until you send it. Where the host cannot take the text, it is copied to the clipboard instead.
+- **Ask the agent…** writes a request (check and remove, find where they are used, redraw, or your own words) followed by the selected paths into the conversation's chat input. Nothing is sent until you send it. In a TUI conversation of [Remote Terminals](../remote-terminals/README.md) 0.1.4 or newer, where a terminal stands in for the chat input, the request is typed at the CLI's prompt instead. Where the host cannot take the text, it is copied to the clipboard instead.
 
 ### What it changes
 

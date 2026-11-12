@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.4 — Other plugins can type at a TUI conversation's prompt
+
+- A TUI conversation has a terminal where a chat has its input, and DSH keeps the chat input hidden underneath. A plugin that put text into the chat input, such as Game Assets' **Ask the agent…**, wrote into that hidden input, so nothing appeared.
+- Such text is now typed at the CLI's prompt as a paste, and is not sent. It waits up to 10 seconds for the terminal if the conversation is on another tab or still opening.
+- Claude Code and Codex take a paste with its line breaks. For an app in the terminal that does not, the text goes on one line, so that no part of it is sent.
+- The other plugin has to ask for it: Game Assets does from 0.1.3. Restart DSH after upgrading. Remote Agents 0.2.130 stays as it is.
+
 ## 0.1.3 — No scrollbar in TUI conversations
 
 - A TUI conversation showed a grey scrollbar on its right edge whenever it scrolled or the pointer came near. It is gone; the wheel and the trackpad scroll as before.

@@ -1,6 +1,6 @@
 {
   "name": "dsh-game-assets",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Browse a game project's 2D art in DeepSeek Harness, see which images the code still uses and which version of each pack is live, then retire, tag or hand them to the agent",
   "type": "module",
   "icon": "icon.svg",
