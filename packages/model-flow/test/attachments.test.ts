@@ -36,6 +36,10 @@ async function setup(t: TestContext, settings: {
   pending?: boolean;
   /** Boot again in an earlier setup's home, as DSH does after a restart. */
   home?: string;
+  /** Other plugins' services, by name. */
+  services?: Record<string, unknown>;
+  /** More of the saved settings. */
+  config?: Record<string, unknown>;
 } = {}) {
   const home = settings.home ?? await mkdtemp(join(tmpdir(), 'model-flow-attachments-'));
   const oldHome = process.env.DSH_HOME;
@@ -51,13 +55,13 @@ async function setup(t: TestContext, settings: {
   const route = (model: string) => ({ provider: 'p', model, label: model });
   const directory = join(home, 'storages', 'dsh-model-flow');
   await mkdir(directory, { recursive: true });
-  await writeFile(join(directory, 'config.json'), JSON.stringify({ plan: route('planner'), implement: route('coder'), review: route('checker'), rounds: 3 }));
+  await writeFile(join(directory, 'config.json'), JSON.stringify({ plan: route('planner'), implement: route('coder'), review: route('checker'), rounds: 3, ...settings.config }));
   let command!: Command, fetch!: (request: Request) => Promise<Response>, service!: ModelFlowService, reviews = 0, disposed = 0, commands = 0;
   const calls: ActivationSpec[] = [], notes: string[] = [], resolved: string[] = [];
   const ctx = {
     connection: { fetch: { register(definition: { fetch: typeof fetch }) { fetch = definition.fetch; } } },
     effect(callback: () => (() => void)) { disposers.push(callback()); },
-    on() {}, get() { return undefined; },
+    on() {}, get(name: string) { return settings.services?.[name]; },
     provide(name: string, value: ModelFlowService) { if (name === 'modelFlow') service = value; },
     commands: {
       register(definition: Command) { command = definition; return () => {}; },
@@ -283,15 +287,70 @@ test('a typed /flow being handled is known as the line that starts a card', asyn
 
 test('another plugin starts a flow through the service and learns how it ended', async t => {
   const host = await setup(t, { verdicts: ['fix it\nFLOW_VERDICT: needs_revision', 'fine\nFLOW_VERDICT: pass'] });
-  assert.equal(host.service.version, 1);
-  const run = await host.service.start(host.agent, { goal: 'fix the bug', rounds: 2, attachments });
+  assert.equal(host.service.version, 2);
+  const run = await host.service.start(host.agent, { goal: 'fix the bug', rounds: 2, attachments, tag: 'autofix:1:manual:7' });
+  // While it runs, the plugin can ask how far it is: what the card shows, under the name it gave the flow.
+  const early = run.progress();
+  assert.deepEqual([early.tag, early.rounds, early.planned, early.parentId, early.end], ['autofix:1:manual:7', 2, true, 'parent', undefined]);
   const result = await run.done;
+  const late = run.progress();
+  assert.deepEqual([late.end?.kind, late.steps.length, late.steps.every(step => step.body === undefined)], ['passed', 5, true]);
+  assert.match(run.stepBody(1) ?? '', /coder output/);
+  assert.equal(run.stepBody(9), undefined);
   assert.deepEqual({ kind: result.end.kind, round: result.end.kind === 'passed' && result.end.round }, { kind: 'passed', round: 2 });
   assert.deepEqual(result.steps.map(step => `${step.role} ${step.round} ${step.status}`), ['plan 0 done', 'implement 1 done', 'review 1 sentBack', 'implement 2 done', 'review 2 passed']);
   assert.match(result.report ?? '', /coder output/);
   assertAttachments(host.calls);
-  // The conversation shows the same card a typed /flow gets.
+  // The conversation shows the same card a typed /flow gets, and the card keeps the name.
   await host.finished();
+  assert.equal(parseRow(host.notes.find(note => /^Done:/u.test(note))!).card?.tag, 'autofix:1:manual:7');
+  // A name that is not `<plugin>:<words>` is left out rather than refused.
+  const plain = await host.service.start(host.agent, { goal: 'again', tag: 'no colon here' });
+  assert.equal(plain.progress().tag, undefined);
+  plain.stop();
+});
+
+test('a /flow that asks for a worktree of its own is handed to Autofix, with what its line chose', async t => {
+  const filed: Record<string, unknown>[] = [];
+  const autofix = { async file(input: Record<string, unknown>) { filed.push(input); return { kind: 'success' as const, text: 'F3 · add csv\n\n<!-- autofix-row {"key":"manual:3"} -->' }; } };
+  const host = await setup(t, { services: { autofix } });
+  const reply = await host.run('wt=on repo=web branch="release 1" impl=coder rounds=2 add csv export');
+  assert.deepEqual(reply, { kind: 'success', text: 'F3 · add csv\n\n<!-- autofix-row {"key":"manual:3"} -->' }, 'the row is Autofix\'s');
+  assert.deepEqual(filed.map(({ agent: _agent, ...rest }) => rest), [{ text: 'add csv export', attachments, kind: 'feature', repo: 'web', branch: 'release 1', models: { implement: 'coder' }, rounds: 2 }]);
+  assert.equal(filed[0].agent, host.agent);
+  assert.equal(host.calls.length, 0, 'no flow runs in this conversation');
+  // Without the option the flow runs here, as before; where a worktree goes means nothing then.
+  assert.match((await host.run('repo=web add csv', [])).text ?? '', /repo= and branch= say where a worktree is made/);
+  assert.equal((await host.run(`${options} do it`)).kind, 'success');
+  await host.finished();
+  assert.equal(filed.length, 1);
+});
+
+test('the settings decide where a typed /flow runs, and the line can say otherwise', async t => {
+  const filed: string[] = [];
+  const autofix = { async file(input: { text: string }) { filed.push(input.text); return { kind: 'success' as const, text: 'handed over' }; } };
+  const host = await setup(t, { services: { autofix }, config: { worktree: true } });
+  assert.match((await host.run('', [])).text ?? '', /Runs in a worktree of its own\./);
+  assert.equal((await host.run('add csv', [])).text, 'handed over');
+  assert.deepEqual(filed, ['add csv']);
+  assert.equal((await host.run('wt=off do it here')).kind, 'success');
+  await host.finished();
+  assert.deepEqual([filed.length, host.calls.length], [1, 3]);
+  assert.match((await host.run('wt=maybe x', [])).text ?? '', /wt is on or off/);
+  // Saving anything else on the settings page keeps the choice.
+  const saved = await host.post({ action: 'save', config: { rounds: 4, worktree: true, implement: { provider: 'p', model: 'coder', label: 'coder' } } }) as { config: { worktree?: boolean; rounds: number } };
+  assert.deepEqual([saved.config.worktree, saved.config.rounds], [true, 4]);
+  const off = await host.post({ action: 'save', config: { rounds: 4 } }) as { config: { worktree?: boolean } };
+  assert.equal(off.config.worktree, undefined);
+});
+
+test('without Autofix a worktree flow says what is missing and how to run here instead', async t => {
+  const host = await setup(t, { services: { autofix: { version: 1 } } });
+  const reply = await host.run('wt=on add csv', []);
+  assert.equal(reply.kind, 'error');
+  assert.match(reply.text ?? '', /runs through Autofix \(dsh-autofix 0\.1\.4 or newer\).*wt=off/);
+  assert.match((await host.run('wt=on 加上导出', [])).text ?? '', /自动修复插件.*wt=off/);
+  assert.equal(host.calls.length, 0);
 });
 
 test('the service refuses what /flow refuses, and its stop ends the flow', async t => {

@@ -2,7 +2,7 @@
  * One bug from start to done. The models only change files: this code decides when they run, checks what they left,
  * commits it, and pushes nothing until a person accepts.
  */
-import type { Conversations, FlowEnd, FlowRun } from './conversations.js';
+import type { Conversations, FlowEnd, FlowProgress, FlowRole, FlowRun } from './conversations.js';
 import { ACTIVE, fail, Failure, messageOf, say, type Item, type ItemEvent, type ItemImage, type Message, type Route, type Source, type Task, type TaskStatus } from './domain.js';
 import { addedLines, blocked, changedFiles, chooseScript, commands, touched, warnings } from './gate.js';
 import { MANUAL } from './manual.js';
@@ -22,6 +22,19 @@ export interface TaskHost {
   changed?(): void;
   /** Puts a card for the task into its conversation: it now waits for a person, or has failed. `task.cards` is that card's number. */
   announce?(task: Task): Promise<void>;
+  /** How often a running flow is asked how far it is. */
+  progressMs?: number;
+}
+/** What /flow asked for one task alone. */
+export interface RunChoice { models?: Partial<Record<FlowRole, string>>; rounds?: number }
+const ROLES: readonly FlowRole[] = ['plan', 'implement', 'review'];
+const MAX_ROUNDS = 10;
+/** Checked, because it may come from another computer: a model per step as short text, and a sensible number of rounds. */
+export function runChoice(raw: unknown): RunChoice {
+  const input = raw && typeof raw === 'object' ? raw as { models?: unknown; rounds?: unknown } : {}, given = input.models && typeof input.models === 'object' ? input.models as Record<string, unknown> : {};
+  const models = Object.fromEntries(ROLES.flatMap(role => typeof given[role] === 'string' && given[role].trim() && given[role].length <= 300 ? [[role, given[role].trim()]] : []));
+  const rounds = typeof input.rounds === 'number' && Number.isSafeInteger(input.rounds) && input.rounds >= 1 && input.rounds <= MAX_ROUNDS ? input.rounds : undefined;
+  return { ...(Object.keys(models).length ? { models } : {}), ...(rounds ? { rounds } : {}) };
 }
 const TEST_TIMEOUT = 30 * 60_000;
 const GIT_NETWORK_TIMEOUT = 160_000;
@@ -41,7 +54,8 @@ function endSaid(end: FlowEnd): Message {
   }
 }
 
-interface Live { controller: AbortController; flow?: FlowRun; settled: Promise<void> }
+/** `carded` says the flow under way has a card in the conversation that carries the task, so no card of the task's own is needed. */
+interface Live { controller: AbortController; flow?: FlowRun; settled: Promise<void>; carded?: boolean }
 
 export class Tasks {
   private readonly live = new Map<string, Live>();
@@ -72,6 +86,16 @@ export class Tasks {
     return task;
   }
   running(key: string): boolean { return this.live.has(key); }
+  /** The flow a task is in right now, as its card shows it; undefined when no flow runs or it cannot say. */
+  progress(key: string): FlowProgress | undefined {
+    try { return this.live.get(key)?.flow?.progress?.(); } catch { return undefined; }
+  }
+  /** What one step of a task's newest flow said in full. */
+  stepBody(key: string, index: number): string | undefined {
+    let live: string | undefined;
+    try { live = this.live.get(key)?.flow?.stepBody?.(index); } catch { /* What was kept when the flow ended, below. */ }
+    return live ?? this.host.store.tasks[key]?.flow?.steps[index]?.body;
+  }
   /** Resolves when the task's current run has ended, however it ended. */
   idle(key: string): Promise<void> { return this.live.get(key)?.settled ?? Promise.resolve(); }
 
@@ -89,7 +113,7 @@ export class Tasks {
         this.live.delete(task.key);
         task.updatedAt = this.now();
         await this.save().catch(() => undefined);
-        if (broke) await this.announce(task);
+        if (broke && !live.carded) await this.announce(task);
       }
     })();
   }
@@ -105,9 +129,10 @@ export class Tasks {
 
   /**
    * Starts the bug as its pool entry says: repository, branch, and the package if one was chosen. `pictures` are ones DSH
-   * already keeps (sent along in a conversation), in the order the bug's text names them.
+   * already keeps (sent along in a conversation), in the order the bug's text names them. `choice` is what this task
+   * alone runs with, instead of the settings.
    */
-  async start(key: string, pictures: readonly unknown[] = []): Promise<Task> {
+  async start(key: string, pictures: readonly unknown[] = [], choice: RunChoice = {}): Promise<Task> {
     const { store } = this.host, item = store.pool[key];
     if (!item) throw fail('This bug is not in the pool');
     if (!item.assignment) throw fail('Choose a repository and a branch for this bug first');
@@ -120,6 +145,7 @@ export class Tasks {
       key, item: item.item, routeId: route.id, baseBranch: item.assignment.branch || route.defaultBranch,
       ...(item.assignment.package ? { packageHint: item.assignment.package } : {}),
       ...(pictures.length ? { pictures: pictures.map((ref, index) => ({ index, ref })) } : {}),
+      ...runChoice(choice),
       status: 'preparing', attempts: 0, startedAt: at, updatedAt: at, events: [{ at, said: say('Started in {route} from {branch}', { route: route.name, branch: item.assignment.branch || route.defaultBranch }) }],
     };
     if (!task.baseBranch) throw fail('{route} has no default branch; choose a branch for this bug', { route: route.name });
@@ -163,13 +189,15 @@ export class Tasks {
     let feedback = first.feedback, added = first.pictures ?? [], failedCheck: string | undefined, retries = run.checkRetries;
     for (;;) {
       signal.throwIfAborted();
-      task.attempts++; task.error = undefined; task.check = undefined;
+      task.attempts++; task.error = undefined; task.check = undefined; live.carded = false;
       await this.move(task, 'working');
       const pictures = task.pictures ?? [];
       const sourceName = this.sourceName(task);
       const goal = taskGoal({ item: task.item, ...(sourceName ? { sourceName } : {}), attached: pictures.map(picture => picture.index), route, baseBranch: task.baseBranch, ...(task.packageHint ? { packageHint: task.packageHint } : {}), ...(feedback !== undefined ? { feedback, feedbackPictures: added.length } : {}), ...(failedCheck ? { failedCheck } : {}), continued: task.attempts > 1 });
       const attachments = [...pictures.map(picture => picture.ref), ...added].map(ref => ({ type: 'image', attachment: ref }));
-      const input = { goal, rounds: run.rounds, ...(Object.keys(run.flowModels).length ? { models: run.flowModels } : {}) };
+      const models = { ...run.flowModels, ...task.models };
+      // The flow's card in the conversation is this task's card: the tag says which task, and which of its flows.
+      const input = { goal, rounds: task.rounds ?? run.rounds, ...(Object.keys(models).length ? { models } : {}), tag: `autofix:${task.attempts}:${task.key}` };
       let flow: FlowRun;
       try { flow = await this.host.conversations.flow(task.sessionId!, { ...input, ...(attachments.length ? { attachments } : {}) }); }
       catch (error) {
@@ -183,10 +211,31 @@ export class Tasks {
       const stop = () => flow.stop();
       signal.addEventListener('abort', stop, { once: true });
       if (signal.aborted) stop();
+      // A flow that can say how far it is has a card that shows it; the task keeps what the card shows, for the board and for other DSHes.
+      const startedAt = this.now();
+      let shape: Pick<NonNullable<Task['flow']>, 'rounds' | 'planned' | 'zh' | 'startedAt' | 'carded'> = {}, seen = '';
+      const look = () => {
+        let now: FlowProgress | undefined;
+        try { now = flow.progress?.(); } catch { /* It says nothing this time. */ }
+        if (!now) return;
+        shape = { rounds: now.rounds, ...(now.planned !== undefined ? { planned: now.planned } : {}), zh: now.zh, startedAt, carded: true };
+        const steps = now.steps.map(({ body: _body, ms, ...step }) => ({ ...step, ...(step.status !== 'running' && ms !== undefined ? { ms } : {}) }));
+        const said = JSON.stringify(steps.map(step => [step.role, step.round, step.status, step.childId]));
+        if (said === seen) return;
+        seen = said;
+        task.flow = { steps, ...shape };
+        void this.save().catch(() => undefined);
+      };
+      look();
+      live.carded = !!shape.carded;
+      // Earlier cards in the conversation stand back for this one.
+      if (live.carded) { task.cards = (task.cards ?? 0) + 1; await this.save().catch(() => undefined); }
+      const watch = live.carded ? setInterval(look, this.host.progressMs ?? 1000) : undefined;
+      watch?.unref?.();
       let result;
       try { result = await flow.done; }
-      finally { signal.removeEventListener('abort', stop); live.flow = undefined; }
-      task.flow = { steps: result.steps.map(step => step.body && step.body.length > STEP_BODY ? { ...step, body: `${step.body.slice(0, STEP_BODY)}…` } : step), end: result.end, ...(result.report ? { report: result.report } : {}) };
+      finally { clearInterval(watch); signal.removeEventListener('abort', stop); live.flow = undefined; }
+      task.flow = { steps: result.steps.map(step => step.body && step.body.length > STEP_BODY ? { ...step, body: `${step.body.slice(0, STEP_BODY)}…` } : step), end: result.end, ...(result.report ? { report: result.report } : {}), ...shape };
       // Stopped from the flow's own card in the conversation: the task stops too.
       if (result.end.kind === 'stopped') { live.controller.abort(); signal.throwIfAborted(); }
       if (result.end.kind !== 'passed') throw new Failure(endSaid(result.end));
@@ -205,7 +254,7 @@ export class Tasks {
       await this.move(task, 'review', say('Committed {commit}; waiting for you', { commit: short(task.commit) }));
       await this.report(task, { kind: 'review', branch: task.branch!, commit: task.commit, checks: (task as Task).check?.runs.length ?? 0 });
       await this.save();
-      await this.announce(task);
+      if (!live.carded) await this.announce(task);
       return;
     }
   }
@@ -345,11 +394,15 @@ export class Tasks {
     // Whatever goes wrong, the fix is out and the task stays done: the reason is shown on it.
     this.drive(task, async signal => {
       try {
-        const warnings = await this.host.workplaces.remove({ project: route?.project ?? workspacePath, worktree }, signal);
+        const removed = await this.host.workplaces.remove({ project: route?.project ?? workspacePath, worktree, deleteBranch: !!task.mergeCommit }, signal);
         task.worktree = undefined; task.workspacePath = undefined; task.sessionId = undefined;
         this.note(task, say('Workspace removed'));
-        for (const warning of warnings) this.note(task, say(warning));
-        if (route && branch && task.mergeCommit) await this.dropBranch(task, route, branch, signal).catch(() => undefined);
+        for (const warning of removed.warnings) this.note(task, say(warning));
+        // The worktree service only knows the repository's default branch; a fix merged into another base is this plugin's to know.
+        let gone = removed.branch === 'deleted';
+        if (!gone && route && branch && task.mergeCommit) gone = await this.dropBranch(task, route, branch, signal).catch(() => false);
+        if (gone && branch) this.note(task, say('Branch {branch} deleted', { branch }));
+        else for (const why of removed.kept) this.note(task, say(why));
       } catch (error) {
         const reason = signal.aborted ? say('Removing the workspace was stopped') : messageOf(error);
         task.error = reason; this.note(task, reason);
@@ -357,13 +410,13 @@ export class Tasks {
     });
     return task;
   }
-  /** The fix's branch, once everything on it is in the base branch on the remote. */
-  private async dropBranch(task: Task, route: Route, branch: string, signal: AbortSignal): Promise<void> {
+  /** The fix's branch, once everything on it is in the base branch on the remote. True when it is gone. */
+  private async dropBranch(task: Task, route: Route, branch: string, signal: AbortSignal): Promise<boolean> {
     const machine = await this.host.workplaces.machine(route.project, signal);
     const [merged] = await machine.git([{ argv: ['merge-base', '--is-ancestor', `refs/heads/${branch}`, `refs/remotes/${route.pushRemote}/${task.baseBranch}`] }], { reads: true, signal });
-    if (merged.code !== 0) return;
+    if (merged.code !== 0) return false;
     const [deleted] = await machine.git([{ argv: ['branch', '-D', branch] }], { signal });
-    if (deleted.code === 0) this.note(task, say('Branch {branch} deleted', { branch }));
+    return deleted.code === 0;
   }
   /** Forgets a task that is not running. Its worktree and conversation stay in DSH. */
   async forget(key: string): Promise<void> {

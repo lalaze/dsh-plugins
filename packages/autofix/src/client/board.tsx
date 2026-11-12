@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { Item, Message, Route, Task, TaskStatus } from '../domain.js';
 import type { PoolView } from '../service.js';
 import { call, type State } from './api.js';
+import { useFlowCard, type FlowView, type Stage, type ViewExtras } from './flowcard.js';
 import { formatLocale, ui, useLocale } from './i18n.js';
 import { sourceText } from './needs.js';
 import { NewBugForm, type NewBug } from './newbug.js';
@@ -31,6 +32,51 @@ export function Said({ message, error }: { message: Message; error?: boolean }) 
 }
 /** A source's name; the built-in one for typed bugs is said in the page's language. */
 const sourceLabel = (name: string) => name === 'Manual' ? ui("Typed in") : name;
+/** Where a task came from: its source, or /flow for something to build. */
+const originLabel = (task: TaskView) => task.item.kind === 'feature' ? ui("From /flow") : sourceLabel(task.sourceName);
+
+/**
+ * A task's newest flow as the flow's own card draws it, from what the task keeps of it. Undefined for a task that has
+ * no flow yet, or whose flow ran before tasks kept what the card needs.
+ */
+function flowOf(task: TaskView, far: boolean, act: (action: string) => Promise<boolean>): FlowView | undefined {
+  const flow = task.flow, live = task.progress;
+  if (!flow || flow.rounds === undefined) return undefined;
+  const active = task.running && task.status === 'working' && !flow.end;
+  // Another DSH's clock is not this one's: a flow followed from afar shows no running time.
+  const elapsed = live?.elapsed ?? (active && !far && flow.startedAt ? Math.max(0, Date.now() - flow.startedAt) : undefined);
+  return {
+    card: { parentId: far ? '' : task.sessionId ?? '', zh: flow.zh ?? false, rounds: flow.rounds, ...(flow.planned !== undefined ? { planned: flow.planned } : {}), steps: live?.steps ?? flow.steps, ...(flow.end ? { end: flow.end } : {}),
+      ...(elapsed !== undefined ? { elapsed } : {}), ...(live?.activity ? { activity: live.activity } : {}) },
+    active, canOpen: !far && !!task.sessionId,
+    ...(active ? { stop: () => { void act('stop'); } } : {}),
+    ...(far ? {} : { stepBody: (index: number) => call<{ body: string | null }>('stepBody', { key: task.key, index }).then(reply => reply.body ?? null, () => null) }),
+  };
+}
+/** What follows the flow, at the end of its progress bar: the repository's checks, then the person. */
+function stagesOf(task: TaskView): Stage[] {
+  const passed = task.flow?.end?.kind === 'passed', after = task.status === 'review' || task.status === 'accepting' || task.status === 'done';
+  const over = !!task.flow?.end && !passed || task.status === 'failed' || task.status === 'stopped';
+  const failedCheck = task.check?.runs.some(run => run.code !== 0);
+  const checks: Stage['status'] = task.status === 'checking' ? 'running' : after ? 'passed' : failedCheck ? 'failed' : over ? 'skipped' : 'pending';
+  const accept: Stage['status'] = task.status === 'accepting' ? 'running' : task.status === 'done' ? 'passed' : over ? 'skipped' : 'pending';
+  return [{ label: ui("Checks"), status: checks }, { label: ui("Acceptance"), status: accept }];
+}
+/** The top of the card once the flow has passed and the task goes on without it; before that the flow speaks for itself. */
+function headOf(task: TaskView): ViewExtras['head'] {
+  const end = task.flow?.end;
+  if (end?.kind !== 'passed') return undefined;
+  const round = ui("Review passed in round {round}", { round: String(end.round) });
+  switch (task.status) {
+    case 'checking': return { status: 'running', title: ui("Running checks"), detail: round, clock: null };
+    case 'review': return { status: 'passed', title: ui("Waiting for you"), detail: [round, task.commit && ui("committed {0}", { 0: task.commit.slice(0, 9) })].filter(Boolean).join(' · '), clock: end.ms };
+    case 'accepting': return { status: 'running', title: ui("Merging and pushing"), detail: round, clock: null };
+    case 'done': return { status: 'passed', title: task.mergeCommit ? ui("Merged into {0} as {1}", { 0: task.baseBranch, 1: task.mergeCommit.slice(0, 9) }) : ui("Branch {0} pushed", { 0: task.branch ?? '' }), detail: round, clock: end.ms };
+    case 'failed': return { status: 'failed', title: ui("Failed"), detail: task.error ? ui(task.error.key, task.error.values) : round, clock: null };
+    case 'stopped': return { status: 'stopped', title: ui("Stopped"), detail: round, clock: null };
+    default: return undefined;
+  }
+}
 const seconds = (ms: number) => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 
 function Diff({ taskKey, at }: { taskKey: string; at?: string }) {
@@ -55,8 +101,12 @@ function Title({ item }: { item: Item }) {
   return item.url ? <a className="tp-title" href={item.url} target="_blank" rel="noreferrer">{text}</a> : <span className="tp-title">{text}</span>;
 }
 
-/** A task with what can be done about it. `keep` leaves out removing it: a card in a conversation is not where a task is thrown away. `at` is set for a task another DSH runs. */
-export function TaskCard({ task, routes, busy, act, open, keep, at }: { task: TaskView; routes: readonly Pick<Route, 'id' | 'name' | 'accept'>[]; busy: boolean; act(action: string, body?: Record<string, unknown>): Promise<boolean>; open?(sessionId: string): void; keep?: boolean; at?: string }) {
+/**
+ * A task with what can be done about it. `keep` leaves out removing it: a card in a conversation is not where a task is
+ * thrown away. `at` is set for a task another DSH runs. `flow` is the card of the task's flow in its own conversation,
+ * live as Model flow draws it; anywhere else the task is drawn from what it keeps of its flow.
+ */
+export function TaskCard({ task, routes, busy, act, open, keep, at, flow }: { task: TaskView; routes: readonly Pick<Route, 'id' | 'name' | 'accept'>[]; busy: boolean; act(action: string, body?: Record<string, unknown>): Promise<boolean>; open?(sessionId: string): void; keep?: boolean; at?: string; flow?: FlowView }) {
   const [mode, setMode] = useState<'idle' | 'back' | 'accept' | 'remove'>('idle'), [note, setNote] = useState(''), [showDiff, setShowDiff] = useState(false), added = usePictures();
   const route = routes.find(entry => entry.id === task.routeId), last = task.events.at(-1);
   const review = task.status === 'review', trouble = task.status === 'failed' || task.status === 'stopped', done = task.status === 'done';
@@ -66,21 +116,22 @@ export function TaskCard({ task, routes, busy, act, open, keep, at }: { task: Ta
   useEffect(() => { if (removable && accepted.current) { accepted.current = false; setMode('remove'); } }, [removable]);
   useEffect(() => { if (mode === 'remove' && !removable) setMode('idle'); }, [mode, removable]);
   const send = async () => { if (await act('sendBack', { feedback: note, images: added.payload() })) { setNote(''); added.clear(); setMode('idle'); } };
-  return <article className="tp-card" data-status={task.status}>
-    <header>
-      <Title item={task.item} />
-      <span className="tp-state" data-status={task.status}>{task.running && <i aria-hidden="true" />}{statusText(task.status)}</span>
-    </header>
-    <p className="tp-meta">{[sourceLabel(task.sourceName), route?.name ?? task.routeId, task.branch && `${task.branch} ← ${task.baseBranch}`, task.commit && task.commit.slice(0, 9), task.attempts > 1 && ui("round {0}", { 0: String(task.attempts) })].filter(Boolean).join(' · ')}</p>
-    {task.error && <Said message={task.error} error />}
-    {!task.error && !review && (!done || task.running) && last && <p className="tp-muted">{told(last.said)}</p>}
+  // Drawn as the flow's own card when Model flow's page offers it: the same progress a /flow shows, then what a task adds.
+  const View = useFlowCard()?.View, view = View ? flow ?? flowOf(task, !!at, action => act(action)) : undefined;
+  const meta = <p className="tp-meta">{[originLabel(task), route?.name ?? task.routeId, task.branch && `${task.branch} ← ${task.baseBranch}`, task.commit && task.commit.slice(0, 9), task.attempts > 1 && ui("round {0}", { 0: String(task.attempts) })].filter(Boolean).join(' · ')}</p>;
+  // The flow says what it is doing itself; the task's own last word is for the time around it.
+  const flowing = !!view && (view.active || (!!view.card.end && task.status === 'working'));
+  const body = <>
+    {task.error && !(view && task.status === 'failed' && task.flow?.end?.kind === 'passed' && !task.error.detail) && <Said message={task.error} error />}
+    {!task.error && !review && (!done || task.running) && !flowing && last && <p className="tp-muted">{told(last.said)}</p>}
     {task.check && (task.check.runs.length > 0 || task.check.warnings.length > 0) && <ul className="tp-checks">
       {task.check.runs.map((run, index) => <li key={index} data-ok={run.code === 0}><code>{run.command}</code><span>{run.code === 0 ? ui("passed") : ui("failed")} · {seconds(run.ms)}</span></li>)}
       {task.check.warnings.map((warning, index) => <li key={`w${index}`} data-warning>{told(warning)}</li>)}
     </ul>}
-    {done && <p className="tp-muted">{task.mergeCommit ? ui("Merged into {0} as {1}", { 0: task.baseBranch, 1: task.mergeCommit.slice(0, 9) }) : ui("Branch {0} pushed", { 0: task.branch ?? '' })}{!task.worktree && ` · ${ui("workspace removed")}`}</p>}
+    {done && !view && <p className="tp-muted">{task.mergeCommit ? ui("Merged into {0} as {1}", { 0: task.baseBranch, 1: task.mergeCommit.slice(0, 9) }) : ui("Branch {0} pushed", { 0: task.branch ?? '' })}{!task.worktree && ` · ${ui("workspace removed")}`}</p>}
+    {done && view && !task.worktree && <p className="tp-muted">{ui("workspace removed")}</p>}
     {task.reportPending && <p className="tp-error">{ui("{0} was not told that this was accepted.", { 0: sourceLabel(task.sourceName) })}</p>}
-    {task.flow?.report && (review || trouble) && <details className="tp-report"><summary>{ui("What the models reported")}</summary><div>{task.flow.report}</div></details>}
+    {task.flow?.report && (review || trouble) && !(view && (flow || keep)) && <details className="tp-report"><summary>{ui("What the models reported")}</summary><div>{task.flow.report}</div></details>}
     {review && <details className="tp-report" onToggle={event => setShowDiff((event.target as HTMLDetailsElement).open)}><summary>{ui("Changes")}{task.check ? ` · ${ui("{0} files", { 0: String(task.check.files.length) })}` : ''}</summary>{showDiff && <Diff taskKey={`${task.key}`} {...(at ? { at } : {})} />}</details>}
     {mode === 'back' && <div className="tp-form tp-back" {...added.zone}><textarea autoFocus rows={3} value={note} placeholder={ui("What should change? Paste or drop screenshots here.")} onChange={event => setNote(event.target.value)} />
       {added.view()}
@@ -91,18 +142,33 @@ export function TaskCard({ task, routes, busy, act, open, keep, at }: { task: Ta
         : route?.accept === 'push-branch' ? ui("Push branch {0} and tell {1} the bug is fixed?", { 0: task.branch ?? '', 1: task.sourceName }) : ui("Merge into {0}, push it, and tell {1} the bug is fixed?", { 0: task.baseBranch, 1: task.sourceName })}</p>
       <div className="tp-actions"><button type="button" className="tp-button" data-primary disabled={busy} onClick={() => void act('accept').then(ok => { if (ok) { accepted.current = true; setMode('idle'); } })}>{ui("Yes, accept")}</button><button type="button" className="tp-button" onClick={() => setMode('idle')}>{ui("Cancel")}</button></div></div>}
     {mode === 'remove' && <div className="tp-form"><p>{task.mergeCommit
-        ? ui("Remove this fix's workspace? Its worktree is deleted and its conversation archived. Branch {0} is deleted too, as it is merged.", { 0: task.branch ?? '' })
-        : ui("Remove this fix's workspace? Its worktree is deleted and its conversation archived. Branch {0} stays.", { 0: task.branch ?? '' })}</p>
+        ? ui("Remove this task's workspace? Its worktree is deleted and its conversation archived. Branch {0} is deleted too, as it is merged.", { 0: task.branch ?? '' })
+        : ui("Remove this task's workspace? Its worktree is deleted and its conversation archived. Branch {0} stays.", { 0: task.branch ?? '' })}</p>
       <div className="tp-actions"><button type="button" className="tp-button" data-danger disabled={busy} onClick={() => void act('removeWorkspace').then(() => setMode('idle'))}>{ui("Yes, remove it")}</button><button type="button" className="tp-button" onClick={() => setMode('idle')}>{ui("Keep it")}</button></div></div>}
     {mode === 'idle' && <div className="tp-actions">
       {review && <><button type="button" className="tp-button" data-primary disabled={busy} onClick={() => setMode('accept')}>{ui("Accept")}</button><button type="button" className="tp-button" disabled={busy} onClick={() => setMode('back')}>{ui("Send back")}</button></>}
       {trouble && task.sessionId && <><button type="button" className="tp-button" data-primary disabled={busy} onClick={() => void act('sendBack', { feedback: '' })}>{ui("Continue")}</button><button type="button" className="tp-button" disabled={busy} onClick={() => setMode('back')}>{ui("Continue with a note")}</button></>}
-      {task.running && <button type="button" className="tp-button" disabled={busy} onClick={() => void act('stop')}>{ui("Stop")}</button>}
+      {task.running && !view?.active && <button type="button" className="tp-button" disabled={busy} onClick={() => void act('stop')}>{ui("Stop")}</button>}
       {task.reportPending && <button type="button" className="tp-button" data-primary disabled={busy} onClick={() => void act('retryReport')}>{ui("Write back again")}</button>}
       {task.sessionId && open && <button type="button" className="tp-button" onClick={() => open(task.sessionId!)}>{ui("Open conversation")}</button>}
       {removable && <button type="button" className="tp-button" disabled={busy} onClick={() => setMode('remove')}>{ui("Remove workspace")}</button>}
       {(trouble || done) && !keep && <button type="button" className="tp-button" data-quiet disabled={busy} onClick={() => void act('forget')}>{ui("Remove")}</button>}
     </div>}
+  </>;
+  if (View && view) {
+    // In a conversation the report is part of the card, as a flow's is; on the board it stays folded with the rest.
+    const report = view.report ?? (keep && (review || trouble) ? task.flow?.report : undefined);
+    return <div className="tp-flowcard" data-status={task.status}>
+      <View {...view} {...(report ? { report } : {})} stages={stagesOf(task)} head={headOf(task)} caption={<><Title item={task.item} />{meta}</>}>{body}</View>
+    </div>;
+  }
+  return <article className="tp-card" data-status={task.status}>
+    <header>
+      <Title item={task.item} />
+      <span className="tp-state" data-status={task.status}>{task.running && <i aria-hidden="true" />}{statusText(task.status)}</span>
+    </header>
+    {meta}
+    {body}
   </article>;
 }
 
@@ -160,7 +226,7 @@ export function Board({ open }: { open?(sessionId: string): void }) {
     projects.current[route.id] = 'loading';
     call<ProjectInfo>('project', { path: route.project, globs: route.packageGlobs }).then(reply => { projects.current[route.id] = { branches: reply.branches ?? [], packages: reply.packages ?? [], defaultBase: reply.defaultBase ?? null }; redraw(value => value + 1); }, () => { delete projects.current[route.id]; });
   }, []);
-  if (!state) return <div className="tp-board"><h2>{ui("Bugs")}</h2>{error ? <Said message={error} error /> : <p className="tp-muted">{ui("Loading…")}</p>}</div>;
+  if (!state) return <div className="tp-board"><h2>{ui("Tasks")}</h2>{error ? <Said message={error} error /> : <p className="tp-muted">{ui("Loading…")}</p>}</div>;
 
   const { routes } = state.settings, tasks = new Map(state.tasks.map(task => [task.key, task]));
   const by = (...statuses: TaskStatus[]) => state.tasks.filter(task => statuses.includes(task.status));
@@ -188,7 +254,7 @@ export function Board({ open }: { open?(sessionId: string): void }) {
   const askable = state.sources.filter(source => source.fetches && !source.unready), fetching = !!busy.fetch || state.sources.some(source => source.busy);
   return <div className="tp-board">
     <header className="tp-top">
-      <div><h2>{ui("Bugs")}</h2>
+      <div><h2>{ui("Tasks")}</h2>
         {state.sources.filter(source => source.id !== 'manual').map(source => <p key={source.id} className={source.error || source.unready ? 'tp-error' : 'tp-muted'}>{source.name} · {source.unready ? sourceText(source.id, source.unready) : source.error ? ui("last fetch failed: {0}", { 0: source.error }) : source.fetches ? ui("fetched {0}", { 0: ago(source.at) }) : ui("hands bugs in by itself")}</p>)}</div>
       <div className="tp-actions">
         {typed && <button type="button" className="tp-button" disabled={adding} onClick={() => setAdding(true)}>{ui("New bug")}</button>}

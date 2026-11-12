@@ -15,6 +15,8 @@ export interface Item {
   labels: string[];
   /** How many pictures the bug has. The body may place them as `[image N]`; the source hands each over through `image`. */
   images?: number;
+  /** Absent for a bug. A feature is something to build, handed in by /flow: the same road, other words. */
+  kind?: 'feature';
 }
 /** One picture of a bug, as the source read it. */
 export interface ItemImage { data: Uint8Array; mediaType: string; name?: string }
@@ -52,6 +54,12 @@ export interface Autofix {
   register(source: Source): () => void;
   /** For a source that is not asked: these bugs are open now. Known ones are refreshed; none is marked stale. */
   submit(sourceId: string, items: readonly Item[]): Promise<{ added: number }>;
+  /**
+   * For /flow, since 0.1.4: what a person typed in a conversation becomes a task in the repository that conversation works
+   * in, as a typed /fix does. `agent` is the conversation's live agent; `kind: 'feature'` is something to build rather
+   * than a bug; `models` and `rounds` are for this task alone. Answers the row to leave in the conversation.
+   */
+  file(input: { agent: unknown; text: string; attachments?: readonly unknown[]; kind?: 'feature'; repo?: string; branch?: string; models?: Partial<Record<FlowRole, string>>; rounds?: number }): Promise<{ kind: 'success' | 'error'; text: string }>;
 }
 export const SOURCE_ID = /^[a-z][a-z0-9-]{0,30}$/u;
 
@@ -143,7 +151,14 @@ export interface Task {
   branch?: string; worktree?: string; workspacePath?: string; sessionId?: string;
   /** The bug's pictures the models are given, as DSH keeps them: `index` is the picture's place in the bug, from 0. */
   pictures?: { index: number; ref: unknown }[];
-  flow?: { steps: FlowStep[]; end?: FlowEnd; report?: string };
+  /**
+   * The newest flow: its steps as they are now, and how it ended once it has. `rounds`, `planned` and `zh` are what its
+   * card is drawn with; `startedAt` is when it began, and `carded` that its card in the conversation carries the task.
+   */
+  flow?: { steps: FlowStep[]; end?: FlowEnd; report?: string; rounds?: number; planned?: boolean; zh?: boolean; startedAt?: number; carded?: boolean };
+  /** What /flow asked for this task alone: other models for its steps, another number of review rounds. */
+  models?: Partial<Record<FlowRole, string>>;
+  rounds?: number;
   check?: TaskCheck;
   commit?: string; mergeCommit?: string;
   error?: Message;
@@ -238,5 +253,6 @@ export function itemFrom(raw: unknown, source: string): Item {
     ...(status ? { status } : {}), ...(priority ? { priority } : {}), ...(module ? { module } : {}),
     labels: list(input.labels, 'A bug\'s labels', 50),
     ...(images ? { images } : {}),
+    ...(input.kind === 'feature' ? { kind: 'feature' as const } : {}),
   };
 }

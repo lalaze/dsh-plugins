@@ -41,10 +41,10 @@ test('the card a fix was accepted on asks before its workspace is removed, and r
   assert.deepEqual(acted, ['accept']);
   // The merge is under way: nothing is asked yet.
   await show(view({ status: 'accepting', running: true }), acted);
-  assert.equal(container.textContent!.includes('Remove this fix'), false);
+  assert.equal(container.textContent!.includes('Remove this task'), false);
   await show(view({ status: 'done', mergeCommit: 'abc1234567890' }), acted);
   assert.match(container.textContent!, /Merged into main as abc123456/);
-  assert.match(container.textContent!, /Remove this fix's workspace\? Its worktree is deleted and its conversation archived\. Branch manual\/1 is deleted too, as it is merged\./);
+  assert.match(container.textContent!, /Remove this task's workspace\? Its worktree is deleted and its conversation archived\. Branch manual\/1 is deleted too, as it is merged\./);
   assert.deepEqual(buttons(), ['Yes, remove it', 'Keep it']);
   assert.deepEqual(acted, ['accept'], 'asking is not removing');
 
@@ -66,7 +66,7 @@ test('the card a fix was accepted on asks before its workspace is removed, and r
 test('a finished fix seen later offers the removal with the same question; a pushed branch is said to stay', async () => {
   const acted: string[] = [];
   await show(view({ status: 'done' }), acted, false);
-  assert.equal(container.textContent!.includes('Remove this fix'), false, 'a card that did not accept the fix does not ask by itself');
+  assert.equal(container.textContent!.includes('Remove this task'), false, 'a card that did not accept the fix does not ask by itself');
   assert.deepEqual(buttons(), ['Remove workspace', 'Remove']);
   await press('Remove workspace');
   assert.match(container.textContent!, /Branch manual\/1 stays\./);

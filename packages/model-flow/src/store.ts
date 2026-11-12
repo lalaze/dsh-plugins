@@ -6,8 +6,11 @@ import { DEFAULT_ROUNDS } from './line.js';
 import { routeFrom } from './routes.js';
 import type { CardState } from './shared.js';
 
-/** `combos` stays absent until the first ones are saved, so an emptied list is not filled again. */
-export interface FlowConfig extends Setup { combos?: Combo[] }
+/**
+ * `combos` stays absent until the first ones are saved, so an emptied list is not filled again. `worktree` is where a
+ * typed /flow runs unless its line says otherwise: in a worktree of its own, through Autofix, instead of in the conversation.
+ */
+export interface FlowConfig extends Setup { combos?: Combo[]; worktree?: boolean }
 
 export function configFrom(value: unknown): FlowConfig {
   const raw = value && typeof value === 'object' ? value as Record<string, unknown> : {};
@@ -16,6 +19,7 @@ export function configFrom(value: unknown): FlowConfig {
     ...(plan ? { plan } : {}), ...(implement ? { implement } : {}), ...(review ? { review } : {}),
     rounds: roundsFrom(raw.rounds),
     ...(Array.isArray(raw.combos) ? { combos: combosFrom(raw.combos) } : {}),
+    ...(raw.worktree === true ? { worktree: true } : {}),
   };
 }
 export class FlowStore {

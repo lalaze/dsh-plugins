@@ -24,16 +24,17 @@ async function setup(t: TestContext, routes: Route[] = [route('Web', '/ws/web'),
   await store.open();
   store.settings = { ...defaultSettings(), routes };
   const folders: Record<string, string> = {}, details: Record<string, Partial<ProjectDetail>> = {};
-  const created: unknown[] = [], started: [string, readonly unknown[]][] = [], sentBack: unknown[][] = [];
+  const created: unknown[] = [], started: [string, readonly unknown[]][] = [], sentBack: unknown[][] = [], chosen: unknown[] = [], titled: string[][] = [];
   let clock = 1000;
   const command = new FixCommand({
     store, now: () => clock,
+    async title(live, title) { titled.push([live.id, title]); },
     folder: live => folders[live.id],
     async inspect(project) { const detail = details[project]; if (!detail) throw new Error('not a workspace'); return { name: 'x', defaultBase: null, branches: [], setup: [], ...detail }; },
     async createManual(input) { created.push(input); return { key: `manual:${created.length}` }; },
     tasks: {
-      async start(key, pictures = []) {
-        started.push([key, pictures]);
+      async start(key, pictures = [], choice) {
+        started.push([key, pictures]); chosen.push(choice);
         const task = { key, item: { source: 'manual', id: key.slice(7), ref: `M${key.slice(7)}`, title: 'typed', body: '', labels: [] }, routeId: 'Web', baseBranch: 'main', status: 'preparing', attempts: 0, startedAt: 1, updatedAt: 1, events: [] } as Task;
         store.tasks[key] = task;
         return task;
@@ -45,7 +46,7 @@ async function setup(t: TestContext, routes: Route[] = [route('Web', '/ws/web'),
     const result = await command.handle({ agent: live, rawInput, attachments });
     return { kind: result.kind, ...parseRow(result.text) };
   };
-  return { store, command, folders, details, created, started, sentBack, run, tick: (ms: number) => { clock += ms; } };
+  return { store, command, folders, details, created, started, sentBack, chosen, titled, run, tick: (ms: number) => { clock += ms; } };
 }
 
 test('what follows /fix: where the bug goes if said, then the bug, whose first line is its title', () => {
@@ -66,6 +67,7 @@ test('a bug typed in a conversation goes to the repository that conversation wor
   assert.deepEqual(host.created, [{ title: '活动页白屏', body: '活动页白屏\n只在 iOS 上', attached: 2, assignment: { routeId: 'Web', branch: 'main' } }]);
   assert.deepEqual(host.started, [['manual:1', [{ attachmentId: 'a' }, { attachmentId: 'b' }]]], 'DSH already keeps the pictures: they go as they are');
   assert.deepEqual(chat.appended, ['turn/start', 'turn/end'], 'a blank session becomes a conversation, or DSH would hand it out again');
+  assert.deepEqual(host.titled, [['chat-1', '活动页白屏']], 'and is named after the bug rather than left untitled');
   assert.equal(host.command.lastCommand(15_000), 'chat-1');
   host.tick(20_000);
   assert.equal(host.command.lastCommand(15_000), undefined);
@@ -148,4 +150,43 @@ test('a conversation in a repository another DSH fixes hands the bug over, and i
   assert.deepEqual(handed[0], ['/air/web', { branch: 'dev', title: '活动页白屏', body: '' }, [{ attachmentId: 'a' }]]);
   const nowhere = await run('other-chat', 'bug');
   assert.deepEqual([nowhere.kind, nowhere.meta?.said?.key?.slice(0, 29)], ['error', 'Nothing can take this bug yet']);
+});
+
+test('a /flow that wants a worktree of its own becomes a task like a typed bug, as something to build', async t => {
+  const host = await setup(t), chat = agent('chat-1', 0);
+  host.folders['chat-1'] = '/ws/web';
+  const take = async (live: LiveAgent, text: string, attachments: { type: string; attachment?: unknown }[], options: Parameters<FixCommand['take']>[3]) => { const result = await host.command.take(live, text, attachments, options); return { kind: result.kind, ...parseRow(result.text) }; };
+  const reply = await take(chat, '给导出加 CSV\n放在列表页右上角', [picture('a')], { kind: 'feature', branch: 'dev', models: { implement: 'codex' }, rounds: 2 });
+  assert.deepEqual([reply.kind, reply.meta], ['success', { key: 'manual:1' }]);
+  assert.deepEqual(host.created, [{ title: '给导出加 CSV', body: '给导出加 CSV\n放在列表页右上角', attached: 1, assignment: { routeId: 'Web', branch: 'dev' }, kind: 'feature' }]);
+  assert.deepEqual(host.chosen, [{ kind: 'feature', models: { implement: 'codex' }, rounds: 2 }]);
+  assert.deepEqual(chat.appended, ['turn/start', 'turn/end']);
+  assert.deepEqual(host.titled, [['chat-1', '给导出加 CSV']]);
+  // The repository can be named on the line, as for /fix; a file cannot come along, and nothing to do is nothing to start.
+  await take(agent('elsewhere'), 'x', [], { kind: 'feature', repo: 'rooh', branch: 'feat/v2' });
+  assert.deepEqual((host.created[1] as { assignment: unknown }).assignment, { routeId: 'rooh web', branch: 'feat/v2' });
+  const file = await take(chat, 'x', [{ type: 'file' }], { kind: 'feature' });
+  assert.deepEqual([file.kind, file.meta?.said?.key], ['error', 'Only pictures can go along with a flow that runs in a worktree of its own']);
+  const empty = await take(chat, '  ', [], { kind: 'feature' });
+  assert.deepEqual([empty.kind, empty.meta?.said?.key], ['error', 'Say what to build']);
+  // In a task's own conversation the line is what is still wrong with that task, whichever command carried it.
+  host.store.tasks['manual:1'].sessionId = 'task-chat';
+  const back = await take(agent('task-chat'), '按钮再大一点', [], { kind: 'feature', models: { implement: 'codex' } });
+  assert.deepEqual([back.kind, host.sentBack], ['success', [['manual:1', '按钮再大一点', [], []]]]);
+  assert.equal(host.titled.length, 1, 'a conversation that already has turns keeps its name');
+  const moved = await take(agent('task-chat'), 'x', [], { kind: 'feature', repo: 'Web' });
+  assert.equal(moved.kind, 'error');
+});
+
+test('something to build is handed to the DSH that runs the repository with its kind and its choices', async t => {
+  const host = await setup(t, []), handed: unknown[][] = [];
+  const command = new FixCommand({
+    store: host.store, folder: () => '/air/web',
+    inspect: async () => { throw new Error('not used'); }, createManual: async () => { throw new Error('this DSH files nothing itself'); },
+    tasks: { start: async () => { throw new Error('this DSH runs nothing itself'); }, sendBack: async () => { throw new Error('not used'); } },
+    async handOver(folder, line, pictures, how) { handed.push([folder, line.title, pictures, how]); return { key: 'manual:7', ref: 'F7', title: line.title }; },
+  });
+  const result = await command.take(agent('air-chat'), '给导出加 CSV', [], { kind: 'feature', rounds: 4 });
+  assert.deepEqual(parseRow(result.text).meta, { key: 'manual:7', at: '/air/web' });
+  assert.deepEqual(handed, [['/air/web', '给导出加 CSV', [], { kind: 'feature', rounds: 4 }]]);
 });

@@ -10,7 +10,7 @@ import { defaultSettings, fail, render, type Item, type ItemEvent, type Message,
 const said = (message: Message | undefined) => message ? render(message) : undefined;
 import { refresh } from '../src/pool.js';
 import { LocalFiles, Store } from '../src/store.js';
-import { Tasks } from '../src/tasks.js';
+import { runChoice, Tasks } from '../src/tasks.js';
 import type { GitStep, Machine } from '../src/workplaces.js';
 
 const exec = promisify(execFile);
@@ -41,7 +41,7 @@ function machine(folder: string): Machine {
 }
 const bug = (id: string, title: string, labels: string[] = []): Item => ({ source: 'tapd', id: `100/${id}`, ref: id, title, body: '加法算错了', url: `https://tapd.example/${id}`, project: { id: '100', name: 'Dana' }, labels, images: 3 });
 
-interface Options { route?: Partial<Route>; reportFails?: boolean; retries?: number; noSource?: boolean; blind?: boolean; cardFails?: boolean; removeWarns?: boolean }
+interface Options { route?: Partial<Route>; reportFails?: boolean; retries?: number; noSource?: boolean; blind?: boolean; cardFails?: boolean; removeWarns?: boolean; carded?: boolean; flowFails?: number }
 async function setup(t: TestContext, options: Options = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'dsh-tapd-')));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -67,7 +67,7 @@ async function setup(t: TestContext, options: Options = {}) {
   const told: ItemEvent[] = [], goals: string[] = [], opened: unknown[] = [];
   /** The cards put into the task's conversation: its number and what the task said then. */
   const cards: [number | undefined, string][] = [];
-  const flows: FlowInput[] = [], discarded: string[] = [], removals: string[] = [];
+  const flows: FlowInput[] = [], discarded: string[] = [], removals: string[] = [], branchAsked: boolean[] = [];
   const source = { id: 'tapd', name: 'TAPD',
     async image(_item: Item, index: number) { if (index === 1) throw new Error('gone'); return { data: new Uint8Array([index]), mediaType: 'image/png', name: `p${index}.png` }; },
     async discard(item: Item) { discarded.push(item.id); },
@@ -76,7 +76,7 @@ async function setup(t: TestContext, options: Options = {}) {
   const edits: ((worktree: string) => Promise<FlowResult['end'] | void>)[] = [];
   let worktree = '', flowing: { stop(): void } | undefined;
   const tasks = new Tasks({
-    store,
+    store, progressMs: 5,
     async announce(task) { cards.push([task.cards, task.status]); if (options.cardFails) throw new Error('conversation closed'); },
     source: id => options.noSource || id !== 'tapd' ? undefined : source,
     workplaces: {
@@ -87,13 +87,14 @@ async function setup(t: TestContext, options: Options = {}) {
       },
       async machine(path) { return machine(path); },
       // As dsh-remote-terminals does it: nothing that exists only here is thrown away, and the branch stays.
-      async remove({ project: source, worktree: folder }) {
-        removals.push(source);
+      async remove({ project: source, worktree: folder, deleteBranch }) {
+        removals.push(source); branchAsked.push(!!deleteBranch);
         const dirty = (await git(folder, 'status', '--porcelain')).split('\n').filter(Boolean).length, unpushed = Number(await git(folder, 'rev-list', '--count', 'HEAD', '--not', '--remotes'));
         if (dirty) throw fail('The workspace has {count} files that are not committed. Commit them or throw them away first, or archive the workspace from the sidebar.', { count: String(dirty) });
         if (unpushed) throw fail('The workspace has {count} commits that are not pushed. Push them first, or archive the workspace from the sidebar.', { count: String(unpushed) });
         await git(source, 'worktree', 'remove', '--force', folder);
-        return options.removeWarns ? ['Teardown was skipped'] : [];
+        // The worktree service deletes a merged branch only when this test says so; otherwise the task does it through the repository.
+        return { warnings: options.removeWarns ? ['Teardown was skipped'] : [], kept: deleteBranch ? ['Branch was kept because it is not merged'] : [], ...(deleteBranch ? { branch: 'kept' as const } : {}) };
       },
     },
     conversations: {
@@ -101,21 +102,29 @@ async function setup(t: TestContext, options: Options = {}) {
       async picture(image) { return { attachmentId: `sha256:${image.data[0]}`, name: image.name }; },
       async flow(_sessionId: string, input: FlowInput): Promise<FlowRun> {
         if (options.blind && input.attachments?.length) throw Object.assign(new Error('Review model X does not support images.'), { code: 'flow/images-unsupported' });
+        if (options.flowFails === flows.length + 1) { flows.push(input); goals.push(input.goal); throw new Error('Choose the models first'); }
         goals.push(input.goal); flows.push(input);
         const edit = edits[Math.min(goals.length, edits.length) - 1];
         let stop!: () => void;
         const stopped = new Promise<FlowResult>(resolve => { stop = () => resolve({ end: { kind: 'stopped', ms: 1 }, steps: [] }); });
         flowing = { stop };
+        let over = false;
         const done = (async (): Promise<FlowResult> => {
           const end = await edit(worktree) ?? { kind: 'passed' as const, round: 1, sentBack: 0, ms: 5 };
+          over = true;
           return { end, report: 'fixed', steps: [{ role: 'implement', round: 1, model: 'coder', status: 'done', body: 'x'.repeat(5000) }] };
         })();
-        return { done: Promise.race([done, stopped]), stop };
+        // As dsh-model-flow 0.1.11 does it: the flow can say how far it is, and has a card of its own in the conversation.
+        const live = options.carded ? {
+          progress: () => ({ steps: [{ role: 'implement' as const, round: 1, model: 'coder', status: over ? 'done' : 'running', childId: 'child-1', ms: 7 }], rounds: input.rounds ?? 3, planned: false, zh: true, elapsed: 7, ...(over ? {} : { activity: 'reading math.js' }) }),
+          stepBody: (index: number) => over && index === 0 ? 'the whole answer' : undefined,
+        } : {};
+        return { done: Promise.race([done, stopped]), stop, ...live };
       },
     },
   });
   const fix = async (dir: string) => { await writeFile(join(dir, 'packages', 'act', 'math.js'), 'export const add = (a, b) => a + b;\n'); };
-  return { root, origin, project, store, tasks, told, goals, flows, discarded, removals, opened, edits, fix, cards, worktree: () => worktree, stopFlow: () => flowing?.stop() };
+  return { root, origin, project, store, tasks, told, goals, flows, discarded, removals, branchAsked, opened, edits, fix, cards, worktree: () => worktree, stopFlow: () => flowing?.stop() };
 }
 
 test('a bug goes from the pool to a local commit, and reaches the remote only when accepted', async t => {
@@ -366,6 +375,7 @@ test('once a fix is merged its workspace can be removed, with its branch; the ta
   await host.tasks.idle('tapd:100/1');
   assert.deepEqual([task.status, said(task.error), task.worktree, task.workspacePath, task.sessionId], ['done', undefined, undefined, undefined, undefined]);
   assert.deepEqual(host.removals, [host.project, host.project], 'asked through the repository\'s own workspace');
+  assert.deepEqual(host.branchAsked, [true, true], 'a merged fix asks for its branch to go with the worktree');
   assert.deepEqual(task.events.slice(-4).map(event => said(event.said)), ['Removing the workspace', 'Workspace removed', 'Teardown was skipped', 'Branch tapd/100/1 deleted']);
   assert.equal(await git(host.project, 'worktree', 'list', '--porcelain').then(text => text.includes(folder)), false);
   assert.equal(await git(host.project, 'branch', '--list', 'tapd/100/1'), '', 'the merged branch is gone');
@@ -390,4 +400,70 @@ test('a branch that was only pushed stays when its workspace is removed', async 
   assert.equal(await git(host.project, 'worktree', 'list', '--porcelain').then(text => text.includes(folder)), false);
   assert.equal(await git(host.project, 'rev-parse', 'refs/heads/tapd/100/1'), task.commit, 'the branch waits for whoever merges it');
   assert.equal(task.events.some(event => event.said.key === 'Branch {branch} deleted'), false);
+  assert.deepEqual(host.branchAsked, [false], 'nobody is asked to delete a branch that was never merged');
+});
+
+test('a flow that has a card of its own carries the task: its progress is kept, and no second card is put beside it', async t => {
+  const host = await setup(t, { carded: true, retries: 1 });
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  // The first flow gets the bug wrong, so the check fails and a second flow repairs it.
+  host.edits.push(async dir => { await held; await writeFile(join(dir, 'packages', 'act', 'math.js'), 'export const add = (a, b) => a * b;\n'); }, host.fix);
+  await host.tasks.start('tapd:100/1');
+  const task = host.store.tasks['tapd:100/1'];
+  for (let tries = 0; !task.flow && tries < 400; tries++) await new Promise(resolve => setTimeout(resolve, 5));
+  assert.equal(host.flows[0].tag, 'autofix:1:tapd:100/1', 'the flow is named after the task and which of its flows it is');
+  assert.deepEqual(task.flow, { steps: [{ role: 'implement', round: 1, model: 'coder', status: 'running', childId: 'child-1' }], rounds: 3, planned: false, zh: true, startedAt: task.flow!.startedAt, carded: true }, 'a running step has no duration yet');
+  assert.equal(host.tasks.progress('tapd:100/1')?.activity, 'reading math.js', 'what the model is doing right now is asked, not kept');
+  assert.equal(task.cards, 1, 'earlier cards of the task stand back for the flow\'s card');
+  release();
+  await host.tasks.idle('tapd:100/1');
+  assert.equal(task.status, 'review', said(task.error));
+  assert.deepEqual(host.flows.map(flow => flow.tag), ['autofix:1:tapd:100/1', 'autofix:2:tapd:100/1']);
+  assert.deepEqual([task.cards, host.cards], [2, []], 'the person decides on the flow\'s card');
+  assert.deepEqual([task.flow?.end?.kind, task.flow?.rounds, task.flow?.zh, task.flow?.carded, task.flow?.steps[0].body?.length], ['passed', 3, true, true, 4001]);
+  assert.equal(host.tasks.progress('tapd:100/1'), undefined);
+  assert.equal(host.tasks.stepBody('tapd:100/1', 0)?.length, 4001, 'afterwards a step\'s answer is what the task kept of it');
+  assert.equal(host.tasks.stepBody('tapd:100/1', 3), undefined);
+});
+
+test('a flow that never started has no card, so the task puts its own', async t => {
+  const host = await setup(t, { carded: true, flowFails: 2 });
+  host.edits.push(host.fix);
+  await host.tasks.start('tapd:100/1');
+  await host.tasks.idle('tapd:100/1');
+  const task = host.store.tasks['tapd:100/1'];
+  assert.deepEqual([task.status, host.cards], ['review', []]);
+  await host.tasks.sendBack('tapd:100/1', 'also subtract');
+  await host.tasks.idle('tapd:100/1');
+  assert.deepEqual([task.status, said(task.error), task.attempts], ['failed', 'Choose the models first', 2]);
+  assert.deepEqual(host.cards, [[2, 'failed']], 'the failure is said where the person reads, on a card after the first flow\'s');
+});
+
+test('a task runs with what its /flow line chose, and something to build is worded, named and committed as that', async t => {
+  const host = await setup(t, { route: { tests: [] } });
+  host.store.settings.run.flowModels = { plan: 'planner', review: 'checker' };
+  host.store.pool['manual:9'] = { key: 'manual:9', item: { source: 'manual', id: '9', ref: 'F9', title: '导出  CSV', body: '在列表页加一个导出按钮', labels: [], kind: 'feature' }, firstSeen: 1, lastSeen: 1, assignment: { routeId: 'web', branch: 'main' } };
+  host.edits.push(host.fix, async dir => { await writeFile(join(dir, 'packages', 'act', 'export.js'), 'export const csv = rows => rows.join();\n'); });
+  await host.tasks.start('manual:9', [], { models: { implement: 'codex', review: ' ', bogus: 'x' } as never, rounds: 2 });
+  await host.tasks.idle('manual:9');
+  const task = host.store.tasks['manual:9'];
+  assert.equal(task.status, 'review', said(task.error));
+  assert.deepEqual([task.models, task.rounds, task.branch], [{ implement: 'codex' }, 2, 'feat/9']);
+  assert.deepEqual([host.flows[0].models, host.flows[0].rounds], [{ plan: 'planner', review: 'checker', implement: 'codex' }, 2], 'the settings, with this task\'s own choice over them');
+  assert.match(host.goals[0], /^Do this task, asked for by a person, in the repository Web\.\n\nTask F9: 导出  CSV\n[\s\S]*在列表页加一个导出按钮[\s\S]*a branch made for this task from main\. Change only what this task needs\.[\s\S]*after a person accepts the work\./);
+  assert.doesNotMatch(host.goals[0], /bug/i);
+  assert.equal(await git(host.worktree(), 'log', '-1', '--format=%s'), 'feat: 导出 CSV');
+  await host.tasks.sendBack('manual:9', '按钮放右上角');
+  await host.tasks.idle('manual:9');
+  assert.match(host.goals[1], /^A person looked at the work on this task and sent it back\./);
+  assert.equal(host.flows[1].rounds, 2, 'a later round keeps the choice');
+  await host.tasks.accept('manual:9');
+  await host.tasks.idle('manual:9');
+  assert.equal(task.status, 'done', said(task.error));
+  assert.equal(await git(host.origin, 'log', '-1', '--format=%s', 'main'), 'merge task F9: 导出 CSV');
+  // What another computer sends along is checked before a task keeps it.
+  assert.deepEqual(runChoice({ models: { plan: 'off', implement: 'x'.repeat(301), other: 'y' }, rounds: 11 }), { models: { plan: 'off' } });
+  assert.deepEqual(runChoice({ models: 'codex', rounds: 3 }), { rounds: 3 });
+  assert.deepEqual(runChoice(undefined), {});
 });

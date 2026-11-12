@@ -53,7 +53,7 @@ async function setup(t: TestContext, options: { relay?: boolean } = {}) {
   const store = new Store(new LocalFiles(home));
   await store.open();
   store.settings = { ...defaultSettings(), routes: [route('Web', '/mini/web'), route('Docs', '/mini/docs')], run: { ...defaultSettings().run, relay: options.relay ?? true } };
-  const created: { title: string; body: string; images: { name: string; mediaType: string; data: string }[]; assignment: unknown }[] = [], calls: unknown[][] = [];
+  const created: { title: string; body: string; images: { name: string; mediaType: string; data: string }[]; assignment: unknown; kind?: string }[] = [], calls: unknown[][] = [], chosen: unknown[] = [];
   let clock = 1_000_000;
   const view = (key: string): TaskView | undefined => store.tasks[key] && { ...store.tasks[key], running: false, sourceName: 'Manual' };
   const server = new RelayServer({
@@ -64,7 +64,8 @@ async function setup(t: TestContext, options: { relay?: boolean } = {}) {
     async createManual(input) { created.push(input); return { key: `manual:${created.length}` }; },
     view, diff: async key => ({ stat: ` a.js | 2 +-`, patch: `diff for ${key}`, truncated: false }),
     tasks: {
-      async start(key) {
+      async start(key, _pictures, choice) {
+        chosen.push(choice);
         const task = { key, item: { source: 'manual', id: key.slice(7), ref: `M${key.slice(7)}`, title: created.at(-1)!.title, body: '', labels: [] }, routeId: 'Web', baseBranch: 'main', status: 'working', attempts: 1, startedAt: clock, updatedAt: clock, events: [],
           flow: { steps: [{ role: 'implement', round: 1, model: 'm', status: 'done', body: 'x'.repeat(9000) }], report: 'fixed' } } as unknown as Task;
         store.tasks[key] = task;
@@ -87,7 +88,7 @@ async function setup(t: TestContext, options: { relay?: boolean } = {}) {
   });
   /** The other DSH keeps looking while this one waits for it. */
   const serving = () => { let on = true; const loop = (async () => { while (on) { await server.tick(); await new Promise(resolve => setTimeout(resolve, 40)); } })(); return async () => { on = false; await loop; }; };
-  return { root, store, server, client, created, calls, shot, serving, tick: (ms: number) => { clock += ms; } };
+  return { root, store, server, client, created, calls, chosen, shot, serving, tick: (ms: number) => { clock += ms; } };
 }
 
 test('a bug typed in one DSH is taken by the DSH that runs fixes for that machine, and followed from there', async t => {
@@ -127,6 +128,11 @@ test('a bug typed in one DSH is taken by the DSH that runs fixes for that machin
   host.store.tasks['manual:1'].status = 'working';
   await assert.rejects(host.client.act('/air/web', { kind: 'accept', key: 'manual:1' }), error => (said(error) as { key: string }).key === 'Only a fix that is waiting for you can be accepted');
   await assert.rejects(host.client.act('/air/web', { kind: 'stop', key: 'manual:404' }), error => (said(error) as { key: string }).key === 'There is no task for this bug');
+  // Something to build crosses over as that, with the models and rounds its /flow line chose; what is not a choice is dropped on arrival.
+  await host.client.file('/air/web', { title: '给导出加 CSV', body: '' }, [], { kind: 'feature', models: { implement: 'codex', nonsense: 'x' } as never, rounds: 2 });
+  assert.deepEqual([host.created.at(-1)?.kind, host.chosen.at(-1)], ['feature', { models: { implement: 'codex' }, rounds: 2 }]);
+  assert.deepEqual([host.created[0].kind, host.chosen[0]], [undefined, {}], 'a bug is still a bug');
+  delete host.store.tasks['manual:2'];
   await host.client.act('/air/web', { kind: 'removeWorkspace', key: 'manual:1' });
   assert.deepEqual(host.calls.at(-1), ['removeWorkspace', 'manual:1'], 'the workspace of a finished fix is removed where it is');
   await again();

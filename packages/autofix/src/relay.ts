@@ -5,11 +5,13 @@
  */
 import { randomUUID } from 'node:crypto';
 import { fail, Failure, messageOf, type ItemImage, type Message, type Route, type Task } from './domain.js';
+import type { Handed } from './command.js';
 import type { FixLine } from './fixline.js';
 import { EXTENSIONS } from './pictures.js';
 import type { State } from './service.js';
 import { fileName, Spool, SPOOL_ROOT } from './spool.js';
 import type { Store } from './store.js';
+import { runChoice, type RunChoice } from './tasks.js';
 import type { Machine, ProjectDetail } from './workplaces.js';
 
 type TaskView = State['tasks'][number];
@@ -17,7 +19,7 @@ export interface ServedRoute { id: string; name: string; repository: string; def
 /** What the DSH that runs fixes says about itself on a machine; `at` is when it last did. */
 export interface Published { executor: string; name: string; at: number; routes: ServedRoute[] }
 export type RelayRequest =
-  | { id: string; kind: 'file'; routeId: string; branch: string; title: string; body: string; pictures: string[] }
+  | { id: string; kind: 'file'; routeId: string; branch: string; title: string; body: string; pictures: string[]; feature?: boolean; models?: RunChoice['models']; rounds?: number }
   | { id: string; kind: 'sendBack'; key: string; feedback: string; pictures: string[] }
   | { id: string; kind: 'accept' | 'stop' | 'retryReport' | 'removeWorkspace'; key: string };
 type Ask = RelayRequest extends infer R ? R extends { id: string } ? Omit<R, 'id' | 'pictures'> : never : never;
@@ -32,8 +34,11 @@ const ID = /^[0-9a-f-]{36}$/u;
 const MEDIA = Object.keys(EXTENSIONS);
 const MAX_PICTURES = 8, MAX_REPORT = 20_000;
 
-/** A task as another DSH's card needs it: without the steps' full results, which stay in the conversation. */
-function slim(task: TaskView): TaskView {
+/**
+ * A task as another DSH's card needs it: without the steps' full results, which stay in the conversation, and without
+ * what is only true this second (a file read later would show it as now).
+ */
+function slim({ progress: _progress, ...task }: TaskView): TaskView {
   const flow = task.flow && { ...task.flow, steps: task.flow.steps.map(({ body: _body, ...step }) => step), ...(task.flow.report ? { report: task.flow.report.slice(0, MAX_REPORT) } : {}) };
   return { ...task, events: task.events.slice(-8), ...(flow ? { flow } : {}) };
 }
@@ -42,11 +47,11 @@ export interface ServerHost {
   store: Store;
   machine(project: string): Promise<Machine>;
   inspect(project: string): Promise<ProjectDetail>;
-  createManual(input: { title: string; body: string; images: { name: string; mediaType: string; data: string }[]; assignment: { routeId: string; branch: string } }): Promise<{ key: string }>;
+  createManual(input: { title: string; body: string; images: { name: string; mediaType: string; data: string }[]; assignment: { routeId: string; branch: string }; kind?: 'feature' }): Promise<{ key: string }>;
   view(key: string): TaskView | undefined;
   diff(key: string): Promise<Diff>;
   tasks: {
-    start(key: string): Promise<Task>; sendBack(key: string, feedback: string, pictures?: readonly ItemImage[]): Promise<Task>;
+    start(key: string, pictures?: readonly unknown[], choice?: RunChoice): Promise<Task>; sendBack(key: string, feedback: string, pictures?: readonly ItemImage[]): Promise<Task>;
     accept(key: string): Promise<Task>; stop(key: string): boolean; retryReport(key: string): Promise<Task>; removeWorkspace(key: string): Promise<Task>;
   };
   /** This DSH, as other DSHes will name it. */
@@ -140,8 +145,8 @@ export class RelayServer {
     if (request.kind === 'file') {
       if (!group.routes.some(route => route.id === request.routeId)) throw fail('The repository this bug was assigned to is no longer in the settings');
       const images = (await pictures()).map(picture => ({ name: picture.name, mediaType: picture.mediaType, data: picture.data.toString('base64') }));
-      const { key } = await this.host.createManual({ title: String(request.title ?? ''), body: String(request.body ?? ''), images, assignment: { routeId: request.routeId, branch: String(request.branch ?? '') } });
-      const task = await tasks.start(key);
+      const { key } = await this.host.createManual({ title: String(request.title ?? ''), body: String(request.body ?? ''), images, assignment: { routeId: request.routeId, branch: String(request.branch ?? '') }, ...(request.feature === true ? { kind: 'feature' as const } : {}) });
+      const task = await tasks.start(key, [], runChoice(request));
       return { ok: true, key, ref: task.item.ref, title: task.item.title };
     }
     const task = store.tasks[String(request.key)];
@@ -162,7 +167,7 @@ export class RelayServer {
       const route = group.routes.find(entry => entry.id === stored.routeId), view = route && this.host.view(stored.key);
       if (!route || !view) continue;
       mine.add(view.key);
-      const state = `${view.updatedAt}:${view.status}:${view.running}:${view.cards ?? 0}:${view.events.length}`, before = this.published.get(view.key), name = fileName(view.key);
+      const state = `${view.updatedAt}:${view.status}:${view.running}:${view.cards ?? 0}:${view.events.length}:${view.flow?.steps.map(step => step.status).join() ?? ''}`, before = this.published.get(view.key), name = fileName(view.key);
       if (before?.state !== state) await spool.writeJson(`tasks/${name}.json`, { task: slim(view), route: { id: route.id, name: route.name, accept: route.accept } } satisfies RemoteTask);
       let commit = before?.commit;
       if (view.status === 'review' && view.commit && view.commit !== commit) {
@@ -199,7 +204,7 @@ export class RelayClient {
   private async spool(folder: string): Promise<Spool> { return new Spool(await this.host.machine(folder), this.host.root ?? SPOOL_ROOT); }
 
   /** Hands a bug typed in a conversation to the DSH that runs fixes for that folder's machine. Undefined when there is none. */
-  async file(folder: string, line: FixLine, pictures: readonly unknown[]): Promise<{ key: string; ref: string; title: string } | undefined> {
+  async file(folder: string, line: FixLine, pictures: readonly unknown[], how: Handed = {}): Promise<{ key: string; ref: string; title: string } | undefined> {
     const here = await this.host.inspect(folder).catch(() => undefined);
     if (!here?.repository) return undefined;
     const spool = await this.spool(folder), published = await spool.readJson<Published>('executor.json');
@@ -213,7 +218,8 @@ export class RelayClient {
     if (!branch) throw fail('{route} has no default branch; choose a branch for this bug', { route: route.name });
     const read: ItemImage[] = [];
     for (const ref of pictures) read.push(await this.host.readImage(ref));
-    const done = await this.send(spool, published.name, { kind: 'file', routeId: route.id, branch, title: line.title || 'See the attached pictures', body: line.body }, read);
+    const done = await this.send(spool, published.name, { kind: 'file', routeId: route.id, branch, title: line.title || 'See the attached pictures', body: line.body,
+      ...(how.kind === 'feature' ? { feature: true } : {}), ...(how.models ? { models: how.models } : {}), ...(how.rounds ? { rounds: how.rounds } : {}) }, read);
     return { key: done.key!, ref: done.ref ?? '', title: done.title ?? line.title };
   }
   /** Something a person decided about a task the other DSH runs. */

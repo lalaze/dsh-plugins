@@ -35,6 +35,7 @@ interface Worktrees {
   machine(path: string, signal?: AbortSignal): Promise<Machine>;
 }
 export interface Created { path: string; worktree: string; branch: string; warnings: string[] }
+export interface Removed { warnings: string[]; kept: string[]; branch?: 'deleted' | 'kept' }
 
 const said = (message: JobMessage) => message.key.replace(/\{(\w+)\}/gu, (whole, name: string) => message.values?.[name] ?? whole) + (message.detail ? `\n${message.detail.trim()}` : '');
 
@@ -82,18 +83,19 @@ export class Workplaces {
   }
 
   /**
-   * Takes a worktree away: its conversations are archived, its folder is deleted and its workspace leaves DSH. The branch
-   * stays. Refused while the worktree holds anything that exists nowhere else, as nobody is shown what would be lost.
-   * `project` is a workspace of the same repository. Returns what there is to know afterwards.
+   * Takes a worktree away: its conversations are archived, its folder is deleted and its workspace leaves DSH. Refused
+   * while the worktree holds anything that exists nowhere else, as nobody is shown what would be lost. `project` is a
+   * workspace of the same repository. With `deleteBranch` the branch goes too when it is merged into the repository's
+   * default branch; `branch` says whether it did, and `kept` why not. `warnings` is what else there is to know.
    */
-  async remove(input: { project: string; worktree: string }, signal: AbortSignal): Promise<string[]> {
+  async remove(input: { project: string; worktree: string; deleteBranch?: boolean }, signal: AbortSignal): Promise<Removed> {
     const worktrees = this.worktrees();
     if (typeof worktrees.archiveCheck !== 'function' || typeof worktrees.archive !== 'function') throw fail('Removing a workspace needs a newer dsh-remote-terminals');
     const check = await worktrees.archiveCheck(input.project, input.worktree, signal);
     if (check.dirty > 0) throw fail('The workspace has {count} files that are not committed. Commit them or throw them away first, or archive the workspace from the sidebar.', { count: String(check.dirty) });
     if (check.unpushed === null) throw fail('Git could not tell whether everything in the workspace is pushed. Archive the workspace from the sidebar if it can go.');
     if (check.unpushed > 0) throw fail('The workspace has {count} commits that are not pushed. Push them first, or archive the workspace from the sidebar.', { count: String(check.unpushed) });
-    let job = worktrees.archive({ path: input.project, worktree: input.worktree });
+    let job = worktrees.archive({ path: input.project, worktree: input.worktree, ...(input.deleteBranch ? { deleteBranch: true } : {}) });
     const stop = () => { void worktrees.act(job.id, 'cancel').catch(() => undefined); };
     signal.addEventListener('abort', stop, { once: true });
     try { for (; (job = worktrees.job(job.id)).state === 'running';) await delay(this.pollMs); }
@@ -101,6 +103,7 @@ export class Workplaces {
     signal.throwIfAborted();
     // A teardown command that failed is the repository's to fix: nobody is here to say it may be skipped.
     if (job.state !== 'done') throw fail('The workspace could not be removed', undefined, job.error ? said(job.error) : undefined);
-    return job.result?.warnings.map(said) ?? [];
+    const warnings = job.result?.warnings ?? [], kept = warnings.filter(warning => warning.key.startsWith('Branch {branch} was kept'));
+    return { warnings: warnings.filter(warning => !kept.includes(warning)).map(said), kept: kept.map(said), ...(input.deleteBranch ? { branch: kept.length || !job.result?.branch ? 'kept' as const : 'deleted' as const } : {}) };
   }
 }

@@ -7,7 +7,7 @@ import { decodePictures, EXTENSIONS } from './pictures.js';
 export const MANUAL = 'manual';
 const MEDIA: Record<string, string> = Object.fromEntries(Object.entries(EXTENSIONS).map(([type, extension]) => [extension, type]));
 /** `attached` counts pictures that are not sent here because DSH already keeps them; the text still gets a mark for each. */
-export interface ManualInput { title?: unknown; body?: unknown; labels?: unknown; images?: unknown; attached?: unknown }
+export interface ManualInput { title?: unknown; body?: unknown; labels?: unknown; images?: unknown; attached?: unknown; kind?: unknown }
 
 export class ManualSource implements Source {
   readonly id = MANUAL;
@@ -34,7 +34,7 @@ export class ManualSource implements Source {
   /** Checks what was typed and keeps the pictures; the item still has to be handed to the pool. */
   async create(input: ManualInput): Promise<Item> {
     const title = typeof input.title === 'string' ? input.title.trim() : '', body = typeof input.body === 'string' ? input.body.trim() : '';
-    if (!title) throw new Error('Give the bug a title');
+    if (!title) throw new Error(input.kind === 'feature' ? 'Say what to build' : 'Give the bug a title');
     if (title.length > 300 || body.length > 100_000) throw new Error('The title or the description is too long');
     const pictures = decodePictures(input.images).map(picture => ({ data: picture.data, extension: EXTENSIONS[picture.mediaType] }));
     const labels = Array.isArray(input.labels) ? [...new Set(input.labels.map(label => String(label).trim().slice(0, 50)).filter(Boolean))].slice(0, 20) : [];
@@ -46,7 +46,8 @@ export class ManualSource implements Source {
     // A picture has no place in typed text unless the person gave it one; say where they are.
     const attached = typeof input.attached === 'number' && Number.isSafeInteger(input.attached) ? Math.min(Math.max(input.attached, 0), 16) : 0;
     const marks = Array.from({ length: pictures.length + attached }, (_, index) => `[image ${index + 1}]`).filter(mark => !body.includes(mark));
-    return { source: MANUAL, id, ref: `M${number}`, title, body: [body, marks.join(' ')].filter(Boolean).join('\n\n'), labels, ...(pictures.length ? { images: pictures.length } : {}) };
+    const feature = input.kind === 'feature';
+    return { source: MANUAL, id, ref: `${feature ? 'F' : 'M'}${number}`, title, body: [body, marks.join(' ')].filter(Boolean).join('\n\n'), labels, ...(pictures.length ? { images: pictures.length } : {}), ...(feature ? { kind: 'feature' as const } : {}) };
   }
   async image(item: Item, index: number): Promise<ItemImage | undefined> {
     let names: string[];

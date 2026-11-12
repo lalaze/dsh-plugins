@@ -6,7 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-connection';
 import { Activity, firstLine, type Chunk } from './activity.js';
 import { brief, flowText, hasCjk, runFlow, type ChildRequest, type ChildResult, type FlowEnd, type StepRow } from './engine.js';
 import { API_PATH, createHandler } from './http.js';
-import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine } from './line.js';
+import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine, USAGE } from './line.js';
 import { attachmentNote } from './prompts.js';
 import { machineOf, machinesFor, misplaced, nameParts, OFF, resolveSpec, settle, type CatalogModel, type Place, type Role, type Route, type Routes } from './routes.js';
 import { cut, MARK, MAX_STEP_BODY, rowText, type CardEnd, type CardState, type CardStep, type EffortOption, type LiveCard, type Locale } from './shared.js';
@@ -68,15 +68,24 @@ const LABELS: Readonly<Record<Role, string>> = { plan: 'flow · plan', implement
 
 /** How a flow ended, with its report and the steps it went through, for a plugin that started it. */
 export interface ModelFlowResult { end: CardEnd; report?: string; steps: CardStep[] }
-export interface ModelFlowRun { done: Promise<ModelFlowResult>; stop(): void }
+/** `progress` is the flow's card as it is now, without the steps' results; `stepBody` is one finished step's result. */
+export interface ModelFlowRun { done: Promise<ModelFlowResult>; stop(): void; progress(): LiveCard; stepBody(index: number): string | undefined }
 /**
  * What other DSH plugins may do, as the service `modelFlow`: run a flow in a conversation, as a typed /flow does, and
  * learn how it ended. `agent` is the conversation's live agent; `models` are /flow's plan=, impl= and review= values.
- * The conversation keeps its title. Starting rejects with the message /flow would show.
+ * The conversation keeps its title. Starting rejects with the message /flow would show. `tag` names the flow for the
+ * plugin that started it, as `<plugin>:<its own words>`: the card carries it, and that plugin's page may add to the card.
  */
 export interface ModelFlowService {
-  readonly version: 1;
-  start(agent: unknown, input: { goal: string; rounds?: number; models?: Partial<Record<Role, string>>; attachments?: readonly unknown[] }): Promise<ModelFlowRun>;
+  readonly version: 2;
+  start(agent: unknown, input: { goal: string; rounds?: number; models?: Partial<Record<Role, string>>; attachments?: readonly unknown[]; tag?: string }): Promise<ModelFlowRun>;
+}
+/**
+ * dsh-autofix's service `autofix`, as far as /flow uses it: a task in a worktree of its own, which goes through the same
+ * flow, then the repository's checks, a commit, and a person's acceptance before anything is merged.
+ */
+interface TaskRunner {
+  file?(input: { agent: unknown; text: string; attachments: readonly unknown[]; kind: 'feature'; repo?: string; branch?: string; models?: Partial<Record<Role, string>>; rounds?: number }): Promise<RowResult>;
 }
 
 export async function apply(ctx: Context): Promise<void> {
@@ -104,11 +113,11 @@ export async function apply(ctx: Context): Promise<void> {
   }));
   /** What a card can still show if DSH stops before the flow ends. */
   const snapshot = (card: Card): CardState => {
-    const { parentId, zh, rounds, planned } = card.state;
-    return { parentId, zh, rounds, planned, steps: stepsOf(card, 4000).map(step => step.status === 'running' ? { ...step, ms: undefined } : step) };
+    const { parentId, zh, rounds, planned, tag } = card.state;
+    return { parentId, zh, rounds, planned, ...(tag ? { tag } : {}), steps: stepsOf(card, 4000).map(step => step.status === 'running' ? { ...step, ms: undefined } : step) };
   };
   const view = (card: Card): LiveCard => {
-    const now = Date.now(), { parentId, zh, rounds, planned, end } = card.state, steps = card.state.steps;
+    const now = Date.now(), { parentId, zh, rounds, planned, end, tag } = card.state, steps = card.state.steps;
     let activity = '';
     // A model goes quiet between its outputs; the card keeps its last line until it says something new.
     for (let index = steps.length - 1; index >= 0; index--) {
@@ -119,7 +128,7 @@ export async function apply(ctx: Context): Promise<void> {
       activity = step.said ?? '';
       break;
     }
-    return { parentId, zh, rounds, planned, ...(end ? { end } : {}), steps: stepsOf(card, 0, now), elapsed: (end ? card.startedAt + end.ms : now) - card.startedAt, ...(activity ? { activity } : {}) };
+    return { parentId, zh, rounds, planned, ...(tag ? { tag } : {}), ...(end ? { end } : {}), steps: stepsOf(card, 0, now), elapsed: (end ? card.startedAt + end.ms : now) - card.startedAt, ...(activity ? { activity } : {}) };
   };
   /** The newest typed /flow: the new-session page stays where it is after a command, so the client opens this conversation. */
   let lastCommand: { sessionId: string; at: number } | undefined;
@@ -247,13 +256,13 @@ export async function apply(ctx: Context): Promise<void> {
     if (refusal) throw new Error(refusal);
     return routes;
   }
-  function start(agent: LiveAgent, goal: string, routes: Routes, rounds: number, attachments: readonly Attachment[]): ModelFlowRun {
+  function start(agent: LiveAgent, goal: string, routes: Routes, rounds: number, attachments: readonly Attachment[], tag?: string): ModelFlowRun {
     const controller = new AbortController(), startedAt = Date.now();
     let resolveDone: (result: ModelFlowResult) => void = () => undefined;
     const done = new Promise<ModelFlowResult>(resolve => { resolveDone = resolve; });
     running.set(agent.id, { controller, routes, goal, startedAt });
     let settle: (result: RowResult) => void = () => undefined;
-    const card: Card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, planned: !!routes.plan, steps: [] }, done: new Promise(resolve => { settle = resolve; }) };
+    const card: Card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, planned: !!routes.plan, steps: [], ...(tag ? { tag } : {}) }, done: new Promise(resolve => { settle = resolve; }) };
     cards.set(card.id, card);
     const persist = () => { if (card.commandId && !card.state.end) saved.put(card.commandId, snapshot(card)); };
     const openRow = ({ role, round, route }: { role: Role; round: number; route: Route }): StepRow => {
@@ -280,7 +289,7 @@ export async function apply(ctx: Context): Promise<void> {
       ended = true;
       card.state.end = end;
       const { parentId, zh, planned } = card.state;
-      settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, planned, steps: stepsOf(card, MAX_STEP_BODY), end } }) });
+      settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, planned, ...(tag ? { tag } : {}), steps: stepsOf(card, MAX_STEP_BODY), end } }) });
       resolveDone({ end, ...(report ? { report } : {}), steps: stepsOf(card, MAX_STEP_BODY) });
       await executed;
       cards.delete(card.id);
@@ -302,10 +311,10 @@ export async function apply(ctx: Context): Promise<void> {
         // Whatever happened, the card must not stay running.
         .finally(() => { running.delete(agent.id); void finish({ kind: 'stopped', ms: Date.now() - startedAt }); });
     }, 0);
-    return { done, stop: () => controller.abort() };
+    return { done, stop: () => controller.abort(), progress: () => view(card), stepBody: index => card.state.steps[index]?.body };
   }
   /** The checks and choices a flow starts with, whoever asks for it. Throws what the chat should say. */
-  async function begin(agent: LiveAgent, input: { goal: string; rounds?: number; overrides: Partial<Record<Role, string>>; attachments: readonly Attachment[]; prepare?(goal: string): Promise<void> }): Promise<{ run: ModelFlowRun; goal: string; routes: Routes; rounds: number }> {
+  async function begin(agent: LiveAgent, input: { goal: string; rounds?: number; overrides: Partial<Record<Role, string>>; attachments: readonly Attachment[]; tag?: string; prepare?(goal: string): Promise<void> }): Promise<{ run: ModelFlowRun; goal: string; routes: Routes; rounds: number }> {
     const { attachments } = input;
     if (running.has(agent.id)) throw new Error(say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, input.goal));
     if (!host.subagents.list().includes('spawn')) throw new Error('This DSH has no subagent provider "spawn".');
@@ -332,7 +341,7 @@ export async function apply(ctx: Context): Promise<void> {
     await input.prepare?.(goal);
     // Another flow may have started here while the models were being looked up.
     if (running.has(agent.id)) throw new Error(say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, goal));
-    return { run: start(agent, goal, routes, rounds, attachments), goal, routes, rounds };
+    return { run: start(agent, goal, routes, rounds, attachments, input.tag), goal, routes, rounds };
   }
   const titleFor = async (agent: LiveAgent, goal: string) => {
     if (agent.session.deriveMessages?.().length) return;
@@ -344,7 +353,7 @@ export async function apply(ctx: Context): Promise<void> {
   ctx.effect(() => host.commands.register({
     name: COMMAND, recordInput: false,
     description: 'one model plans, one implements, one reviews, and rejected work goes back',
-    input: { hint: '[plan=model] [impl=model] [review=model] [rounds=n] <goal> | stop', attachments: true },
+    input: { hint: '[plan=model] [impl=model] [review=model] [rounds=n] [wt=on|off] <goal> | stop', attachments: true },
     handler: async ({ commandId, agent, rawInput, attachments = [] }) => {
       const input = rawInput.trimStart();
       if (input.startsWith(cardMark)) {
@@ -360,9 +369,14 @@ export async function apply(ctx: Context): Promise<void> {
   }));
   async function typedCommand(agent: LiveAgent, rawInput: string, attachments: readonly Attachment[]): Promise<RowResult> {
     lastCommand = { sessionId: agent.id, at: Date.now() };
-    ensureConversation(agent);
     try {
-      const line = parseLine(rawInput, attachments.length > 0), current = running.get(agent.id);
+      let line: ReturnType<typeof parseLine>;
+      try { line = parseLine(rawInput, attachments.length > 0); } catch (error) { ensureConversation(agent); throw error; }
+      const tasks = ctx.get('autofix' as never) as TaskRunner | undefined;
+      // A line that goes to Autofix is Autofix's to make a conversation of: it names one that began with the line.
+      const handed = line.kind === 'run' && (line.worktree ?? store.config.worktree) && typeof tasks?.file === 'function';
+      if (!handed) ensureConversation(agent);
+      const current = running.get(agent.id);
       if (line.kind === 'stop') {
         if (attachments.length) return { kind: 'error', text: say('Remove the attachments before using /flow stop.', '请先移除附件，再使用 /flow stop。') };
         if (!current) return { kind: 'error', text: say('No flow is running in this conversation.', '这个对话里没有正在运行的流程。') };
@@ -372,11 +386,20 @@ export async function apply(ctx: Context): Promise<void> {
       if (line.kind === 'status') {
         if (current) return { kind: 'success', text: `${flowText(current.goal).started(current.routes, store.config.rounds)}. ${brief(current.goal, 120)}` };
         const { plan, implement, review, rounds } = store.config;
-        const usage = `/${COMMAND} [plan=model] [impl=model] [review=model] [rounds=1-${MAX_ROUNDS}] <goal>`;
+        const where = store.config.worktree;
         return { kind: 'success', text: say(
-          `Plan: ${plan?.label ?? 'skipped'}. Implement: ${implement?.label ?? 'not chosen'}. Review: ${review?.label ?? 'not chosen'}. Up to ${rounds} review rounds. ${usage}`,
-          `计划：${plan?.label ?? '跳过'}。实现：${implement?.label ?? '未选择'}。审核：${review?.label ?? '未选择'}。最多审核 ${rounds} 轮。${usage}`) };
+          `Plan: ${plan?.label ?? 'skipped'}. Implement: ${implement?.label ?? 'not chosen'}. Review: ${review?.label ?? 'not chosen'}. Up to ${rounds} review rounds. Runs in ${where ? 'a worktree of its own' : 'this conversation'}. ${USAGE}`,
+          `计划：${plan?.label ?? '跳过'}。实现：${implement?.label ?? '未选择'}。审核：${review?.label ?? '未选择'}。最多审核 ${rounds} 轮。${where ? '在独立的 worktree 里运行' : '在当前对话里运行'}。${USAGE}`) };
       }
+      // In a worktree of its own the flow is a task of Autofix: the same steps, then checks, a commit and a person's acceptance.
+      if (line.worktree ?? store.config.worktree) {
+        if (typeof tasks?.file !== 'function') return { kind: 'error', text: say(
+          'A flow in a worktree of its own runs through Autofix (dsh-autofix 0.1.4 or newer), which is not running here. Install it, or start the line with wt=off to run in this conversation.',
+          '在独立的 worktree 里运行要通过自动修复插件（dsh-autofix 0.1.4 或更新版本），这里没有运行它。请安装它，或者在开头加 wt=off 在当前对话里运行。', line.goal) };
+        return await tasks.file({ agent, text: line.goal, attachments, kind: 'feature', ...(line.repo ? { repo: line.repo } : {}), ...(line.branch ? { branch: line.branch } : {}),
+          ...(Object.keys(line.overrides).length ? { models: line.overrides } : {}), ...(line.rounds ? { rounds: line.rounds } : {}) });
+      }
+      if (line.repo || line.branch) return { kind: 'error', text: say('repo= and branch= say where a worktree is made: add wt=on, or leave them out to run in this conversation.', 'repo= 和 branch= 用来指定在哪里建 worktree：请加上 wt=on，或者去掉它们在当前对话里运行。', line.goal) };
       if (current) return { kind: 'error', text: say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, line.goal) };
       const { goal, routes, rounds } = await begin(agent, { goal: line.goal, ...(line.rounds ? { rounds: line.rounds } : {}), overrides: line.overrides, attachments, prepare: goal => titleFor(agent, goal) });
       // The card that follows is the flow, so this row draws nothing; the text is for DSH without this plugin.
@@ -386,13 +409,14 @@ export async function apply(ctx: Context): Promise<void> {
     }
   }
   const service: ModelFlowService = {
-    version: 1,
+    version: 2,
     async start(agent, input) {
       const live = agent as LiveAgent, attachments = (input.attachments ?? []) as readonly Attachment[], goal = input.goal.trim();
       if (!goal && !attachments.length) throw new Error('A flow needs a goal.');
       if (input.rounds !== undefined && (!Number.isSafeInteger(input.rounds) || input.rounds < 1 || input.rounds > MAX_ROUNDS)) throw new Error(`rounds must be a whole number from 1 to ${MAX_ROUNDS}`);
       ensureConversation(live);
-      return (await begin(live, { goal, ...(input.rounds ? { rounds: input.rounds } : {}), overrides: input.models ?? {}, attachments })).run;
+      const tag = typeof input.tag === 'string' && /^[a-z][a-z0-9-]{0,30}:.{1,400}$/su.test(input.tag) ? input.tag : undefined;
+      return (await begin(live, { goal, ...(input.rounds ? { rounds: input.rounds } : {}), overrides: input.models ?? {}, attachments, ...(tag ? { tag } : {}) })).run;
     },
   };
   ctx.provide('modelFlow', service);

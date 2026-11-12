@@ -14,7 +14,7 @@ import { missingPlugins } from './needs.js';
 import { RelayClient, RelayServer } from './relay.js';
 import { AutofixService, Sources } from './service.js';
 import { LocalFiles, Store } from './store.js';
-import { Tasks } from './tasks.js';
+import { runChoice, Tasks } from './tasks.js';
 import { Workplaces } from './workplaces.js';
 
 export const name = 'dsh-autofix';
@@ -64,7 +64,8 @@ export async function apply(ctx: Context): Promise<void> {
   ctx.effect(() => () => served.stop());
   const fix = command = new FixCommand({
     store, tasks, createManual: input => service.createManual(input), inspect: project => workplaces.inspect(project),
-    handOver: (folder, line, pictures) => relayClient.file(folder, line, pictures),
+    handOver: (folder, line, pictures, how) => relayClient.file(folder, line, pictures, how),
+    title: async (agent, title) => { await (lookup('sessionController') as { rename?(input: { sessionId: string; title: string }): Promise<unknown> } | undefined)?.rename?.({ sessionId: agent.id, title }); },
     folder: agent => { try { return (lookup('workingDirectory') as { get(session: unknown): string } | undefined)?.get(agent.session); } catch { return undefined; } },
   });
   ctx.connection.fetch.register({ path: API_PATH, methods: ['POST'], requestBody: 'buffered', fetch: createHandler(service, tasks, { lastCommand: () => fix.lastCommand(LAST_COMMAND_AGE) }, relayClient) });
@@ -75,6 +76,13 @@ export async function apply(ctx: Context): Promise<void> {
     handler: invocation => fix.handle(invocation),
   }));
   // Sources are plugins of their own: an issue tracker, an alert, anything that knows about bugs.
-  ctx.provide('autofix', { version: 1, register: source => service.register(source), submit: (sourceId, items) => service.submit(sourceId, items) } satisfies Autofix);
+  ctx.provide('autofix', {
+    version: 1, register: source => service.register(source), submit: (sourceId, items) => service.submit(sourceId, items),
+    // Another plugin's words are checked like a page's: only what a task can carry gets through.
+    file: input => fix.take(input.agent as LiveAgent, typeof input.text === 'string' ? input.text : '', (Array.isArray(input.attachments) ? input.attachments : []) as { type: string; attachment?: unknown }[], {
+      ...(input.kind === 'feature' ? { kind: 'feature' as const } : {}), ...runChoice(input),
+      ...(typeof input.repo === 'string' && input.repo.trim() ? { repo: input.repo.trim().slice(0, 200) } : {}), ...(typeof input.branch === 'string' && input.branch.trim() ? { branch: input.branch.trim().slice(0, 200) } : {}),
+    }),
+  } satisfies Autofix);
   ctx.effect(() => () => tasks.close());
 }

@@ -1,6 +1,6 @@
 {
   "name": "dsh-autofix",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Bugs fixed in DeepSeek Harness: whatever source hands one in, it runs through plan, implement and review in its own worktree, and nothing is pushed before you accept it",
   "type": "module",
   "main": "lib/server/index.js",

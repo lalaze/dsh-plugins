@@ -144,6 +144,10 @@ test('the last verdict line decides and Markdown around it is ignored', () => {
 test('the line takes options first and everything after them is the goal', () => {
   assert.deepEqual(parseLine(' impl=codex review=claude/haiku@high rounds=2 add plan=x support\nfor csv'), { kind: 'run', goal: 'add plan=x support\nfor csv', overrides: { implement: 'codex', review: 'claude/haiku@high' }, rounds: 2 });
   assert.deepEqual(parseLine(' plan=off fix it'), { kind: 'run', goal: 'fix it', overrides: { plan: 'off' } });
+  // Where it runs: in a worktree of its own or here, and for a worktree which repository and branch.
+  assert.deepEqual(parseLine('wt=on repo="Dana Web" branch=release/1 impl=codex add csv'), { kind: 'run', goal: 'add csv', overrides: { implement: 'codex' }, worktree: true, repo: 'Dana Web', branch: 'release/1' });
+  assert.deepEqual(parseLine('worktree=OFF add wt=on later'), { kind: 'run', goal: 'add wt=on later', overrides: {}, worktree: false });
+  assert.throws(() => parseLine('wt=perhaps x'), /wt is on or off/);
   assert.deepEqual(parseLine('  '), { kind: 'status' });
   assert.deepEqual(parseLine(' stop'), { kind: 'stop' });
   assert.deepEqual(parseLine(' stop the bleeding'), { kind: 'run', goal: 'stop the bleeding', overrides: {} });

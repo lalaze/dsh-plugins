@@ -6,7 +6,8 @@ import { MAX_ROUNDS } from '../line.js';
 import { machineOf, mainMachine, nameParts, nativeModel, type CatalogModel, type Role, type Route } from '../routes.js';
 import type { FlowConfig } from '../store.js';
 import { post } from './api.js';
-import { FlowRow, flowRowStyles } from './flow-row.js';
+import { extend, type FlowView, type ModelFlowCard, type ViewExtras } from './extend.js';
+import { FlowCardView, FlowRow, flowRowStyles } from './flow-row.js';
 import { i18n, ui, useLocale } from './i18n.js';
 import { machineName, modelGroups, modelKey, preferredModel, routeKey } from './model-list.js';
 import { Select, useEscape } from './select.js';
@@ -51,6 +52,7 @@ const styles = `
 .mf-empty{padding:14px 8px;text-align:center;font-size:12px;color:var(--dsw-alias-label-secondary,#6b7280)}
 .mf-rounds{display:flex;align-items:center;gap:8px}
 .mf-rounds .mf-trigger{width:72px}
+.mf-where .mf-trigger{width:220px}
 .mf-combos{display:flex;flex-direction:column;gap:8px}
 .mf-combos-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:26px}
 .mf-button{height:26px;padding:0 10px;border:1px solid var(--dsw-alias-border-l3,#d1d5db);border-radius:6px;background:transparent;color:inherit;font:inherit;font-size:12px;white-space:nowrap;cursor:pointer}
@@ -87,7 +89,7 @@ const ROLES: readonly { role: Role; label: string; optional?: boolean }[] = [
   { role: 'review', label: 'Review' },
 ];
 const shortName = (route: Route) => nameParts(route.provider, route.label).name;
-const withoutCombos = ({ combos: _combos, ...setup }: FlowConfig): Setup => setup;
+const withoutCombos = ({ combos: _combos, worktree: _worktree, ...setup }: FlowConfig): Setup => setup;
 
 function RoleRow({ label, optional, route, models, machines, change }: { label: string; optional?: boolean; route?: Route; models: CatalogModel[]; machines: readonly (string | undefined)[]; change(route: Route | undefined): void }) {
   const [efforts, setEfforts] = useState<EffortOption[]>([]);
@@ -201,7 +203,7 @@ function Setup({ embedded }: { embedded?: boolean }) {
     if (!data) return;
     const { setup, missing } = placeCombo(combo, data.models);
     if (missing.length) { setStatus({ text: ui('Not in the list right now: {models}', { models: missing.join(', ') }), tone: 'error' }); return; }
-    void save({ ...setup, ...(data.config.combos ? { combos: data.config.combos } : {}) }, { text: ui('Using "{name}"', { name: combo.name }) });
+    void save({ ...setup, ...(data.config.combos ? { combos: data.config.combos } : {}), ...(data.config.worktree ? { worktree: true } : {}) }, { text: ui('Using "{name}"', { name: combo.name }) });
   };
   const storeCombo = (name: string) => {
     if (!data?.config.implement || !data.config.review) return;
@@ -229,6 +231,13 @@ function Setup({ embedded }: { embedded?: boolean }) {
       <Select label={ui('Review rounds at most')} text={String(data.config.rounds)} value={String(data.config.rounds)} menuWidth={72}
         options={Array.from({ length: MAX_ROUNDS }, (_, index) => ({ id: String(index + 1), label: String(index + 1) }))}
         onChange={id => void save({ ...data.config, rounds: Number(id) })} /></div>}
+    {data && !embedded && <div className="mf-rounds mf-where"><label>{ui('A typed /flow runs in')}</label>
+      <Select label={ui('A typed /flow runs in')} text={ui(data.config.worktree ? 'A worktree of its own' : 'This conversation')} value={data.config.worktree ? 'worktree' : 'here'} menuWidth={220}
+        options={[{ id: 'here', label: ui('This conversation') }, { id: 'worktree', label: ui('A worktree of its own') }]}
+        onChange={id => { const { worktree: _old, ...rest } = data.config; void save(id === 'worktree' ? { ...rest, worktree: true } : rest); }} /></div>}
+    {data && !embedded && <p className="mf-muted">{ui(data.config.worktree
+      ? 'Each /flow gets a worktree, a branch and a conversation of its own through Autofix: after the review come the repository\'s checks, a commit, and your acceptance before anything is merged. wt=off on the line runs one here.'
+      : 'The flow changes the files of the workspace this conversation is in, and ends when the review passes. wt=on on the line runs one in a worktree of its own instead, through Autofix.')}</p>}
     {data && <p className="mf-muted">{ui('Planning and review run read-only, so those models cannot change your files.')}</p>}
     <div className="mf-status" role="status" data-tone={status?.tone}>{status?.text}
       {status?.tone === 'error' && !data && <button type="button" onClick={() => setRevision(value => value + 1)}>{ui('Retry')}</button>}
@@ -305,6 +314,12 @@ export function apply(ctx: Client): void {
   const Row: React.FC<{ node: React.ComponentProps<typeof FlowRow>['node'] }> = ({ node }) => <FlowRow node={node} openStep={openStep} />;
   ctx.slots.inject('conversation.chat.commandview', () => ctx.slots.register({ name: 'conversation.chat.commandview', key: 'flow' }, Row as React.FC));
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'model-flow', order: 75, label: () => ui('Model flow') }, Settings));
+  // The card itself, for a plugin that runs flows of its own and has more to show around them.
+  const View: React.FC<FlowView & ViewExtras> = props => <FlowCardView {...props} openStep={openStep} />;
+  ctx.effect(() => {
+    try { return ctx.provide?.('modelFlowCard', { version: 1, View, extend } satisfies ModelFlowCard) ?? (() => undefined); }
+    catch (error) { console.warn('[dsh-model-flow] Could not offer the flow card to other plugins', error); return () => undefined; }
+  });
   // A host that refuses the service keeps the rest of the plugin working; the models are then chosen on this plugin's own page.
   ctx.effect(() => {
     try { return ctx.provide?.('modelFlowSettings', { version: 1, Models }) ?? (() => undefined); }

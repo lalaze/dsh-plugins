@@ -10,8 +10,11 @@ export type FlowEnd =
   | { kind: 'stopped'; ms: number }
   | { kind: 'noVerdict'; ms: number };
 export interface FlowResult { end: FlowEnd; report?: string; steps: FlowStep[] }
-export interface FlowRun { done: Promise<FlowResult>; stop(): void }
-export interface FlowInput { goal: string; rounds?: number; models?: Partial<Record<FlowRole, string>>; attachments?: readonly unknown[] }
+/** A flow's card as it is now: what dsh-model-flow 0.1.11 and newer can say while the flow runs. */
+export interface FlowProgress { steps: FlowStep[]; rounds: number; planned?: boolean; zh: boolean; elapsed: number; activity?: string; end?: FlowEnd }
+export interface FlowRun { done: Promise<FlowResult>; stop(): void; progress?(): FlowProgress; stepBody?(index: number): string | undefined }
+/** `tag` names the flow as this plugin's, so its card in the conversation can carry the task. */
+export interface FlowInput { goal: string; rounds?: number; models?: Partial<Record<FlowRole, string>>; attachments?: readonly unknown[]; tag?: string }
 
 /** dsh-model-flow's service `modelFlow`. */
 interface ModelFlow { readonly version: number; start(agent: unknown, input: FlowInput): Promise<FlowRun> }

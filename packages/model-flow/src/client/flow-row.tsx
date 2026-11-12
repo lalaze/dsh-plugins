@@ -9,6 +9,7 @@ import { firstLine } from '../activity.js';
 import type { Role } from '../routes.js';
 import { cardWords, clock, MARK, parseRow, type CardEnd, type CardState, type CardStep, type LiveCard, type RowParts, type StepStatus } from '../shared.js';
 import { post } from './api.js';
+import { claimant, extensionFor, useExtensions, type CommandNode, type FlowView, type Stage, type ViewExtras } from './extend.js';
 import { i18n, ui, useLocale } from './i18n.js';
 
 const POLL_MS = 1000;
@@ -85,6 +86,11 @@ const cardStyles = `
 .mf-step[data-status=failed] .mf-step-note{color:var(--mf-err)}
 .mf-step-body{grid-column:2/-1;contain:inline-size;margin:6px 0 2px;padding:10px 12px;max-height:420px;overflow:auto;border-radius:8px;border:1px solid var(--mf-line);cursor:auto}
 .mf-card-report{border-top:1px solid var(--mf-line);padding:12px 16px 14px;font-size:var(--dsh-content-font-size,14px)}
+.mf-card-caption{padding:12px 16px 0;min-width:0}
+.mf-card-caption+.mf-card-head{padding-top:10px}
+.mf-card-more{border-top:1px solid var(--mf-line);margin-top:12px;padding:12px 16px 14px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mf-card-report+.mf-card-more,.mf-steps+.mf-card-more{margin-top:0}
+.mf-seg[data-status=pending]{background:var(--mf-line)}
 .mf-spin{display:block;width:8px;height:8px;border:1.5px solid currentColor;border-right-color:transparent;border-radius:50%;animation:mf-spin .9s linear infinite}
 .mf-card-mark .mf-spin{width:12px;height:12px;border-width:1.8px}
 @keyframes mf-spin{to{transform:rotate(360deg)}}
@@ -117,14 +123,17 @@ export const flowRowStyles = rowStyles + cardStyles;
 
 const ICON = <IconApiOutlineRegular size={14} />;
 const HIDDEN = <div className="mf-flow mf-flow-hidden" />;
-export interface CommandNode { commandId: string; name?: string | null; args?: string | null; outcome: { kind: 'success' | 'error'; text?: string } | null }
+export type { CommandNode };
 type OpenStep = (parentId: string, childId: string) => void;
 type Labels = React.ComponentProps<typeof MarkdownText>['labels'];
 type Words = ReturnType<typeof cardWords>;
 
 export function FlowRow({ node, openStep }: { node: CommandNode; openStep: OpenStep }) {
-  useLocale();
+  useLocale(); useExtensions();
   const parts = useMemo(() => parseRow(node.outcome?.text ?? ''), [node.outcome?.text]);
+  // A line handed over to another plugin (a flow in a worktree of its own) was answered by that plugin: it draws the row.
+  const other = node.outcome?.text ? claimant(node.outcome.text) : undefined;
+  if (other?.Row) return <other.Row node={node} />;
   if (parts.card) return <FlowCard node={node} parts={parts} openStep={openStep} />;
   if (parts.start) return HIDDEN;
   if (node.outcome === null) {
@@ -162,61 +171,78 @@ const NOTED = new Set<StepStatus>(['sentBack', 'noVerdict', 'failed']);
 
 function FlowCard({ node, parts, openStep }: { node: CommandNode; parts?: RowParts; openStep: OpenStep }) {
   const running = node.outcome === null, live = useLiveCard(running ? node.commandId : undefined);
-  const [showSteps, setShowSteps] = useState<boolean | undefined>(undefined);
   const [stopping, setStopping] = useState(false);
   const stop = useCallback(() => {
     setStopping(true);
     post({ action: 'stop', commandId: node.commandId }).catch(() => setStopping(false));
   }, [node.commandId]);
-  const labels = useLabels();
+  const stepBody = useCallback((index: number) => post<{ body: string | null }>({ action: 'stepBody', commandId: node.commandId, index }).then(reply => reply.body, () => null), [node.commandId]);
+  useExtensions();
   // Until the first answer, a running row may still turn out to be the /flow line itself.
   if (running && (!live.known || live.start)) return HIDDEN;
 
-  const card: (CardState & Partial<Pick<LiveCard, 'elapsed' | 'activity'>>) | undefined = parts?.card ?? live.card;
-  const end = card?.end;
+  const card: FlowView['card'] | undefined = parts?.card ?? live.card;
+  if (!card) return <FlowCardView card={{ parentId: '', zh: i18n.activeLocale() === 'zh', rounds: 0, steps: [] }} active={false} interrupted={running && live.gone} bare openStep={openStep} />;
   // A card left running by a DSH that stopped: it says how far it got, or how it ended if it got that far.
-  const interrupted = running && !end && (live.gone || !!live.card?.interrupted);
-  const active = running && !interrupted && !!live.card && !end;
-  const words = cardWords(card?.zh ?? i18n.activeLocale() === 'zh');
-  const steps = card?.steps ?? [];
+  const interrupted = running && !card.end && (live.gone || !!live.card?.interrupted);
+  const view: FlowView = {
+    card, active: running && !interrupted && !!live.card && !card.end, interrupted, stop, stopping,
+    ...(parts?.body ? { report: parts.body } : {}), ...(running ? { stepBody } : {}),
+  };
+  // The plugin that started this flow may draw its card: the same card, with what it has to add.
+  const Own = extensionFor(card.tag)?.Card;
+  return Own ? <Own tag={card.tag!} flow={view} /> : <FlowCardView {...view} openStep={openStep} />;
+}
+
+/**
+ * The card itself: what is happening, the progress bar, the steps and the report. Another plugin draws its own flows
+ * with it too, through the client service `modelFlowCard`, and says what stands around them.
+ */
+export function FlowCardView({ card, active, interrupted = false, report, stop, stopping, stepBody, canOpen = true, head, stages = [], caption, children, bare, openStep }: FlowView & ViewExtras & { bare?: boolean; openStep: OpenStep }) {
+  const [showSteps, setShowSteps] = useState<boolean | undefined>(undefined);
+  const labels = useLabels();
+  const end = card.end;
+  const words = cardWords(card.zh);
+  const steps = card.steps;
   let current: CardStep | undefined;
   for (let index = steps.length - 1; index >= 0 && !current; index--) if (steps[index].status === 'running') current = steps[index];
-  const status: StepStatus = interrupted ? 'stopped' : end ? END_STATUS[end.kind] : 'running';
-  const title = interrupted ? words.interrupted : end ? words.title(end) : current ? words.running(current.role, current.round) : words.starting;
-  const detail = interrupted ? words.interruptedDetail
+  const status: StepStatus = head?.status ?? (interrupted ? 'stopped' : end ? END_STATUS[end.kind] : 'running');
+  const title = head?.title ?? (interrupted ? words.interrupted : end ? words.title(end) : current ? words.running(current.role, current.round) : words.starting);
+  const detail = head ? head.detail ?? '' : interrupted ? words.interruptedDetail
     : end ? words.detail(end, steps.at(-1))
-    : current && card ? words.doing(current, steps.filter(step => step.status === 'sentBack').length, card.rounds)
-    : card ? words.rounds(card.rounds) : '';
-  const elapsed = end ? end.ms : interrupted ? undefined : card?.elapsed;
+    : current ? words.doing(current, steps.filter(step => step.status === 'sentBack').length, card.rounds)
+    : bare ? '' : words.rounds(card.rounds);
+  const elapsed = head && head.clock !== undefined ? head.clock ?? undefined : end ? end.ms : interrupted ? undefined : card.elapsed;
   const open = showSteps ?? !end;
   const showMachine = new Set(steps.map(step => step.machine ?? '')).size > 1;
-  const report = parts?.body;
   return <div className="mf-flow mf-card" data-status={status}>
+    {caption ? <div className="mf-card-caption">{caption}</div> : undefined}
     <div className="mf-card-head">
       <span className="mf-card-mark" data-status={status}>{status === 'running' ? <span className="mf-spin" aria-hidden /> : <Glyph status={status} size={14} />}</span>
       <span className="mf-card-title" title={title}>{title}</span>
       <span className="mf-card-detail" title={detail}>{detail}</span>
       <span className="mf-card-side">
         {elapsed !== undefined ? <span className="mf-card-clock">{clock(elapsed)}</span> : undefined}
-        {active ? <button type="button" className="mf-card-stop" disabled={stopping} onClick={stop}>{ui(stopping ? 'Stopping' : 'Stop')}</button> : undefined}
+        {active && stop ? <button type="button" className="mf-card-stop" disabled={stopping} onClick={stop}>{ui(stopping ? 'Stopping' : 'Stop')}</button> : undefined}
       </span>
     </div>
-    {card ? <Track card={card} words={words} over={!!end || interrupted} interrupted={interrupted} /> : undefined}
+    {bare ? undefined : <Track card={card} words={words} over={!!end || interrupted} interrupted={interrupted} stages={stages} />}
     {end && steps.length ? <button type="button" className="mf-card-toggle" aria-expanded={open} onClick={() => setShowSteps(!open)}>
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 3.5l4.5 4.5L6 12.5" /></svg>
       {open ? words.hideSteps : words.showSteps(steps.length)}
     </button> : undefined}
-    {open && steps.length && card ? <ol className="mf-steps">
-      {steps.map((step, index) => <StepLine key={index} step={step} index={index} commandId={node.commandId} parentId={card.parentId} words={words} labels={labels}
-        showMachine={showMachine} fetchable={running} interrupted={interrupted} activity={active && step === current ? card.activity : undefined} openStep={openStep} />)}
+    {open && steps.length ? <ol className="mf-steps">
+      {steps.map((step, index) => <StepLine key={index} step={step} index={index} parentId={card.parentId} words={words} labels={labels}
+        showMachine={showMachine} fetchBody={stepBody} interrupted={interrupted} activity={active && step === current ? card.activity : undefined} openStep={canOpen && card.parentId ? openStep : undefined} />)}
     </ol> : undefined}
     {/* The report has no fold: it is what the flow was for, and a report that cannot fold cannot be found folded. */}
     {report ? <div className="mf-card-report"><MarkdownText text={report} labels={labels} /></div> : undefined}
+    {children ? <div className="mf-card-more">{children}</div> : undefined}
   </div>;
 }
 
-/** Every step the flow can still take: the plan, then each round's implement and review, up to the most rounds. */
-function Track({ card, words, over, interrupted }: { card: CardState; words: Words; over: boolean; interrupted: boolean }) {
+/** Every step the flow can still take: the plan, then each round's implement and review, up to the most rounds; then what follows the flow. */
+function Track({ card, words, over, interrupted, stages }: { card: CardState; words: Words; over: boolean; interrupted: boolean; stages: readonly Stage[] }) {
   const planned = card.planned ?? card.steps.some(step => step.role === 'plan');
   const slot = (role: Role, round: number): string => {
     let status: StepStatus | undefined;
@@ -227,6 +253,7 @@ function Track({ card, words, over, interrupted }: { card: CardState; words: Wor
   const groups = [
     ...(planned ? [{ label: words.roleName('plan'), slots: [slot('plan', 0)] }] : []),
     ...Array.from({ length: card.rounds }, (_, index) => ({ label: words.round(index + 1), slots: [slot('implement', index + 1), slot('review', index + 1)] })),
+    ...stages.map(stage => ({ label: stage.label, slots: [stage.status as string] })),
   ];
   const labelled = groups.length <= 6;
   return <div className="mf-track" style={{ gridTemplateColumns: groups.map(group => `${group.slots.length}fr`).join(' ') }}>
@@ -237,19 +264,19 @@ function Track({ card, words, over, interrupted }: { card: CardState; words: Wor
   </div>;
 }
 
-function StepLine({ step, index, commandId, parentId, words, labels, showMachine, fetchable, interrupted, activity, openStep }: {
-  step: CardStep; index: number; commandId: string; parentId: string; words: Words; labels: Labels;
-  showMachine: boolean; fetchable: boolean; interrupted: boolean; activity?: string; openStep: OpenStep;
+function StepLine({ step, index, parentId, words, labels, showMachine, fetchBody, interrupted, activity, openStep }: {
+  step: CardStep; index: number; parentId: string; words: Words; labels: Labels;
+  showMachine: boolean; fetchBody?: (index: number) => Promise<string | null>; interrupted: boolean; activity?: string; openStep?: OpenStep;
 }) {
   const [open, setOpen] = useState(false);
   const [fetched, setFetched] = useState<string | null | undefined>(undefined);
   const status: StepStatus = interrupted && step.status === 'running' ? 'stopped' : step.status;
   const body = step.body ?? fetched ?? undefined;
   // A running card sends its steps without their results, so an opened step asks for its own.
-  const expandable = status !== 'running' && (body !== undefined || (fetchable && fetched === undefined));
+  const expandable = status !== 'running' && (body !== undefined || (!!fetchBody && fetched === undefined));
   const toggle = () => {
     if (!expandable) return;
-    if (!open && body === undefined) void post<{ body: string | null }>({ action: 'stepBody', commandId, index }).then(reply => setFetched(reply.body)).catch(() => setFetched(null));
+    if (!open && body === undefined && fetchBody) void fetchBody(index).then(setFetched, () => setFetched(null));
     setOpen(!open);
   };
   const note = activity || (NOTED.has(status) ? step.note ?? (step.body ? firstLine(step.body) : undefined) : undefined);
@@ -262,7 +289,7 @@ function StepLine({ step, index, commandId, parentId, words, labels, showMachine
       {step.model}{showMachine && step.machine ? <span className="mf-step-machine"> · {step.machine}</span> : undefined}
     </span>
     <span className="mf-step-time">{step.ms !== undefined ? words.time(step.ms) : ''}</span>
-    <span>{childId ? <button type="button" className="mf-step-open" onClick={event => { event.stopPropagation(); openStep(parentId, childId); }}>{ui('Open')}</button> : undefined}</span>
+    <span>{childId && openStep ? <button type="button" className="mf-step-open" onClick={event => { event.stopPropagation(); openStep(parentId, childId); }}>{ui('Open')}</button> : undefined}</span>
     {note ? <span className="mf-step-note" title={note}>{note}</span> : undefined}
     {open && body ? <div className="mf-step-body" onClick={event => event.stopPropagation()}><MarkdownText text={body} labels={labels} /></div> : undefined}
   </li>;

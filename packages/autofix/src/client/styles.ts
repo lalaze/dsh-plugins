@@ -2,7 +2,8 @@
 export const CSS = `
 .tp-board,.tp-settings{display:flex;flex-direction:column;gap:12px;color:var(--dsw-alias-label-primary,inherit);font-family:var(--dsw-font-family,inherit);font-size:13px;line-height:20px}
 .tp-board *,.tp-settings *,.tp-chat *{box-sizing:border-box}
-:where(.tp-board,.tp-settings,.tp-chat) :is(h2,h3,p,pre,ul){margin:0}
+/* Not inside what the flow's card renders as Markdown: a report keeps its own paragraphs. */
+:where(.tp-board,.tp-settings,.tp-chat) :is(h2,h3,p,pre,ul):where(:not(.mf-card-report *,.mf-step-body *)){margin:0}
 .tp-board{padding:0 24px 24px}
 .tp-top{display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
 .tp-board>.tp-top{position:sticky;top:0;z-index:1;margin:0 -24px;padding:22px 54px 10px 24px;background:var(--dsw-alias-bg-layer-2,Canvas)}
@@ -170,6 +171,9 @@ export const CSS = `
 .tp-savebar>span{flex:1 1 auto;min-width:0;font-size:13px;line-height:20px;overflow-wrap:anywhere}
 .tp-savebar[data-kind=error]>span{color:var(--tp-danger)}
 .tp-chat{display:flex;flex-direction:column;gap:6px;max-width:720px;margin:4px 0;color:var(--dsw-alias-label-primary,inherit);font-family:var(--dsw-font-family,inherit);font-size:13px;line-height:20px}
+/* A task drawn as the flow's card is as wide as a flow's card. */
+.tp-chat:has(.tp-flowcard){max-width:none}
+.tp-flowcard .tp-title{display:block}
 .tp-chat-line{color:var(--dsw-alias-label-secondary,color-mix(in srgb,currentColor 72%,transparent));font-size:12.5px;line-height:19px;overflow-wrap:anywhere}
 .tp-chat-line>.tp-muted{color:inherit;font-size:inherit;line-height:inherit}
 .tp-new{border-style:dashed}

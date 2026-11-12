@@ -3,7 +3,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { call } from './api.js';
 import { Board } from './board.js';
-import { FixRow, installOpenAfterFix, type CommandNode } from './chat.js';
+import { FixRow, installOpenAfterFix, ownsRow, TaskFlowCard, type CommandNode } from './chat.js';
+import { followFlowCard } from './flowcard.js';
 import { installLocale, ui, useLocale } from './i18n.js';
 import { setHost, sourcePanels } from './needs.js';
 import { AutofixSettings } from './settings.js';
@@ -36,7 +37,7 @@ function BoardDialog({ onClose }: { onClose(): void }) {
   }, []);
   return createPortal(<div className="tp-overlay"><style>{CSS}</style>
     <div className="tp-mask" onPointerDown={onClose} />
-    <div className="tp-dialog" role="dialog" aria-modal="true" aria-label={ui("Bugs")}>
+    <div className="tp-dialog" role="dialog" aria-modal="true" aria-label={ui("Tasks")}>
       <button ref={close} type="button" className="tp-close" aria-label={ui("Close")} title={ui("Close")} onClick={onClose}>
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
       </button>
@@ -61,10 +62,10 @@ function HeaderPill() {
     return () => { alive = false; clearInterval(timer); };
   }, [open]);
   if (!counts) return null;
-  const title = counts.review ? ui("Bugs: {0} waiting for you", { 0: String(counts.review) }) : counts.running ? ui("Bugs: {0} running", { 0: String(counts.running) }) : ui("Bugs");
+  const title = counts.review ? ui("Tasks: {0} waiting for you", { 0: String(counts.review) }) : counts.running ? ui("Tasks: {0} running", { 0: String(counts.running) }) : ui("Tasks");
   return <><style>{CSS}</style>
     <button type="button" className="tp-pill" title={title} aria-label={title} aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}>
-      {counts.running > 0 && <i aria-hidden="true" />}{ui("Bugs")}{counts.review > 0 && <b>{counts.review}</b>}
+      {counts.running > 0 && <i aria-hidden="true" />}{ui("Tasks")}{counts.review > 0 && <b>{counts.review}</b>}
     </button>
     {open && <BoardDialog onClose={() => setOpen(false)} />}
   </>;
@@ -98,11 +99,13 @@ export function apply(ctx: Client): void {
   });
   ctx.effect(() => installOpenAfterFix(open));
   const Row: React.FC<{ node: CommandNode }> = ({ node }) => <FixRow node={node} open={open} />;
+  // A task's flow is drawn by Model flow's page; this plugin adds the task to its card, and draws the rows of a /flow that became a task.
+  ctx.effect(() => followFlowCard(() => ctx.get?.('modelFlowCard'), { Card: TaskFlowCard, claims: ownsRow, Row: Row as React.ComponentType<{ node: never }> }));
   ctx.slots.inject('conversation.chat.commandview', () => ctx.slots.register({ name: 'conversation.chat.commandview', key: 'fix' }, Row as React.FC));
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'autofix', order: 72, label: () => ui("Autofix") }, SettingsSection as React.FC));
   // A host that rejects the entry keeps the rest of the plugin working.
   ctx.slots.inject('conversation.session.header.utilities', () => {
-    try { return ctx.slots.register({ name: 'conversation.session.header.utilities', id: 'autofix-board', order: -900, label: () => ui("Bugs") }, HeaderPill); }
+    try { return ctx.slots.register({ name: 'conversation.session.header.utilities', id: 'autofix-board', order: -900, label: () => ui("Tasks") }, HeaderPill); }
     catch (error) { console.warn('[dsh-autofix] Could not add the bugs button to the conversation header', error); return undefined; }
   });
 }

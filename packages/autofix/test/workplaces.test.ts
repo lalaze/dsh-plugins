@@ -5,10 +5,11 @@ import { Workplaces } from '../src/workplaces.js';
 
 type JobState = 'running' | 'failed' | 'done';
 /** dsh-remote-terminals' worktree service, as far as removing a worktree asks it. */
-function service(check: { dirty: number; unpushed: number | null }, states: JobState[], error?: { key: string; values?: Record<string, string> }) {
+function service(check: { dirty: number; unpushed: number | null }, states: JobState[], error?: { key: string; values?: Record<string, string> },
+  warnings: { key: string; values?: Record<string, string> }[] = [{ key: 'Teardown was skipped' }, { key: 'Branch {branch} was kept because it is not merged', values: { branch: 'fix/1' } }]) {
   const calls: unknown[] = [];
   let reads = 0;
-  const job = () => { const state = states[Math.min(reads++, states.length - 1)]; return { id: 'j1', state, log: '', actions: [], ...(state === 'failed' && error ? { error } : {}), ...(state === 'done' ? { result: { branch: 'fix/1', worktree: '/w/fix-1', warnings: [{ key: 'Branch {branch} was kept', values: { branch: 'fix/1' } }] } } : {}) }; };
+  const job = () => { const state = states[Math.min(reads++, states.length - 1)]; return { id: 'j1', state, log: '', actions: [], ...(state === 'failed' && error ? { error } : {}), ...(state === 'done' ? { result: { branch: 'fix/1', worktree: '/w/fix-1', warnings } } : {}) }; };
   return { calls, worktrees: {
     version: 1,
     async archiveCheck(path: string, worktree: string) { calls.push(['check', path, worktree]); return { branch: 'fix/1', mergedInto: null, teardown: [], workspaces: [], ...check }; },
@@ -22,8 +23,14 @@ const said = (error: unknown) => error instanceof Failure ? [error.said.key, err
 test('a worktree is removed once nothing in it exists only there', async () => {
   const fine = service({ dirty: 0, unpushed: 0 }, ['running', 'running', 'done']);
   const places = new Workplaces(name => name === 'remoteAgentsWorktrees' ? fine.worktrees : undefined, 1);
-  assert.deepEqual(await places.remove({ project: '/p', worktree: '/w/fix-1' }, new AbortController().signal), ['Branch fix/1 was kept']);
-  assert.deepEqual(fine.calls, [['check', '/p', '/w/fix-1'], ['archive', { path: '/p', worktree: '/w/fix-1' }]], 'the branch is not the worktree service\'s to delete here');
+  assert.deepEqual(await places.remove({ project: '/p', worktree: '/w/fix-1' }, new AbortController().signal), { warnings: ['Teardown was skipped'], kept: ['Branch fix/1 was kept because it is not merged'] });
+  assert.deepEqual(fine.calls, [['check', '/p', '/w/fix-1'], ['archive', { path: '/p', worktree: '/w/fix-1' }]], 'the branch stays unless it is asked for');
+  // Asked to take the branch along: the answer says whether it went, and why not.
+  const asked = service({ dirty: 0, unpushed: 0 }, ['done']);
+  assert.deepEqual(await new Workplaces(() => asked.worktrees, 1).remove({ project: '/p', worktree: '/w/fix-1', deleteBranch: true }, new AbortController().signal), { warnings: ['Teardown was skipped'], kept: ['Branch fix/1 was kept because it is not merged'], branch: 'kept' });
+  assert.deepEqual(asked.calls.at(-1), ['archive', { path: '/p', worktree: '/w/fix-1', deleteBranch: true }]);
+  const merged = service({ dirty: 0, unpushed: 0 }, ['done'], undefined, []);
+  assert.deepEqual(await new Workplaces(() => merged.worktrees, 1).remove({ project: '/p', worktree: '/w/fix-1', deleteBranch: true }, new AbortController().signal), { warnings: [], kept: [], branch: 'deleted' });
 
   for (const [check, key, values] of [
     [{ dirty: 2, unpushed: 0 }, 'The workspace has {count} files that are not committed. Commit them or throw them away first, or archive the workspace from the sidebar.', { count: '2' }],

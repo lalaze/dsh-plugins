@@ -3,6 +3,7 @@ import { fail, itemFrom, itemKey, messageOf, settingsFrom, SOURCE_ID, type Assig
 import { MANUAL, type ManualInput, type ManualSource } from './manual.js';
 import { ordered, refresh, suggest } from './pool.js';
 import type { Store } from './store.js';
+import type { FlowProgress } from './conversations.js';
 import type { Tasks } from './tasks.js';
 import type { Folders } from './folders.js';
 import type { Workplaces } from './workplaces.js';
@@ -40,7 +41,8 @@ export interface State {
   /** Loaded sources; a bug whose source is not among them can still be read, not started or written back. */
   sources: SourceView[];
   pool: PoolView[];
-  tasks: (Task & { running: boolean; sourceName: string })[];
+  /** `progress` is the flow a task is in this very moment, when it runs here and can say. */
+  tasks: (Task & { running: boolean; sourceName: string; progress?: FlowProgress })[];
   relay: { label: string; routes: string[]; error?: string }[];
   /** Plugins that are not running and without which repositories cannot be reached or fixes cannot run. */
   needs: string[];
@@ -51,7 +53,8 @@ const text = (value: unknown, what: string, max = 4000): string => {
   return value.trim();
 };
 
-export class AutofixService implements Autofix {
+/** `file` is the conversations' side of the service; the plugin adds it where it has the command. */
+export class AutofixService implements Omit<Autofix, 'file'> {
   readonly version = 1 as const;
   private readonly fetching = new Map<string, Promise<{ added: number }>>();
   constructor(private readonly host: ServiceHost) {}
@@ -67,7 +70,7 @@ export class AutofixService implements Autofix {
         return { id: source.id, name: source.name, ...(unready ? { unready } : {}), fetches: !!source.fetch, ...store.fetch[source.id], busy: this.fetching.has(source.id) };
       }),
       pool: ordered(store.pool).map(entry => ({ ...entry, sourceName: name(entry.item.source) })),
-      tasks: Object.values(store.tasks).sort((a, b) => b.updatedAt - a.updatedAt).map(task => ({ ...task, running: tasks.running(task.key), sourceName: name(task.item.source) })),
+      tasks: Object.values(store.tasks).sort((a, b) => b.updatedAt - a.updatedAt).map(task => this.view(task)),
       relay: this.host.relay?.() ?? [],
       needs: this.host.needs?.() ?? [],
     };
@@ -75,7 +78,11 @@ export class AutofixService implements Autofix {
   /** One task as the board shows it, for a card that follows only that one. */
   task(key: unknown): State['tasks'][number] | undefined {
     const task = this.host.store.tasks[text(key, 'The bug', 300)];
-    return task && { ...task, running: this.host.tasks.running(task.key), sourceName: this.host.sources.get(task.item.source)?.name ?? task.item.source };
+    return task && this.view(task);
+  }
+  private view(task: Task): State['tasks'][number] {
+    const { tasks, sources } = this.host, progress = tasks.progress(task.key);
+    return { ...task, running: tasks.running(task.key), sourceName: sources.get(task.item.source)?.name ?? task.item.source, ...(progress ? { progress } : {}) };
   }
   async saveSettings(raw: unknown): Promise<void> { const next: Settings = settingsFrom(raw); await this.host.store.saveSettings(next); }
   projects(signal?: AbortSignal) { return this.host.workplaces.projects(signal); }
