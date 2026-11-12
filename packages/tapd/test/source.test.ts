@@ -37,7 +37,7 @@ test('what happened to a bug is written back as the settings say', async () => {
     async getBug(workspaceId, id) { return workspaceId === '100' && id === '1001' ? bug : undefined; },
     async image(address) { asked.push(address); return { bytes: png, mediaType: 'image/png', extension: 'png' }; },
   }, () => current);
-  assert.equal(source.unready?.()?.key, 'Add the access token, your TAPD name and a TAPD project in Settings → TAPD first.');
+  assert.equal(source.unready?.()?.key, 'Add the access token, your TAPD name and a TAPD project first.');
   current = settings();
   assert.equal(source.unready?.(), undefined);
   assert.deepEqual((await source.fetch!()).map(item => item.id), ['100/1001']);

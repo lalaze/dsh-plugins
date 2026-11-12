@@ -1,6 +1,6 @@
 {
   "name": "dsh-autofix",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Bugs fixed in DeepSeek Harness: whatever source hands one in, it runs through plan, implement and review in its own worktree, and nothing is pushed before you accept it",
   "type": "module",
   "main": "lib/server/index.js",
@@ -84,6 +84,7 @@
     "@deepseek-ai/cordis": "~4.0.5",
     "@deepseek-ai/dsh-client-connection": "0.2.1-rc.2",
     "@dsh-plugins/i18n": "workspace:*",
+    "@dsh-plugins/needs": "workspace:*",
     "@types/react": "^18.3.26",
     "@types/react-dom": "^18.3.7",
     "react": "^18.3.1",

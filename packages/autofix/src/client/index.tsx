@@ -5,12 +5,14 @@ import { call } from './api.js';
 import { Board } from './board.js';
 import { FixRow, installOpenAfterFix, type CommandNode } from './chat.js';
 import { installLocale, ui, useLocale } from './i18n.js';
+import { setHost, sourcePanels } from './needs.js';
 import { AutofixSettings } from './settings.js';
 import { CSS } from './styles.js';
 
 interface Client {
   effect(factory: () => () => void): void;
   get?(name: string): unknown;
+  provide?(name: string, value: unknown): () => void;
   slots: { inject(name: string, factory: () => unknown): unknown; register(spec: Record<string, unknown>, component: React.FC): unknown };
 }
 const PILL_REFRESH_MS = 15_000;
@@ -67,9 +69,10 @@ function HeaderPill() {
     {open && <BoardDialog onClose={() => setOpen(false)} />}
   </>;
 }
-function SettingsSection() {
+/** `close` is DSH's: it shuts the settings, which cover every other page. */
+function SettingsSection({ close }: { close?(): void }) {
   const [open, setOpen] = useState(false);
-  return <><style>{CSS}</style><AutofixSettings board={() => setOpen(true)} />{open && <BoardDialog onClose={() => setOpen(false)} />}</>;
+  return <><style>{CSS}</style><AutofixSettings board={() => setOpen(true)} leave={() => close?.()} />{open && <BoardDialog onClose={() => setOpen(false)} />}</>;
 }
 
 export const name = 'dsh-autofix-client';
@@ -79,6 +82,12 @@ export function apply(ctx: Client): void {
   client = ctx;
   ctx.effect(() => installLocale(ctx as LocaleContext));
   ctx.effect(() => () => { if (client === ctx) client = undefined; });
+  ctx.effect(() => setHost(ctx));
+  // A source's plugin draws its settings inside this plugin's page. A host that refuses the service leaves each source its own page.
+  ctx.effect(() => {
+    try { return ctx.provide?.('autofixSources', sourcePanels) ?? (() => undefined); }
+    catch (error) { console.warn('[dsh-autofix] Could not offer the settings page to sources', error); return () => undefined; }
+  });
   const open = (sessionId: string) => (ctx.get?.('uiWorkspace') as { openSession?(id: string): void } | undefined)?.openSession?.(sessionId);
   // Rows in conversations are many; one stylesheet in the page serves them all.
   ctx.effect(() => {
@@ -90,7 +99,7 @@ export function apply(ctx: Client): void {
   ctx.effect(() => installOpenAfterFix(open));
   const Row: React.FC<{ node: CommandNode }> = ({ node }) => <FixRow node={node} open={open} />;
   ctx.slots.inject('conversation.chat.commandview', () => ctx.slots.register({ name: 'conversation.chat.commandview', key: 'fix' }, Row as React.FC));
-  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'autofix', order: 72, label: () => ui("Autofix") }, SettingsSection));
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'autofix', order: 72, label: () => ui("Autofix") }, SettingsSection as React.FC));
   // A host that rejects the entry keeps the rest of the plugin working.
   ctx.slots.inject('conversation.session.header.utilities', () => {
     try { return ctx.slots.register({ name: 'conversation.session.header.utilities', id: 'autofix-board', order: -900, label: () => ui("Bugs") }, HeaderPill); }

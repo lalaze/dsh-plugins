@@ -13,7 +13,7 @@
     "test": "pnpm -r --if-present run test",
     "test:ui": "pnpm -r --if-present run test:ui",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",
-    "pack:plugins": "pnpm -r --filter './packages/*' --filter '!@dsh-plugins/i18n' --filter '!@dsh-plugins/file-view' --filter '!@dsh-plugins/remote-core' pack --pack-destination dist",
+    "pack:plugins": "pnpm -r --filter './packages/*' --filter '!@dsh-plugins/i18n' --filter '!@dsh-plugins/needs' --filter '!@dsh-plugins/file-view' --filter '!@dsh-plugins/remote-core' pack --pack-destination dist",
     "release:market": "node scripts/release-market.mjs"
   },
   "license": "MIT",

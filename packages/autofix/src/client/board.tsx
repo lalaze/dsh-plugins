@@ -3,6 +3,7 @@ import type { Item, Message, Route, Task, TaskStatus } from '../domain.js';
 import type { PoolView } from '../service.js';
 import { call, type State } from './api.js';
 import { formatLocale, ui, useLocale } from './i18n.js';
+import { sourceText } from './needs.js';
 import { NewBugForm, type NewBug } from './newbug.js';
 import { Pick } from './pick.js';
 import { usePictures } from './pictures.js';
@@ -178,7 +179,7 @@ export function Board({ open }: { open?(sessionId: string): void }) {
   return <div className="tp-board">
     <header className="tp-top">
       <div><h2>{ui("Bugs")}</h2>
-        {state.sources.filter(source => source.id !== 'manual').map(source => <p key={source.id} className={source.error || source.unready ? 'tp-error' : 'tp-muted'}>{source.name} · {source.unready ? told(source.unready) : source.error ? ui("last fetch failed: {0}", { 0: source.error }) : source.fetches ? ui("fetched {0}", { 0: ago(source.at) }) : ui("hands bugs in by itself")}</p>)}</div>
+        {state.sources.filter(source => source.id !== 'manual').map(source => <p key={source.id} className={source.error || source.unready ? 'tp-error' : 'tp-muted'}>{source.name} · {source.unready ? sourceText(source.id, source.unready) : source.error ? ui("last fetch failed: {0}", { 0: source.error }) : source.fetches ? ui("fetched {0}", { 0: ago(source.at) }) : ui("hands bugs in by itself")}</p>)}</div>
       <div className="tp-actions">
         {typed && <button type="button" className="tp-button" disabled={adding} onClick={() => setAdding(true)}>{ui("New bug")}</button>}
         {askable.length > 0 && <button type="button" className="tp-button" data-primary disabled={fetching} onClick={() => void run('fetch', 'fetch')}>{fetching ? ui("Fetching…") : ui("Fetch")}</button>}

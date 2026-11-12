@@ -1,12 +1,21 @@
 import type { LocaleContext } from '@dsh-plugins/i18n';
+import { remoteFrom } from '@dsh-plugins/needs';
+import { usePluginOffer } from '@dsh-plugins/needs/react';
 import React, { useEffect, useRef, useState } from 'react';
 import type { PublicSettings } from '../settings.js';
 import { installLocale, ui, useLocale } from './i18n.js';
 
 interface Client {
   effect(factory: () => () => void): void;
+  get?(name: string): unknown;
+  /** Runs `callback` in a scope of its own while the named services are there, and ends that scope when one leaves. */
+  inject?(names: string[], callback: (scoped: Client) => void): unknown;
   slots: { inject(name: string, factory: () => unknown): unknown; register(spec: Record<string, unknown>, component: React.FC): unknown };
 }
+/** Autofix's page, as its client offers it to the plugins that hand bugs in. */
+interface AutofixSources { register(id: string, panel: { name: string; Panel: React.ComponentType<{ embedded: true }>; text?(key: string, values?: Record<string, string>): string }): () => void }
+const AUTOFIX = 'dsh-autofix';
+let host: Client | undefined;
 interface Reply { settings?: PublicSettings; connected?: boolean; found?: number; error?: string }
 type Note = { kind: 'ok' | 'error'; text: string };
 async function call(action: string, body: Record<string, unknown> = {}): Promise<Reply> {
@@ -26,7 +35,13 @@ const CSS = `.td-settings{--td-fill:var(--dsw-alias-interactive-bg-hover,color-m
 .td-muted{color:var(--td-soft);font-size:12px;line-height:18px}
 .td-head+.td-muted{margin-top:4px;font-size:13px;line-height:20px}
 .td-error{color:var(--td-danger);font-size:12px;line-height:18px;overflow-wrap:anywhere}
-.td-note{margin-top:14px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb,#f59e0b 14%,transparent);color:color-mix(in srgb,#d97706 72%,currentColor)}
+.td-note{display:flex;align-items:center;gap:16px;margin-top:14px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb,#f59e0b 14%,transparent)}
+.td-note>div{display:flex;flex:1 1 auto;flex-direction:column;gap:2px;min-width:0}
+.td-note>div>span{color:color-mix(in srgb,#d97706 72%,currentColor)}
+.td-note>div>small{font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
+.td-settings[data-embedded]{max-width:none;padding-top:0}
+.td-settings[data-embedded] h3{margin-top:24px}
+.td-settings[data-embedded] .td-savebar{position:static;box-shadow:none}
 .td-settings input{min-width:0;height:32px;padding:0 10px;border:1px solid transparent;border-radius:10px;background:var(--td-fill);color:inherit;font:inherit;font-size:13px}
 .td-settings input:hover{background:var(--td-fill-strong)}
 .td-settings input:focus{outline:0;border-color:var(--td-accent);background:transparent}
@@ -68,7 +83,7 @@ const CSS = `.td-settings{--td-fill:var(--dsw-alias-interactive-bg-hover,color-m
 .td-savebar{position:sticky;bottom:12px;z-index:2;display:flex;align-items:center;gap:8px;min-height:50px;margin-top:20px;padding:8px 8px 8px 14px;border:1px solid var(--td-line);border-radius:14px;background:var(--dsw-alias-bg-layer-3,Canvas);box-shadow:0 8px 28px rgba(0,0,0,.16)}
 .td-savebar>span{flex:1 1 auto;min-width:0;font-size:13px;line-height:20px;overflow-wrap:anywhere}
 .td-savebar[data-kind=error]>span{color:var(--td-danger)}
-@media(max-width:560px){.td-row{flex-direction:column;align-items:stretch;gap:8px}.td-row-control{max-width:none;justify-content:flex-start}.td-row-control>input{width:100%}.td-project>input:first-child{flex-basis:96px}}
+@media(max-width:560px){.td-note{flex-direction:column;align-items:stretch}.td-row{flex-direction:column;align-items:stretch;gap:8px}.td-row-control{max-width:none;justify-content:flex-start}.td-row-control>input{width:100%}.td-project>input:first-child{flex-basis:96px}}
 @media(prefers-reduced-motion:reduce){.td-switch,.td-switch::after{transition:none}}`;
 
 const words = (value: string) => value.split(/[,，\n]/u).map(word => word.trim()).filter(Boolean);
@@ -96,12 +111,46 @@ function Chips({ label, value, onChange, placeholder }: { label: string; value: 
   </div>;
 }
 
-function TapdSettings() {
+/** Autofix is what these bugs are handed to: without it, the way to get it. `leave` closes the settings, which cover the Plugins page. */
+function NeedsAutofix({ leave, settled }: { leave(): void; settled(): void }) {
+  const { offer, busy, outcome, run } = usePluginOffer(() => remoteFrom(host), AUTOFIX, settled);
+  let plugins: { openBundle(name: string): void; openList(): void } | undefined;
+  try { plugins = host?.get?.('pluginNavigation') as typeof plugins; } catch { /* A DSH without a Plugins page. */ }
+  const installable = offer?.kind === 'install' || offer?.kind === 'update';
+  const says = outcome?.kind === 'restart' ? ui("Installed. It starts the next time DSH starts.")
+    : outcome?.kind === 'applied' ? ui("Installed.")
+    : outcome?.kind === 'failed' ? ui("It could not be installed: {0}", { 0: outcome.detail })
+    : busy ? ui("Installing… this can take a minute.")
+    : offer?.kind === 'present' ? ui("It is installed but not running: switch it on in Plugins, or restart DSH.")
+    : offer && !installable ? ui("None of your plugin markets offers it: add it on the Plugins page.") : undefined;
+  return <div className="td-note" role="status">
+    <div><span>{ui("Autofix is not installed or not running, so these bugs have nowhere to go.")}</span>{says && <small>{says}</small>}</div>
+    {installable && outcome?.kind !== 'applied' && outcome?.kind !== 'restart' && <button type="button" className="td-button" data-primary disabled={busy} onClick={run}>
+      {busy ? ui("Installing…") : offer.kind === 'update' ? ui("Update Autofix") : ui("Install Autofix")}</button>}
+    {plugins && offer && (!installable || outcome?.kind === 'failed') && <button type="button" className="td-button" onClick={() => { if (offer.kind === 'present') plugins.openBundle(AUTOFIX); else plugins.openList(); leave(); }}>{ui("Open Plugins")}</button>}
+  </div>;
+}
+
+/** What the page of its own says if DSH still shows it after the settings moved into Autofix's page. */
+function MovedToAutofix() {
+  useLocale();
+  return <section className="td-settings" aria-label="TAPD"><style>{CSS}</style><header className="td-head"><h2>TAPD</h2></header>
+    <p className="td-muted">{ui("These settings are now in Settings → Autofix, under where bugs come from.")}</p></section>;
+}
+
+/** TAPD's settings: a page of their own, or `embedded` in Autofix's page under the sources, which has the heading already. */
+function TapdSettings({ embedded, close }: { embedded?: boolean; close?(): void }) {
   useLocale();
   const [form, setForm] = useState<PublicSettings>(), [connected, setConnected] = useState(true), [token, setToken] = useState('');
   const [message, setMessage] = useState<Note>(), [busy, setBusy] = useState<'save' | 'test'>(), [dirty, setDirty] = useState(false);
   const load = () => call('state').then(reply => { setForm(reply.settings); setConnected(reply.connected !== false); setToken(''); setDirty(false); }, reason => setMessage({ kind: 'error', text: reason instanceof Error ? reason.message : String(reason) }));
   useEffect(() => { void load(); }, []);
+  // Autofix installed from this page starts a moment later.
+  useEffect(() => {
+    if (connected || embedded) return;
+    const timer = setInterval(() => { void call('state').then(reply => setConnected(reply.connected !== false), () => undefined); }, 4000);
+    return () => clearInterval(timer);
+  }, [connected, embedded]);
   useEffect(() => {
     if (message?.kind !== 'ok') return;
     const timer = setTimeout(() => setMessage(undefined), 4000);
@@ -124,11 +173,13 @@ function TapdSettings() {
   };
   const basic = form.auth.kind === 'basic';
   const project = (index: number, change: Partial<PublicSettings['workspaces'][number]>) => set('workspaces', form.workspaces.map((workspace, at) => at === index ? { ...workspace, ...change } : workspace));
-  return <section className="td-settings" aria-label="TAPD"><style>{CSS}</style>
-    <header className="td-head"><h2>TAPD</h2>
-      <button type="button" className="td-button" disabled={!!busy || dirty} title={dirty ? ui("Save first, then test.") : undefined} onClick={() => void act('test')}>{busy === 'test' ? ui("Testing…") : ui("Test the connection")}</button></header>
-    <p className="td-muted">{ui("The bugs under your TAPD name, handed to Autofix; status and comments are written back from there.")}</p>
-    {!connected && <p className="td-note" role="status">{ui("Autofix is not installed or not running, so these bugs have nowhere to go. Install dsh-autofix.")}</p>}
+  const test = <button type="button" className="td-button" disabled={!!busy || dirty} title={dirty ? ui("Save first, then test.") : undefined} onClick={() => void act('test')}>{busy === 'test' ? ui("Testing…") : ui("Test the connection")}</button>;
+  return <section className="td-settings" aria-label="TAPD" data-embedded={embedded || undefined}><style>{CSS}</style>
+    {embedded
+      ? <header className="td-head"><p className="td-muted">{ui("The bugs under your TAPD name, handed to Autofix; status and comments are written back from there.")}</p>{test}</header>
+      : <><header className="td-head"><h2>TAPD</h2>{test}</header>
+        <p className="td-muted">{ui("The bugs under your TAPD name, handed to Autofix; status and comments are written back from there.")}</p></>}
+    {!connected && !embedded && <NeedsAutofix leave={() => close?.()} settled={() => void call('state').then(reply => setConnected(reply.connected !== false), () => undefined)} />}
 
     <h3>{ui("Sign-in")}</h3>
     <div className="td-rows">
@@ -184,7 +235,34 @@ function TapdSettings() {
 export const name = 'dsh-tapd-client';
 // The desktop language bridge initializes asynchronously; wait before registering UI.
 export const inject = ['slots', 'locale'];
+const Embedded = () => <TapdSettings embedded />;
 export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx as LocaleContext));
-  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'tapd', order: 73, label: () => 'TAPD' }, TapdSettings));
+  ctx.effect(() => { host = ctx; return () => { if (host === ctx) host = undefined; }; });
+  // Inside Autofix's page while that page takes sources' settings. Without it, a page of its own, which says Autofix is missing.
+  let hosted = false, redraw: (() => void) | undefined;
+  const Page: React.FC<{ close?(): void }> = ({ close }) => {
+    const [, set] = useState(0);
+    useEffect(() => { redraw = () => set(count => count + 1); return () => { redraw = undefined; }; }, []);
+    return hosted ? <MovedToAutofix /> : <TapdSettings close={close} />;
+  };
+  let section: unknown;
+  const show = (wanted: boolean) => {
+    if (wanted === (section !== undefined)) return;
+    if (wanted) section = ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'tapd', order: 73, label: () => 'TAPD' }, Page as React.FC)) ?? true;
+    else { const end = section; section = undefined; if (typeof end === 'function') (end as () => void)(); else (end as { dispose?(): void } | undefined)?.dispose?.(); }
+  };
+  show(true);
+  ctx.effect(() => () => show(false));
+  try {
+    ctx.inject?.(['autofixSources'], scoped => {
+      const sources = scoped.get?.('autofixSources') as AutofixSources | undefined;
+      if (!sources) return;
+      scoped.effect(() => {
+        const remove = sources.register('tapd', { name: 'TAPD', Panel: Embedded, text: (key, values) => ui(key, values) });
+        hosted = true; show(false); redraw?.();
+        return () => { remove(); hosted = false; show(true); redraw?.(); };
+      });
+    });
+  } catch (error) { console.warn('[dsh-tapd] Could not join the Autofix settings page', error); }
 }

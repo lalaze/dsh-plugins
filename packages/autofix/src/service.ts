@@ -29,6 +29,8 @@ export interface ServiceHost {
   /** The machines on which other DSHes can hand bugs to this one, when that is switched on. */
   relay?(): { label: string; routes: string[]; error?: string }[];
   folders: Pick<Folders, 'add' | 'repository'>;
+  /** The plugins this one works through that are not running right now, by package name. */
+  needs?(): string[];
   now?(): number;
 }
 export interface SourceView { id: string; name: string; unready?: Message; fetches: boolean; at?: number; error?: string; busy: boolean }
@@ -40,6 +42,8 @@ export interface State {
   pool: PoolView[];
   tasks: (Task & { running: boolean; sourceName: string })[];
   relay: { label: string; routes: string[]; error?: string }[];
+  /** Plugins that are not running and without which repositories cannot be reached or fixes cannot run. */
+  needs: string[];
 }
 const DIFF_LIMIT = 400_000;
 const text = (value: unknown, what: string, max = 4000): string => {
@@ -65,6 +69,7 @@ export class AutofixService implements Autofix {
       pool: ordered(store.pool).map(entry => ({ ...entry, sourceName: name(entry.item.source) })),
       tasks: Object.values(store.tasks).sort((a, b) => b.updatedAt - a.updatedAt).map(task => ({ ...task, running: tasks.running(task.key), sourceName: name(task.item.source) })),
       relay: this.host.relay?.() ?? [],
+      needs: this.host.needs?.() ?? [],
     };
   }
   /** One task as the board shows it, for a card that follows only that one. */

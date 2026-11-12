@@ -1,7 +1,18 @@
 /** English source strings and their Simplified Chinese translations. */
 export const zh = {
   "The bugs under your TAPD name, handed to Autofix; status and comments are written back from there.": "把你 TAPD 名下的缺陷交给「自动修复」，并由它回写状态和评论。",
-  "Autofix is not installed or not running, so these bugs have nowhere to go. Install dsh-autofix.": "「自动修复」没有安装或没有运行，这些缺陷无处可去。请安装 dsh-autofix。",
+  "Autofix is not installed or not running, so these bugs have nowhere to go.": "「自动修复」没有安装或没有运行，这些缺陷无处可去。",
+  "Install Autofix": "安装自动修复",
+  "Update Autofix": "更新自动修复",
+  "Installing…": "正在安装…",
+  "Open Plugins": "打开插件页",
+  "Installed.": "已安装。",
+  "Installed. It starts the next time DSH starts.": "已安装，重启 DSH 后生效。",
+  "It could not be installed: {0}": "安装失败：{0}",
+  "Installing… this can take a minute.": "正在安装，可能需要一分钟…",
+  "It is installed but not running: switch it on in Plugins, or restart DSH.": "已安装但没有运行：请在插件页启用它，或重启 DSH。",
+  "None of your plugin markets offers it: add it on the Plugins page.": "你添加的插件市场里没有它，请在插件页手动添加。",
+  "These settings are now in Settings → Autofix, under where bugs come from.": "这些设置已经移到 设置 → 自动修复 的「缺陷来源」里。",
   "Sign-in": "登录",
   "Sign-in kind": "登录方式",
   "Personal access token": "个人访问令牌",
@@ -42,4 +53,5 @@ export const zh = {
   "Written once you accept the fix.": "你验收通过后写入。",
   "Unsaved changes": "有未保存的修改",
   "Discard": "放弃",
+  "Add the access token, your TAPD name and a TAPD project first.": "请先填写访问令牌、你的 TAPD 名字和一个 TAPD 项目。",
 } as const;

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { Route, Settings } from '../domain.js';
 import { call, type State } from './api.js';
 import { ui, useLocale } from './i18n.js';
+import { Need, service, sourceText, useSourcePanels, type SourcePanel } from './needs.js';
 import { Pick } from './pick.js';
 
 type Form = State['settings'];
@@ -156,19 +157,57 @@ function Repo({ route, projects, startOpen, onChange, onProjects, onRemove }: {
   </div>;
 }
 
-/** Settings → Autofix: the repositories bugs can go to, and how tasks run. Each source of bugs has settings of its own. */
-export function AutofixSettings({ board }: { board(): void }) {
+/** The plugins this page works through: what each is called, and what Autofix uses it for. */
+const NEEDS: Record<string, { title: string; why: string }> = {
+  'dsh-remote-agents': { title: "Remote agents", why: "Reaches the machines your repositories are on." },
+  'dsh-remote-terminals': { title: "Remote terminals", why: "Opens a worktree for each fix as a workspace, on this computer or on another machine." },
+  'dsh-model-flow': { title: "Model flow", why: "Runs each fix on this DSH as plan, implement and review. A DSH that only hands its bugs to another one can do without it." },
+};
+const TAPD = 'dsh-tapd';
+/** A source whose plugin put its settings here: a line that says how it is, and those settings once opened. */
+function SourceCard({ name, says, ready, panel }: { name: string; says?: string; ready?: boolean; panel: SourcePanel }) {
+  const [open, setOpen] = useState(false);
+  return <div className="tp-repo" data-open={open || undefined}>
+    <button type="button" className="tp-repo-head" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <Chevron />
+      <span className="tp-repo-name">{name}</span>
+      <span className="tp-repo-meta">{says}</span>
+      {ready !== undefined && <span className="tp-status" data-ready={ready || undefined}><i aria-hidden="true" />{ready ? ui("Ready") : ui("Needs setting up")}</span>}
+    </button>
+    {open && <div className="tp-repo-body tp-embed"><panel.Panel embedded /></div>}
+  </div>;
+}
+
+/**
+ * Settings → Autofix: the repositories bugs can go to, the models that fix them, how tasks run and where bugs come from.
+ * What another plugin holds is set here too: the models are Model flow's, and a source's settings are its plugin's.
+ */
+export function AutofixSettings({ board, leave }: { board(): void; leave(): void }) {
   useLocale();
   const [form, setForm] = useState<Form>(), [sources, setSources] = useState<State['sources']>([]), [projects, setProjects] = useState<Project[]>([]), [relay, setRelay] = useState<State['relay']>([]);
+  const [needs, setNeeds] = useState<string[]>([]), [, redraw] = useState(0), panels = useSourcePanels();
   // Each repository card keeps its own state; a number that stays with it tells React which is which when one is removed.
   const [cards, setCards] = useState<{ id: number; fresh: boolean }[]>([]), nextCard = useRef(1);
   const [message, setMessage] = useState<Note>(), [saving, setSaving] = useState(false), [dirty, setDirty] = useState(false);
   const show = (settings: Form) => { setForm(settings); setCards(settings.routes.map(() => ({ id: nextCard.current++, fresh: false }))); setDirty(false); };
-  const load = () => call('state').then(reply => { if (reply.state) { show(reply.state.settings); setSources(reply.state.sources); setRelay(reply.state.relay ?? []); } }, reason => setMessage({ kind: 'error', text: told(reason) }));
+  const around = (state: State) => { setSources(state.sources); setRelay(state.relay ?? []); setNeeds(state.needs ?? []); };
+  const load = () => call('state').then(reply => { if (reply.state) { show(reply.state.settings); around(reply.state); } }, reason => setMessage({ kind: 'error', text: told(reason) }));
+  const loadProjects = () => call<{ projects: Project[] }>('projects').then(reply => setProjects(reply.projects ?? []), () => undefined);
+  /** What other plugins brought or took away, without touching what is being edited. */
+  const look = () => call('state').then(reply => { if (reply.state) around(reply.state); redraw(count => count + 1); }, () => undefined);
+  useEffect(() => { void load(); }, []);
+  const reaches = !needs.some(plugin => plugin !== 'dsh-model-flow'), flows = !needs.includes('dsh-model-flow');
+  const Models = flows ? service<{ Models?: React.ComponentType }>('modelFlowSettings')?.Models : undefined;
+  // A plugin installed from here starts a moment later, and its page part can come after that.
+  const waiting = needs.length > 0 || (flows && !Models);
   useEffect(() => {
-    void load();
-    call<{ projects: Project[] }>('projects').then(reply => setProjects(reply.projects ?? []), () => undefined);
-  }, []);
+    if (!waiting) return;
+    const timer = setInterval(() => void look(), 4000);
+    return () => clearInterval(timer);
+  }, [waiting]);
+  // The projects come from the plugins that reach the repositories: asked once those run.
+  const known = form !== undefined;
+  useEffect(() => { if (known && reaches) void loadProjects(); }, [known, reaches]);
   useEffect(() => {
     if (message?.kind !== 'ok') return;
     const timer = setTimeout(() => setMessage(undefined), 2500);
@@ -184,12 +223,16 @@ export function AutofixSettings({ board }: { board(): void }) {
     setSaving(true);
     try {
       const reply = await call('saveSettings', { settings: form });
-      if (reply.state) { setForm(reply.state.settings); setRelay(reply.state.relay ?? []); }
+      if (reply.state) { setForm(reply.state.settings); around(reply.state); }
       setDirty(false); setMessage({ kind: 'ok', text: ui("Saved") });
     } catch (reason) { setMessage({ kind: 'error', text: told(reason) }); }
     finally { setSaving(false); }
   };
-  const sourceSays = (source: State['sources'][number]) => source.id === 'manual' ? ui("with New bug on the board, pictures included") : source.unready ? ui(source.unready.key, source.unready.values) : source.fetches ? ui("fetched from the board") : ui("hands bugs in by itself");
+  const sourceSays = (source: State['sources'][number]) => source.id === 'manual' ? ui("with New bug on the board, pictures included") : source.unready ? sourceText(source.id, source.unready) : source.fetches ? ui("fetched from the board") : ui("hands bugs in by itself");
+
+  const need = (plugin: string) => <Need key={plugin} plugin={plugin} title={ui(NEEDS[plugin]?.title ?? plugin)} why={ui(NEEDS[plugin]?.why ?? '')} leave={leave} settled={() => void look()} />;
+  const plain = sources.filter(source => !panels.has(source.id));
+  const carded = [...sources.filter(source => panels.has(source.id)).map(source => ({ id: source.id, source })), ...[...panels.keys()].filter(id => !sources.some(source => source.id === id)).map(id => ({ id, source: undefined }))];
 
   return <section className="tp-settings" aria-label={ui("Autofix")}>
     <header className="tp-head"><h2>{ui("Autofix")}</h2><button type="button" className="tp-button" onClick={board}>{ui("Open the board")}</button></header>
@@ -198,13 +241,19 @@ export function AutofixSettings({ board }: { board(): void }) {
 
     <h3>{ui("Repositories")}</h3>
     <p className="tp-muted">{ui("Where bugs can be sent. Each bug is fixed in a new worktree of its repository.")}</p>
-    {form.routes.length === 0 && <div className="tp-empty">{ui("No repository yet. Add one so bugs have somewhere to go.")}</div>}
+    {needs.filter(plugin => plugin !== 'dsh-model-flow').map(need)}
+    {form.routes.length === 0 && reaches && <div className="tp-empty">{ui("No repository yet. Add one so bugs have somewhere to go.")}</div>}
     {form.routes.map((route, index) => <Repo key={cards[index]?.id ?? index} route={route} projects={projects} startOpen={cards[index]?.fresh ?? false} onProjects={setProjects}
       onChange={next => change(current => ({ ...current, routes: current.routes.map((entry, at) => at === index ? next(entry) : entry) }))} onRemove={() => remove(index)} />)}
-    <button type="button" className="tp-button tp-add" onClick={add}><span aria-hidden="true">+</span>{ui("Add a repository")}</button>
+    {reaches && <button type="button" className="tp-button tp-add" onClick={add}><span aria-hidden="true">+</span>{ui("Add a repository")}</button>}
+
+    <h3>{ui("Models")}</h3>
+    <p className="tp-muted">{ui("Which model plans, which implements and which reviews each fix. This is the choice of Settings → Model flow, which /flow uses too.")}</p>
+    {!flows ? need('dsh-model-flow')
+      : Models ? <div className="tp-embed tp-models"><Models /></div>
+        : <div className="tp-empty">{ui("Choose them in Settings → Model flow. Once Model flow is 0.1.8 or newer and the page is reloaded, they can be chosen here.")}</div>}
 
     <h3>{ui("How tasks run")}</h3>
-    <p className="tp-muted">{ui("Each task plans, implements and reviews with the models chosen in Settings → Model flow.")}</p>
     <div className="tp-rows">
       <Row title={ui("What the models may do")} hint={ui("Nobody is there to answer a permission prompt.")}>
         <Pick label={ui("What the models may do")} value={form.run.permission} onChange={value => run('permission', value as Settings['run']['permission'])}
@@ -222,13 +271,17 @@ export function AutofixSettings({ board }: { board(): void }) {
     </div>
 
     <h3>{ui("Where bugs come from")}</h3>
+    <p className="tp-muted">{ui("Every source besides typing is a plugin; its settings are here once it is installed.")}</p>
     <div className="tp-rows">
-      {sources.map(source => <div key={source.id} className="tp-row">
+      {plain.map(source => <div key={source.id} className="tp-row">
         <div className="tp-row-text"><span>{source.id === 'manual' ? ui("Typed in") : source.name}</span><small>{sourceSays(source)}</small></div>
         <span className="tp-status" data-ready={!source.unready || undefined}><i aria-hidden="true" />{source.unready ? ui("Needs setting up") : ui("Ready")}</span>
       </div>)}
     </div>
-    <p className="tp-muted">{ui("Every other source is a plugin with settings of its own, such as dsh-tapd.")}</p>
+    {carded.map(({ id, source }) => <SourceCard key={id} name={source?.name ?? panels.get(id)!.name} panel={panels.get(id)!}
+      {...(source ? { says: sourceSays(source), ready: !source.unready } : {})} />)}
+    {!sources.some(source => source.id === 'tapd') && !panels.has('tapd') && <Need optional plugin={TAPD} title="TAPD" leave={leave} settled={() => void look()}
+      why={ui("Optional. Brings in the bugs under your TAPD name, and writes status and comments back.")} />}
 
     {(dirty || saving || message) && <footer className="tp-savebar" data-kind={message?.kind}>
       <span role={message?.kind === 'error' ? 'alert' : 'status'}>{message?.text ?? ui("Unsaved changes")}</span>
