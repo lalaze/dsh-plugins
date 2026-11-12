@@ -3,6 +3,7 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
+import { offerTuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
 import type { Asset, ScanResult } from '../src/domain.js';
 import { BUNDLE_KEY, VIEW_ID, apply, fileAddress } from '../src/client/index.js';
 import { resetProjects } from '../src/client/projects.js';
@@ -431,6 +432,39 @@ test('a selection is handed to the agent through the chat input, after what the 
   assert.match(container.querySelector('.ga-status')!.textContent!, /^Added to the chat input/);
   // Nothing was sent or changed on the host: the request only sits in the input.
   assert.deepEqual(sent().map(request => request.action), ['scan']);
+  await act(async () => composerRoot.unmount());
+});
+
+test('in a TUI conversation the request is typed at the CLI’s prompt, as the composer there is hidden under the terminal', async () => {
+  const dsh = await mount('s8');
+  const drafts: string[] = [], pasted: string[][] = [], copied: string[] = [];
+  let takes = true;
+  // dsh-remote-terminals offers the prompt of its TUI conversations through the page.
+  offerTuiPrompt({ has: sessionId => sessionId === 's8', paste: async (sessionId, text) => { pasted.push([sessionId, text]); return takes; } });
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { copied.push(text); } } });
+  // DSH keeps the composer mounted, and it would take a draft nobody could see.
+  const { createRoot } = await import('react-dom/client');
+  const composer = document.createElement('div'); document.body.append(composer);
+  const composerRoot = createRoot(composer);
+  await act(async () => composerRoot.render(React.createElement(dsh.composer()!.component, { sessionId: 's8', inputActions: { setDraft: (text: string) => { drafts.push(text); } }, useInput: (select: (state: { draft: string }) => unknown) => select({ draft: '' }) })));
+
+  await check('assets/cast-v1/hero.png');
+  await click(button('.ga-selbar', 'Ask the agent…'));
+  await click(button('.ga-dialog', 'Redraw'));
+  await click(button('.ga-dialog', 'Put in chat input'));
+  await settle();
+  assert.deepEqual(pasted, [['s8', 'Redraw these images in the project’s current art style. Keep each file’s name, pixel size and transparency.\n\n- assets/cast-v1/hero.png']]);
+  assert.deepEqual(drafts, []);
+  assert.match(container.querySelector('.ga-status')!.textContent!, /^Added to the chat input/);
+
+  // A terminal that could not take it in time leaves the request on the clipboard, as a host without a composer does.
+  takes = false;
+  await click(button('.ga-selbar', 'Ask the agent…'));
+  await click(button('.ga-dialog', 'Put in chat input'));
+  await settle();
+  assert.equal(pasted.length, 2);
+  assert.deepEqual([copied.length, drafts.length], [1, 0]);
+  assert.match(container.querySelector('.ga-status')!.textContent!, /^Copied\. Paste it into the chat input\./);
   await act(async () => composerRoot.unmount());
 });
 

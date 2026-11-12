@@ -1,5 +1,6 @@
 import React from 'react';
 import type { LocaleContext } from '@dsh-plugins/i18n';
+import { tuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
 import { NAMESPACE, installLocale, ui } from './i18n.js';
 import { ComposerBridge, offer, type ComposerProps } from './outbox.js';
 import { AssetsPanel } from './panel.js';
@@ -53,8 +54,16 @@ export function apply(ctx: Client): void {
       return () => { activate = undefined; };
     });
   });
-  /** Offers the text to the conversation's composer, which may only mount once Chat is showing. */
-  const sendToChat = (sessionId: string, text: string) => { const taken = offer(sessionId, text); activate?.(sessionId); return taken; };
+  /**
+   * Offers the text to the conversation's composer, which may only mount once Chat is showing. A TUI conversation has the
+   * CLI's prompt in a terminal instead, and DSH keeps its composer hidden underneath, where a draft would never be seen.
+   */
+  const sendToChat = (sessionId: string, text: string) => {
+    const tui = tuiPrompt();
+    const taken = tui?.has(sessionId) ? tui.paste(sessionId, text) : offer(sessionId, text);
+    activate?.(sessionId);
+    return taken;
+  };
   const View: React.FC<{ sessionId?: string }> = ({ sessionId }) =>
     <AssetsPanel sessionId={sessionId} sendToChat={sendToChat} openFile={(session, path, line) => openResource?.(fileAddress(session, path, line), line ? { params: { line } } : undefined)} />;
   let release: (() => void) | undefined, waited = false;

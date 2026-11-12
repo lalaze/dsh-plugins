@@ -173,6 +173,9 @@ importers:
       '@dsh-plugins/i18n':
         specifier: workspace:*
         version: link:../i18n
+      '@dsh-plugins/remote-core':
+        specifier: workspace:*
+        version: link:../remote-core
       '@types/jsdom':
         specifier: ^21.1.7
         version: 21.1.7
