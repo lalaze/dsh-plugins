@@ -49,7 +49,7 @@ export function createHandler(live: () => { terminals: Terminals; machines: Remo
       if (!now) throw new RemoteError('Install or update Remote Agents: remote terminals work on the machines saved there.', 501);
       const { terminals, machines } = now;
       let result: unknown;
-      if (TUI.has(action)) result = await tuiAction(terminals.tui, action, input, request.signal);
+      if (TUI.has(action)) result = await tuiAction(terminals.tui, action, input, request.signal, () => terminals.sharing.soon());
       else if (WORKTREES.has(action)) result = await worktreeAction(terminals.worktrees, action, input, request.signal);
       // The Remote workspace launcher, while the conversation is in a remote workspace; see the client's terminal-preference.ts.
       else if (action === 'terminalShell') {

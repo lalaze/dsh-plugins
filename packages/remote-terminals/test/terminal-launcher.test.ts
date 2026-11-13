@@ -20,7 +20,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
   // Every launcher invocation has a finite fallback, never the developer's interactive shell.
   await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
-  for (const name of ['core/domain', 'core/saved-hosts', 'core/ssh', 'core/remote-host', 'core/access', 'tui', 'holder-protocol', 'terminal-hold']) {
+  for (const name of ['core/domain', 'core/saved-hosts', 'core/ssh', 'core/remote-host', 'core/access', 'tui', 'tui-state', 'holder-protocol', 'terminal-hold']) {
     // As the build lays them out: the shared core's files beside the plugin's own in core/, imported by relative path.
     const source = await readFile(new URL(name.startsWith('core/') ? `../../remote-core/src/${name.slice(5)}.ts` : `../src/${name}.ts`, import.meta.url), 'utf8');
     await mkdir(dirname(join(modules, name)), { recursive: true });
@@ -72,6 +72,9 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   // The composer's model applies to the first launch; a resumed session keeps what /model chose since.
   const opus = await launchTui('session-opus'), opusId = /--resume ([0-9a-f-]{36});/.exec(opus)?.[1];
   assert.ok(opus.includes(`then claude --resume ${opusId}; else claude --session-id ${opusId} --model "opus[1m]" --effort "high"; fi`), opus);
+  // A conversation another DSH started runs the Claude session it has there, whatever this DSH calls its conversation.
+  await writeFile(f.path, JSON.stringify({ ...JSON.parse(await readFile(f.path, 'utf8')), tuiSessions: ['session-tui', 'session-here'], tuiDetails: { 'session-here': { key: 'session-tui' } } }));
+  assert.equal(await launchTui('session-here'), tui, 'the same session as in the DSH that started it');
   await launch(anchor);
   await writeFile(join(anchor, '.dsh-remote-meta.json'), '{}');
   await assert.rejects(launch(anchor), /valid remote workspace binding/);

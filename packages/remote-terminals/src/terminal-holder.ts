@@ -7,7 +7,8 @@
  *
  * - `daemon` is the holder: it owns the Python process, keeps the screen in a headless xterm and accepts clients on a private socket.
  * - `attach` is run by the launcher inside `ssh -tt` and connects that terminal to the holder, starting one if there is none.
- *   A client that joins gets the screen and its scrollback, then the same bytes as everyone else.
+ *   A client that joins gets the screen and its scrollback, then the same bytes as everyone else. The screen has the size
+ *   of the client that came or resized last, or that typed last if it was another's meanwhile; see `claimsScreen`.
  *
  * The launcher is in terminal-hold.ts.
  */
@@ -16,7 +17,7 @@ import fs from 'node:fs';
 import { createConnection, createServer, type Socket } from 'node:net';
 import { delimiter, join } from 'node:path';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
-import { ATTACH_EXIT, attachExitCode, FRAME } from './holder-protocol.js';
+import { ATTACH_EXIT, attachExitCode, claimsScreen, FRAME } from './holder-protocol.js';
 import { HolderOutput } from './holder-output.js';
 
 const ID = /^[a-z]+-[0-9a-f]{16,64}$/;
@@ -190,6 +191,8 @@ async function daemon(id: string, python: string): Promise<void> {
     if (!screen || (screen.cols === cols && screen.rows === rows)) return;
     screen.resize(cols, rows);
     (shim?.stdio[3] as NodeJS.WritableStream | undefined)?.write(`${rows} ${cols}\n`);
+    // In the order of the output, so that a client still waiting for its snapshot hears of it after that.
+    output.write(frame(FRAME.size, JSON.stringify({ cols, rows })));
   };
   /** Everything a terminal needs to look as this one does, starting from any state, as a client reconnecting has the old screen. */
   const snapshot = () => {
@@ -337,10 +340,22 @@ async function attach(id: string, encoded: string): Promise<void> {
   const socket = await holderSocket(id, encoded);
   // Bytes reach the terminal on the other end of SSH unchanged; setRawMode would leave \n turning into \r\n.
   if (process.stdin.isTTY) { try { execFileSync('stty', ['raw', '-echo'], { stdio: ['inherit', 'ignore', 'ignore'], timeout: 5000 }); } catch { /* the terminal will echo */ } }
-  const size = () => JSON.stringify({ cols: process.stdout.columns, rows: process.stdout.rows });
+  // A terminal knows its own size; the variables are for a client without one, as in the tests.
+  const own = () => ({ cols: process.stdout.columns ?? (Number(process.env.COLUMNS) || undefined), rows: process.stdout.rows ?? (Number(process.env.LINES) || undefined) });
+  const size = () => JSON.stringify(own());
+  /** The screen's size when another client last changed it. A holder from an earlier version never says, and nothing is taken back. */
+  let theirs: { cols?: unknown; rows?: unknown } | undefined;
   socket.write(frame(FRAME.hello, size()));
   process.stdout.on('resize', () => socket.write(frame(FRAME.resize, size())));
-  process.stdin.on('data', (data: Buffer) => socket.write(frame(FRAME.input, data)));
+  process.stdin.on('data', (data: Buffer) => {
+    if (theirs && claimsScreen(data)) {
+      const { cols, rows } = own();
+      if (theirs.cols !== cols || theirs.rows !== rows) socket.write(frame(FRAME.resize, size()));
+      // Until the holder says what the size is now, this client has nothing more to ask for.
+      theirs = undefined;
+    }
+    socket.write(frame(FRAME.input, data));
+  });
   // The other end of SSH went away. The holder carries on.
   for (const stream of [process.stdin, process.stdout]) { stream.on('end', () => process.exit(0)); stream.on('error', () => process.exit(0)); }
   process.on('SIGHUP', () => process.exit(0));
@@ -348,6 +363,7 @@ async function attach(id: string, encoded: string): Promise<void> {
   socket.on('close', () => process.exit(ATTACH_EXIT.lost));
   socket.on('data', frames((type, payload) => {
     if (type === FRAME.output) { if (!process.stdout.write(Buffer.from(payload))) { socket.pause(); process.stdout.once('drain', () => socket.resume()); } return; }
+    if (type === FRAME.size) { try { theirs = JSON.parse(payload.toString('utf8')) as typeof theirs; } catch { /* as if it had not said */ } return; }
     if (type !== FRAME.exit) return;
     let code: number | null | undefined;
     try { code = (JSON.parse(payload.toString('utf8')) as { code?: number | null }).code; } catch { /* reported as a failure */ }

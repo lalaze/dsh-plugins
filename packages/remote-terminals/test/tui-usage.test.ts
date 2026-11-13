@@ -322,6 +322,25 @@ test('a machine that cannot be read is reported and read again next time, from t
   usage.close();
 });
 
+test('a conversation another DSH started counts from when it came here, on that DSH\'s CLI session', async () => {
+  // Two turns in its log: one before this DSH showed the conversation, which the first DSH counted, and one after.
+  let state = { version: 1, hosts: [], tasks: [], tuiSessions: ['here'], tuiDetails: { here: { key: 'there', usageFrom: '2026-11-10T17:00:00.000Z' } } } as unknown as State;
+  const store = { snapshot: () => structuredClone(state), update: async (change: (draft: State) => void) => { const draft = structuredClone(state); change(draft); state = draft; } };
+  const records: RemoteUsageRecord[] = [], asked: string[] = [];
+  const usage = new TuiUsage(store, {
+    target: async () => ({ hostId: 'h1', label: 'mac-mini', cwd: '/srv/app' }),
+    read: async (_host, _sessions, entries) => {
+      asked.push(entries[0].id);
+      return asked.length > 1 ? '@ 0 600 600 0 main\n' : `@ 0 0 600 0 main\n${reply('msg_1', '2026-11-10T16:00:01.000Z', { out: 5 })}\n${turnEnd('2026-11-10T16:00:03.000Z', 2500)}\n${reply('msg_2', '2026-11-10T18:00:01.000Z', { out: 7 })}\n${turnEnd('2026-11-10T18:00:03.000Z', 2500)}\n`;
+    },
+    emit: record => records.push(record),
+  });
+  await usage.sweep();
+  assert.equal(asked[0], tuiClaudeSession('there'));
+  assert.deepEqual(records.map(record => [record.startedAt, record.usage.outputTokens]), [['2026-11-10T18:00:01.000Z', 7]]);
+  usage.close();
+});
+
 test('Codex subagent threads are looked for in all files once, again at once when some turn up, then only in recent ones', async () => {
   const CHILD = '01a1ab1c-a93a-7242-ab5b-507292cd48da';
   let state = { version: 1, hosts: [], tasks: [], tuiSessions: ['c'], tuiDetails: { c: { cli: 'codex', thread: THREAD } } } as unknown as State;

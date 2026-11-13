@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { TurnUsage } from '@dsh-plugins/remote-core/domain.js';
-import type { TuiDetails, TuiStore } from './tui-state.js';
+import { tuiKey, type TuiDetails, type TuiStore } from './tui-state.js';
 import { claudeTurnUsage, codexTurnUsage, type RemoteUsageRecord } from '@dsh-plugins/remote-core/usage.js';
 import type { TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { tuiClaudeSession } from './tui.js';
@@ -328,7 +328,7 @@ export class TuiUsage {
     const details = this.store.snapshot().tuiDetails ?? {}, started = this.deps.now?.() ?? Date.now();
     const entries: TuiUsageEntry[] = sessions.map(({ sessionId }) => {
       const saved = details[sessionId], read = saved?.usage?.read ?? {};
-      if (saved?.cli !== 'codex') return { cli: 'claude', id: tuiClaudeSession(sessionId), read };
+      if (saved?.cli !== 'codex') return { cli: 'claude', id: tuiClaudeSession(tuiKey(sessionId, saved)), read };
       const scanned = Date.parse(saved.usage?.scannedAt ?? '');
       return { cli: 'codex', id: saved.thread ?? '', read, ...(Number.isFinite(scanned) ? { since: Math.max(0, Math.ceil((started - scanned) / 60_000)) + SCAN_MARGIN_MINUTES } : {}) };
     });
@@ -359,7 +359,12 @@ export class TuiUsage {
       }
     });
     for (const { sessionId, target, cli, turns } of results) {
-      for (const turn of turns) for (const record of tuiUsageRecords(turn, { cli, sessionId, host: target.label, workspace: target.cwd })) this.deps.emit(record);
+      // A conversation another DSH started had its earlier turns counted there.
+      const from = Date.parse(details[sessionId]?.usageFrom ?? '');
+      for (const turn of turns) {
+        if (Number.isFinite(from) && Date.parse(turn.startedAt) + turn.durationMs < from) continue;
+        for (const record of tuiUsageRecords(turn, { cli, sessionId, host: target.label, workspace: target.cwd })) this.deps.emit(record);
+      }
     }
     return more;
   }

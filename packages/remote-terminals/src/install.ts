@@ -1,7 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-client-connection';
 import { join } from 'node:path';
-import { field, identifier, RemoteError } from '@dsh-plugins/remote-core/domain.js';
+import { field, identifier, RemoteError, sharesSessions } from '@dsh-plugins/remote-core/domain.js';
+import { savedHosts } from '@dsh-plugins/remote-core/saved-hosts.js';
 import type { MachineFiles, RemoteAgentsMachines } from '@dsh-plugins/remote-core/machines.js';
 import { requireClient, transferBody, transferFailure, transferSize } from '@dsh-plugins/remote-core/transfer.js';
 import { workspacePath, type WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
@@ -9,6 +10,7 @@ import { endClosedTerminals, installWorkspaceTerminal, type ClosableTerminals } 
 import { installTuiActivity } from './tui-activity.js';
 import { TuiFiles } from './tui-files.js';
 import { TuiRemote } from './tui-remote.js';
+import { TuiSharing } from './tui-shared.js';
 import type { TuiStore } from './tui-state.js';
 import { TuiUsage } from './tui-usage.js';
 import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
@@ -34,7 +36,7 @@ export interface RemoteAgentsWorktrees {
 }
 
 /** `terminal.shell` is the Remote workspace launcher in DSH's shell menu, once installed. */
-export interface Terminals { terminal: { shell?: string }; worktrees: WorktreeService; tui: TuiSessions }
+export interface Terminals { terminal: { shell?: string }; worktrees: WorktreeService; tui: TuiSessions; sharing: TuiSharing }
 
 /**
  * Terminals that open in a conversation's remote workspace and outlive DSH, conversations whose view is Claude Code or
@@ -93,7 +95,11 @@ export function installTerminals(ctx: Context, machines: RemoteAgentsMachines, s
     machine: (path, signal) => worktrees.machine(path, signal),
   } satisfies RemoteAgentsWorktrees);
 
-  const sessionController = () => ctx.get('sessionController') as { list(input: object): Promise<{ items?: { sessionId: string; blank?: boolean }[] }>; rename(input: { sessionId: string; title: string }): Promise<unknown>; selectModel(input: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown> } | undefined;
+  const sessionController = () => ctx.get('sessionController') as {
+    list(input: object): Promise<{ items?: { sessionId: string; blank?: boolean; projections?: { values?: { title?: string | null } } }[] }>;
+    create(input: { workspaceId: string; sessionId: string }): Promise<{ sessionId: string }>;
+    rename(input: { sessionId: string; title: string }): Promise<unknown>; selectModel(input: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown>;
+  } | undefined;
   const tui = new TuiSessions(store, {
     verify: (id, signal) => machines.target(id, signal),
     session: id => (ctx.get('sessions') as { get?(id: string): { append(type: string, data: unknown): unknown } | undefined } | undefined)?.get?.(id),
@@ -115,7 +121,50 @@ export function installTerminals(ctx: Context, machines: RemoteAgentsMachines, s
     attach: (id, path, input, size, sha256, signal) => onMachine(id, signal, (machine, target) => machine.attach(target.cwd, path, input, size, sha256, signal)),
   });
   ctx.connection.fetch.register({ path: '/api/remote-terminals/tui-files', methods: ['POST'], requestBody: 'streaming', fetch: tuiFilesHandler(files) });
-  return { terminal, worktrees, tui };
+
+  // TUI conversations in every DSH that uses the machine; see tui-shared.ts. Nothing here belongs to one conversation,
+  // so there is no claim to check before a machine's list is read or written.
+  const onHost = <T>(hostId: string, action: (remote: TuiRemote) => Promise<T>) => machines.withWorkspace(hostId, async () => {}, files => action(new TuiRemote(files.transport)));
+  const dsh = <T>(name: string) => {
+    const value = ctx.get(name) as T | undefined;
+    if (!value) throw new Error(`DSH's ${name} is not available yet`);
+    return value;
+  };
+  const warn = (message: string) => { const logger = ctx.get('logger') as { warn?(text: string): void } | undefined; if (logger?.warn) logger.warn(message); else console.warn(`[dsh-remote-terminals] ${message}`); };
+  const sharing = new TuiSharing(store, tui, {
+    hosts: async () => {
+      const shared = new Set((await savedHosts(machines.stateFile)).filter(sharesSessions).map(host => host.id));
+      return machines.hosts().filter(host => shared.has(host.id)).map(({ id, label }) => ({ id, label }));
+    },
+    list: hostId => onHost(hostId, remote => remote.sharedTuis()),
+    put: (hostId, name, record) => onHost(hostId, remote => remote.putSharedTui(name, record)),
+    target: (id, signal) => machines.target(id, signal),
+    archived: () => { const ids = (ctx.get('workspaceRegistry') as { archivedSessionIds?: readonly string[] } | undefined)?.archivedSessionIds; return Array.isArray(ids) ? ids : undefined; },
+    archive: async (sessionId, archived) => {
+      const controller = dsh<{ archiveSession(request: { sessionId: string; stopActivity?: boolean }): Promise<unknown>; unarchiveSession(request: { sessionId: string }): Promise<unknown> }>('workspaceController');
+      await (archived ? controller.archiveSession({ sessionId, stopActivity: true }) : controller.unarchiveSession({ sessionId }));
+    },
+    rows: async () => new Map(((await sessionController()?.list({}))?.items ?? []).map(item => {
+      const title = item.projections?.values?.title;
+      return [item.sessionId, { blank: item.blank === true, ...(typeof title === 'string' ? { title } : {}) }];
+    })),
+    anchor: async (hostId, cwd, signal) => (await machines.createWorkspace(hostId, cwd, signal)).path,
+    workspace: async path => String((await dsh<{ create(request: { path: string }): Promise<{ workspace: { workspaceId: string } }> }>('workspaceController').create({ path })).workspace.workspaceId),
+    create: async (workspaceId, sessionId) => {
+      const controller = sessionController();
+      if (!controller) throw new Error('DSH sessions are not available yet');
+      return String((await controller.create({ workspaceId, sessionId })).sessionId);
+    },
+    warn,
+  });
+  sharing.start();
+  ctx.effect(() => () => sharing.close());
+  // Archiving or restoring one here reaches the list without waiting for the next round. DSH asks before it restores, so
+  // the round that follows a moment later sees it restored.
+  const archiveChanged = (request?: { sessionId?: unknown }) => { if (typeof request?.sessionId === 'string' && tui.list().includes(request.sessionId)) sharing.soon(); };
+  const listen = (ctx as unknown as { on?(event: string, listener: (request?: { sessionId?: unknown }) => void): unknown }).on;
+  for (const event of ['workspace/session-archived', 'workspace/session-unarchiving']) listen?.call(ctx, event, archiveChanged);
+  return { terminal, worktrees, tui, sharing };
 }
 
 /** A file dropped or pasted into a TUI conversation, which comes back as its absolute path on the conversation's machine. */
@@ -154,7 +203,7 @@ export async function worktreeAction(worktrees: WorktreeService, action: string,
 }
 
 /** The requests about TUI conversations. */
-export async function tuiAction(tui: TuiSessions, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+export async function tuiAction(tui: TuiSessions, action: string, input: Record<string, unknown>, signal: AbortSignal, changed: () => void = () => {}): Promise<unknown> {
   if (action === 'tuiSessions') return { sessions: tui.list(), codex: tui.codex(), localScroll: tui.localScroll() };
   if (action === 'tuiScroll') {
     if (typeof input.local !== 'boolean') throw new RemoteError('Invalid scrolling choice');
@@ -164,9 +213,14 @@ export async function tuiAction(tui: TuiSessions, action: string, input: Record<
   const sessionId = field(input.sessionId, 'session ID', 256);
   if (action === 'tuiStart') {
     await tui.start(sessionId, { cli: input.cli, model: input.model, effort: input.effort }, signal);
+    changed();
     return { sessionId };
   }
-  if (action === 'tuiTitle') return { title: await tui.syncTitle(sessionId, input.current, signal) };
+  if (action === 'tuiTitle') {
+    const title = await tui.syncTitle(sessionId, input.current, signal);
+    if (title !== undefined) changed();
+    return { title };
+  }
   if (action === 'tuiEnd') { await tui.end(sessionId, signal); return { ok: true }; }
   throw new RemoteError('Unknown workspace action');
 }

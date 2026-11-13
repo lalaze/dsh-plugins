@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { build } from 'esbuild';
-import { attachExitCode, ATTACH_EXIT, endHolderScript, HOLDERS_FOLDER, tabHolder, tuiHolder } from '../src/holder-protocol.js';
+import { attachExitCode, ATTACH_EXIT, claimsScreen, endHolderScript, HOLDERS_FOLDER, tabHolder, tuiHolder } from '../src/holder-protocol.js';
 import { attachCommand, holdTerminal } from '../src/terminal-hold.js';
 
 let python = false;
@@ -148,6 +148,43 @@ test('a client that stopped reading is dropped rather than holding up the CLI, a
   process.kill(holder, 'SIGTERM');
   await second.exited;
   stuck.child.kill('SIGKILL'); await stuck.exited;
+});
+
+test('two clients of different sizes: the screen is the size of whoever came last, then of whoever types', options, async () => {
+  const id = newId();
+  const wide = attach(id, SHELL, { COLUMNS: '120', LINES: '40' });
+  assert.ok(await until(() => wide.output().includes('> ')), wide.output());
+  const sizes = (client: Client) => [...client.output().matchAll(/size=(\d+) (\d+)/g)].map(match => `${match[1]}x${match[2]}`);
+  const ask = async (client: Client, expected: string, count: number) => {
+    client.send('echo size=$(stty size)\n');
+    assert.ok(await until(() => sizes(client).length >= count), client.output());
+    assert.equal(sizes(client).at(-1), expected);
+  };
+  await ask(wide, '40x120', 1);
+  // As a phone opening the conversation its computer has open.
+  const narrow = attach(id, 'exit 99', { COLUMNS: '50', LINES: '20' });
+  assert.ok(await until(() => narrow.output().includes('size=40 120')), narrow.output());
+  await ask(narrow, '20x50', 2);
+  // Back at the computer: typing there makes the screen its size again, without resizing its window.
+  await ask(wide, '40x120', 3);
+  await ask(narrow, '20x50', 4);
+  // What a terminal sends by itself, here a focus report, takes nothing: the screen stays the other client's.
+  wide.send('\x1b[I');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  await ask(narrow, '20x50', 5);
+  // The narrow one leaves, and the screen goes back to the one that is left.
+  narrow.child.kill('SIGKILL'); await narrow.exited;
+  await new Promise(resolve => setTimeout(resolve, 300));
+  wide.send('\x15echo size=$(stty size)\n');
+  assert.ok(await until(() => sizes(wide).at(-1) === '40x120'), wide.output());
+  wide.send('exit 0\n');
+  assert.equal(await wide.exited, 0);
+});
+
+test('typing takes the screen back, and what a terminal sends by itself does not', () => {
+  for (const typed of ['a', '\r', '\x7f', '\x03', '中', 'ls -la\r']) assert.equal(claimsScreen(Buffer.from(typed)), true, JSON.stringify(typed));
+  // Cursor position, device attributes, focus in and out, a mouse report, an arrow key, a bracketed paste.
+  for (const sent of ['\x1b[12;40R', '\x1b[?62;4c', '\x1b[I', '\x1b[O', '\x1b[<0;10;5M', '\x1b[A', '\x1b[200~pasted\x1b[201~', '']) assert.equal(claimsScreen(Buffer.from(sent)), false, JSON.stringify(sent));
 });
 
 test('holder IDs are stable, distinct and fit what the holder accepts', () => {

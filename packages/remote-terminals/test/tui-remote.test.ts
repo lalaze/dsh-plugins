@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, stat, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenSshTransport, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
@@ -88,4 +88,23 @@ test('a Codex thread\'s title records come from the name index and its own recor
   assert.equal(codexTitle(await tui(d.files).codexTitleRecords(THREAD)), 'Login work', 'the newest name wins');
   assert.equal(codexTitle(await tui(d.files).codexTitleRecords('01a1a95c-0000-7df3-8065-26d0933aeb53')), undefined, 'a thread that is gone has none');
   assert.throws(() => tui(d.files).codexTitleRecords('$(touch x)'), /Invalid Codex thread/);
+});
+
+test('the TUI conversations listed on a machine are read back as written, newest first, and a name is only ever a holder\'s', async t => {
+  const { root, files } = await directory(t), remote = tui(files);
+  assert.equal(await remote.sharedTuis(), '', 'none before the first one is listed');
+  const first = 'tui-' + '1'.repeat(32), second = 'tui-' + '2'.repeat(32);
+  const record = (title: string) => JSON.stringify({ v: 1, key: 'k', cli: 'claude', cwd: "/srv/it's here", title });
+  await remote.putSharedTui(first, record('one $(touch pwned) `id` \\n "quoted"'));
+  await remote.putSharedTui(second, record('二号'));
+  await remote.putSharedTui(first, record('one again'));
+  // What something else left in the folder is not a record.
+  await writeFile(join(root, '.dsh-remote-agents/tui-v1/notes.txt'), 'not a record\n');
+  await writeFile(join(root, '.dsh-remote-agents/tui-v1/.put.left'), 'half written');
+  assert.deepEqual((await remote.sharedTuis()).split('\n').filter(Boolean).sort(), [record('one again'), record('二号')].sort());
+  assert.equal((await stat(join(root, '.dsh-remote-agents/tui-v1', `${first}.json`))).mode & 0o777, 0o600, 'for this account only');
+  await assert.rejects(access(join(root, 'pwned')), 'nothing in a record runs');
+  await assert.rejects(remote.putSharedTui('../../.ssh/authorized_keys', record('x')), /Invalid TUI conversation/);
+  await assert.rejects(remote.putSharedTui(first, 'two\nlines'), /Invalid TUI conversation record/);
+  await assert.rejects(remote.putSharedTui(first, 'x'.repeat(5000)), /Invalid TUI conversation record/);
 });

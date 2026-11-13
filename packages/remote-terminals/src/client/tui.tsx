@@ -12,6 +12,7 @@ import { TuiPrompts, usePromptText } from './tui-prompt.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { findXterm, TuiRenderChoices, TuiRenderMenu, useWebglRenderer, type TuiScrollControl } from './tui-render.js';
 import { TuiScrollChoice, useConversationScrollback } from './tui-scroll.js';
+import { followNewSessions } from './tui-new-sessions.js';
 import { KeptTerminals, type KeptTerminal } from './tui-kept.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
@@ -349,11 +350,14 @@ export function installTuiSessions(ctx: Client): void {
     slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'remote-agents-tui-terminals' }, () => <TuiTerminalLayer services={services} />));
     scoped.effect(() => {
       const controller = new AbortController();
-      void api<{ sessions: string[]; codex?: string[]; localScroll?: boolean }>('tuiSessions', {}, controller.signal).then(value => {
-        store.set(value.sessions, value.codex);
-        if (typeof value.localScroll === 'boolean') services.scroll.load(value.localScroll);
+      const load = (first: boolean) => void api<{ sessions: string[]; codex?: string[]; localScroll?: boolean }>('tuiSessions', {}, controller.signal).then(value => {
+        // Asking again only looks for conversations that came from another DSH; the same answer changes nothing.
+        if (first || value.sessions.some(id => !store.has(id))) store.set(value.sessions, value.codex);
+        if (first && typeof value.localScroll === 'boolean') services.scroll.load(value.localScroll);
       }, () => {});
-      return () => controller.abort();
+      load(true);
+      const stop = followNewSessions(sessions, store.has, () => load(false));
+      return () => { stop(); controller.abort(); };
     });
     slots.inject('conversation.view', () => {
       const taken = new Map<SlotEntry, { own: unknown; wrapper: React.FC<any> }>();
