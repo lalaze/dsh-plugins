@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { SOURCE_KINDS } from './domain.js';
+import { SOURCE_KINDS, usesApi } from './domain.js';
 import { imageSize, rasterType } from './images.js';
 import { AssetError } from './workspace.js';
 /** Sources one DSH keeps. */
@@ -25,6 +25,12 @@ export function cleanSource(value, previous) {
         throw new AssetError('Give the source a name of up to 60 characters');
     if (!SOURCE_KINDS.includes(input.kind))
         throw new AssetError('Unknown kind of image API');
+    const model = typeof input.model === 'string' ? input.model.trim().replace(/^models\//, '') : '';
+    if (model.length > 200 || /[\s/?#]/.test(model) || CONTROL.test(model))
+        throw new AssetError('Name the model, such as gpt-image-2');
+    // Codex has no address and no key: it uses the login of the Codex CLI on the machine it runs on.
+    if (!usesApi(input.kind))
+        return { name, kind: input.kind, baseUrl: '', model, apiKey: '' };
     const raw = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : '';
     let url;
     try {
@@ -35,8 +41,7 @@ export function cleanSource(value, previous) {
     }
     if ((url.protocol !== 'https:' && url.protocol !== 'http:') || raw.length > 2048 || url.username || url.password || url.hash)
         throw new AssetError('The address must be a full http:// or https:// URL');
-    const model = typeof input.model === 'string' ? input.model.trim().replace(/^models\//, '') : '';
-    if (!model || model.length > 200 || /[\s/?#]/.test(model) || CONTROL.test(model))
+    if (!model)
         throw new AssetError('Name the model, such as gpt-image-2');
     let apiKey = previous?.apiKey ?? '';
     if (input.apiKey !== undefined) {
@@ -234,6 +239,8 @@ export async function generateImage(source, input, options = {}) {
     const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(new Error('timeout')), options.timeoutMs ?? GENERATE_TIMEOUT_MS);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal;
     const fetch = options.fetch ?? globalThis.fetch;
+    if (!usesApi(source.kind))
+        throw new AssetError(`${source.name} does not answer over HTTP`, 500);
     try {
         return await (source.kind === 'gemini' ? gemini : openai)(source, input, fetch, signal);
     }

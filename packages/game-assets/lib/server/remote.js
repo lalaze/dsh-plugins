@@ -32,15 +32,17 @@ export function remoteAnswer(output, exitCode) {
         throw new AssetError(typeof answer.error === 'string' ? answer.error : 'The workspace could not be scanned', typeof answer.status === 'number' ? answer.status : 500);
     return answer.result;
 }
-const TIMEOUT_MS = { scan: 180_000, place: 300_000 };
+const TIMEOUT_MS = { scan: 180_000, place: 300_000, codex: 330_000 };
 /** Output kept from one run: a scan of tens of thousands of images, compressed, stays far below it. */
 const OUTPUT_LIMIT = 96 * 1024 * 1024;
 /**
  * One request on the conversation's machine, in its workspace folder, which is verified again once the connection is
  * ready. An `upload` travels first, over the same connection, as no shell argument could hold a picture.
  */
-export async function runRemote(machines, sessionId, target, script, request, upload) {
-    const signal = AbortSignal.timeout(TIMEOUT_MS[request.op] ?? 60_000), chunks = [];
+export async function runRemote(machines, sessionId, target, script, request, upload, stop) {
+    const timeout = AbortSignal.timeout(TIMEOUT_MS[request.op] ?? 60_000), chunks = [];
+    // A request the user gave up on ends the command on the machine too, as a closed generate dialog does.
+    const signal = stop ? AbortSignal.any([timeout, stop]) : timeout;
     let size = 0;
     const exitCode = await machines.withWorkspace(target.hostId, async () => { await machines.target(sessionId, signal, target); }, async (files) => {
         if (upload) {
@@ -51,6 +53,8 @@ export async function runRemote(machines, sessionId, target, script, request, up
         return files.stream(target.cwd, remoteCommand(script, request), {}, data => { if ((size += data.length) <= OUTPUT_LIMIT)
             chunks.push(Buffer.from(data)); }, signal);
     }).catch(error => { throw error instanceof AssetError ? error : new AssetError(`The remote machine could not be reached: ${error instanceof Error ? error.message : String(error)}`, 502); });
+    if (stop?.aborted)
+        throw new AssetError('Generation stopped', 499);
     if (signal.aborted)
         throw new AssetError('The remote machine took too long to answer', 504);
     return remoteAnswer(Buffer.concat(chunks).toString('latin1'), exitCode);

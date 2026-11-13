@@ -5,8 +5,10 @@
 import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { runCodex } from './codex.js';
 import { detectEngine } from './detect.js';
-import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage } from './domain.js';
+import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage, isReference } from './domain.js';
+import { readProjectSource, writeProjectSource } from './project.js';
 export class AssetError extends Error {
     status;
     constructor(message, status = 400) {
@@ -16,7 +18,7 @@ export class AssetError extends Error {
 }
 /** Where Remote Agents' upload leaves a picture on a remote machine before the script puts it in place. */
 export const STAGING_DIR = '.dsh-remote-agents/attachments/game-assets';
-const STAGED = /^[a-f0-9]{64}\.(?:png|webp|jpe?g)$/;
+const STAGED = /^[a-f0-9]{64}\.(?:png|webp|jpe?g|json)$/;
 /** The bytes of an uploaded picture, checked against its digest; the upload is removed either way. */
 async function takeStaged(root, staged, sha256) {
     const name = staged?.startsWith(`${STAGING_DIR}/`) ? staged.slice(STAGING_DIR.length + 1) : '';
@@ -67,7 +69,7 @@ export async function readImage(root, path) {
     return readFile(file).catch(fsError);
 }
 /** Answers one request about the folder `root`, an existing directory with symbolic links resolved. */
-export async function handle(root, request, scanner, library) {
+export async function handle(root, request, scanner, library, extras = {}) {
     switch (request.op) {
         case 'scan': return scanner.scan(root, request.rules, request.retireDir);
         case 'detect': return { engine: await detectEngine(root) ?? null };
@@ -79,6 +81,27 @@ export async function handle(root, request, scanner, library) {
             const data = request.data !== undefined ? Buffer.from(request.data, 'base64') : await takeStaged(root, request.staged, request.sha256);
             try {
                 return await library.place(request.path, data, request.replace, request.retireDir);
+            }
+            catch (error) {
+                throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409);
+            }
+        }
+        case 'codex': {
+            const references = [];
+            for (const path of request.references) {
+                if (!isReference(path))
+                    throw new AssetError('Only PNG, WebP and JPEG images can be sent to an image API');
+                await readImage(root, path);
+                references.push(await realpath(resolve(root, path)));
+            }
+            const picture = await runCodex({ prompt: request.prompt, references, aspect: request.aspect, transparent: request.transparent, model: request.model }, { loginShell: request.loginShell, signal: extras.signal, command: extras.codexCommand });
+            return { data: picture.data.toString('base64'), mediaType: picture.mediaType, ...(picture.width ? { width: picture.width, height: picture.height } : {}), ...(picture.text ? { text: picture.text } : {}) };
+        }
+        case 'projectSource': return readProjectSource(root);
+        case 'setProjectSource': {
+            const bundle = request.staged ? JSON.parse((await takeStaged(root, request.staged, request.sha256)).toString('utf8')) : request.bundle ?? null;
+            try {
+                return await writeProjectSource(root, bundle);
             }
             catch (error) {
                 throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409);

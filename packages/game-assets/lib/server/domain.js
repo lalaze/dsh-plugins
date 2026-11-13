@@ -43,11 +43,15 @@ export function defaultRule(name, images = 0, codeFiles = 0, allCodeFiles = 0) {
 }
 /** Images and code directly in the workspace folder are listed under this name. */
 export const ROOT_FOLDER = '.';
-export const SOURCE_KINDS = ['openai', 'gemini'];
+export const SOURCE_KINDS = ['codex', 'openai', 'gemini'];
+/** Kinds that call an HTTP API with a key, from the DSH host; the others run where the workspace is. */
+export const usesApi = (kind) => kind !== 'codex';
 /** What a new source of each kind starts with, and models to offer while typing. */
 export const SOURCE_DEFAULTS = {
     openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-2', models: ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-1.5', 'gpt-image-1-mini'] },
     gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3.1-flash-image', models: ['gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-lite-image'] },
+    // Codex draws with its own image tool; the model only drives it, and Codex's default is used when it is empty.
+    codex: { baseUrl: '', model: '', models: [] },
 };
 /** Images one generation may be given as references. */
 export const REFERENCE_LIMIT = 4;
@@ -56,3 +60,15 @@ export const REFERENCE_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg'];
 export const isReference = (path) => REFERENCE_EXTENSIONS.includes(extensionOf(path));
 /** The longest prompt a generation takes. */
 export const PROMPT_LIMIT = 8000;
+/**
+ * In the workspace: the image source agents working in the project generate with, and the script they run for it.
+ * Committed with the project; it never holds a key.
+ */
+export const PROJECT_DIR = '.game-assets';
+export const PROJECT_SOURCE_FILE = `${PROJECT_DIR}/image-source.json`;
+export const PROJECT_SCRIPT = `${PROJECT_DIR}/generate-image.cjs`;
+export const PROJECT_README = `${PROJECT_DIR}/README.md`;
+/** Agent instruction files that get a short section on generating images. */
+export const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'];
+/** On the machine the project is on, under the user's home: keys of the sources projects there use, readable by the user alone. */
+export const KEYS_DIR = '.dsh-game-assets', KEYS_FILE = 'keys.json';

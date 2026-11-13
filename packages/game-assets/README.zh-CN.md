@@ -46,14 +46,15 @@ DSH 的对话标签页是对所有对话统一注册的，所以插件的做法�
 
 ## 生图来源
 
-图片来自你在 **生图来源** 里添加的生图接口，可以在插件设置页或生成对话框里添加。支持两类：
+图片来自你在 **生图来源** 里添加的来源，可以在插件设置页或生成对话框里添加。支持三类：
 
 | 类型 | 调用 | 例子 |
 | --- | --- | --- |
+| Codex | 在工作区所在的机器上运行 `codex exec`，用它自带的生图工具 | 那台机器上用 `codex login` 登录过的 Codex 命令行；不需要地址和密钥，消耗那个 ChatGPT 账号的额度。模型可不填，只决定驱动 Codex 的模型 |
 | OpenAI 兼容 | 没有参考图时 `POST /images/generations`，有参考图时 `POST /images/edits` | OpenAI（`https://api.openai.com/v1`，`gpt-image-2`），或提供相同接口的中转服务 |
 | Gemini | `POST /models/<模型>:generateContent`，要求返回图片 | Google（`https://generativelanguage.googleapis.com/v1beta`，`gemini-3.1-flash-image`），或提供该接口的中转服务 |
 
-每个来源有名称、地址、模型和 API 密钥，其中一个是默认来源。密钥只保存在运行 DSH 的电脑上，即 DSH 主目录下的 `storages/dsh-game-assets/image-sources.json`，只有文件所有者可读。页面只显示密钥最后四位，拿不到密钥本身。请求也从那台电脑发出，远程工作区同样如此。Node.js 的 `fetch` 只有在 DSH 以 `NODE_USE_ENV_PROXY=1` 运行时才会使用 `HTTPS_PROXY`；网络访问不到接口时，也可以改用中转服务的地址。
+每个接口类来源有名称、地址、模型和 API 密钥，其中一个来源是默认来源。Codex 在工作区所在的机器上运行：本地工作区在 DSH 所在电脑上（通过登录 shell 启动，所以从程序坞打开的 DSH 也能找到它），远程工作区在那台远程机器上；它在一个空的临时目录里以只读沙箱运行，参考图按路径附上。密钥只保存在运行 DSH 的电脑上，即 DSH 主目录下的 `storages/dsh-game-assets/image-sources.json`，只有文件所有者可读。页面只显示密钥最后四位，拿不到密钥本身。请求也从那台电脑发出，远程工作区同样如此。Node.js 的 `fetch` 只有在 DSH 以 `NODE_USE_ENV_PROXY=1` 运行时才会使用 `HTTPS_PROXY`；网络访问不到接口时，也可以改用中转服务的地址。
 
 对话框会发送描述、形状（方形、横向或纵向，取接口最接近的尺寸），对 OpenAI 兼容来源还会发送是否要透明背景。重绘时形状跟随原图；原图有透明像素时默认勾选透明背景。只有 PNG、WebP 和 JPEG 能作为参考图，GIF 和 SVG 会被略过。保存之前不会写入任何文件：
 
@@ -62,6 +63,22 @@ DSH 的对话标签页是对所有对话统一注册的，所以插件的做法�
 - **替换原图**：先把原图退役（移到退役文件夹，已有同名旧图时自动编号），再把新图写到原路径，代码照常能找到它，标签也保留。把新图退役后，在 **已退役** 里点 **恢复** 就能找回旧图。
 
 生成过程中关闭对话框会停止请求。单次生成超过五分钟会放弃。
+
+### 项目里的 agent
+
+生成对话框里还会显示**在项目里工作的 agent** 用哪个来源，点 **让它们用…** 会把当前选中的来源记录到项目里。之后项目里会有：
+
+- `.game-assets/image-source.json`：来源的名称、类型、模型和地址，不含密钥；
+- `.game-assets/generate-image.cjs`：只需要 Node.js 18 的生图脚本，以及说明用法的 `.game-assets/README.md`；
+- `AGENTS.md` 和 `CLAUDE.md` 里一段夹在 `<!-- dsh-game-assets:image-source -->` 标记之间的说明（文件不存在就新建；一个链接到另一个时只写一次）。
+
+不管 agent 由谁运行（DSH、远程 Claude Code 或 Codex、终端），都可以这样生图：
+
+```sh
+node .game-assets/generate-image.cjs --prompt "a blue slime, pixel art" --out assets/slime.png [--ref assets/hero.png] [--shape wide] [--transparent]
+```
+
+脚本把一张图保存到项目里的空闲路径，从不覆盖文件，尺寸是来源生成的尺寸，并以 JSON 输出路径和尺寸。接口类来源的密钥保存到项目所在机器的 `~/.dsh-game-assets/keys.json`，只有本人可读，远程工作区通过 Remote Agents 的上传通道送过去；也可以用 `DSH_IMAGE_API_KEY` 环境变量覆盖，比如在别的机器上。Codex 用运行脚本那台机器上的登录。**从项目中移除** 会删掉这些文件和说明段；之后在设置里修改来源，不会自动更新项目，需要重新写入。
 
 ### 它会改什么
 
@@ -72,12 +89,13 @@ DSH 的对话标签页是对所有对话统一注册的，所以插件的做法�
 | `.game-assets.json` 按图片路径保存标签和备注 | 打标签、写备注 |
 | 生成的图片写到你选的空闲路径 | 另存为新文件 |
 | 原图按上面的方式退役，新图写到原路径 | 替换原图 |
+| 写入或删除 `.game-assets/`，以及 `AGENTS.md`、`CLAUDE.md` 里带标记的一段 | 记录项目的生图来源 |
 
 两个文件都是普通 JSON，适合随项目一起提交，标签会跟着项目走，智能体也能读。退役文件夹可以按工作区改成别的（**扫描范围** → “退役的图片移到”），比如 `assets/art-retired`；它必须是工作区内的可见文件夹。移动之后空出来的文件夹会被删掉。
 
 只有上次扫描列出的图片才能被移动、打标签或替换。移动从不覆盖文件：目标位置已有同名文件时，图片留在原处并给出提示。新图会先以隐藏文件名写在目标旁边，再链接到目标位置，所以要么完整出现、要么不出现，也不会覆盖已有文件；替换时如果原图已退役但新图没写成，原图会被移回去。退役的图片不参与代码匹配，所以不会算作在用；退役文件夹里原本就有、但清单里没有记录的图片会显示为已退役，但无法在这里恢复。
 
-在工作区之外，插件只保存你的设置（标签页在哪里显示、每个工作区的扫描范围和退役文件夹）和生图来源，存放在 DSH 主目录下。
+在工作区之外，插件只保存你的设置（标签页在哪里显示、每个工作区的扫描范围和退役文件夹）和生图来源，存放在 DSH 主目录下；项目记录了接口类来源时，它的密钥保存在那个项目所在机器的 `~/.dsh-game-assets/` 里。
 
 ## 如何判断是否在用
 
@@ -114,7 +132,7 @@ DSH 的对话标签页是对所有对话统一注册的，所以插件的做法�
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.2.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.3.0.tgz"
 ```
 
 重启对应 profile 并刷新浏览器。桌面版请先完全退出 DSH，再用它自带的 `dsh` 加 `--profile desktop` 安装。要求 DSH `>=0.2.1-rc.2 <0.3.0`。
@@ -127,6 +145,6 @@ pnpm --filter dsh-game-assets preview:ui   # 在 DSH 之外预览标签页，扫
 node scripts/preview.mjs /path/to/game 4184
 ```
 
-宿主端（`src/`）负责扫描，并通过 `/api/game-assets` 提供图片；`src/workspace.ts` 是它在一个文件夹里做的全部事情，本机工作区在宿主进程里运行，远程工作区在发到那台机器的脚本 `src/remote-agent.ts` 里运行；客户端（`src/client/`）是标签页界面。引用规则都在 `src/references.ts`，要让它识别新的引用写法就改这里；所有会改动工作区的操作都在 `src/manage.ts`；`src/sources.ts` 保存生图来源并调用接口，`src/client/generate.tsx` 是生成对话框；哪些引擎算游戏项目列在 `src/detect.ts`。
+宿主端（`src/`）负责扫描，并通过 `/api/game-assets` 提供图片；`src/workspace.ts` 是它在一个文件夹里做的全部事情，本机工作区在宿主进程里运行，远程工作区在发到那台机器的脚本 `src/remote-agent.ts` 里运行；客户端（`src/client/`）是标签页界面。引用规则都在 `src/references.ts`，要让它识别新的引用写法就改这里；所有会改动工作区的操作都在 `src/manage.ts`；`src/sources.ts` 保存生图来源并调用接口，`src/codex.ts` 运行 Codex，`src/project.ts` 把来源记录到项目，`src/generate-image.ts` 是项目拿到的脚本，`src/client/generate.tsx` 是生成对话框；哪些引擎算游戏项目列在 `src/detect.ts`。
 
 MIT。

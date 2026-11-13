@@ -46,14 +46,15 @@ Tick the box in an image's corner to select it; Shift extends the selection, Ctr
 
 ## Image sources
 
-Pictures come from image APIs you add under **Image sources**, on the plugin's settings page or from the generate dialog. Two kinds are understood:
+Pictures come from image sources you add under **Image sources**, on the plugin's settings page or from the generate dialog. Three kinds are understood:
 
 | Kind | Speaks | For example |
 | --- | --- | --- |
+| Codex | `codex exec` with its own image tool, on the machine the workspace is on | The Codex CLI signed in there with `codex login`; no address, no key, it uses that ChatGPT account. A model is optional and only drives Codex |
 | OpenAI compatible | `POST /images/generations` without references, `POST /images/edits` with them | OpenAI (`https://api.openai.com/v1`, `gpt-image-2`), or a relay service that offers the same routes |
 | Gemini | `POST /models/<model>:generateContent`, asked for an image | Google (`https://generativelanguage.googleapis.com/v1beta`, `gemini-3.1-flash-image`), or a relay that offers it |
 
-Each source has a name, an address, a model and an API key; one of them is the default. Keys are kept only on the computer DSH runs on, in `storages/dsh-game-assets/image-sources.json` under the DSH home, readable by its owner alone. The page shows the last four characters of a key and never receives the key itself. Requests to the APIs go out from that computer, for remote workspaces too. Node.js's `fetch` uses `HTTPS_PROXY` only when DSH runs with `NODE_USE_ENV_PROXY=1`; a relay's address is the other way around a network that cannot reach the API.
+Each API source has a name, an address, a model and an API key; one source is the default. Codex runs where the workspace is: on the DSH host for a local workspace (through the login shell, so a DSH started from the Dock still finds it), on the remote machine for a remote one, in an empty scratch folder with a read-only sandbox, with the references attached by path. Keys are kept only on the computer DSH runs on, in `storages/dsh-game-assets/image-sources.json` under the DSH home, readable by its owner alone. The page shows the last four characters of a key and never receives the key itself. Requests to the APIs go out from that computer, for remote workspaces too. Node.js's `fetch` uses `HTTPS_PROXY` only when DSH runs with `NODE_USE_ENV_PROXY=1`; a relay's address is the other way around a network that cannot reach the API.
 
 The dialog sends the prompt, the shape (square, wide or tall, the API's nearest size) and, for an OpenAI-compatible source, whether the background should be transparent. A redraw starts with the image's shape and with transparency on when the image has see-through pixels. Only PNG, WebP and JPEG images can be references; GIF and SVG are left out. Nothing is written until you save:
 
@@ -62,6 +63,22 @@ The dialog sends the prompt, the shape (square, wide or tall, the API's nearest 
 - **Replace the image** retires the image first (to the retired folder, numbered if an earlier copy is there) and writes the picture at its path, so the code keeps finding it and its tags stay. **Retired → Restore** brings the old one back once the new one is retired.
 
 Closing the dialog while a picture is being generated stops the request. A generation gives up after five minutes.
+
+### Agents in the project
+
+The generate dialog also says which source the **agents working in the project** use, and **Let them use …** records the selected one. The project then holds:
+
+- `.game-assets/image-source.json`: the source's name, kind, model and address, never its key;
+- `.game-assets/generate-image.cjs`: a script that needs Node.js 18 and nothing else, and `.game-assets/README.md` on how to run it;
+- a short section between `<!-- dsh-game-assets:image-source -->` markers in `AGENTS.md` and `CLAUDE.md` (each created if missing, written once when one links to the other).
+
+An agent, whatever runs it (DSH, a remote Claude Code or Codex, a terminal), then generates with:
+
+```sh
+node .game-assets/generate-image.cjs --prompt "a blue slime, pixel art" --out assets/slime.png [--ref assets/hero.png] [--shape wide] [--transparent]
+```
+
+It saves one picture at a free path inside the project, never over a file, at the size the source makes, and prints the path and size as JSON. For an API source the key goes to `~/.dsh-game-assets/keys.json` on the machine the project is on, readable by the user alone, by Remote Agents' upload for a remote workspace; `DSH_IMAGE_API_KEY` overrides it, as on another machine. Codex uses the login of the machine the script runs on. **Remove from the project** takes the files and the sections out again; editing a source later does not update the project until it is written again.
 
 ### What it changes
 
@@ -72,12 +89,13 @@ Closing the dialog while a picture is being generated stops the request. A gener
 | `.game-assets.json` holds tags and notes by image path | Tagging and notes |
 | A generated picture is written to a free path you chose | Save as new file |
 | The image is retired as above, and the picture written at its path | Replace the image |
+| `.game-assets/` and a marked section in `AGENTS.md` and `CLAUDE.md` are written, or removed | Recording the project's image source |
 
 Both files are plain JSON meant to be committed with the project, so tags travel with it and an agent can read them. The retired folder can be another one per workspace (**Folders to scan** → *Retired images go to*), for example `assets/art-retired`; it must be a visible folder inside the workspace. Folders that a move leaves empty are removed.
 
 Only images the last scan listed can be moved, tagged or replaced. A move never replaces a file: if the target exists, the image stays where it is and is reported. A picture is written beside its place under a hidden name and then linked into it, so it appears whole or not at all and never over an existing file; if that fails after a replaced image was retired, the image is moved back. Retired images are not matched against code, so they never count as in use; an image already in the retired folder without an entry in the list is shown as retired but cannot be restored from here.
 
-Outside the workspace the plugin saves only your settings (where the tab appears, which folders each workspace scans and its retired folder) and your image sources, under the DSH home.
+Outside the workspace the plugin saves only your settings (where the tab appears, which folders each workspace scans and its retired folder) and your image sources, under the DSH home; and, when a project records an API source, its key in `~/.dsh-game-assets/` on that project's machine.
 
 ## How usage is decided
 
@@ -114,7 +132,7 @@ Settings of a remote workspace are kept by machine and folder. Retired images, t
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.2.1.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.3.0.tgz"
 ```
 
 Restart the profile and refresh the browser. For Desktop, quit DSH and use its bundled `dsh` with `--profile desktop`. Requires DSH `>=0.2.1-rc.2 <0.3.0`.
@@ -127,6 +145,6 @@ pnpm --filter dsh-game-assets preview:ui   # the tab outside DSH, over the curre
 node scripts/preview.mjs /path/to/game 4184
 ```
 
-The host half (`src/`) scans and serves images through `/api/game-assets`; `src/workspace.ts` is what it does in one folder, run in the host's process for a local workspace and inside `src/remote-agent.ts`, the script sent to the machine, for a remote one; the client half (`src/client/`) is the tab. `src/references.ts` holds the reference rules and is the place to teach it a new way code names a file; `src/manage.ts` is everything that changes a workspace; `src/sources.ts` keeps the image sources and calls their APIs, and `src/client/generate.tsx` is the dialog; `src/detect.ts` lists the engines that make a workspace a game project.
+The host half (`src/`) scans and serves images through `/api/game-assets`; `src/workspace.ts` is what it does in one folder, run in the host's process for a local workspace and inside `src/remote-agent.ts`, the script sent to the machine, for a remote one; the client half (`src/client/`) is the tab. `src/references.ts` holds the reference rules and is the place to teach it a new way code names a file; `src/manage.ts` is everything that changes a workspace; `src/sources.ts` keeps the image sources and calls their APIs, `src/codex.ts` runs Codex, `src/project.ts` records a source in a project and `src/generate-image.ts` is the script it gets, and `src/client/generate.tsx` is the dialog; `src/detect.ts` lists the engines that make a workspace a game project.
 
 MIT.

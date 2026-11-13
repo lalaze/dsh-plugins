@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, extensionOf, isReference } from './domain.js';
+import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, extensionOf, isReference, usesApi } from './domain.js';
 import { rasterType } from './images.js';
 import { Library, cleanImagePath, cleanRetireDir, cleanTag } from './manage.js';
 import { REMOTE_CHUNK, runRemote } from './remote.js';
@@ -122,16 +122,17 @@ export class AssetService {
             throw new AssetError('This conversation has no workspace folder', 409);
         if (!REMOTE_ANCHOR.test(cwd)) {
             const root = await realpath(cwd).catch(() => { throw new AssetError('The workspace folder is not available', 404); });
-            return { key: root, name: basename(root), root, call: request => handle(root, request, this.scanner, this.library(root)) };
+            const extras = { codexCommand: this.options.codex?.command };
+            return { key: root, name: basename(root), root, call: (request, signal) => handle(root, request, this.scanner, this.library(root), { ...extras, signal }) };
         }
         const machines = this.options.machines?.(), script = this.options.remoteScript;
         if (!machines || typeof machines.target !== 'function' || typeof machines.withWorkspace !== 'function' || !script)
             throw new AssetError('Assets of a remote workspace need Remote Agents 0.2.130 or newer', 409);
         const target = await machines.target(sessionId).catch(error => { throw new AssetError(`The remote workspace is not available: ${error instanceof Error ? error.message : String(error)}`, 409); });
-        const run = async (request) => runRemote(machines, sessionId, target, await script(), request);
+        const run = async (request, signal) => runRemote(machines, sessionId, target, await script(), request, undefined, signal);
         return {
             key: `remote:${target.hostId}:${target.cwd}`, name: target.cwd.replace(/\/+$/, '').split('/').pop() || target.cwd, host: target.label,
-            call: (async (request) => {
+            call: (async (request, signal) => {
                 // A long selection goes in several runs, so no command outgrows what a shell argument may hold.
                 if (request.op === 'retire' || request.op === 'restore') {
                     const all = { moved: [], failed: [] };
@@ -147,6 +148,14 @@ export class AssetService {
                     const staged = `${STAGING_DIR}/${sha256}.${extensionOf(request.path)}`;
                     return runRemote(machines, sessionId, target, await script(), { ...request, data: undefined, staged, sha256 }, { path: staged, data, sha256 });
                 }
+                // The bundle carries a key and a script: it travels by upload, never on a command line.
+                if (request.op === 'setProjectSource' && request.bundle) {
+                    const data = Buffer.from(JSON.stringify(request.bundle), 'utf8'), sha256 = createHash('sha256').update(data).digest('hex');
+                    const staged = `${STAGING_DIR}/${sha256}.json`;
+                    return runRemote(machines, sessionId, target, await script(), { op: 'setProjectSource', staged, sha256 }, { path: staged, data, sha256 });
+                }
+                if (request.op === 'codex')
+                    return run(request, signal);
                 if (request.op === 'tag') {
                     const all = {};
                     for (let i = 0; i < request.paths.length; i += REMOTE_CHUNK)
@@ -346,6 +355,13 @@ export class AssetService {
             if (!isReference(path))
                 throw new AssetError('Only PNG, WebP and JPEG images can be sent to an image API');
         }
+        if (!usesApi(source.kind)) {
+            // Codex runs on the workspace's machine, with that machine's login, and reads the references there.
+            const workspace = await this.workspace(sessionId), started = Date.now();
+            const picture = await workspace.call({ op: 'codex', prompt, references: [...new Set(paths)], aspect: input.aspect, transparent: input.transparent,
+                ...(source.model ? { model: source.model } : {}), ...(workspace.root ? { loginShell: this.options.codex?.loginShell ?? true } : {}) }, signal);
+            return { ...picture, model: source.model || 'Codex', source: source.name, ms: Date.now() - started };
+        }
         const references = await Promise.all([...new Set(paths)].map(async (path) => {
             const data = await this.raw(sessionId, path), type = rasterType(data);
             if (type !== 'png' && type !== 'jpeg' && type !== 'webp')
@@ -378,5 +394,26 @@ export class AssetService {
             throw new AssetError(replace === true ? 'Only an image of the last scan can be replaced' : 'A file of that name is already there', 409);
         const placed = await workspace.call({ op: 'place', path: clean, replace: replace === true, retireDir, data });
         return { ...placed, scan: await this.fresh(workspace) };
+    }
+    /** The image source the workspace records for its agents. */
+    async projectSource(sessionId) {
+        return (await this.workspace(sessionId)).call({ op: 'projectSource' });
+    }
+    /**
+     * Records a source for the agents working in the workspace, or with null removes it. The project gets the source
+     * without its key and the generate-image script; the key goes to the workspace machine's home folder.
+     */
+    async setProjectSource(sessionId, sourceId) {
+        const workspace = await this.workspace(sessionId);
+        if (sourceId === null)
+            return workspace.call({ op: 'setProjectSource', bundle: null });
+        if (typeof sourceId !== 'string' || !sourceId)
+            throw new AssetError('Invalid image source');
+        const source = await this.sourceStore.get(sourceId), script = await this.options.projectScript?.();
+        if (!script)
+            throw new AssetError('The generate-image script is missing from this build of the plugin', 500);
+        const bundle = { source: { id: source.id, name: source.name, kind: source.kind, model: source.model, baseUrl: source.baseUrl }, script,
+            ...(usesApi(source.kind) ? { key: source.apiKey } : {}) };
+        return workspace.call({ op: 'setProjectSource', bundle });
     }
 }

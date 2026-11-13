@@ -32,4 +32,4 @@ export interface Upload {
  * One request on the conversation's machine, in its workspace folder, which is verified again once the connection is
  * ready. An `upload` travels first, over the same connection, as no shell argument could hold a picture.
  */
-export declare function runRemote(machines: RemoteMachines, sessionId: string, target: RemoteTarget, script: string, request: WorkspaceRequest, upload?: Upload): Promise<unknown>;
+export declare function runRemote(machines: RemoteMachines, sessionId: string, target: RemoteTarget, script: string, request: WorkspaceRequest, upload?: Upload, stop?: AbortSignal): Promise<unknown>;

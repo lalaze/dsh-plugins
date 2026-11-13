@@ -1,4 +1,4 @@
-import { type AssetDetail, type GeneratedImage, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
+import { type AssetDetail, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
 import { type Failure, type Placed } from './manage.js';
 import { type RemoteMachines } from './remote.js';
 import { type Rules } from './scan.js';
@@ -19,6 +19,13 @@ export interface ServiceOptions {
     remoteScript?: () => Promise<string>;
     /** How image APIs are reached; tests answer for them. */
     fetch?: (input: string, init?: RequestInit) => Promise<Response>;
+    /** The bundled script recorded in projects for their agents. */
+    projectScript?: () => Promise<string>;
+    /** How Codex is started for a local workspace: through the login shell (the default), and which command; tests change both. */
+    codex?: {
+        loginShell?: boolean;
+        command?: string;
+    };
 }
 export declare class AssetService {
     private readonly cwdOf;
@@ -99,4 +106,11 @@ export declare class AssetService {
     save(sessionId: string, path: unknown, data: unknown, replace: unknown): Promise<Placed & {
         scan: FullScan;
     }>;
+    /** The image source the workspace records for its agents. */
+    projectSource(sessionId: string): Promise<ProjectSourceStatus>;
+    /**
+     * Records a source for the agents working in the workspace, or with null removes it. The project gets the source
+     * without its key and the generate-image script; the key goes to the workspace machine's home folder.
+     */
+    setProjectSource(sessionId: string, sourceId: unknown): Promise<ProjectSourceStatus>;
 }

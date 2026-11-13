@@ -158,11 +158,14 @@ export interface ProjectStatus {
 /** Images and code directly in the workspace folder are listed under this name. */
 export declare const ROOT_FOLDER = ".";
 /**
- * The kinds of image API a source may be: `openai` speaks OpenAI's Images API (`/images/generations` and
- * `/images/edits`), as OpenAI and most relay services do; `gemini` speaks Gemini's `generateContent`.
+ * The kinds of image source: `openai` speaks OpenAI's Images API (`/images/generations` and `/images/edits`), as
+ * OpenAI and most relay services do; `gemini` speaks Gemini's `generateContent`; `codex` runs the Codex CLI signed in
+ * on the machine the workspace is on, with its own image tool and no key.
  */
-export type SourceKind = 'openai' | 'gemini';
+export type SourceKind = 'openai' | 'gemini' | 'codex';
 export declare const SOURCE_KINDS: readonly SourceKind[];
+/** Kinds that call an HTTP API with a key, from the DSH host; the others run where the workspace is. */
+export declare const usesApi: (kind: SourceKind) => boolean;
 /** What a new source of each kind starts with, and models to offer while typing. */
 export declare const SOURCE_DEFAULTS: Record<SourceKind, {
     baseUrl: string;
@@ -217,3 +220,28 @@ export declare const REFERENCE_EXTENSIONS: readonly ["png", "webp", "jpg", "jpeg
 export declare const isReference: (path: string) => boolean;
 /** The longest prompt a generation takes. */
 export declare const PROMPT_LIMIT = 8000;
+/**
+ * In the workspace: the image source agents working in the project generate with, and the script they run for it.
+ * Committed with the project; it never holds a key.
+ */
+export declare const PROJECT_DIR = ".game-assets";
+export declare const PROJECT_SOURCE_FILE = ".game-assets/image-source.json";
+export declare const PROJECT_SCRIPT = ".game-assets/generate-image.cjs";
+export declare const PROJECT_README = ".game-assets/README.md";
+/** Agent instruction files that get a short section on generating images. */
+export declare const AGENT_FILES: readonly ["AGENTS.md", "CLAUDE.md"];
+/** On the machine the project is on, under the user's home: keys of the sources projects there use, readable by the user alone. */
+export declare const KEYS_DIR = ".dsh-game-assets", KEYS_FILE = "keys.json";
+/** The image source recorded in a project. */
+export interface ProjectSource {
+    id: string;
+    name: string;
+    kind: SourceKind;
+    model: string;
+    baseUrl: string;
+}
+/** What a workspace records: its source, and the files that carry it. */
+export interface ProjectSourceStatus {
+    source: ProjectSource | null;
+    files: string[];
+}
