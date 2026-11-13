@@ -1,5 +1,5 @@
 import { type Aspect, type ImageAnswer, type ProjectSourceStatus, type ScanResult, type ScannedAsset } from './domain.js';
-import type { Library, Moved, Placed } from './manage.js';
+import type { Library, Making, Moved, Placed } from './manage.js';
 import { type ProjectBundle } from './project.js';
 import type { Rules, Scanner } from './scan.js';
 export declare class AssetError extends Error {
@@ -41,6 +41,13 @@ export type WorkspaceRequest = {
     data?: string;
     staged?: string;
     sha256?: string;
+    made?: Making;
+}
+/** Brings the retired image `path` back where it came from, retiring the image there first. */
+ | {
+    op: 'revert';
+    path: string;
+    retireDir: string;
 }
 /** Generates a picture with the Codex CLI signed in on this machine; `references` are workspace paths. */
  | {
@@ -83,6 +90,7 @@ export interface WorkspaceAnswers {
     };
     read: ReadAnswer[];
     place: Placed;
+    revert: Placed;
     codex: CodexAnswer;
     projectSource: ProjectSourceStatus;
     setProjectSource: ProjectSourceStatus;

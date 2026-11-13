@@ -1,3 +1,4 @@
+import { type MadeInfo } from './domain.js';
 export interface RetiredEntry {
     from: string;
     to: string;
@@ -22,7 +23,12 @@ export interface Placed {
 export interface TagFile {
     tags: Record<string, string[]>;
     notes: Record<string, string>;
+    made: Record<string, MadeInfo>;
 }
+/** How a picture being saved was made; the time is added when it is written. */
+export type Making = Omit<MadeInfo, 'at'>;
+/** A record of how a picture was made, as it may be kept; undefined when it is not one. */
+export declare function cleanMade(value: unknown, at?: string): MadeInfo | undefined;
 export declare const TAG_LIMIT = 40, TAGS_PER_IMAGE = 20, NOTE_LIMIT = 2000;
 /** A tag as kept: trimmed, single-spaced, without commas or control characters; undefined when nothing usable is left. */
 export declare function cleanTag(value: unknown): string | undefined;
@@ -70,7 +76,14 @@ export declare class Library {
     /**
      * Writes a new picture at `path`, which must be free. With `replace`, the image at `path` is retired first, to a free
      * name in the retired folder, and moved back if the picture cannot be written; its tags and note stay with the path,
-     * as the new picture takes over its role in the game.
+     * as the new picture takes over its role in the game, while the record of how it was made goes with it. `made` says
+     * how the new picture was made.
      */
-    place(path: string, data: Buffer, replace: boolean, retireDir: string): Promise<Placed>;
+    place(path: string, data: Buffer, replace: boolean, retireDir: string, made?: Making): Promise<Placed>;
+    /**
+     * Brings the retired image `path` back to where it came from. An image there now is retired first, to a free name, so
+     * going back is itself a version that can be gone back to; if the move fails it returns to its place. The record of
+     * how each picture was made goes with its file; the tags and note stay with the place unless it had none.
+     */
+    revert(path: string, retireDir: string): Promise<Placed>;
 }

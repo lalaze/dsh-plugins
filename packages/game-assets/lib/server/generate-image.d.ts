@@ -5,6 +5,7 @@ export interface Options {
     refs: string[];
     aspect: Aspect;
     transparent: boolean;
+    replace?: boolean;
 }
 export declare function parseArgs(argv: string[]): Promise<Options | 'help'>;
 /** Generates and saves; answers what to print. `root` is the project folder, the one that holds `.game-assets`. */

@@ -4,17 +4,19 @@
  * needs Node.js 18 or newer and nothing else.
  */
 import { spawnSync } from 'node:child_process';
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { runCodex } from './codex.js';
 import { KEYS_DIR, KEYS_FILE, PROJECT_SOURCE_FILE, REFERENCE_LIMIT, extensionOf, isReference, usesApi } from './domain.js';
 import { Library, cleanImagePath } from './manage.js';
 import { generateImage } from './sources.js';
-const USAGE = `Usage: node ${PROJECT_SOURCE_FILE.replace('image-source.json', 'generate-image.cjs')} --prompt <text> --out <path> [--ref <image>]... [--shape square|wide|tall] [--transparent]
+const USAGE = `Usage: node ${PROJECT_SOURCE_FILE.replace('image-source.json', 'generate-image.cjs')} --prompt <text> --out <path> [--ref <image>]... [--shape square|wide|tall] [--transparent] [--replace]
 
 Generates one picture with the project's image source and saves it at --out, a new .png, .webp or .jpg file inside the
-project. An existing file is never replaced. Prints {"path", "width", "height", "bytes", "source", "model"} as JSON.`;
+project; an existing file is never overwritten. With --replace, the image at --out is redrawn in place: it is retired
+first, and DSH's Assets tab keeps it in the image's history to go back to. Prints {"path", "width", "height", "bytes",
+"source", "model"} as JSON, and "retired" when an image was replaced.`;
 const EXTENSION = { 'image/png': 'png', 'image/webp': 'webp', 'image/jpeg': 'jpg' };
 const ASPECTS = ['square', 'wide', 'tall'];
 class UsageError extends Error {
@@ -42,6 +44,8 @@ export async function parseArgs(argv) {
         }
         else if (arg === '--transparent')
             options.transparent = true;
+        else if (arg === '--replace')
+            options.replace = true;
         else
             throw new UsageError(`Unknown option ${arg}`);
     }
@@ -85,15 +89,22 @@ export async function generate(root, options, cwd = process.cwd()) {
         ? await generateImage({ ...source, apiKey: await keyOf(source) }, { prompt: options.prompt, aspect: options.aspect, transparent: options.transparent && source.kind !== 'gemini',
             references: await Promise.all(refs.map(async (rel) => { const data = await readFile(join(root, rel)); return { name: basename(rel), data, mediaType: `image/${extensionOf(rel) === 'jpg' ? 'jpeg' : extensionOf(rel)}` }; })) })
         : await runCodex({ prompt: options.prompt, references: refs.map(rel => join(root, rel)), aspect: options.aspect, transparent: options.transparent, model: source.model });
-    // The file takes the picture's own format; a name that says otherwise is corrected rather than mislabelled.
-    const extension = EXTENSION[picture.mediaType], wanted = extensionOf(out);
+    // The file takes the picture's own format; a name that says otherwise is corrected rather than mislabelled, unless
+    // it replaces an image, whose name the game uses.
+    const extension = EXTENSION[picture.mediaType], wanted = extensionOf(out), same = extension === wanted || (extension === 'jpg' && wanted === 'jpeg');
     let renamed = false;
-    if (extension && wanted !== extension && !(extension === 'jpg' && wanted === 'jpeg')) {
+    if (extension && !same) {
+        if (options.replace)
+            throw new Error(`The source made a .${extension} picture, which cannot replace the .${wanted} image ${out}`);
         out = `${out.slice(0, out.length - wanted.length)}${extension}`;
         renamed = true;
     }
-    const placed = await new Library(root).place(out, picture.data, false, '_retired');
-    return { path: placed.path, width: picture.width, height: picture.height, bytes: picture.data.length, source: source.name, model: source.model || undefined, ...(renamed ? { note: `saved as .${extension}, the format the source made` } : {}) };
+    const exists = await stat(join(root, out)).then(info => info.isFile(), () => false);
+    if (exists && !options.replace)
+        throw new Error(`${out} already exists: pass --replace to redraw it in place (the old one is kept), or choose another --out`);
+    const placed = await new Library(root).place(out, picture.data, exists, source.retireDir || '_retired', { source: source.name, ...(source.model ? { model: source.model } : {}), prompt: options.prompt, by: 'agent' });
+    return { path: placed.path, width: picture.width, height: picture.height, bytes: picture.data.length, source: source.name, model: source.model || undefined,
+        ...(placed.retired ? { retired: placed.retired } : {}), ...(renamed ? { note: `saved as .${extension}, the format the source made` } : {}) };
 }
 async function main() {
     // Node.js uses HTTPS_PROXY only when told to; an API reached through a proxy needs it.

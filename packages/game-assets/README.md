@@ -60,9 +60,15 @@ The dialog sends the prompt, the shape (square, wide or tall, the API's nearest 
 
 - The new picture is shown beside the image it redraws, already scaled to that image's pixel size: **Sharp pixels** for small sprites (128 px or less), **Smooth** for the rest, or **Keep the API's size**. A transparent picture is fitted whole; an opaque one, such as a background, is cropped to fill the size.
 - **Save as new file** writes it to a free path, by default `<name>-redraw.<ext>` beside the image, or `generated.png` in the folder being looked at.
-- **Replace the image** retires the image first (to the retired folder, numbered if an earlier copy is there) and writes the picture at its path, so the code keeps finding it and its tags stay. **Retired → Restore** brings the old one back once the new one is retired.
+- **Replace the image** retires the image first (to the retired folder, numbered if an earlier copy is there) and writes the picture at its path, so the code keeps finding it and its tags stay. The old one is listed under the image's [earlier versions](#earlier-versions).
 
 Closing the dialog while a picture is being generated stops the request. A generation gives up after five minutes.
+
+### Earlier versions
+
+Every image that took another's place keeps the one before: the detail pane of an image lists its **Earlier versions**, newest first, each with when it was replaced and how it was made. **Go back** returns that version to the image's path and retires the current one in its place, so going back is itself a version you can go back to, and nothing is ever deleted. A retired version opened on its own has **Go back to this version** for the same.
+
+Each picture saved from the generate dialog or by the project's script records how it was made (the source, the model, the prompt, the time, and whether an agent made it) in `.game-assets.json` under its path. The record moves with the file when it is retired or brought back; the tags and the note stay with the place. Every version is a whole file in the retired folder: retire or delete old ones there when they are no longer wanted.
 
 ### Agents in the project
 
@@ -75,10 +81,10 @@ The generate dialog also says which source the **agents working in the project**
 An agent, whatever runs it (DSH, a remote Claude Code or Codex, a terminal), then generates with:
 
 ```sh
-node .game-assets/generate-image.cjs --prompt "a blue slime, pixel art" --out assets/slime.png [--ref assets/hero.png] [--shape wide] [--transparent]
+node .game-assets/generate-image.cjs --prompt "a blue slime, pixel art" --out assets/slime.png [--ref assets/hero.png] [--shape wide] [--transparent] [--replace]
 ```
 
-It saves one picture at a free path inside the project, never over a file, at the size the source makes, and prints the path and size as JSON. For an API source the key goes to `~/.dsh-game-assets/keys.json` on the machine the project is on, readable by the user alone, by Remote Agents' upload for a remote workspace; `DSH_IMAGE_API_KEY` overrides it, as on another machine. Codex uses the login of the machine the script runs on. **Remove from the project** takes the files and the sections out again; editing a source later does not update the project until it is written again.
+It saves one picture at a free path inside the project, never over a file; with `--replace` it redraws the image at `--out` in place, retiring the old one as **Replace the image** does, so it shows up under that image's earlier versions, at the size the source makes, and prints the path and size as JSON. For an API source the key goes to `~/.dsh-game-assets/keys.json` on the machine the project is on, readable by the user alone, by Remote Agents' upload for a remote workspace; `DSH_IMAGE_API_KEY` overrides it, as on another machine. Codex uses the login of the machine the script runs on. **Remove from the project** takes the files and the sections out again; editing a source later does not update the project until it is written again.
 
 ### What it changes
 
@@ -86,7 +92,8 @@ It saves one picture at a free path inside the project, never over a file, at th
 | --- | --- |
 | Images move into `_retired/<their path>` and back | Retire and Restore |
 | `_retired/retired.json` lists where each retired image came from | Retire and Restore |
-| `.game-assets.json` holds tags and notes by image path | Tagging and notes |
+| `.game-assets.json` holds tags, notes and how each picture was made, by image path | Tagging, notes, saving a generated picture |
+| The current image is retired and the chosen version moved back to its path | Go back |
 | A generated picture is written to a free path you chose | Save as new file |
 | The image is retired as above, and the picture written at its path | Replace the image |
 | `.game-assets/` and a marked section in `AGENTS.md` and `CLAUDE.md` are written, or removed | Recording the project's image source |
@@ -132,7 +139,7 @@ Settings of a remote workspace are kept by machine and folder. Retired images, t
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.3.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.4.0.tgz"
 ```
 
 Restart the profile and refresh the browser. For Desktop, quit DSH and use its bundled `dsh` with `--profile desktop`. Requires DSH `>=0.2.1-rc.2 <0.3.0`.

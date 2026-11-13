@@ -18,6 +18,8 @@ export const REF_LIMIT = 8;
 export const ASSET_LIMIT = 30000;
 export const extensionOf = (path) => /\.([A-Za-z0-9]+)$/.exec(path)?.[1].toLowerCase() ?? '';
 export const isImage = (path) => IMAGE_EXTENSIONS.includes(extensionOf(path));
+/** The longest prompt kept with a picture. */
+export const MADE_PROMPT_LIMIT = 2000;
 export const DEFAULT_RETIRE_DIR = '_retired';
 /** In the retired folder: where each retired image came from. */
 export const RETIRED_LIST = 'retired.json';

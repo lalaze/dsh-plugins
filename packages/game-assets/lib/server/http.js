@@ -11,7 +11,7 @@ const text = (value, label) => {
 const summary = (scan) => ({ ...scan, assets: scan.assets.map(({ refs: _refs, ...asset }) => asset) });
 /**
  * `GET ?sessionId&path` answers an image's bytes; `POST` takes a JSON `action`: `scan`, `detail`, `images` and `configure` read a workspace;
- * `retire`, `restore`, `tag`, `note` and `save` change it (see manage.ts);
+ * `retire`, `restore`, `revert`, `tag`, `note` and `save` change it (see manage.ts);
  * `project`, `setProject`, `mode` and `setMode` decide where the tab appears;
  * `sources`, `saveSource`, `deleteSource` and `defaultSource` keep the image sources, `generate` asks one for a picture,
  * and `projectSource` and `setProjectSource` read and record the one the project's agents use. */
@@ -85,7 +85,11 @@ export function createHandler(service, log) {
                         throw new AssetError('Invalid image source');
                     return Response.json(await service.setProjectSource(sessionId, input.sourceId), { headers });
                 case 'save': {
-                    const result = await service.save(sessionId, input.path, input.data, input.replace);
+                    const result = await service.save(sessionId, input.path, input.data, input.replace, input.made);
+                    return Response.json({ ...result, scan: summary(result.scan) }, { headers });
+                }
+                case 'revert': {
+                    const result = await service.revert(sessionId, input.path);
                     return Response.json({ ...result, scan: summary(result.scan) }, { headers });
                 }
                 default: throw new AssetError('Unknown assets action');

@@ -103,7 +103,14 @@ export declare class AssetService {
      * Writes a picture to the workspace. A new path must be free and outside the retired folder; `replace` takes the place
      * of an image of the last scan, which is retired first and can be restored.
      */
-    save(sessionId: string, path: unknown, data: unknown, replace: unknown): Promise<Placed & {
+    save(sessionId: string, path: unknown, data: unknown, replace: unknown, made?: unknown): Promise<Placed & {
+        scan: FullScan;
+    }>;
+    /**
+     * Goes back to an earlier version: the retired image `path` returns where it came from, and the image there now is
+     * retired in its place, so it can be gone back to as well.
+     */
+    revert(sessionId: string, path: unknown): Promise<Placed & {
         scan: FullScan;
     }>;
     /** The image source the workspace records for its agents. */

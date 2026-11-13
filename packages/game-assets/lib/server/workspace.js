@@ -80,12 +80,19 @@ export async function handle(root, request, scanner, library, extras = {}) {
         case 'place': {
             const data = request.data !== undefined ? Buffer.from(request.data, 'base64') : await takeStaged(root, request.staged, request.sha256);
             try {
-                return await library.place(request.path, data, request.replace, request.retireDir);
+                return await library.place(request.path, data, request.replace, request.retireDir, request.made);
             }
             catch (error) {
                 throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409);
             }
         }
+        case 'revert':
+            try {
+                return await library.revert(request.path, request.retireDir);
+            }
+            catch (error) {
+                throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409);
+            }
         case 'codex': {
             const references = [];
             for (const path of request.references) {
