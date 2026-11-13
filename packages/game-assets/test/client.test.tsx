@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { offerTuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
-import type { Asset, ScanResult, SourceView } from '../src/domain.js';
+import type { Asset, ProjectSource, ScanResult, SourceView } from '../src/domain.js';
 import { BUNDLE_KEY, VIEW_ID, apply, fileAddress } from '../src/client/index.js';
 import { resetProjects } from '../src/client/projects.js';
 import { resetSources } from '../src/client/sources.js';
@@ -25,7 +25,7 @@ const scan = (): ScanResult => ({
 
 let root: Root | undefined, container: HTMLElement, requests: Record<string, unknown>[], opened: unknown[][];
 /** What the simulated host has saved: where the tab appears, and the user's choice per conversation's workspace. */
-let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string };
+let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string; project: ProjectSource | null };
 /** A PNG of 1024 × 1024, as an image API answers. */
 const GENERATED = (() => { const data = Buffer.alloc(40); data.writeUInt32BE(0x89504e47, 0); data.writeUInt32BE(0x0d0a1a0a, 4); data.writeUInt32BE(13, 8); data.write('IHDR', 12, 'latin1'); data.writeUInt32BE(1024, 16); data.writeUInt32BE(1024, 20); return data; })();
 /** The workspace as the simulated host answers it: retired images sit in the retired folder, tags are attached. */
@@ -44,7 +44,7 @@ const project = (sessionId: string) => {
 };
 beforeEach(() => {
   const { window } = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true });
-  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [] };
+  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [], project: null };
   const fetch = async (url: string, init: { method?: string; body?: string; headers: Record<string, string> }) => {
     assert.equal(init.headers['X-DSH-Game-Assets'], '1');
     if (!init.body) { requests.push({ image: new URL(url, 'http://localhost/').searchParams.get('path') }); return new Response(new Uint8Array([1, 2, 3])); }
@@ -69,6 +69,13 @@ beforeEach(() => {
       saved.sources = index >= 0 ? saved.sources.map(source => source.id === id ? next : source) : [...saved.sources, next];
       saved.defaultId ??= id;
       return Response.json({ ...sources(), id });
+    }
+    const recorded = () => ({ source: saved.project, files: saved.project ? ['.game-assets/image-source.json', '.game-assets/generate-image.cjs', '.game-assets/README.md', 'AGENTS.md', 'CLAUDE.md'] : [] });
+    if (body.action === 'projectSource') return Response.json(recorded());
+    if (body.action === 'setProjectSource') {
+      const source = saved.sources.find(entry => entry.id === body.sourceId);
+      saved.project = source ? { id: source.id, name: source.name, kind: source.kind, model: source.model, baseUrl: source.baseUrl } : null;
+      return Response.json(recorded());
     }
     if (body.action === 'defaultSource') { saved.defaultId = body.id; return Response.json(sources()); }
     if (body.action === 'deleteSource') { saved.sources = saved.sources.filter(source => source.id !== body.id); if (saved.defaultId === body.id) saved.defaultId = saved.sources[0]?.id ?? null; return Response.json(sources()); }
@@ -521,11 +528,14 @@ test('Redraw asks for an image source first, then generates from the image and s
   await settle();
   assert.equal(container.querySelector('.ga-dialog h3')!.textContent, 'Redraw npc.png');
   assert.match(container.querySelector('.ga-dialog')!.textContent!, /No image source yet/);
-  // A new source starts as OpenAI with its address and model; switching kind brings Gemini's.
+  // A new source starts as Codex, which has no address or key; switching kind brings the others' addresses and models.
+  const kind = (label: string) => click([...container.querySelectorAll('.ga-sform label')].find(node => node.textContent === label)!.querySelector('input'));
+  assert.deepEqual([field('Name')!.value, field('Model')!.value, field('Model')!.placeholder, field('Address'), field('API key')], ['Codex', '', 'Codex’s default', undefined, undefined]);
+  await kind('OpenAI compatible');
   assert.deepEqual([field('Name')!.value, field('Address')!.value, field('Model')!.value], ['OpenAI compatible', 'https://api.openai.com/v1', 'gpt-image-2']);
-  await click([...container.querySelectorAll('.ga-sform label')].find(label => label.textContent === 'Gemini')!.querySelector('input'));
+  await kind('Gemini');
   assert.deepEqual([field('Name')!.value, field('Model')!.value], ['Gemini', 'gemini-3.1-flash-image']);
-  await click([...container.querySelectorAll('.ga-sform label')].find(label => label.textContent === 'OpenAI compatible')!.querySelector('input'));
+  await kind('OpenAI compatible');
   await typeInto(field('Name'), 'Relay');
   await typeInto(field('Address'), 'https://relay.example/v1');
   await typeInto(field('API key'), 'sk-test-5678');
@@ -626,3 +636,45 @@ test('the settings page lists image sources without their keys, and sets the def
   assert.deepEqual(sent().at(-1), { action: 'deleteSource', id: 'g' });
   assert.deepEqual(texts('.ga-srow b'), ['Relay默认']);
 });
+
+test('the generate dialog records a source in the project for its agents, picks the recorded one first, and removes it again', async () => {
+  saved.sources = [{ id: 'a', name: 'Relay', kind: 'openai', baseUrl: 'https://relay.example/v1', model: 'gpt-image-2', keyHint: '…1234' }, { id: 'c', name: 'Codex', kind: 'codex', baseUrl: '', model: '', keyHint: '' }];
+  saved.defaultId = 'a';
+  await mount('s1');
+  await click(container.querySelector('[aria-label="Generate a new picture…"]'));
+  await settle();
+  const row = () => container.querySelector('.ga-project')!.textContent;
+  assert.equal(row(), 'Agents in this project cannot generate images yet.Let them use “Relay”');
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /This writes \.game-assets\/ \(the source without its key, and a script agents run\) and a short section in AGENTS\.md and CLAUDE\.md\. The key is saved on the machine the project is on/);
+  // Codex is listed by name only, as it has no model of its own here; choosing it changes what the note says.
+  assert.deepEqual(texts('.ga-dialog select[aria-label=Source] option'), ['Relay · gpt-image-2', 'Codex']);
+  await pick(container.querySelector('.ga-dialog select[aria-label=Source]'), 'c');
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /Agents use the Codex signed in on the machine the project is on\./);
+  await click(button('.ga-project', 'Let them use “Codex”'));
+  await settle();
+  assert.deepEqual(sent().filter(request => request.action === 'setProjectSource'), [{ action: 'setProjectSource', sessionId: 's1', sourceId: 'c' }]);
+  assert.equal(row(), 'Agents in this project generate images with “Codex”.Write it againRemove from the project');
+  await click(button('.ga-dialog', 'Cancel'));
+
+  // Opened again, the dialog starts on the source the project records, not the default.
+  await click(container.querySelector('[aria-label="Generate a new picture…"]'));
+  await settle();
+  assert.equal((container.querySelector('.ga-dialog select[aria-label=Source]') as HTMLSelectElement).value, 'c');
+  await pick(container.querySelector('.ga-dialog select[aria-label=Source]'), 'a');
+  assert.equal(row(), 'Agents in this project generate images with “Codex”.Switch them to “Relay”Remove from the project');
+  await click(button('.ga-project', 'Remove from the project'));
+  await settle();
+  assert.deepEqual(sent().filter(request => request.action === 'setProjectSource').at(-1), { action: 'setProjectSource', sessionId: 's1', sourceId: null });
+  assert.equal(row(), 'Agents in this project cannot generate images yet.Let them use “Relay”');
+});
+
+test('a Codex source is added with a name only', async () => {
+  const dsh = await host(['s1']);
+  await render(dsh.settings().component, {});
+  await click(button('.ga-sources', 'Add image source'));
+  await act(async () => { container.querySelector('.ga-sform')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+  await settle();
+  assert.deepEqual(sent().at(-1), { action: 'saveSource', source: { name: 'Codex', kind: 'codex', model: '', baseUrl: '' } });
+  assert.deepEqual(texts('.ga-srow .ga-wname > span'), ['Codex · Codex’s default · signed in on the workspace’s machine']);
+});
+

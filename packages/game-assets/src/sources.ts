@@ -6,7 +6,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { SOURCE_KINDS, type Aspect, type SourceKind, type SourcesAnswer, type SourceView } from './domain.js';
+import { SOURCE_KINDS, usesApi, type Aspect, type SourceKind, type SourcesAnswer, type SourceView } from './domain.js';
 import { imageSize, rasterType } from './images.js';
 import { AssetError } from './workspace.js';
 
@@ -27,12 +27,15 @@ export function cleanSource(value: unknown, previous?: ImageSource): Omit<ImageS
   const name = typeof input.name === 'string' ? input.name.trim() : '';
   if (!name || name.length > 60 || CONTROL.test(name)) throw new AssetError('Give the source a name of up to 60 characters');
   if (!SOURCE_KINDS.includes(input.kind as SourceKind)) throw new AssetError('Unknown kind of image API');
+  const model = typeof input.model === 'string' ? input.model.trim().replace(/^models\//, '') : '';
+  if (model.length > 200 || /[\s/?#]/.test(model) || CONTROL.test(model)) throw new AssetError('Name the model, such as gpt-image-2');
+  // Codex has no address and no key: it uses the login of the Codex CLI on the machine it runs on.
+  if (!usesApi(input.kind as SourceKind)) return { name, kind: input.kind as SourceKind, baseUrl: '', model, apiKey: '' };
   const raw = typeof input.baseUrl === 'string' ? input.baseUrl.trim() : '';
   let url: URL;
   try { url = new URL(raw); } catch { throw new AssetError('The address must be a full http:// or https:// URL'); }
   if ((url.protocol !== 'https:' && url.protocol !== 'http:') || raw.length > 2048 || url.username || url.password || url.hash) throw new AssetError('The address must be a full http:// or https:// URL');
-  const model = typeof input.model === 'string' ? input.model.trim().replace(/^models\//, '') : '';
-  if (!model || model.length > 200 || /[\s/?#]/.test(model) || CONTROL.test(model)) throw new AssetError('Name the model, such as gpt-image-2');
+  if (!model) throw new AssetError('Name the model, such as gpt-image-2');
   let apiKey = previous?.apiKey ?? '';
   if (input.apiKey !== undefined) {
     if (typeof input.apiKey !== 'string' || input.apiKey.length > 8192 || CONTROL.test(input.apiKey.trim())) throw new AssetError('Invalid API key');
@@ -210,6 +213,7 @@ export async function generateImage(source: ImageSource, input: GenerateInput, o
   const timeout = new AbortController(), timer = setTimeout(() => timeout.abort(new Error('timeout')), options.timeoutMs ?? GENERATE_TIMEOUT_MS);
   const signal = options.signal ? AbortSignal.any([options.signal, timeout.signal]) : timeout.signal;
   const fetch = options.fetch ?? globalThis.fetch;
+  if (!usesApi(source.kind)) throw new AssetError(`${source.name} does not answer over HTTP`, 500);
   try {
     return await (source.kind === 'gemini' ? gemini : openai)(source, input, fetch, signal);
   } catch (error) {

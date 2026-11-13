@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
-import { CLIENT_HEADER, type GeneratedImage, type SaveResult, type ScanResult, type SourcesAnswer } from '../src/domain.js';
+import { CLIENT_HEADER, type GeneratedImage, type ProjectSourceStatus, type SaveResult, type ScanResult, type SourcesAnswer } from '../src/domain.js';
 import { createHandler } from '../src/http.js';
 import { cleanImagePath } from '../src/manage.js';
 import { AssetService } from '../src/service.js';
 import { SourceStore, cleanSource, generateImage, type ImageSource } from '../src/sources.js';
+import { CODEX_PICTURE, fakeCodex } from './fake-codex.js';
 
 const png = (fill: number, length = 64, size = 16) => {
   const data = Buffer.alloc(length, fill);
@@ -139,12 +140,15 @@ async function game() {
   await put('public/art/spin.gif', gif());
   let drawn = 0;
   const image = api(() => Response.json({ data: [{ b64_json: png(10 + drawn++, 80).toString('base64') }] }));
-  const handler = createHandler(new AssetService(async id => id === 'game' ? root : undefined, join(state, 'workspaces.json'), { fetch: image.fetch }));
+  const codex = await fakeCodex();
+  made.push(...codex.dirs);
+  const handler = createHandler(new AssetService(async id => id === 'game' ? root : undefined, join(state, 'workspaces.json'),
+    { fetch: image.fetch, codex: { loginShell: false, command: codex.command }, projectScript: async () => '#!/usr/bin/env node\n// the generate-image script\n' }));
   const call = async <T>(body: Record<string, unknown>) => {
     const answer = await handler(new Request('http://dsh.test/api/game-assets', { method: 'POST', headers: { 'content-type': 'application/json', [CLIENT_HEADER]: '1' }, body: JSON.stringify({ sessionId: 'game', ...body }) }));
     return { status: answer.status, body: await answer.json() as T & { error?: string } };
   };
-  return { root, state, put, call, sent: image.sent };
+  return { root, state, put, call, sent: image.sent, codex };
 }
 
 test('generating sends listed images as references and writes nothing; the API key never reaches the client', async () => {
@@ -211,3 +215,51 @@ test('a picture is saved at a free path, never over a file; replacing retires th
   // No temporary file is left behind.
   assert.deepEqual([...await readdir(join(root, 'public/art')), ...await readdir(join(root, 'public/art/new'))].filter(name => name.startsWith('.')), []);
 });
+
+test('a Codex source draws on the workspace machine with references read there; it needs no address or key', async () => {
+  const { root, call, codex } = await game();
+  await call<ScanResult>({ action: 'scan' });
+  const added = (await call<SourcesAnswer & { id: string }>({ action: 'saveSource', source: { name: 'Codex', kind: 'codex', model: '', baseUrl: 'ignored', apiKey: 'ignored' } })).body;
+  assert.deepEqual(added.sources, [{ id: added.id, name: 'Codex', kind: 'codex', baseUrl: '', model: '', keyHint: '' }]);
+
+  const generated = await call<GeneratedImage>({ action: 'generate', sourceId: added.id, prompt: 'winter hero', references: ['public/art/hero.png'], aspect: 'square', transparent: true });
+  assert.equal(generated.status, 200, generated.body.error);
+  assert.deepEqual([generated.body.mediaType, generated.body.width, generated.body.source, generated.body.model], ['image/png', 1024, 'Codex', 'Codex']);
+  assert.deepEqual(Buffer.from(generated.body.data, 'base64'), CODEX_PICTURE);
+  const call1 = (await codex.calls()).at(-1)!;
+  assert.deepEqual(call1.args.slice(-2), ['--image', join(await realpath(root), 'public/art/hero.png')]);
+  assert.match(call1.prompt, /on a transparent background[\s\S]*winter hero$/);
+
+  process.env.FAKE_CODEX_MODE = 'auth';
+  try {
+    const failed = await call({ action: 'generate', sourceId: added.id, prompt: 'p', aspect: 'square', transparent: false });
+    assert.deepEqual([failed.status, failed.body.error], [502, 'Codex made no picture (exit 1): Your access token could not be refreshed because your refresh token was revoked. Please log out and sign in again.']);
+  } finally { process.env.FAKE_CODEX_MODE = 'ok'; }
+  assert.equal((await call({ action: 'generate', sourceId: added.id, prompt: 'p', references: ['public/art/spin.gif'], aspect: 'square', transparent: false })).body.error, 'Only PNG, WebP and JPEG images can be sent to an image API');
+});
+
+test('the source is recorded in the project for its agents, its key on the machine only, and can be removed again', async () => {
+  const home = await temp('dsh-game-gen-home-'), before = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const { root, call } = await game();
+    assert.deepEqual((await call({ action: 'projectSource' })).body, { source: null, files: [] });
+    const added = (await call<SourcesAnswer & { id: string }>({ action: 'saveSource', source: { name: 'Relay', kind: 'openai', baseUrl: 'https://relay.example/v1', model: 'gpt-image-2', apiKey: 'sk-recorded-5555' } })).body;
+    const recorded = await call<ProjectSourceStatus>({ action: 'setProjectSource', sourceId: added.id });
+    assert.equal(recorded.status, 200, recorded.body.error);
+    assert.deepEqual(recorded.body, { source: { id: added.id, name: 'Relay', kind: 'openai', model: 'gpt-image-2', baseUrl: 'https://relay.example/v1' },
+      files: ['.game-assets/image-source.json', '.game-assets/generate-image.cjs', '.game-assets/README.md', 'AGENTS.md', 'CLAUDE.md'] });
+    assert.equal(await readFile(join(root, '.game-assets/generate-image.cjs'), 'utf8'), '#!/usr/bin/env node\n// the generate-image script\n');
+    for (const file of ['.game-assets/image-source.json', '.game-assets/README.md', 'AGENTS.md', 'CLAUDE.md']) assert.doesNotMatch(await readFile(join(root, file), 'utf8'), /sk-recorded/, file);
+    assert.match(await readFile(join(home, '.dsh-game-assets/keys.json'), 'utf8'), /sk-recorded-5555/);
+    assert.deepEqual((await call({ action: 'projectSource' })).body, recorded.body);
+    // The script and the agent files are not images: the scan does not list them.
+    assert.equal((await call<ScanResult>({ action: 'scan', refresh: true })).body.assets.some(asset => asset.path.startsWith('.game-assets')), false);
+
+    assert.equal((await call({ action: 'setProjectSource', sourceId: 'gone' })).body.error, 'That image source was removed');
+    assert.equal((await call({ action: 'setProjectSource', sourceId: 5 })).body.error, 'Invalid image source');
+    assert.deepEqual((await call({ action: 'setProjectSource', sourceId: null })).body, { source: null, files: [] });
+    assert.deepEqual((await readdir(root)).sort(), ['package.json', 'public', 'src'], 'nothing of the recording is left');
+  } finally { process.env.HOME = before; }
+});
+

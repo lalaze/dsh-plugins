@@ -24,8 +24,10 @@ export function apply(ctx: Context): void {
   // The build writes the remote script next to lib/server.
   let script: Promise<string> | undefined;
   const remoteScript = () => script ??= readFile(new URL('../remote-agent.cjs', import.meta.url), 'utf8').catch(error => { script = undefined; throw error; });
+  let generator: Promise<string> | undefined;
+  const projectScript = () => generator ??= readFile(new URL('../generate-image.cjs', import.meta.url), 'utf8').catch(error => { generator = undefined; throw error; });
   const assets = new AssetService(id => workingDirectoryOf(get, id), join(stateDir(), 'workspaces.json'),
-    { machines: () => ctx.get('remoteAgentsMachines') as RemoteMachines | undefined, remoteScript });
+    { machines: () => ctx.get('remoteAgentsMachines') as RemoteMachines | undefined, remoteScript, projectScript });
   const log = (message: string) => (ctx.get('logger') as { warn?(text: string): void } | undefined)?.warn?.(message);
   // The host connection supplies authentication and origin checks.
   ctx.connection.fetch.register({ path: ROUTE, methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(assets, log) });

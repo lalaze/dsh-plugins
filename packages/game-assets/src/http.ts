@@ -15,7 +15,8 @@ const summary = (scan: ScanResult<ScannedAsset>): ScanResult => ({ ...scan, asse
  * `GET ?sessionId&path` answers an image's bytes; `POST` takes a JSON `action`: `scan`, `detail`, `images` and `configure` read a workspace;
  * `retire`, `restore`, `tag`, `note` and `save` change it (see manage.ts);
  * `project`, `setProject`, `mode` and `setMode` decide where the tab appears;
- * `sources`, `saveSource`, `deleteSource` and `defaultSource` keep the image APIs, and `generate` asks one for a picture. */
+ * `sources`, `saveSource`, `deleteSource` and `defaultSource` keep the image sources, `generate` asks one for a picture,
+ * and `projectSource` and `setProjectSource` read and record the one the project's agents use. */
 export function createHandler(service: AssetService, log?: (message: string) => void) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
@@ -62,6 +63,10 @@ export function createHandler(service: AssetService, log?: (message: string) => 
         case 'note': return Response.json(await service.note(sessionId, input.path, input.note), { headers });
         // Closing the dialog drops the request, and with it the call to the image API.
         case 'generate': return Response.json(await service.generate(sessionId, input, request.signal), { headers });
+        case 'projectSource': return Response.json(await service.projectSource(sessionId), { headers });
+        case 'setProjectSource':
+          if (input.sourceId !== null && typeof input.sourceId !== 'string') throw new AssetError('Invalid image source');
+          return Response.json(await service.setProjectSource(sessionId, input.sourceId), { headers });
         case 'save': {
           const result = await service.save(sessionId, input.path, input.data, input.replace);
           return Response.json({ ...result, scan: summary(result.scan) }, { headers });

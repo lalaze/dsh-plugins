@@ -9,3 +9,8 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const { size } = await stat('lib/remote-agent.cjs');
   if (size > 80 * 1024) throw new Error(`lib/remote-agent.cjs is ${size} bytes; over 80 KiB it may no longer fit a remote command.`);
 }
+// The script projects get for their agents: one file that runs on Node.js 18 or newer with nothing installed.
+export const projectBundle = { entryPoints: ['src/generate-image.ts'], bundle: true, platform: 'node', format: 'cjs', target: 'node18', minify: true, legalComments: 'none',
+  banner: { js: '#!/usr/bin/env node\n// Written by DSH Game Assets: generates images with the image source chosen for this project. Usage: node .game-assets/generate-image.cjs --help\nglobalThis.__DSH_GAME_ASSETS_SCRIPT__=true;' } };
+if (process.argv[1] === new URL(import.meta.url).pathname) await build({ ...projectBundle, absWorkingDir: process.cwd(), outfile: 'lib/generate-image.cjs' });
+

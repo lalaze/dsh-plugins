@@ -4,8 +4,8 @@
  * image, which is retired first and can be restored.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { extensionOf, isReference, type Aspect, type Asset, type GeneratedImage, type SaveResult } from '../domain.js';
-import { generatePicture, savePicture } from './api.js';
+import { AGENT_FILES, PROJECT_DIR, extensionOf, isReference, usesApi, type Aspect, type Asset, type GeneratedImage, type ProjectSourceStatus, type SaveResult } from '../domain.js';
+import { generatePicture, projectSource, savePicture, setProjectSource } from './api.js';
 import { Picture } from './grid.js';
 import { THUMB_LIMIT, useImage } from './thumbs.js';
 import { localizePictureError, ui } from './i18n.js';
@@ -71,16 +71,19 @@ export function GenerateDialog({ sessionId, target, references: given, assets, f
   const [path, setPath] = useState(() => suggestedPath(target, folder === retireDir || folder.startsWith(`${retireDir}/`) ? '' : folder, given, taken));
   const [running, setRunning] = useState<{ controller: AbortController; started: number }>(), [now, setNow] = useState(Date.now());
   const [result, setResult] = useState<Result>(), [preview, setPreview] = useState<string>(), [saving, setSaving] = useState(false), [error, setError] = useState('');
+  const [project, setProject] = useState<ProjectSourceStatus>(), [recording, setRecording] = useState(false);
   const alive = useRef(true);
 
   const sources = answer?.sources ?? [];
-  const source = sources.find(entry => entry.id === sourceId) ?? sources.find(entry => entry.id === answer?.defaultId) ?? sources[0];
+  // The source the project's agents use comes first, then the default.
+  const source = sources.find(entry => entry.id === sourceId) ?? sources.find(entry => entry.id === project?.source?.id) ?? sources.find(entry => entry.id === answer?.defaultId) ?? sources[0];
   const size = target?.width && target.height ? { width: target.width, height: target.height } : undefined;
   const canReplace = !!target && !target.retired && isReference(target.path);
   /** Gemini draws no transparency; an opaque picture is cropped to fill the original's size rather than padded. */
   const alpha = transparent && source?.kind !== 'gemini';
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => { projectSource(sessionId).then(next => { if (alive.current) setProject(next); }, () => { if (alive.current) setProject({ source: null, files: [] }); }); }, [sessionId]);
   // Closing the dialog stops a generation that is still running.
   useEffect(() => () => running?.controller.abort(), [running]);
   useEffect(() => {
@@ -111,6 +114,12 @@ export function GenerateDialog({ sessionId, target, references: given, assets, f
       .finally(() => { if (alive.current) setRunning(old => old?.controller === controller ? undefined : old); });
   };
   const stop = () => { running?.controller.abort(); setRunning(undefined); };
+  /** Records the source in the project for its agents, or with null removes it. */
+  const record = (id: string | null) => {
+    setRecording(true); setError('');
+    setProjectSource(sessionId, id).then(next => { if (alive.current) setProject(next); }, e => { if (alive.current) setError(localizePictureError(e)); })
+      .finally(() => { if (alive.current) setRecording(false); });
+  };
   const save = async (replace: boolean) => {
     if (!result) return;
     const where = replace && target ? target.path : path.trim(), type = mimeOfPath(where);
@@ -133,18 +142,26 @@ export function GenerateDialog({ sessionId, target, references: given, assets, f
       {target && !chosenTransparent && /^(png|webp)$/.test(extensionOf(target.path)) && <TransparencyProbe sessionId={sessionId} asset={target} onResult={setTransparent} />}
       {sourcesError && <div className="ga-banner" data-tone="error" role="alert">{sourcesError}</div>}
       {answer && !sources.length ? <>
-        <p>{ui('No image source yet. Add an OpenAI-compatible or Gemini API to generate pictures here.')}</p>
+        <p>{ui('No image source yet. Add Codex, an OpenAI-compatible API or Gemini to generate pictures here.')}</p>
         <SourceSettings adding onAdded={setSourceId} />
         <p className="ga-actions ga-end"><button type="button" className="ga-button" onClick={onClose}>{ui('Close')}</button></p>
       </> : <>
         <div className="ga-field">
           <span>{ui('Source')}</span>
           <select className="ga-select ga-grow" aria-label={ui('Source')} disabled={!source || !!running} value={source?.id ?? ''} onChange={event => setSourceId(event.target.value)}>
-            {sources.map(entry => <option key={entry.id} value={entry.id}>{entry.name} · {entry.model}</option>)}
+            {sources.map(entry => <option key={entry.id} value={entry.id}>{entry.name}{entry.model ? ` · ${entry.model}` : ''}</option>)}
           </select>
           <button type="button" className="ga-link" aria-expanded={managing} onClick={() => setManaging(!managing)}>{ui(managing ? 'Hide sources' : 'Manage sources')}</button>
         </div>
         {managing && <SourceSettings />}
+        <div className="ga-project" role="group" aria-label={ui('Agents in this project')}>
+          <span>{!project ? ui('Reading the project…') : project.source ? ui('Agents in this project generate images with “{name}”.', { name: project.source.name }) : ui('Agents in this project cannot generate images yet.')}</span>
+          {project && source && <button type="button" className="ga-link" disabled={recording} onClick={() => record(source.id)}>
+            {ui(project.source?.id === source.id ? 'Write it again' : project.source ? 'Switch them to “{name}”' : 'Let them use “{name}”', { name: source.name })}</button>}
+          {project?.source && <button type="button" className="ga-link" disabled={recording} onClick={() => record(null)}>{ui('Remove from the project')}</button>}
+        </div>
+        {project && source && project.source?.id !== source.id && <p className="ga-dim">{ui('This writes {folder} (the source without its key, and a script agents run) and a short section in {files}.', { folder: `${PROJECT_DIR}/`, files: AGENT_FILES.join(ui(' and ')) })}{' '}
+          {ui(usesApi(source.kind) ? 'The key is saved on the machine the project is on, in ~/.dsh-game-assets/, readable by you alone.' : 'Agents use the Codex signed in on the machine the project is on.')}</p>}
         {references.length > 0 && <div className="ga-refpics" aria-label={ui('Reference images')}>
           {references.map(asset => <span key={asset.path} className="ga-refpic" title={asset.path}>
             <span className="ga-twin-thumb"><Picture sessionId={sessionId} asset={asset} box={36} /></span>

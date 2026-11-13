@@ -5,9 +5,11 @@
 import { createHash } from 'node:crypto';
 import { lstat, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { runCodex } from './codex.js';
 import { detectEngine } from './detect.js';
-import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage, type ImageAnswer, type ScanResult, type ScannedAsset } from './domain.js';
+import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage, isReference, type Aspect, type ImageAnswer, type ProjectSourceStatus, type ScanResult, type ScannedAsset } from './domain.js';
 import type { Library, Moved, Placed } from './manage.js';
+import { readProjectSource, writeProjectSource, type ProjectBundle } from './project.js';
 import type { Rules, Scanner } from './scan.js';
 
 export class AssetError extends Error { constructor(message: string, readonly status = 400) { super(message); } }
@@ -23,16 +25,26 @@ export type WorkspaceRequest =
    * Writes a picture to `path`, replacing the image there if `replace`. Its bytes come in `data` (base64) or, on a remote
    * machine, were uploaded beforehand to `staged`, relative to the workspace, with the digest `sha256`.
    */
-  | { op: 'place'; path: string; replace: boolean; retireDir: string; data?: string; staged?: string; sha256?: string };
+  | { op: 'place'; path: string; replace: boolean; retireDir: string; data?: string; staged?: string; sha256?: string }
+  /** Generates a picture with the Codex CLI signed in on this machine; `references` are workspace paths. */
+  | { op: 'codex'; prompt: string; references: string[]; aspect: Aspect; transparent: boolean; model?: string; loginShell?: boolean }
+  | { op: 'projectSource' }
+  /** Records an image source for the project's agents, or removes it with `bundle: null`. A remote bundle comes `staged`. */
+  | { op: 'setProjectSource'; bundle?: ProjectBundle | null; staged?: string; sha256?: string };
+/** The picture of a `codex` request, its bytes in base64. */
+export interface CodexAnswer { data: string; mediaType: string; width?: number; height?: number; text?: string }
 export type ReadAnswer = ImageAnswer;
 export interface WorkspaceAnswers {
   scan: ScanResult<ScannedAsset>; detect: { engine: string | null }; retire: Moved; restore: Moved;
   tag: Record<string, string[]>; note: { note: string }; read: ReadAnswer[]; place: Placed;
+  codex: CodexAnswer; projectSource: ProjectSourceStatus; setProjectSource: ProjectSourceStatus;
 }
+/** What a request may be given besides itself, in the process that runs it. */
+export interface HandleExtras { signal?: AbortSignal; codexCommand?: string }
 
 /** Where Remote Agents' upload leaves a picture on a remote machine before the script puts it in place. */
 export const STAGING_DIR = '.dsh-remote-agents/attachments/game-assets';
-const STAGED = /^[a-f0-9]{64}\.(?:png|webp|jpe?g)$/;
+const STAGED = /^[a-f0-9]{64}\.(?:png|webp|jpe?g|json)$/;
 
 /** The bytes of an uploaded picture, checked against its digest; the upload is removed either way. */
 async function takeStaged(root: string, staged: string | undefined, sha256: string | undefined): Promise<Buffer> {
@@ -72,7 +84,7 @@ export async function readImage(root: string, path: string): Promise<Buffer> {
 }
 
 /** Answers one request about the folder `root`, an existing directory with symbolic links resolved. */
-export async function handle(root: string, request: WorkspaceRequest, scanner: Scanner, library: Library): Promise<unknown> {
+export async function handle(root: string, request: WorkspaceRequest, scanner: Scanner, library: Library, extras: HandleExtras = {}): Promise<unknown> {
   switch (request.op) {
     case 'scan': return scanner.scan(root, request.rules, request.retireDir);
     case 'detect': return { engine: await detectEngine(root) ?? null };
@@ -83,6 +95,23 @@ export async function handle(root: string, request: WorkspaceRequest, scanner: S
     case 'place': {
       const data = request.data !== undefined ? Buffer.from(request.data, 'base64') : await takeStaged(root, request.staged, request.sha256);
       try { return await library.place(request.path, data, request.replace, request.retireDir); }
+      catch (error) { throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409); }
+    }
+    case 'codex': {
+      const references: string[] = [];
+      for (const path of request.references) {
+        if (!isReference(path)) throw new AssetError('Only PNG, WebP and JPEG images can be sent to an image API');
+        await readImage(root, path);
+        references.push(await realpath(resolve(root, path)));
+      }
+      const picture = await runCodex({ prompt: request.prompt, references, aspect: request.aspect, transparent: request.transparent, model: request.model },
+        { loginShell: request.loginShell, signal: extras.signal, command: extras.codexCommand });
+      return { data: picture.data.toString('base64'), mediaType: picture.mediaType, ...(picture.width ? { width: picture.width, height: picture.height } : {}), ...(picture.text ? { text: picture.text } : {}) };
+    }
+    case 'projectSource': return readProjectSource(root);
+    case 'setProjectSource': {
+      const bundle = request.staged ? JSON.parse((await takeStaged(root, request.staged, request.sha256)).toString('utf8')) as ProjectBundle : request.bundle ?? null;
+      try { return await writeProjectSource(root, bundle); }
       catch (error) { throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409); }
     }
     case 'read': {

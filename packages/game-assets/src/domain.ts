@@ -133,15 +133,20 @@ export interface ProjectStatus {
 export const ROOT_FOLDER = '.';
 
 /**
- * The kinds of image API a source may be: `openai` speaks OpenAI's Images API (`/images/generations` and
- * `/images/edits`), as OpenAI and most relay services do; `gemini` speaks Gemini's `generateContent`.
+ * The kinds of image source: `openai` speaks OpenAI's Images API (`/images/generations` and `/images/edits`), as
+ * OpenAI and most relay services do; `gemini` speaks Gemini's `generateContent`; `codex` runs the Codex CLI signed in
+ * on the machine the workspace is on, with its own image tool and no key.
  */
-export type SourceKind = 'openai' | 'gemini';
-export const SOURCE_KINDS: readonly SourceKind[] = ['openai', 'gemini'];
+export type SourceKind = 'openai' | 'gemini' | 'codex';
+export const SOURCE_KINDS: readonly SourceKind[] = ['codex', 'openai', 'gemini'];
+/** Kinds that call an HTTP API with a key, from the DSH host; the others run where the workspace is. */
+export const usesApi = (kind: SourceKind): boolean => kind !== 'codex';
 /** What a new source of each kind starts with, and models to offer while typing. */
 export const SOURCE_DEFAULTS: Record<SourceKind, { baseUrl: string; model: string; models: string[] }> = {
   openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-2', models: ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-1.5', 'gpt-image-1-mini'] },
   gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3.1-flash-image', models: ['gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-lite-image'] },
+  // Codex draws with its own image tool; the model only drives it, and Codex's default is used when it is empty.
+  codex: { baseUrl: '', model: '', models: [] },
 };
 /** A source as the client sees it: everything but the key, of which only the end is shown so keys can be told apart. */
 export interface SourceView { id: string; name: string; kind: SourceKind; baseUrl: string; model: string; keyHint: string }
@@ -161,3 +166,20 @@ export const REFERENCE_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg'] as const;
 export const isReference = (path: string): boolean => (REFERENCE_EXTENSIONS as readonly string[]).includes(extensionOf(path));
 /** The longest prompt a generation takes. */
 export const PROMPT_LIMIT = 8000;
+
+/**
+ * In the workspace: the image source agents working in the project generate with, and the script they run for it.
+ * Committed with the project; it never holds a key.
+ */
+export const PROJECT_DIR = '.game-assets';
+export const PROJECT_SOURCE_FILE = `${PROJECT_DIR}/image-source.json`;
+export const PROJECT_SCRIPT = `${PROJECT_DIR}/generate-image.cjs`;
+export const PROJECT_README = `${PROJECT_DIR}/README.md`;
+/** Agent instruction files that get a short section on generating images. */
+export const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
+/** On the machine the project is on, under the user's home: keys of the sources projects there use, readable by the user alone. */
+export const KEYS_DIR = '.dsh-game-assets', KEYS_FILE = 'keys.json';
+/** The image source recorded in a project. */
+export interface ProjectSource { id: string; name: string; kind: SourceKind; model: string; baseUrl: string }
+/** What a workspace records: its source, and the files that carry it. */
+export interface ProjectSourceStatus { source: ProjectSource | null; files: string[] }

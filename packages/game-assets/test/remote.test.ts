@@ -1,17 +1,18 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { gzipSync } from 'node:zlib';
 import { build } from 'esbuild';
-import { CLIENT_HEADER, type MoveResult, type ProjectStatus, type SaveResult, type ScanResult, type TagResult } from '../src/domain.js';
+import { CLIENT_HEADER, type GeneratedImage, type MoveResult, type ProjectSourceStatus, type ProjectStatus, type SaveResult, type ScanResult, type SourcesAnswer, type TagResult } from '../src/domain.js';
 import { createHandler } from '../src/http.js';
 import { REMOTE_BEGIN, REMOTE_END, remoteAnswer, remoteCommand, type RemoteMachines, type RemoteTarget } from '../src/remote.js';
 import { AssetError, AssetService } from '../src/service.js';
+import { CODEX_PICTURE, fakeCodex } from './fake-codex.js';
 
 const png = (fill: number, length = 64) => {
   const data = Buffer.alloc(length, fill);
@@ -80,7 +81,8 @@ async function remoteGame(options: { stream?: (command: string) => { output: str
     },
   };
   const cwds: Record<string, string> = { remote: '/home/me/.dsh/remote-workspaces/mini/game', local: root };
-  const service = (withMachines = true) => new AssetService(async id => cwds[id], join(state, 'workspaces.json'), { machines: () => withMachines ? machines : undefined, remoteScript: async () => script });
+  const service = (withMachines = true) => new AssetService(async id => cwds[id], join(state, 'workspaces.json'),
+    { machines: () => withMachines ? machines : undefined, remoteScript: async () => script, projectScript: async () => '#!/usr/bin/env node\n// the generate-image script\n' });
   const handler = createHandler(service());
   const call = async <T>(body: Record<string, unknown>, route = handler) => {
     const answer = await route(new Request('http://dsh.test/api/game-assets', { method: 'POST', headers: { 'content-type': 'application/json', [CLIENT_HEADER]: '1' }, body: JSON.stringify({ sessionId: 'remote', ...body }) }));
@@ -217,5 +219,36 @@ test('saving to a remote workspace through a Remote Agents without uploads says 
   const saved = await game.call<{ error: string }>({ action: 'save', path: 'public/art/hero-redraw.png', data: png(30).toString('base64') });
   assert.deepEqual([saved.status, saved.body.error], [409, 'Saving pictures in a remote workspace needs a newer Remote Agents']);
   assert.equal(await exists(join(game.root, 'public/art/hero-redraw.png')), false);
+});
+
+test('a Codex source runs on the remote machine, with its login and the references there', async () => {
+  const game = await remoteGame(), codex = await fakeCodex(), path = process.env.PATH;
+  made.push(...codex.dirs);
+  process.env.PATH = `${codex.bin}:${path}`;
+  try {
+    await game.call<ScanResult>({ action: 'scan' });
+    const added = (await game.call<SourcesAnswer & { id: string }>({ action: 'saveSource', source: { name: 'Codex', kind: 'codex', model: 'gpt-5.5' } })).body;
+    const generated = await game.call<GeneratedImage & { error?: string }>({ action: 'generate', sourceId: added.id, prompt: 'winter hero', references: ['public/art/hero.png'], aspect: 'wide', transparent: false });
+    assert.equal(generated.status, 200, generated.body.error);
+    assert.deepEqual(Buffer.from(generated.body.data, 'base64'), CODEX_PICTURE);
+    const call = (await codex.calls()).at(-1)!;
+    assert.deepEqual(call.args.slice(-4), ['--model', 'gpt-5.5', '--image', join(await realpath(game.root), 'public/art/hero.png')]);
+  } finally { process.env.PATH = path; }
+});
+
+test('recording a source in a remote project sends the key and the script by upload, never on a command line', async () => {
+  const game = await remoteGame();
+  const added = (await game.call<SourcesAnswer & { id: string }>({ action: 'saveSource', source: { name: 'Relay', kind: 'openai', baseUrl: 'https://relay.example/v1', model: 'gpt-image-2', apiKey: 'sk-remote-7777' } })).body;
+  const recorded = await game.call<ProjectSourceStatus & { error?: string }>({ action: 'setProjectSource', sourceId: added.id });
+  assert.equal(recorded.status, 200, recorded.body.error);
+  assert.deepEqual(recorded.body.files, ['.game-assets/image-source.json', '.game-assets/generate-image.cjs', '.game-assets/README.md', 'AGENTS.md', 'CLAUDE.md']);
+  assert.match(game.uploads.at(-1)!.path, /^\.dsh-remote-agents\/attachments\/game-assets\/[a-f0-9]{64}\.json$/);
+  assert.equal(game.runs.some(command => command.includes('sk-remote-7777') || command.includes(Buffer.from('sk-remote-7777').toString('base64'))), false);
+  assert.deepEqual(await readdir(join(game.root, '.dsh-remote-agents/attachments/game-assets')), []);
+  assert.match(await readFile(join(game.home, '.dsh-game-assets/keys.json'), 'utf8'), /sk-remote-7777/);
+  assert.doesNotMatch(await readFile(join(game.root, '.game-assets/image-source.json'), 'utf8'), /sk-remote/);
+  assert.deepEqual((await game.call<ProjectSourceStatus>({ action: 'projectSource' })).body, recorded.body);
+  assert.deepEqual((await game.call<ProjectSourceStatus>({ action: 'setProjectSource', sourceId: null })).body, { source: null, files: [] });
+  assert.equal(await exists(join(game.root, '.game-assets')), false);
 });
 

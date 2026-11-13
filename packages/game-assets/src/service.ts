@@ -2,12 +2,13 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, extensionOf, isReference, type Aspect, type AssetDetail, type GeneratedImage, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
+import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, extensionOf, isReference, usesApi, type Aspect, type AssetDetail, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
 import { rasterType } from './images.js';
 import { Library, cleanImagePath, cleanRetireDir, cleanTag, type Failure, type Moved, type Placed } from './manage.js';
 import { REMOTE_CHUNK, runRemote, type RemoteMachines } from './remote.js';
 import { Scanner, type Rules } from './scan.js';
 import { SourceStore, generateImage } from './sources.js';
+import type { ProjectBundle } from './project.js';
 import { AssetError, STAGING_DIR, handle, readImage, type ReadAnswer, type WorkspaceAnswers, type WorkspaceRequest } from './workspace.js';
 
 type FullScan = ScanResult<ScannedAsset>;
@@ -76,7 +77,8 @@ interface Workspace {
   host?: string;
   /** The folder itself, for a local workspace. */
   root?: string;
-  call<K extends WorkspaceRequest['op']>(request: Extract<WorkspaceRequest, { op: K }>): Promise<WorkspaceAnswers[K]>;
+  /** `signal` ends a request the caller gave up on: a Codex run on the machine stops with it. */
+  call<K extends WorkspaceRequest['op']>(request: Extract<WorkspaceRequest, { op: K }>, signal?: AbortSignal): Promise<WorkspaceAnswers[K]>;
 }
 type MoveAnswer = { moved: number; failed: Failure[]; scan: FullScan };
 /** Image requests that arrive together travel to a remote machine in one run. */
@@ -89,6 +91,10 @@ export interface ServiceOptions {
   remoteScript?: () => Promise<string>;
   /** How image APIs are reached; tests answer for them. */
   fetch?: (input: string, init?: RequestInit) => Promise<Response>;
+  /** The bundled script recorded in projects for their agents. */
+  projectScript?: () => Promise<string>;
+  /** How Codex is started for a local workspace: through the login shell (the default), and which command; tests change both. */
+  codex?: { loginShell?: boolean; command?: string };
 }
 const ASPECTS: readonly Aspect[] = ['square', 'wide', 'tall'];
 /** The file type a saved picture's extension promises. */
@@ -121,15 +127,16 @@ export class AssetService {
     if (!cwd) throw new AssetError('This conversation has no workspace folder', 409);
     if (!REMOTE_ANCHOR.test(cwd)) {
       const root = await realpath(cwd).catch(() => { throw new AssetError('The workspace folder is not available', 404); });
-      return { key: root, name: basename(root), root, call: request => handle(root, request, this.scanner, this.library(root)) as Promise<never> };
+      const extras = { codexCommand: this.options.codex?.command };
+      return { key: root, name: basename(root), root, call: (request, signal) => handle(root, request, this.scanner, this.library(root), { ...extras, signal }) as Promise<never> };
     }
     const machines = this.options.machines?.(), script = this.options.remoteScript;
     if (!machines || typeof machines.target !== 'function' || typeof machines.withWorkspace !== 'function' || !script) throw new AssetError('Assets of a remote workspace need Remote Agents 0.2.130 or newer', 409);
     const target = await machines.target(sessionId).catch(error => { throw new AssetError(`The remote workspace is not available: ${error instanceof Error ? error.message : String(error)}`, 409); });
-    const run = async (request: WorkspaceRequest) => runRemote(machines, sessionId, target, await script(), request);
+    const run = async (request: WorkspaceRequest, signal?: AbortSignal) => runRemote(machines, sessionId, target, await script(), request, undefined, signal);
     return {
       key: `remote:${target.hostId}:${target.cwd}`, name: target.cwd.replace(/\/+$/, '').split('/').pop() || target.cwd, host: target.label,
-      call: (async (request: WorkspaceRequest) => {
+      call: (async (request: WorkspaceRequest, signal?: AbortSignal) => {
         // A long selection goes in several runs, so no command outgrows what a shell argument may hold.
         if (request.op === 'retire' || request.op === 'restore') {
           const all: Moved = { moved: [], failed: [] };
@@ -141,6 +148,13 @@ export class AssetService {
           const staged = `${STAGING_DIR}/${sha256}.${extensionOf(request.path)}`;
           return runRemote(machines, sessionId, target, await script(), { ...request, data: undefined, staged, sha256 }, { path: staged, data, sha256 });
         }
+        // The bundle carries a key and a script: it travels by upload, never on a command line.
+        if (request.op === 'setProjectSource' && request.bundle) {
+          const data = Buffer.from(JSON.stringify(request.bundle), 'utf8'), sha256 = createHash('sha256').update(data).digest('hex');
+          const staged = `${STAGING_DIR}/${sha256}.json`;
+          return runRemote(machines, sessionId, target, await script(), { op: 'setProjectSource', staged, sha256 }, { path: staged, data, sha256 });
+        }
+        if (request.op === 'codex') return run(request, signal);
         if (request.op === 'tag') {
           const all: Record<string, string[]> = {};
           for (let i = 0; i < request.paths.length; i += REMOTE_CHUNK) Object.assign(all, await run({ ...request, paths: request.paths.slice(i, i + REMOTE_CHUNK) }));
@@ -305,6 +319,13 @@ export class AssetService {
       if (!listed.has(path)) throw new AssetError('Not an image of this workspace', 404);
       if (!isReference(path)) throw new AssetError('Only PNG, WebP and JPEG images can be sent to an image API');
     }
+    if (!usesApi(source.kind)) {
+      // Codex runs on the workspace's machine, with that machine's login, and reads the references there.
+      const workspace = await this.workspace(sessionId), started = Date.now();
+      const picture = await workspace.call({ op: 'codex', prompt, references: [...new Set(paths as string[])], aspect: input.aspect as Aspect, transparent: input.transparent,
+        ...(source.model ? { model: source.model } : {}), ...(workspace.root ? { loginShell: this.options.codex?.loginShell ?? true } : {}) }, signal);
+      return { ...picture, model: source.model || 'Codex', source: source.name, ms: Date.now() - started };
+    }
     const references = await Promise.all([...new Set(paths as string[])].map(async path => {
       const data = await this.raw(sessionId, path), type = rasterType(data);
       if (type !== 'png' && type !== 'jpeg' && type !== 'webp') throw new AssetError(`${path} is not the image its name says`);
@@ -332,5 +353,24 @@ export class AssetService {
     if (replace === true ? !listed || listed.retired : listed) throw new AssetError(replace === true ? 'Only an image of the last scan can be replaced' : 'A file of that name is already there', 409);
     const placed = await workspace.call({ op: 'place', path: clean, replace: replace === true, retireDir, data });
     return { ...placed, scan: await this.fresh(workspace) };
+  }
+
+  /** The image source the workspace records for its agents. */
+  async projectSource(sessionId: string): Promise<ProjectSourceStatus> {
+    return (await this.workspace(sessionId)).call({ op: 'projectSource' });
+  }
+  /**
+   * Records a source for the agents working in the workspace, or with null removes it. The project gets the source
+   * without its key and the generate-image script; the key goes to the workspace machine's home folder.
+   */
+  async setProjectSource(sessionId: string, sourceId: unknown): Promise<ProjectSourceStatus> {
+    const workspace = await this.workspace(sessionId);
+    if (sourceId === null) return workspace.call({ op: 'setProjectSource', bundle: null });
+    if (typeof sourceId !== 'string' || !sourceId) throw new AssetError('Invalid image source');
+    const source = await this.sourceStore.get(sourceId), script = await this.options.projectScript?.();
+    if (!script) throw new AssetError('The generate-image script is missing from this build of the plugin', 500);
+    const bundle: ProjectBundle = { source: { id: source.id, name: source.name, kind: source.kind, model: source.model, baseUrl: source.baseUrl }, script,
+      ...(usesApi(source.kind) ? { key: source.apiKey } : {}) };
+    return workspace.call({ op: 'setProjectSource', bundle });
   }
 }
