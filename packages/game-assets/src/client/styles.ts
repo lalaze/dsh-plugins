@@ -158,9 +158,10 @@ export const styles = `
 .ga-refpic .ga-tool{width:22px;height:22px;font-size:14px}
 .ga-compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0 0}
 .ga-compare figure{margin:0;min-width:0}
-.ga-compare .ga-preview{height:236px}
+.ga-compare .ga-preview{height:clamp(140px,26vh,236px)}
 .ga-compare figcaption{margin-top:4px;font-size:11.5px;text-align:center;color:var(--dsw-alias-label-secondary,inherit);font-variant-numeric:tabular-nums}
 .ga-gen>.ga-dim{margin:8px 0 0;font-size:11.5px;line-height:1.5}
+.ga-gen>.ga-actions.ga-end{position:sticky;bottom:-16px;z-index:1;margin:12px -16px -16px;padding:10px 16px;border-top:1px solid var(--ga-line);background:var(--ga-surface)}
 .ga-sources{display:flex;flex-direction:column;gap:8px;margin:10px 0}
 .ga-sources>p{margin:0}
 .ga-srow{grid-template-columns:minmax(0,1fr) auto;min-height:44px}
