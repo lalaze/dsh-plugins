@@ -1,4 +1,6 @@
-import type { TuiStore } from './tui-state.js';
+import { type TuiStore } from './tui-state.js';
+import type { SharedTui } from './tui-shared.js';
+import type { TuiCli } from './core/workspace.js';
 /** The part of a DSH session this needs. */
 interface TuiSession {
     append(type: string, data: unknown): unknown;
@@ -7,13 +9,23 @@ interface SessionRow {
     sessionId: string;
     blank?: boolean;
 }
+/** What a conversation shows until its CLI has titled it. */
+export declare const FIRST_TITLES: Record<TuiCli, string>;
+export declare const MAX_TITLE = 120;
+/** The title 0.2.81 gave every TUI conversation, which is replaced like the plugin's own. */
+export declare const OLD_TITLE: RegExp;
+/** Model and effort reach the remote command line inside double quotes. */
+export declare const COMMAND_VALUE: RegExp;
 /**
  * Codex saves a new thread only once it has a message or a name, and `codex resume` needs it saved, so a TUI conversation's
  * thread starts with this name. It keeps Codex from titling the thread by itself, so `/rename` is the only title it can have.
  */
 export declare const CODEX_THREAD_NAME = "DSH TUI";
-/** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
-export declare function tuiClaudeSession(sessionId: string): string;
+/**
+ * The Claude session of a TUI conversation: the same every launch, so that reopening it resumes.
+ * @param key - the conversation's `tuiKey`, which is its DSH session unless another DSH started it.
+ */
+export declare function tuiClaudeSession(key: string): string;
 /**
  * A conversation's title from Claude Code's session file: the user's /rename, then Claude's own title, then the first
  * prompt. Claude often writes no title, for a short greeting especially, and DSH titles its other conversations by their
@@ -82,6 +94,20 @@ export declare class TuiSessions {
         model?: unknown;
         effort?: unknown;
     }, signal: AbortSignal): Promise<void>;
+    /** DSH shows no views in a conversation until its log has a turn, so an empty one is recorded. */
+    private firstTurn;
+    /**
+     * Shows a TUI conversation another DSH started, in a conversation of this DSH made for it. Nothing is started on the
+     * machine: its CLI runs there already, or resumes when the conversation is opened here.
+     * @param sessionId - this DSH's conversation, in the remote workspace of the conversation's directory.
+     * @param blank - whether that conversation is new, and so needs the turn that makes DSH show it.
+     */
+    adopt(sessionId: string, hostId: string, shared: SharedTui, blank: boolean, now?: Date): Promise<void>;
+    /**
+     * Gives a conversation the title another DSH read from its CLI.
+     * @param rename - false for a conversation renamed in DSH, which keeps its name and only notes the CLI's title.
+     */
+    retitle(sessionId: string, title: string, rename?: boolean): Promise<void>;
     /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
     end(sessionId: string, signal: AbortSignal): Promise<void>;
     /**

@@ -40,7 +40,7 @@ export function createHandler(live) {
             const { terminals, machines } = now;
             let result;
             if (TUI.has(action))
-                result = await tuiAction(terminals.tui, action, input, request.signal);
+                result = await tuiAction(terminals.tui, action, input, request.signal, () => terminals.sharing.soon());
             else if (WORKTREES.has(action))
                 result = await worktreeAction(terminals.worktrees, action, input, request.signal);
             // The Remote workspace launcher, while the conversation is in a remote workspace; see the client's terminal-preference.ts.

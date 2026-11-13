@@ -1,5 +1,5 @@
 import type { TurnUsage } from './core/domain.js';
-import type { TuiStore } from './tui-state.js';
+import { type TuiStore } from './tui-state.js';
 import { type RemoteUsageRecord } from './core/usage.js';
 import type { TuiCli } from './core/workspace.js';
 /**

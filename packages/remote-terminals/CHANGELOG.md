@@ -4,6 +4,15 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.7 — A TUI conversation appears in every DSH that uses its machine
+
+- A TUI conversation was known only to the DSH that started it. Started on one computer, it was missing from DSH's web page, the phone and every other DSH, although its CLI ran on a machine all of them reach.
+- It now appears in each of them within about half a minute, in the remote workspace of its directory (added if missing). All of them open the one terminal on the machine: the same screen everywhere, and any of them can type. The screen has one size: that of the window that opened or resized it last, and typing in another window makes it that window's size again, so it is laid out for whoever is using it. This needs a terminal started by this version; one already running keeps the size of whoever came last until it is started again.
+- The title its CLI gives it follows to the other DSHes, unless you renamed it there. Archiving or restoring it in one DSH does the same in the others. Archiving ends its CLI, as before.
+- Conversations you archived earlier stay where they are; only ones not archived are listed. Each DSH counts a conversation's usage from when it first showed it, so earlier turns are not counted a second time there.
+- A machine with **Share sessions and workspaces with other DSH instances** switched off in Remote Agents keeps its TUI conversations to the DSH that started them.
+- After upgrading: install this version in every DSH and restart each. The TUI conversations you have open now are listed by the DSH that started them once it runs this version. Remote Agents stays as it is.
+
 ## 0.1.6 — "Connecting…" no longer flashes when you come back to a conversation
 
 - DSH does not keep a sidebar terminal's screen while another conversation is in view. Each time you came back it connected again, and for a moment a row saying **Connecting…** appeared above the terminal, pushed the screen down, and went away.

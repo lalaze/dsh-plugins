@@ -153,7 +153,9 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const details = (dshSession && saved.tuiDetails?.[dshSession]) || {};
   // Only a TUI conversation's own CLI is its session; the other launcher, chosen in its sidebar, is that CLI as usual.
   const own = dshSession && saved.tuiSessions?.includes(dshSession) && (details.cli ?? 'claude') === cli;
-  const claudeSession = own ? tuiClaudeSession(dshSession) : undefined;
+  // A conversation another DSH started keeps the CLI session and the terminal it has there; see TuiDetails.key.
+  const key = details.key || dshSession;
+  const claudeSession = own ? tuiClaudeSession(key) : undefined;
   const choice = (details.model ? ' --model "' + details.model + '"' : '') + (details.effort ? ' --effort "' + details.effort + '"' : '');
   // Claude Code saves a session only once it has a message, so the first launches of a new one have nothing to resume.
   // Those use the model chosen in the composer; a resumed session keeps whatever /model chose since.
@@ -174,7 +176,7 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const command = 'cd ' + quote(placement.cwd) + (interactive ? ' && export COLORTERM=truecolor' + (localScroll ? ' CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' : '') : '') + ' && exec ' + start;
   const ssh = ['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', ...TERMINAL_KEEPALIVE, ...TERMINAL_TYPING, ...(url.port ? ['-p', url.port] : []), '--', target];
   const terminalId = process.env[TERMINAL_ID_ENV];
-  const holder = own ? tuiHolder(dshSession) : dshSession && terminalId ? tabHolder(dshSession, terminalId) : undefined;
+  const holder = own ? tuiHolder(key) : dshSession && terminalId ? tabHolder(dshSession, terminalId) : undefined;
   const version = ${JSON.stringify(holderVersion ?? null)};
   const kept = holder && version ? await holdTerminal({ ssh, holder, command, script: { path: ${JSON.stringify(holderPath)}, version } }) : 'direct';
   if (kept === 'direct') run('ssh', [...ssh, command], process.env);

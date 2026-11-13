@@ -1,13 +1,15 @@
 import { createHash } from 'node:crypto';
 import { RemoteError } from './core/domain.js';
+import { tuiKey } from './tui-state.js';
 import { tuiHolder } from './holder-protocol.js';
 /** What a conversation shows until its CLI has titled it. */
-const FIRST_TITLES = { claude: 'Claude Code', codex: 'Codex' };
-const MAX_TITLE = 120, MAX_PROMPT_TITLE = 80;
+export const FIRST_TITLES = { claude: 'Claude Code', codex: 'Codex' };
+export const MAX_TITLE = 120;
+const MAX_PROMPT_TITLE = 80;
 /** The title 0.2.81 gave every TUI conversation, which is replaced like the plugin's own. */
-const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
+export const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
 /** Model and effort reach the remote command line inside double quotes. */
-const COMMAND_VALUE = /^[\w.:[\]-]+$/;
+export const COMMAND_VALUE = /^[\w.:[\]-]+$/;
 /** The chat provider of each remote CLI. */
 const PROVIDERS = { claude: 'remote-cli-claude', codex: 'remote-cli-codex' };
 /**
@@ -15,9 +17,12 @@ const PROVIDERS = { claude: 'remote-cli-claude', codex: 'remote-cli-codex' };
  * thread starts with this name. It keeps Codex from titling the thread by itself, so `/rename` is the only title it can have.
  */
 export const CODEX_THREAD_NAME = 'DSH TUI';
-/** The Claude session of a TUI conversation: the same every launch, so that reopening it resumes. */
-export function tuiClaudeSession(sessionId) {
-    const hash = createHash('sha256').update(`dsh-tui:${sessionId}`).digest('hex');
+/**
+ * The Claude session of a TUI conversation: the same every launch, so that reopening it resumes.
+ * @param key - the conversation's `tuiKey`, which is its DSH session unless another DSH started it.
+ */
+export function tuiClaudeSession(key) {
+    const hash = createHash('sha256').update(`dsh-tui:${key}`).digest('hex');
     return [hash.slice(0, 8), hash.slice(8, 12), `4${hash.slice(13, 16)}`, `8${hash.slice(17, 20)}`, hash.slice(20, 32)].join('-');
 }
 /** Without a trailing space: DSH trims titles, and a difference would read as a rename. */
@@ -147,6 +152,11 @@ export class TuiSessions {
                     ...(model && COMMAND_VALUE.test(model) ? { model } : {}), ...(typeof effort === 'string' && COMMAND_VALUE.test(effort) ? { effort } : {}) } };
         });
         await this.recordModel(sessionId, target.hostId, model ? selection.model : undefined).catch(() => { });
+        this.firstTurn(sessionId, session);
+        await this.dsh.rename(sessionId, FIRST_TITLES[cli]);
+    }
+    /** DSH shows no views in a conversation until its log has a turn, so an empty one is recorded. */
+    firstTurn(sessionId, session) {
         session.append('turn/start', { turn: 1 });
         session.append('turn/end', { turn: 1, reason: { kind: 'completed' } });
         // An agent reads its last turn once, when it is created. A later turn here, numbered 1 again, would leave a log DSH
@@ -154,12 +164,52 @@ export class TuiSessions {
         const phase = this.dsh.agent?.(sessionId)?.phase;
         if (phase?.kind === 'idle')
             phase.lastTurn = 1;
-        await this.dsh.rename(sessionId, FIRST_TITLES[cli]);
+    }
+    /**
+     * Shows a TUI conversation another DSH started, in a conversation of this DSH made for it. Nothing is started on the
+     * machine: its CLI runs there already, or resumes when the conversation is opened here.
+     * @param sessionId - this DSH's conversation, in the remote workspace of the conversation's directory.
+     * @param blank - whether that conversation is new, and so needs the turn that makes DSH show it.
+     */
+    async adopt(sessionId, hostId, shared, blank, now = new Date()) {
+        if (this.list().includes(sessionId))
+            return;
+        const cli = shared.cli, title = shared.title ?? FIRST_TITLES[cli];
+        // DSH makes a conversation's agent when its model is chosen, and the workspace list shows the model's icon.
+        const modelRecorded = await this.dsh.selectModel({ sessionId, provider: PROVIDERS[cli], model: `${hostId}/${cli}/${encodeURIComponent(shared.model ?? 'default')}`,
+            ...(shared.effort ? { reasoningEffort: shared.effort } : {}) }).then(() => true, () => false);
+        if (blank) {
+            const session = this.dsh.session(sessionId);
+            if (!session)
+                throw new RemoteError('This conversation is not open', 409);
+            this.firstTurn(sessionId, session);
+        }
+        await this.store.update(state => {
+            if (state.tuiSessions?.includes(sessionId))
+                return;
+            state.tuiSessions = [...state.tuiSessions ?? [], sessionId];
+            state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title, ...(cli === 'codex' && shared.thread ? { cli: 'codex', thread: shared.thread } : {}),
+                    ...(shared.model ? { model: shared.model } : {}), ...(shared.effort ? { effort: shared.effort } : {}), ...(modelRecorded ? { modelRecorded } : {}),
+                    ...(shared.key !== sessionId ? { key: shared.key } : {}), shared: { archived: false, title }, usageFrom: now.toISOString() } };
+        });
+        await this.dsh.rename(sessionId, title);
+    }
+    /**
+     * Gives a conversation the title another DSH read from its CLI.
+     * @param rename - false for a conversation renamed in DSH, which keeps its name and only notes the CLI's title.
+     */
+    async retitle(sessionId, title, rename = true) {
+        if (!this.list().includes(sessionId))
+            return;
+        if (rename)
+            await this.dsh.rename(sessionId, title);
+        await this.store.update(state => { if (state.tuiDetails?.[sessionId])
+            state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...state.tuiDetails[sessionId], title } }; });
     }
     /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
     async end(sessionId, signal) {
         if (this.list().includes(sessionId))
-            await this.dsh.endHolder?.(sessionId, tuiHolder(sessionId), signal);
+            await this.dsh.endHolder?.(sessionId, tuiHolder(tuiKey(sessionId, this.store.snapshot().tuiDetails?.[sessionId])), signal);
     }
     /**
      * Follow the CLI's title, until the conversation is renamed in DSH.
@@ -177,7 +227,7 @@ export class TuiSessions {
         await this.recordModel(sessionId, target.hostId).catch(() => { });
         if (renamed)
             return;
-        const title = saved?.thread ? codexTitle(await this.dsh.codexTitleRecords(sessionId, saved.thread, signal)) : claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(sessionId), signal));
+        const title = saved?.thread ? codexTitle(await this.dsh.codexTitleRecords(sessionId, saved.thread, signal)) : claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(tuiKey(sessionId, saved)), signal));
         if (!title || title === shown)
             return;
         await this.dsh.rename(sessionId, title);

@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { RemoteAgentsMachines } from './core/machines.js';
 import { TuiFiles } from './tui-files.js';
+import { TuiSharing } from './tui-shared.js';
 import type { TuiStore } from './tui-state.js';
 import { TuiSessions } from './tui.js';
 import { WorktreeService } from './worktrees.js';
@@ -29,6 +30,7 @@ export interface Terminals {
     };
     worktrees: WorktreeService;
     tui: TuiSessions;
+    sharing: TuiSharing;
 }
 /**
  * Terminals that open in a conversation's remote workspace and outlive DSH, conversations whose view is Claude Code or
@@ -42,4 +44,4 @@ export declare function tuiFilesHandler(files: TuiFiles): (request: Request) => 
 /** Worktree workspaces: a project's DSH workspace path, a worktree's path on its machine, and operation IDs. */
 export declare function worktreeAction(worktrees: WorktreeService, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
 /** The requests about TUI conversations. */
-export declare function tuiAction(tui: TuiSessions, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown>;
+export declare function tuiAction(tui: TuiSessions, action: string, input: Record<string, unknown>, signal: AbortSignal, changed?: () => void): Promise<unknown>;

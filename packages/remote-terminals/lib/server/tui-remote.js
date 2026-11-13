@@ -1,9 +1,12 @@
 import { RemoteError, remotePath } from './core/domain.js';
 import { initializeCodex } from './core/codex.js';
 import { JsonlPeer, quote } from './core/ssh.js';
-import { endHolderScript } from './holder-protocol.js';
+import { endHolderScript, SHARED_TUI_FOLDER } from './holder-protocol.js';
 import { TUI_CODEX_CHILD, TUI_SUBAGENT_FILE, TUI_USAGE_CAP } from './tui-usage.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** A listed TUI conversation's file, named as its terminal holder is; how many are read, and how large one may be. */
+const SHARED_TUI_NAME = /^tui-[0-9a-f]{32}$/, SHARED_TUI_LIMIT = 300;
+export const SHARED_TUI_BYTES = 4096;
 /** What terminals and TUI conversations run on a machine, over its SSH connection. */
 export class TuiRemote {
     transport;
@@ -12,6 +15,30 @@ export class TuiRemote {
     }
     /** Ends a terminal's holder and what runs in it, if there is one. */
     async endHolder(holder) { await this.transport.exec(endHolderScript(holder), 15_000, { login: false }); }
+    /**
+     * The TUI conversations listed on this machine for every DSH that uses this account, one record a line; see tui-shared.ts.
+     * The most recently changed ones, so that a list grown over years still fits one read.
+     */
+    sharedTuis() {
+        return this.transport.exec(`dsh_dir="$HOME/${SHARED_TUI_FOLDER}"
+[ -d "$dsh_dir" ] || exit 0
+ls -t "$dsh_dir" 2>/dev/null | head -n ${SHARED_TUI_LIMIT} | while IFS= read -r dsh_name; do
+  case "$dsh_name" in tui-*.json) head -c ${SHARED_TUI_BYTES} "$dsh_dir/$dsh_name" 2>/dev/null; printf '\\n' ;; esac
+done
+true`, 20_000, { login: false });
+    }
+    /** Lists a TUI conversation on this machine, or replaces what is listed about it. */
+    async putSharedTui(name, record) {
+        if (!SHARED_TUI_NAME.test(name))
+            throw new RemoteError('Invalid TUI conversation');
+        if (Buffer.byteLength(record) > SHARED_TUI_BYTES || /[\0\r\n]/.test(record))
+            throw new RemoteError('Invalid TUI conversation record');
+        await this.transport.exec(`umask 077
+dsh_dir="$HOME/${SHARED_TUI_FOLDER}"
+mkdir -p "$dsh_dir" || exit 1
+dsh_file="$(mktemp "$dsh_dir/.put.XXXXXXXXXX")" || exit 1
+printf '%s\\n' ${quote(record)} > "$dsh_file" && mv -f "$dsh_file" "$dsh_dir/${name}.json" || { rm -f "$dsh_file"; exit 1; }`, 20_000, { login: false });
+    }
     /** The records that can title a Claude Code session, from its file on this machine if it has saved that session. */
     claudeTitleRecords(claudeSession) {
         return this.transport.exec(`dsh_file=$(find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${quote(`${claudeSession}.jsonl`)} 2>/dev/null | head -n 1)
