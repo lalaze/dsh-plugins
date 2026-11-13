@@ -465,8 +465,8 @@
         "zh": "DSH 游戏素材"
       },
       "description": {
-        "en": "An Assets tab for game projects: browse a workspace's 2D art, see which images the code still uses and which version of each pack is live, then retire, tag, redraw them with Codex or an image API (OpenAI compatible or Gemini), which agents in the project can call too, or hand them to the agent",
-        "zh": "游戏项目的素材标签页：浏览工作区里的 2D 素材，查看哪些图片代码还在用、每组素材哪个版本在生效，并可退役、打标签、用 Codex 或自选的生图接口（OpenAI 兼容或 Gemini）重绘，项目里的 agent 也能调用，或交给智能体处理"
+        "en": "An Assets tab for game projects: browse a workspace's 2D art, see which images the code still uses and which version of each pack is live, then retire, tag, redraw them with Codex or an image API (OpenAI compatible or Gemini) with every earlier version kept to go back to, which agents in the project can call too, or hand them to the agent",
+        "zh": "游戏项目的素材标签页：浏览工作区里的 2D 素材，查看哪些图片代码还在用、每组素材哪个版本在生效，并可退役、打标签、用 Codex 或自选的生图接口（OpenAI 兼容或 Gemini）重绘并保留历史版本可回退，项目里的 agent 也能调用，或交给智能体处理"
       },
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0IiBmaWxsPSJub25lIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkRTSCBHYW1lIEFzc2V0cyI+CiAgPHJlY3Qgd2lkdGg9IjY0IiBoZWlnaHQ9IjY0IiByeD0iMTYiIGZpbGw9IiMyRjZGNUUiLz4KICA8cmVjdCB4PSIxMCIgeT0iMTIiIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCIgcng9IjQiIGZpbGw9IiNGNEYxRTQiLz4KICA8cmVjdCB4PSIzNCIgeT0iMTIiIHdpZHRoPSIyMCIgaGVpZ2h0PSIyMCIgcng9IjQiIGZpbGw9IiNGNEYxRTQiIGZpbGwtb3BhY2l0eT0iLjU1Ii8+CiAgPHJlY3QgeD0iMTAiIHk9IjM2IiB3aWR0aD0iMjAiIGhlaWdodD0iMTYiIHJ4PSI0IiBmaWxsPSIjRjRGMUU0IiBmaWxsLW9wYWNpdHk9Ii41NSIvPgogIDxyZWN0IHg9IjM0IiB5PSIzNiIgd2lkdGg9IjIwIiBoZWlnaHQ9IjE2IiByeD0iNCIgZmlsbD0iI0Y0RjFFNCIgZmlsbC1vcGFjaXR5PSIuMyIvPgogIDxwYXRoIGZpbGw9IiMyRjZGNUUiIGQ9Ik0xNiAxOGg0djRoLTR6TTIwIDIyaDR2NGgtNHpNMTYgMjZoNHYyaC00ek0yNCAxOGgydjRoLTJ6Ii8+CiAgPGNpcmNsZSBjeD0iMjYiIGN5PSIxNiIgcj0iNSIgZmlsbD0iIzU4Qzk4QiIgc3Ryb2tlPSIjMkY2RjVFIiBzdHJva2Utd2lkdGg9IjIiLz4KPC9zdmc+Cg==",
       "author": "lalaze",
@@ -484,12 +484,12 @@
       },
       "versions": [
         {
-          "version": "0.3.0",
-          "publishTimestamp": 1794565168,
+          "version": "0.4.0",
+          "publishTimestamp": 1794566088,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "8636ebb3187ee5cd0a71548460be07220c78c1c7",
+            "commit": "057f8efa5d2ef5a1b025f71ac06821fe098b762b",
             "path": "packages/game-assets"
           },
           "engines": {
