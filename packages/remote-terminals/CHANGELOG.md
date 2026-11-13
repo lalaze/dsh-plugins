@@ -4,6 +4,14 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.8 — Typing in a terminal on a phone or tablet
+
+- On a touch device with a phone layout plugin (dsh-web-mobile), tapping a terminal or a TUI conversation did not let you type: the on-screen keyboard did not come up, and a hardware keyboard typed nowhere.
+- Cause: a tap landed on one of the terminal screen's drawing layers, and the terminal then moved keyboard focus to its hidden input from code. That plugin lets code focus a text input only when the finger went down on the input or on an element that contains it, so focus was refused every time.
+- On a device whose main pointer is a finger, those layers no longer take the tap, so it lands on the screen itself, which contains the input. Sidebar terminals and TUI conversations both get this; with a mouse nothing changes.
+- Opening a TUI conversation on such a device still does not raise the keyboard by itself, which is what that plugin is for: tap the terminal first.
+- Nothing to do after upgrading but reload the page. Remote Agents stays as it is.
+
 ## 0.1.7 — A TUI conversation appears in every DSH that uses its machine
 
 - A TUI conversation was known only to the DSH that started it. Started on one computer, it was missing from DSH's web page, the phone and every other DSH, although its CLI ran on a machine all of them reach.
