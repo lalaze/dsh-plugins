@@ -4,6 +4,14 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.6 — "Connecting…" no longer flashes when you come back to a conversation
+
+- DSH does not keep a sidebar terminal's screen while another conversation is in view. Each time you came back it connected again, and for a moment a row saying **Connecting…** appeared above the terminal, pushed the screen down, and went away.
+- That row, and the ones for reading the environment and starting, now show only if they last longer than 0.7 seconds, and take no room until then. The cursor is hidden while the terminal is not connected yet.
+- States that need you are shown at once as before: **Reconnect**, **Retry**, **New terminal**, **Take control**.
+- The terminal is still built again on each return, so its scroll position is not kept. Local terminals and TUI conversations get the same change.
+- Nothing to do after upgrading but restart DSH. Remote Agents stays as it is.
+
 ## 0.1.5 — Terminals work on DSH 0.2.2-rc.2
 
 - DSH 0.2.2-rc.2 changed how it starts a terminal. With 0.1.4 installed there, a terminal failed to open with "Cannot read properties of undefined (reading 'throwIfAborted')": TUI conversations, and by the same path the sidebar's terminals, local ones included.
