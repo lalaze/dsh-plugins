@@ -43,3 +43,16 @@ export function defaultRule(name, images = 0, codeFiles = 0, allCodeFiles = 0) {
 }
 /** Images and code directly in the workspace folder are listed under this name. */
 export const ROOT_FOLDER = '.';
+export const SOURCE_KINDS = ['openai', 'gemini'];
+/** What a new source of each kind starts with, and models to offer while typing. */
+export const SOURCE_DEFAULTS = {
+    openai: { baseUrl: 'https://api.openai.com/v1', model: 'gpt-image-2', models: ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-1.5', 'gpt-image-1-mini'] },
+    gemini: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3.1-flash-image', models: ['gemini-3.1-flash-image', 'gemini-3-pro-image', 'gemini-3.1-flash-lite-image'] },
+};
+/** Images one generation may be given as references. */
+export const REFERENCE_LIMIT = 4;
+/** Formats the image APIs take as references, and the ones a saved picture may have. */
+export const REFERENCE_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg'];
+export const isReference = (path) => REFERENCE_EXTENSIONS.includes(extensionOf(path));
+/** The longest prompt a generation takes. */
+export const PROMPT_LIMIT = 8000;

@@ -6,3 +6,5 @@ export declare function imageSize(data: Buffer): {
     width: number;
     height: number;
 } | undefined;
+/** The raster format of an image's bytes, by their first bytes; undefined for anything else, SVG included. */
+export declare function rasterType(data: Uint8Array): 'png' | 'jpeg' | 'webp' | 'gif' | undefined;

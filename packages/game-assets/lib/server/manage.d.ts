@@ -14,6 +14,11 @@ export interface Moved {
     }[];
     failed: Failure[];
 }
+/** Where a picture was written, and where the image it replaced was retired to. */
+export interface Placed {
+    path: string;
+    retired?: string;
+}
 export interface TagFile {
     tags: Record<string, string[]>;
     notes: Record<string, string>;
@@ -26,6 +31,11 @@ export declare function cleanTag(value: unknown): string | undefined;
  * `assets/art-retired`. Hidden folders are not scanned, so retired images there could not be listed or restored.
  */
 export declare function cleanRetireDir(value: unknown): string | undefined;
+/**
+ * A path a generated picture may be saved at: relative, of visible names, ending in a PNG, WebP or JPEG file name.
+ * Hidden folders are not scanned, so a picture there would not be listed.
+ */
+export declare function cleanImagePath(value: unknown): string | undefined;
 export declare function readRetired(root: string, retireDir: string): Promise<RetiredEntry[]>;
 export declare function readTags(root: string): Promise<TagFile>;
 /** Changes to one workspace, one at a time, so two requests cannot both rewrite the retired list or the tag file. */
@@ -42,6 +52,11 @@ export declare class Library {
     private move;
     private moveTags;
     private moveAll;
+    private writeRetired;
+    /** Creates `dir`, refusing when an existing folder on the way is a link that leads out of the workspace. */
+    private folder;
+    /** A free place for `path` in the retired folder: under its own path, or numbered beside an earlier retired copy. */
+    private freeRetired;
     /** Removes the folders a move left empty, from each given file's folder up to, but not including, `top`. */
     private prune;
     /** Moves images into the retired folder, each under its own path, and records where it came from. */
@@ -52,4 +67,10 @@ export declare class Library {
     tag(paths: readonly string[], add: readonly string[], remove: readonly string[]): Promise<Record<string, string[]>>;
     /** Sets an image's note; an empty note removes it. */
     note(path: string, note: string): Promise<string>;
+    /**
+     * Writes a new picture at `path`, which must be free. With `replace`, the image at `path` is retired first, to a free
+     * name in the retired folder, and moved back if the picture cannot be written; its tags and note stay with the path,
+     * as the new picture takes over its role in the game.
+     */
+    place(path: string, data: Buffer, replace: boolean, retireDir: string): Promise<Placed>;
 }

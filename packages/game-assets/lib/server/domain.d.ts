@@ -157,3 +157,63 @@ export interface ProjectStatus {
 }
 /** Images and code directly in the workspace folder are listed under this name. */
 export declare const ROOT_FOLDER = ".";
+/**
+ * The kinds of image API a source may be: `openai` speaks OpenAI's Images API (`/images/generations` and
+ * `/images/edits`), as OpenAI and most relay services do; `gemini` speaks Gemini's `generateContent`.
+ */
+export type SourceKind = 'openai' | 'gemini';
+export declare const SOURCE_KINDS: readonly SourceKind[];
+/** What a new source of each kind starts with, and models to offer while typing. */
+export declare const SOURCE_DEFAULTS: Record<SourceKind, {
+    baseUrl: string;
+    model: string;
+    models: string[];
+}>;
+/** A source as the client sees it: everything but the key, of which only the end is shown so keys can be told apart. */
+export interface SourceView {
+    id: string;
+    name: string;
+    kind: SourceKind;
+    baseUrl: string;
+    model: string;
+    keyHint: string;
+}
+/** A source as the client sends it; an absent `apiKey` keeps the key already saved. */
+export interface SourceInput {
+    id?: string;
+    name: string;
+    kind: SourceKind;
+    baseUrl: string;
+    model: string;
+    apiKey?: string;
+}
+export interface SourcesAnswer {
+    sources: SourceView[];
+    defaultId: string | null;
+}
+/** The shape asked of a generated picture; the API's nearest size is used. */
+export type Aspect = 'square' | 'wide' | 'tall';
+/** What one generation answers: the picture as the API made it, in base64. */
+export interface GeneratedImage {
+    data: string;
+    mediaType: string;
+    width?: number;
+    height?: number;
+    model: string;
+    source: string;
+    ms: number;
+    text?: string;
+}
+/** What saving a picture answers: where it went, where the image it replaced was retired to, and the workspace now. */
+export interface SaveResult {
+    path: string;
+    retired?: string;
+    scan: ScanResult;
+}
+/** Images one generation may be given as references. */
+export declare const REFERENCE_LIMIT = 4;
+/** Formats the image APIs take as references, and the ones a saved picture may have. */
+export declare const REFERENCE_EXTENSIONS: readonly ["png", "webp", "jpg", "jpeg"];
+export declare const isReference: (path: string) => boolean;
+/** The longest prompt a generation takes. */
+export declare const PROMPT_LIMIT = 8000;

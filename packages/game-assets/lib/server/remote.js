@@ -32,16 +32,25 @@ export function remoteAnswer(output, exitCode) {
         throw new AssetError(typeof answer.error === 'string' ? answer.error : 'The workspace could not be scanned', typeof answer.status === 'number' ? answer.status : 500);
     return answer.result;
 }
-const TIMEOUT_MS = { scan: 180_000 };
+const TIMEOUT_MS = { scan: 180_000, place: 300_000 };
 /** Output kept from one run: a scan of tens of thousands of images, compressed, stays far below it. */
 const OUTPUT_LIMIT = 96 * 1024 * 1024;
-/** One request on the conversation's machine, in its workspace folder, which is verified again once the connection is ready. */
-export async function runRemote(machines, sessionId, target, script, request) {
+/**
+ * One request on the conversation's machine, in its workspace folder, which is verified again once the connection is
+ * ready. An `upload` travels first, over the same connection, as no shell argument could hold a picture.
+ */
+export async function runRemote(machines, sessionId, target, script, request, upload) {
     const signal = AbortSignal.timeout(TIMEOUT_MS[request.op] ?? 60_000), chunks = [];
     let size = 0;
-    const exitCode = await machines.withWorkspace(target.hostId, async () => { await machines.target(sessionId, signal, target); }, files => files.stream(target.cwd, remoteCommand(script, request), {}, data => { if ((size += data.length) <= OUTPUT_LIMIT)
-        chunks.push(Buffer.from(data)); }, signal))
-        .catch(error => { throw error instanceof AssetError ? error : new AssetError(`The remote machine could not be reached: ${error instanceof Error ? error.message : String(error)}`, 502); });
+    const exitCode = await machines.withWorkspace(target.hostId, async () => { await machines.target(sessionId, signal, target); }, async (files) => {
+        if (upload) {
+            if (typeof files.attach !== 'function')
+                throw new AssetError('Saving pictures in a remote workspace needs a newer Remote Agents', 409);
+            await files.attach(target.cwd, upload.path, (async function* () { yield upload.data; })(), upload.data.length, upload.sha256, signal);
+        }
+        return files.stream(target.cwd, remoteCommand(script, request), {}, data => { if ((size += data.length) <= OUTPUT_LIMIT)
+            chunks.push(Buffer.from(data)); }, signal);
+    }).catch(error => { throw error instanceof AssetError ? error : new AssetError(`The remote machine could not be reached: ${error instanceof Error ? error.message : String(error)}`, 502); });
     if (signal.aborted)
         throw new AssetError('The remote machine took too long to answer', 504);
     return remoteAnswer(Buffer.concat(chunks).toString('latin1'), exitCode);

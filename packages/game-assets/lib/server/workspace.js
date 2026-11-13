@@ -2,8 +2,9 @@
  * Everything the plugin does in one workspace folder, as requests with JSON answers. The host runs them in its own
  * process for a local workspace and, for a remote one, inside the script it sends to that machine (remote-agent.ts).
  */
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { lstat, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { detectEngine } from './detect.js';
 import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage } from './domain.js';
 export class AssetError extends Error {
@@ -11,6 +12,28 @@ export class AssetError extends Error {
     constructor(message, status = 400) {
         super(message);
         this.status = status;
+    }
+}
+/** Where Remote Agents' upload leaves a picture on a remote machine before the script puts it in place. */
+export const STAGING_DIR = '.dsh-remote-agents/attachments/game-assets';
+const STAGED = /^[a-f0-9]{64}\.(?:png|webp|jpe?g)$/;
+/** The bytes of an uploaded picture, checked against its digest; the upload is removed either way. */
+async function takeStaged(root, staged, sha256) {
+    const name = staged?.startsWith(`${STAGING_DIR}/`) ? staged.slice(STAGING_DIR.length + 1) : '';
+    if (!STAGED.test(name) || !sha256 || !name.startsWith(sha256))
+        throw new AssetError('Invalid upload');
+    const file = join(root, STAGING_DIR, name);
+    try {
+        const info = await lstat(file).catch(fsError);
+        if (!info.isFile() || info.size > RAW_LIMIT)
+            throw new AssetError('Invalid upload');
+        const data = await readFile(file);
+        if (createHash('sha256').update(data).digest('hex') !== sha256)
+            throw new AssetError('The upload arrived damaged', 502);
+        return data;
+    }
+    finally {
+        await rm(file, { force: true });
     }
 }
 const fsError = (error) => {
@@ -52,6 +75,15 @@ export async function handle(root, request, scanner, library) {
         case 'restore': return library.restore(request.retireDir, request.paths);
         case 'tag': return library.tag(request.paths, request.add, request.remove);
         case 'note': return { note: await library.note(request.path, request.note) };
+        case 'place': {
+            const data = request.data !== undefined ? Buffer.from(request.data, 'base64') : await takeStaged(root, request.staged, request.sha256);
+            try {
+                return await library.place(request.path, data, request.replace, request.retireDir);
+            }
+            catch (error) {
+                throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409);
+            }
+        }
         case 'read': {
             const answers = [];
             let bytes = 0;
