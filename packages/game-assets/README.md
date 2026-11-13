@@ -114,7 +114,7 @@ Settings of a remote workspace are kept by machine and folder. Retired images, t
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.2.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.2.1.tgz"
 ```
 
 Restart the profile and refresh the browser. For Desktop, quit DSH and use its bundled `dsh` with `--profile desktop`. Requires DSH `>=0.2.1-rc.2 <0.3.0`.
