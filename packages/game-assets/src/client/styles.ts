@@ -142,6 +142,36 @@ export const styles = `
 .ga-wrow .ga-select{max-width:none;margin:0}
 .ga-note p{margin:0 0 10px}
 
+.ga-seg button[aria-checked=true]{background:var(--ga-hover);opacity:1;font-weight:600}
+.ga-seg button:disabled{cursor:default}
+.ga-button[data-danger]{border-color:transparent;background:var(--ga-unused);color:#fff}
+.ga-dialog.ga-gen{width:min(720px,100%)}
+.ga-gen .ga-field:first-of-type{margin-top:4px}
+.ga-grow{flex:1;max-width:none;margin:0}
+.ga-wrap{flex-wrap:wrap;white-space:normal}
+.ga-wrap .ga-tools{gap:8px}
+.ga-check-label{display:inline-flex;align-items:center;gap:6px;cursor:pointer}
+.ga-refpics{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.ga-refpic{display:inline-flex;align-items:center;gap:6px;max-width:220px;padding:3px 2px 3px 3px;border:1px solid var(--ga-line);border-radius:7px}
+.ga-refpic .ga-twin-thumb{flex:none;width:36px;height:36px}
+.ga-refpic .ga-twin-path{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ga-refpic .ga-tool{width:22px;height:22px;font-size:14px}
+.ga-compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:12px 0 0}
+.ga-compare figure{margin:0;min-width:0}
+.ga-compare .ga-preview{height:236px}
+.ga-compare figcaption{margin-top:4px;font-size:11.5px;text-align:center;color:var(--dsw-alias-label-secondary,inherit);font-variant-numeric:tabular-nums}
+.ga-gen>.ga-dim{margin:8px 0 0;font-size:11.5px;line-height:1.5}
+.ga-sources{display:flex;flex-direction:column;gap:8px;margin:10px 0}
+.ga-sources>p{margin:0}
+.ga-srow{grid-template-columns:minmax(0,1fr) auto;min-height:44px}
+.ga-srow .ga-actions{justify-content:flex-end}
+.ga-default{margin-left:6px;vertical-align:1px}
+.ga-sform{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--ga-line);border-radius:8px}
+.ga-sform>p{margin:0;font-size:11.5px;line-height:1.5}
+.ga-sform .ga-actions.ga-end{margin:4px 0 0}
+.ga-sfield{display:grid;grid-template-columns:72px minmax(0,1fr);align-items:center;gap:8px;font-size:12px}
+.ga-sfield .ga-search{max-width:none}
+
 .ga-status{display:flex;gap:12px;flex:none;padding:5px 12px;border-top:1px solid var(--ga-line);font-size:11.5px;white-space:nowrap;color:var(--dsw-alias-label-secondary,inherit)}
 .ga-status>span{overflow:hidden;text-overflow:ellipsis}
 .ga-status>span:first-child{flex:none}

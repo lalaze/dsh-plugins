@@ -18,7 +18,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.md) | Colored workspace tags, with sidebar grouping by tag or by running status |
 | `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.md) | Track DSH and Claude SSH token usage with filters, grouped reports and CSV export |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.md) | Bing daily wallpapers, local uploads, pinned backgrounds and image previews for DSH |
-| `dsh-game-assets` | [packages/game-assets](packages/game-assets/README.md) | An Assets tab for game projects: browse a workspace's 2D art, see which images the code still uses and which version of each pack is live, then retire, tag or hand them to the agent |
+| `dsh-game-assets` | [packages/game-assets](packages/game-assets/README.md) | An Assets tab for game projects: browse a workspace's 2D art, see which images the code still uses and which version of each pack is live, then retire, tag, redraw them with an image API of your choice (OpenAI compatible or Gemini) or hand them to the agent |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | Chrome-style Elements, Console and Network debugger in a separate Chrome/Edge window |
 | `dsh-translate` | [packages/translate](packages/translate/README.md) | Translate selected chat text and composer drafts through an OpenAI-compatible API |
 | `dsh-auth-cookie-cleanup` | [packages/auth-cookie-cleanup](packages/auth-cookie-cleanup/README.md) | Temporary fix for Desktop failing to open after ~70 launches: expires stale per-port `dsh-auth-*` cookies (deepseek-harness#10598) |

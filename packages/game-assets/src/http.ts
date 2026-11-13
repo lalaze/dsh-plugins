@@ -1,8 +1,8 @@
 import { CLIENT_HEADER, type Asset, type ScanResult, type ScannedAsset } from './domain.js';
 import { AssetError, parseRules, type AssetService } from './service.js';
 
-/** Room for a selection of thousands of paths. */
-const BODY_LIMIT = 2 * 1024 * 1024;
+/** Room for a selection of thousands of paths, or a picture to save (32 MB in base64). */
+const BODY_LIMIT = 48 * 1024 * 1024;
 const text = (value: unknown, label: string): string => {
   if (typeof value !== 'string' || !value || value.length > 4096) throw new AssetError(`Invalid ${label}`);
   return value;
@@ -13,8 +13,9 @@ const summary = (scan: ScanResult<ScannedAsset>): ScanResult => ({ ...scan, asse
 
 /**
  * `GET ?sessionId&path` answers an image's bytes; `POST` takes a JSON `action`: `scan`, `detail`, `images` and `configure` read a workspace;
- * `retire`, `restore`, `tag` and `note` change it (see manage.ts);
- * `project`, `setProject`, `mode` and `setMode` decide where the tab appears. */
+ * `retire`, `restore`, `tag`, `note` and `save` change it (see manage.ts);
+ * `project`, `setProject`, `mode` and `setMode` decide where the tab appears;
+ * `sources`, `saveSource`, `deleteSource` and `defaultSource` keep the image APIs, and `generate` asks one for a picture. */
 export function createHandler(service: AssetService, log?: (message: string) => void) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
@@ -39,6 +40,10 @@ export function createHandler(service: AssetService, log?: (message: string) => 
         if (input.mode !== 'games' && input.mode !== 'all') throw new AssetError('Invalid tab setting');
         return Response.json({ mode: await service.setMode(input.mode) }, { headers });
       }
+      if (input.action === 'sources') return Response.json(await service.sources(), { headers });
+      if (input.action === 'saveSource') return Response.json(await service.saveSource(input.source), { headers });
+      if (input.action === 'deleteSource') return Response.json(await service.deleteSource(input.id), { headers });
+      if (input.action === 'defaultSource') return Response.json(await service.setDefaultSource(input.id), { headers });
       const sessionId = text(input.sessionId, 'session ID');
       switch (input.action) {
         case 'project': return Response.json(await service.project(sessionId), { headers });
@@ -55,6 +60,12 @@ export function createHandler(service: AssetService, log?: (message: string) => 
         }
         case 'tag': return Response.json(await service.tag(sessionId, input.paths, input.add, input.remove), { headers });
         case 'note': return Response.json(await service.note(sessionId, input.path, input.note), { headers });
+        // Closing the dialog drops the request, and with it the call to the image API.
+        case 'generate': return Response.json(await service.generate(sessionId, input, request.signal), { headers });
+        case 'save': {
+          const result = await service.save(sessionId, input.path, input.data, input.replace);
+          return Response.json({ ...result, scan: summary(result.scan) }, { headers });
+        }
         default: throw new AssetError('Unknown assets action');
       }
     } catch (error) {

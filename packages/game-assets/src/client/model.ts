@@ -12,6 +12,14 @@ export const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 export const dirOf = (path: string) => path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
 export const stemOf = (path: string) => nameOf(path).replace(/\.[A-Za-z0-9]+$/, '');
 export const inFolder = (path: string, folder: string) => !folder || path.startsWith(`${folder}/`);
+/** The folder holding the most images that are not retired: where a new picture most likely belongs. */
+export function busiestFolder(assets: readonly Asset[]): string {
+  const counts = new Map<string, number>();
+  for (const asset of assets) if (!asset.retired) counts.set(dirOf(asset.path), (counts.get(dirOf(asset.path)) ?? 0) + 1);
+  let best = '', most = 0;
+  for (const [dir, count] of counts) if (count > most) { best = dir; most = count; }
+  return best;
+}
 
 const terms = (query: string) => query.toLowerCase().split(/\s+/).filter(Boolean);
 /** Search words are looked for in the path, the tags and the note. */

@@ -1,13 +1,14 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from '@dsh-plugins/i18n/react';
-import { ROOT_FOLDER, type Asset, type FolderRule, type ScanResult } from '../domain.js';
+import { REFERENCE_LIMIT, ROOT_FOLDER, isReference, type Asset, type FolderRule, type SaveResult, type ScanResult } from '../domain.js';
 import { configureFolders, moveAssets, noteAsset, scanWorkspace, tagAssets } from './api.js';
 import { RetireDialog, SendDialog, TagDialog } from './dialogs.js';
 import { Detail } from './detail.js';
+import { GenerateDialog } from './generate.js';
 import { Grid } from './grid.js';
 import { i18n, localizeError, ui } from './i18n.js';
 import { chooseProject, useProject } from './projects.js';
-import { UNTAGGED, USAGE_FILTERS, availableHeight, buildTree, filterAssets, formatBytes, sameName, sortAssets, tagCounts, usageCounts, type Filter, type Sort, type UsageFilter } from './model.js';
+import { UNTAGGED, USAGE_FILTERS, availableHeight, buildTree, busiestFolder, dirOf, filterAssets, formatBytes, sameName, sortAssets, tagCounts, usageCounts, type Filter, type Sort, type UsageFilter } from './model.js';
 import { styles } from './styles.js';
 import { FolderSettings, Tree, Versions } from './views.js';
 
@@ -21,7 +22,8 @@ const scans = new Map<string, ScanResult>();
 const PATHS = {
   tree: 'M2.5 3.5h4l1.5 1.5h5.5v7.5h-11z', copy: 'M5.5 5.5h7v8h-7zM3.5 10.5v-8h7', folders: 'M3 4h10M3 8h10M3 12h10M6 2.8v2.4M10 6.8v2.4M5 10.8v2.4',
   check: 'M2.5 2.5h11v11h-11zM5 8.2l2.2 2.2L11.2 6',
-  rescan: 'M13 3v3.5H9.5M3 13V9.5h3.5M4.2 6A4.5 4.5 0 0 1 12.6 5.7M11.8 10A4.5 4.5 0 0 1 3.4 10.3', size: 'M2.5 2.5h4v4h-4zM9.5 2.5h4v4h-4zM2.5 9.5h4v4h-4zM9.5 9.5h4v4h-4z',
+  rescan: 'M13 3v3.5H9.5M3 13V9.5h3.5M4.2 6A4.5 4.5 0 0 1 12.6 5.7M11.8 10A4.5 4.5 0 0 1 3.4 10.3',
+  spark: 'M7 2.5l1.2 3.3 3.3 1.2-3.3 1.2L7 11.5 5.8 8.2 2.5 7l3.3-1.2zM12.5 10.5v3M11 12h3', size: 'M2.5 2.5h4v4h-4zM9.5 2.5h4v4h-4zM2.5 9.5h4v4h-4zM9.5 9.5h4v4h-4z',
 } as const;
 const Tool = ({ label, icon, ...props }: { label: string; icon: keyof typeof PATHS } & React.ButtonHTMLAttributes<HTMLButtonElement>) =>
   <button type="button" className="ga-tool" title={label} aria-label={label} {...props}>
@@ -61,7 +63,7 @@ export function AssetsPanel({ sessionId, openFile, sendToChat }: PanelProps) {
   return <Workspace key={sessionId} sessionId={sessionId} openFile={openFile} sendToChat={sendToChat} />;
 }
 
-type DialogKind = 'retire' | 'tag' | 'send';
+type DialogKind = 'retire' | 'tag' | 'send' | 'generate';
 
 /**
  * DSH lets a conversation's view grow with its content and scrolls the conversation instead. The Assets view keeps to
@@ -97,7 +99,7 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
   const [selected, setSelected] = useState<string>(), [settings, setSettings] = useState(false), [notice, setNotice] = useState('');
   const [narrow, setNarrow] = useState(false), [treeOpen, setTreeOpen] = useState<boolean>();
   /** Images picked for an action, and the dialog that acts on some images: the picked ones, a version's, or the one in the detail pane. */
-  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set()), [dialog, setDialog] = useState<{ kind: DialogKind; paths: string[] }>();
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set()), [dialog, setDialog] = useState<{ kind: DialogKind; paths: string[]; target?: string }>();
   const root = useRef<HTMLElement>(null), alive = useRef(true), lastChecked = useRef<string>();
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useFitToConversation(root);
@@ -202,6 +204,18 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
     void (sendToChat ? sendToChat(sessionId, text) : Promise.resolve(false)).then(taken => taken ? (alive.current && setNotice(ui('Added to the chat input'))) : copy(text, ui('Copied. Paste it into the chat input.')));
   };
   const pickedPaths = () => picked.map(asset => asset.path);
+  /** One picked image is the one to redraw; several are references for a new picture. */
+  const generateFrom = (from: Asset[]) => {
+    const usable = from.filter(asset => isReference(asset.path));
+    setDialog({ kind: 'generate', paths: (usable.length ? usable : from).slice(0, REFERENCE_LIMIT).map(asset => asset.path), target: from.length === 1 && !from[0].retired ? from[0].path : undefined });
+  };
+  /** Shows the workspace with the new picture in it, and the picture itself. */
+  const saved = (answer: SaveResult, replaced: boolean) => {
+    adopt(answer.scan); setDialog(undefined);
+    if (!items.some(asset => asset.path === answer.path)) setFilter({ query: '', usage: 'all', folder: '', tag: '' });
+    setSelected(answer.path);
+    setNotice(replaced && answer.retired ? ui('Replaced {path}; the old image is in {retired}', { path: answer.path, retired: answer.retired }) : ui('Saved {path}', { path: answer.path }));
+  };
   const allShown = items.length > 0 && items.every(asset => checked.has(asset.path));
 
   return <section className="ga-root" ref={root} data-narrow={narrow || undefined} aria-label={ui('Assets')} aria-busy={busy}><style>{styles}</style>
@@ -234,6 +248,7 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
             onClick={() => allShown ? clearChecked() : setChecked(new Set([...checked, ...items.map(asset => asset.path)]))} />
           <Tool label={ui('Copy the paths of the {count} images shown', { count: items.length })} icon="copy" disabled={!items.length}
             onClick={() => copy(items.map(asset => asset.path).join('\n'), ui('Copied {count} paths', { count: items.length }))} />
+          <Tool label={ui('Generate a new picture…')} icon="spark" disabled={!result} onClick={() => setDialog({ kind: 'generate', paths: [] })} />
         </>}
         <Tool label={ui('Folders to scan')} icon="folders" disabled={!result} onClick={() => setSettings(true)} />
         <Tool label={ui('Scan again')} icon="rescan" disabled={busy} onClick={() => void run(() => scanWorkspace(sessionId, true))} />
@@ -248,6 +263,7 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
         <button type="button" className="ga-button" onClick={() => setDialog({ kind: 'tag', paths: pickedPaths() })}>{ui('Tag…')}</button>
         {shelf ? <button type="button" className="ga-button" disabled={busy || !picked.some(asset => asset.origin)} onClick={() => move('restore', picked.filter(asset => asset.origin).map(asset => asset.path))}>{ui('Restore')}</button>
           : <button type="button" className="ga-button" disabled={busy} onClick={() => setDialog({ kind: 'retire', paths: pickedPaths() })}>{ui('Retire…')}</button>}
+        {!shelf && <button type="button" className="ga-button" onClick={() => generateFrom(picked)}>{ui('Generate…')}</button>}
         <button type="button" className="ga-button" onClick={() => setDialog({ kind: 'send', paths: pickedPaths() })}>{ui('Ask the agent…')}</button>
       </span>
     </div>}
@@ -262,7 +278,8 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
           {chosen && <Detail sessionId={sessionId} asset={chosen} result={result} twins={twinsOf(chosen)} onSelect={reveal} onClose={() => setSelected(undefined)}
             onCopy={text => copy(text, ui('Copied'))} openFile={openFile && ((path, line) => openFile(sessionId, path, line))}
             knownTags={tagNames} onTag={(add, remove) => tag([chosen.path], add, remove)} onNote={text => note(chosen.path, text)}
-            onMove={() => chosen.retired ? move('restore', [chosen.path]) : setDialog({ kind: 'retire', paths: [chosen.path] })} />}
+            onMove={() => chosen.retired ? move('restore', [chosen.path]) : setDialog({ kind: 'retire', paths: [chosen.path] })}
+            onRedraw={!chosen.retired && isReference(chosen.path) ? () => generateFrom([chosen]) : undefined} />}
         </>}
     </div>
     {result && <footer className="ga-status">
@@ -274,7 +291,9 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
     </footer>}
     {settings && result && <FolderSettings folders={result.folders} retireDir={result.retireDir} busy={busy} onApply={applyFolders} onClose={() => setSettings(false)}
       onHide={() => { void chooseProject(sessionId, false).catch(e => { if (alive.current) setError(localizeError(e)); }); setSettings(false); }} />}
-    {dialog && result && subject.length > 0 && (dialog.kind === 'retire' ? <RetireDialog assets={subject} retireDir={result.retireDir} busy={busy} onConfirm={() => move('retire', subject.map(asset => asset.path))} onClose={() => setDialog(undefined)} />
+    {dialog?.kind === 'generate' && result && <GenerateDialog sessionId={sessionId} references={subject} target={dialog.target ? assets.find(asset => asset.path === dialog.target) : undefined}
+      assets={assets} folder={filter.folder || (chosen && !chosen.retired ? dirOf(chosen.path) : busiestFolder(assets))} retireDir={result.retireDir} onSaved={saved} onClose={() => setDialog(undefined)} />}
+    {dialog && dialog.kind !== 'generate' && result && subject.length > 0 && (dialog.kind === 'retire' ? <RetireDialog assets={subject} retireDir={result.retireDir} busy={busy} onConfirm={() => move('retire', subject.map(asset => asset.path))} onClose={() => setDialog(undefined)} />
       : dialog.kind === 'tag' ? <TagDialog assets={subject} known={tagNames} busy={busy} onChange={(add, remove) => tag(subject.map(asset => asset.path), add, remove)} onClose={() => setDialog(undefined)} />
       : <SendDialog assets={subject} onSend={send} onClose={() => setDialog(undefined)} />)}
   </section>;

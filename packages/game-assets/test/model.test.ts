@@ -74,3 +74,26 @@ test('only the rows on screen, with a margin, are rendered', () => {
   assert.deepEqual(visibleRows(1000, 10, 100, 5000, 600), { rows: 100, first: 48, last: 58 });
   assert.deepEqual(visibleRows(5, 10, 100, 0, 600), { rows: 1, first: 0, last: 0 });
 });
+
+test('a generated picture is placed whole for a sprite, or crops to fill for an opaque picture', async () => {
+  const { placeRect, aspectOf, defaultFit } = await import('../src/client/picture.js');
+  assert.deepEqual(placeRect(1536, 1024, 320, 180), { x: 25, y: 0, width: 270, height: 180 });
+  assert.deepEqual(placeRect(1536, 1024, 320, 180, true), { x: 0, y: -17, width: 320, height: 213 });
+  assert.deepEqual(placeRect(1024, 1024, 32, 32), { x: 0, y: 0, width: 32, height: 32 });
+  assert.deepEqual([aspectOf(32, 32), aspectOf(320, 180), aspectOf(100, 140), aspectOf()], ['square', 'wide', 'tall', 'square']);
+  assert.deepEqual([defaultFit(32, 32), defaultFit(128, 96), defaultFit(320, 180), defaultFit()], ['pixel', 'pixel', 'smooth', 'none']);
+});
+
+test('a picture is offered a free path beside the image it redraws, or in the folder being looked at', async () => {
+  const { freePath, suggestedPath } = await import('../src/client/generate.js');
+  const { busiestFolder } = await import('../src/client/model.js');
+  const taken = new Set(['art/hero.png', 'art/hero-redraw.png', 'art/hero-redraw-2.png', 'art/generated.png']);
+  assert.equal(freePath('art/new.png', taken), 'art/new.png');
+  assert.equal(freePath('art/hero-redraw.png', taken), 'art/hero-redraw-3.png');
+  assert.equal(suggestedPath(asset('art/hero.png'), '', [], taken), 'art/hero-redraw-3.png');
+  assert.equal(suggestedPath(asset('art/spin.gif'), '', [], taken), 'art/spin-redraw.png', 'a GIF is redrawn as a PNG');
+  assert.equal(suggestedPath(undefined, 'art', [], taken), 'art/generated-2.png');
+  assert.equal(suggestedPath(undefined, '', [asset('ui/button.png')], taken), 'ui/generated.png');
+  assert.equal(suggestedPath(undefined, '', [], taken), 'generated.png');
+  assert.equal(busiestFolder([asset('a/1.png'), asset('b/1.png'), asset('b/2.png'), asset('_retired/a/3.png', 'unused', { retired: true }), asset('_retired/a/4.png', 'unused', { retired: true })]), 'b');
+});

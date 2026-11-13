@@ -99,5 +99,5 @@ export function apply(ctx: Client): void {
   });
   // Only an explicit entry keyed by the bundle identity gives the plugin's detail page a settings section.
   ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({ name: 'plugins.bundle.config', key: BUNDLE_KEY, locale: NAMESPACE },
-    (props: { view?: string }) => props.view === 'summary' ? <>{ui('Where the Assets tab appears')}</> : <TabSettings />));
+    (props: { view?: string }) => props.view === 'summary' ? <>{ui('Where the Assets tab appears and which image APIs draw pictures')}</> : <TabSettings />));
 }

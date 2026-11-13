@@ -1,4 +1,4 @@
-import { CLIENT_HEADER, ROUTE, type AssetDetail, type FolderRule, type ImageAnswer, type MoveResult, type ProjectStatus, type ScanResult, type TabMode, type TagResult } from '../domain.js';
+import { CLIENT_HEADER, ROUTE, type Aspect, type AssetDetail, type FolderRule, type GeneratedImage, type ImageAnswer, type MoveResult, type ProjectStatus, type SaveResult, type ScanResult, type SourceInput, type SourcesAnswer, type TabMode, type TagResult } from '../domain.js';
 
 export class AssetRequestError extends Error { constructor(message: string, readonly status: number) { super(message); } }
 
@@ -28,3 +28,13 @@ export const projectStatus = (sessionId: string) => post<ProjectStatus>({ action
 export const setProject = (sessionId: string, game: boolean | null) => post<ProjectStatus>({ action: 'setProject', sessionId, game });
 export const tabMode = () => post<{ mode: TabMode }>({ action: 'mode' });
 export const setTabMode = (mode: TabMode) => post<{ mode: TabMode }>({ action: 'setMode', mode });
+
+export const listSources = () => post<SourcesAnswer>({ action: 'sources' });
+export const saveSource = (source: SourceInput) => post<SourcesAnswer & { id: string }>({ action: 'saveSource', source });
+export const deleteSource = (id: string) => post<SourcesAnswer>({ action: 'deleteSource', id });
+export const setDefaultSource = (id: string) => post<SourcesAnswer>({ action: 'defaultSource', id });
+export interface GenerateOptions { sourceId: string; prompt: string; references: string[]; aspect: Aspect; transparent: boolean }
+/** Asks the source for a picture; nothing is written. Aborting stops the call to the image API. */
+export const generatePicture = (sessionId: string, options: GenerateOptions, signal?: AbortSignal) => post<GeneratedImage>({ action: 'generate', sessionId, ...options }, signal);
+/** Writes a picture, given in base64, to a free path, or in place of an image that is retired first. */
+export const savePicture = (sessionId: string, path: string, data: string, replace: boolean) => post<SaveResult>({ action: 'save', sessionId, path, data, replace });

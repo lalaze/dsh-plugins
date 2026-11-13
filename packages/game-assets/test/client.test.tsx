@@ -4,9 +4,10 @@ import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { offerTuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
-import type { Asset, ScanResult } from '../src/domain.js';
+import type { Asset, ScanResult, SourceView } from '../src/domain.js';
 import { BUNDLE_KEY, VIEW_ID, apply, fileAddress } from '../src/client/index.js';
 import { resetProjects } from '../src/client/projects.js';
+import { resetSources } from '../src/client/sources.js';
 
 test('file addresses encode the session and each part of the path, with an optional line', () => {
   assert.equal(fileAddress('s 1', 'src/a b.ts'), 'dsh-resource://file/session/s%201/src/a%20b.ts');
@@ -24,7 +25,9 @@ const scan = (): ScanResult => ({
 
 let root: Root | undefined, container: HTMLElement, requests: Record<string, unknown>[], opened: unknown[][];
 /** What the simulated host has saved: where the tab appears, and the user's choice per conversation's workspace. */
-let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]> };
+let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string };
+/** A PNG of 1024 × 1024, as an image API answers. */
+const GENERATED = (() => { const data = Buffer.alloc(40); data.writeUInt32BE(0x89504e47, 0); data.writeUInt32BE(0x0d0a1a0a, 4); data.writeUInt32BE(13, 8); data.write('IHDR', 12, 'latin1'); data.writeUInt32BE(1024, 16); data.writeUInt32BE(1024, 20); return data; })();
 /** The workspace as the simulated host answers it: retired images sit in the retired folder, tags are attached. */
 const library = (): ScanResult => {
   const base = scan();
@@ -41,7 +44,7 @@ const project = (sessionId: string) => {
 };
 beforeEach(() => {
   const { window } = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true });
-  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {} };
+  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [] };
   const fetch = async (url: string, init: { method?: string; body?: string; headers: Record<string, string> }) => {
     assert.equal(init.headers['X-DSH-Game-Assets'], '1');
     if (!init.body) { requests.push({ image: new URL(url, 'http://localhost/').searchParams.get('path') }); return new Response(new Uint8Array([1, 2, 3])); }
@@ -58,6 +61,27 @@ beforeEach(() => {
     if (body.action === 'restore') { saved.retired = saved.retired.filter(path => !body.paths.includes(`_retired/${path}`)); return Response.json({ moved: body.paths.length, failed: [], scan: library() }); }
     if (body.action === 'tag') { const tags: Record<string, string[]> = {}; for (const path of body.paths) tags[path] = saved.tags[path] = [...new Set([...(saved.tags[path] ?? []).filter(tag => !body.remove.includes(tag)), ...body.add])]; return Response.json({ tags }); }
     if (body.action === 'note') return Response.json({ note: body.note.trim() });
+    const sources = () => ({ sources: saved.sources, defaultId: saved.defaultId });
+    if (body.action === 'sources') return Response.json(sources());
+    if (body.action === 'saveSource') {
+      const { apiKey, ...rest } = body.source, id = rest.id ?? `src-${saved.sources.length + 1}`;
+      const index = saved.sources.findIndex(source => source.id === id), next = { ...rest, id, keyHint: apiKey ? `…${apiKey.slice(-4)}` : saved.sources[index]?.keyHint ?? '' };
+      saved.sources = index >= 0 ? saved.sources.map(source => source.id === id ? next : source) : [...saved.sources, next];
+      saved.defaultId ??= id;
+      return Response.json({ ...sources(), id });
+    }
+    if (body.action === 'defaultSource') { saved.defaultId = body.id; return Response.json(sources()); }
+    if (body.action === 'deleteSource') { saved.sources = saved.sources.filter(source => source.id !== body.id); if (saved.defaultId === body.id) saved.defaultId = saved.sources[0]?.id ?? null; return Response.json(sources()); }
+    if (body.action === 'generate') {
+      if (saved.failGenerate) return Response.json({ error: saved.failGenerate }, { status: 502 });
+      const source = saved.sources.find(entry => entry.id === body.sourceId)!;
+      return Response.json({ data: GENERATED.toString('base64'), mediaType: 'image/png', width: 1024, height: 1024, model: source.model, source: source.name, ms: 12_400 });
+    }
+    if (body.action === 'save') {
+      saved.written.push(body.path);
+      const base = library();
+      return Response.json({ path: body.path, ...(body.replace ? { retired: `_retired/${body.path}` } : {}), scan: { ...base, assets: [...base.assets.filter(a => a.path !== body.path), asset(body.path, 'unused', { mtimeMs: 2 })].sort((a, b) => a.path < b.path ? -1 : 1) } });
+    }
     if (body.action === 'detail') return Response.json({ path: body.path, refCount: 1, refs: [{ file: 'src/game.ts', line: 7, kind: 'path', text: "load.image('hero', 'cast-v2/hero.png')" }] });
     if (body.action === 'configure') return Response.json({ ...scan(), scannedAt: 2, assets: scan().assets.map(a => ({ ...a, usage: 'unused', refCount: 0 })), folders: scan().folders.map(f => ({ ...f, ...body.folders[f.name] })) });
     return body.sessionId === 'broken' ? Response.json({ error: 'This conversation has no workspace folder' }, { status: 409 }) : Response.json(library());
@@ -70,7 +94,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined;
-  mock.timers.reset(); resetProjects();
+  mock.timers.reset(); resetProjects(); resetSources();
   for (const name of globals) delete (globalThis as Record<string, unknown>)[name];
 });
 const settle = () => act(async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); });
@@ -199,7 +223,7 @@ test('a workspace can hide the tab, and the settings page chooses per workspace 
 test('the settings section has a one-line summary', async () => {
   const dsh = await host(['s1']);
   await render(dsh.settings().component, { view: 'summary' });
-  assert.equal(container.textContent, 'Where the Assets tab appears');
+  assert.equal(container.textContent, 'Where the Assets tab appears and which image APIs draw pictures');
 });
 
 test('a host without a session list gets the tab everywhere; one that cannot answer says so in the view', async () => {
@@ -313,6 +337,13 @@ test('without a conversation there is nothing to scan', async () => {
 });
 
 const check = (path: string) => click(container.querySelector(`.ga-cell[title="${path}"] .ga-check`));
+const typeInto = (input: Element | null | undefined, value: string) => act(async () => {
+  assert.ok(input, 'input to type into');
+  const setter = Object.getOwnPropertyDescriptor(input instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype, 'value')!.set!;
+  setter.call(input, value); input.dispatchEvent(new window.Event('input', { bubbles: true }));
+});
+const pick = (select: Element | null, value: string) => act(async () => { assert.ok(select); (select as HTMLSelectElement).value = value; select.dispatchEvent(new window.Event('change', { bubbles: true })); });
+const field = (label: string) => [...container.querySelectorAll('.ga-sfield')].find(node => node.firstChild?.textContent === label)?.querySelector('input');
 const button = (scope: string, label: string) => [...container.querySelectorAll(`${scope} button`)].find(node => node.textContent === label);
 const chip = (label: string) => [...container.querySelectorAll('.ga-chip')].find(node => node.textContent!.startsWith(label));
 
@@ -481,4 +512,117 @@ test('without a composer to take it, the request is copied instead', async () =>
   assert.equal(copied.length, 1);
   assert.match(copied[0], /^For each of these images.*\n\n- public\/art\/hero\.gif$/s);
   assert.match(container.querySelector('.ga-status')!.textContent!, /^Copied\. Paste it into the chat input\./);
+});
+
+test('Redraw asks for an image source first, then generates from the image and saves the picture beside it', async () => {
+  await mount('s1');
+  await click(container.querySelector('.ga-cell[title="public/art/npc.png"]'));
+  await click(button('.ga-detail', 'Redraw…'));
+  await settle();
+  assert.equal(container.querySelector('.ga-dialog h3')!.textContent, 'Redraw npc.png');
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /No image source yet/);
+  // A new source starts as OpenAI with its address and model; switching kind brings Gemini's.
+  assert.deepEqual([field('Name')!.value, field('Address')!.value, field('Model')!.value], ['OpenAI compatible', 'https://api.openai.com/v1', 'gpt-image-2']);
+  await click([...container.querySelectorAll('.ga-sform label')].find(label => label.textContent === 'Gemini')!.querySelector('input'));
+  assert.deepEqual([field('Name')!.value, field('Model')!.value], ['Gemini', 'gemini-3.1-flash-image']);
+  await click([...container.querySelectorAll('.ga-sform label')].find(label => label.textContent === 'OpenAI compatible')!.querySelector('input'));
+  await typeInto(field('Name'), 'Relay');
+  await typeInto(field('Address'), 'https://relay.example/v1');
+  await typeInto(field('API key'), 'sk-test-5678');
+  await act(async () => { container.querySelector('.ga-sform')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+  await settle();
+  assert.deepEqual(sent().find(request => request.action === 'saveSource'), { action: 'saveSource', source: { name: 'Relay', kind: 'openai', baseUrl: 'https://relay.example/v1', model: 'gpt-image-2', apiKey: 'sk-test-5678' } });
+
+  // The image is the reference; a small square sprite asks for a square picture on a transparent background.
+  assert.deepEqual(texts('.ga-dialog .ga-refpic .ga-twin-path'), ['npc.png']);
+  assert.equal((container.querySelector('.ga-dialog select') as HTMLSelectElement).value, 'src-1');
+  assert.equal(container.querySelector('.ga-seg [aria-checked=true]')!.textContent, 'Square');
+  assert.equal((container.querySelector('.ga-check-label input') as HTMLInputElement).checked, true);
+  assert.equal(sent().some(request => request.action === 'generate'), false, 'nothing is generated until asked');
+  await click(button('.ga-dialog', 'Generate'));
+  await settle();
+  assert.deepEqual(sent().find(request => request.action === 'generate'), { action: 'generate', sessionId: 's1', sourceId: 'src-1', prompt: 'Redraw this image in the same art style. Keep the subject, the pose and the framing.', references: ['public/art/npc.png'], aspect: 'square', transparent: true });
+  assert.deepEqual(texts('.ga-compare figcaption'), ['Now · 32 × 32', 'New · 1024 × 1024 → 32 × 32']);
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /From Relay · gpt-image-2 in 12 s/);
+  assert.equal((container.querySelector('select[aria-label=Size]') as HTMLSelectElement).value, 'pixel', 'a small sprite keeps its pixels sharp');
+  assert.equal((container.querySelector('input[aria-label="Save as"]') as HTMLInputElement).value, 'public/art/npc-redraw.png');
+
+  // Kept at the API's size, the picture is sent as it came.
+  await pick(container.querySelector('select[aria-label=Size]'), 'none');
+  await click(button('.ga-dialog', 'Save as new file'));
+  await settle();
+  const save = sent().find(request => request.action === 'save')!;
+  assert.deepEqual([save.path, save.replace, Buffer.from(save.data as string, 'base64').equals(GENERATED)], ['public/art/npc-redraw.png', false, true]);
+  assert.equal(container.querySelector('.ga-dialog'), null);
+  assert.equal(container.querySelector('.ga-cell[aria-selected=true]')!.getAttribute('title'), 'public/art/npc-redraw.png');
+  assert.equal(container.querySelector('.ga-status')!.textContent!.startsWith('Saved public/art/npc-redraw.png'), true);
+});
+
+test('a picture can replace the image it was drawn for; failures and GIF references are explained', async () => {
+  saved.sources = [{ id: 'a', name: 'Relay', kind: 'openai', baseUrl: 'https://relay.example/v1', model: 'gpt-image-2', keyHint: '…1234' }, { id: 'g', name: 'Google', kind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3.1-flash-image', keyHint: '' }];
+  saved.defaultId = 'g';
+  await mount('s1');
+  // A selection of two, one of them a GIF: the PNG goes as a reference and nothing is offered for replacing.
+  await check('public/art/hero.gif'); await check('public/art/npc.png');
+  await click(button('.ga-selbar', 'Generate…'));
+  await settle();
+  assert.equal(container.querySelector('.ga-dialog h3')!.textContent, 'Generate a picture');
+  assert.deepEqual(texts('.ga-refpic .ga-twin-path'), ['npc.png']);
+  // Gemini, the default, cannot make transparent pictures.
+  assert.equal((container.querySelector('.ga-dialog select') as HTMLSelectElement).value, 'g');
+  assert.equal((container.querySelector('.ga-check-label input') as HTMLInputElement).disabled, true);
+  await typeInto(container.querySelector('.ga-dialog textarea'), 'A wizard cat');
+  saved.failGenerate = 'Google refused the request (429): Resource has been exhausted';
+  await click(button('.ga-dialog', 'Generate'));
+  await settle();
+  assert.equal(container.querySelector('.ga-dialog [role=alert]')!.textContent, 'Google refused the request (429): Resource has been exhausted');
+  saved.failGenerate = undefined;
+  await click(button('.ga-dialog', 'Generate'));
+  await settle();
+  assert.equal(sent().filter(request => request.action === 'generate').at(-1)!.transparent, false);
+  assert.equal(button('.ga-dialog', 'Replace the image'), undefined);
+  assert.equal((container.querySelector('input[aria-label="Save as"]') as HTMLInputElement).value, 'public/art/generated.png');
+  await click(button('.ga-dialog', 'Discard'));
+  assert.equal(container.querySelector('.ga-dialog'), null);
+
+  // One image of the detail pane is replaced in place; the notice says where the old one went.
+  await click(container.querySelector('.ga-cell[title="assets/cast-v2/hero.png"]'));
+  await click(button('.ga-detail', 'Redraw…'));
+  await settle();
+  await pick(container.querySelector('.ga-dialog select'), 'a');
+  await click(button('.ga-dialog', 'Generate'));
+  await settle();
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /retires the current image to “_retired\/” first/);
+  await pick(container.querySelector('select[aria-label=Size]'), 'none');
+  await click(button('.ga-dialog', 'Replace the image'));
+  await settle();
+  const save = sent().filter(request => request.action === 'save').at(-1)!;
+  assert.deepEqual([save.path, save.replace], ['assets/cast-v2/hero.png', true]);
+  assert.equal(container.querySelector('.ga-status')!.textContent!.startsWith('Replaced assets/cast-v2/hero.png; the old image is in _retired/assets/cast-v2/hero.png'), true);
+});
+
+test('the settings page lists image sources without their keys, and sets the default, edits and removes them', async () => {
+  saved.sources = [{ id: 'a', name: 'Relay', kind: 'openai', baseUrl: 'https://relay.example/v1', model: 'gpt-image-2', keyHint: '…1234' }, { id: 'g', name: 'Google', kind: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-3.1-flash-image', keyHint: '' }];
+  saved.defaultId = 'a';
+  const dsh = await host(['s1'], { language: 'zh' });
+  await render(dsh.settings().component, {});
+  assert.deepEqual(texts('.ga-srow .ga-wname > span'), ['OpenAI 兼容 · gpt-image-2 · relay.example · 密钥 …1234', 'Gemini · gemini-3.1-flash-image · generativelanguage.googleapis.com · 无密钥']);
+  assert.deepEqual(texts('.ga-srow b'), ['Relay默认', 'Google']);
+  await click(button('.ga-srow:nth-child(2)', '设为默认'));
+  await settle();
+  assert.deepEqual(sent().at(-1), { action: 'defaultSource', id: 'g' });
+  // Editing keeps the key unless one is typed.
+  await click(button('.ga-srow:nth-child(1)', '编辑'));
+  assert.equal(field('API 密钥')!.placeholder, '已保存（…1234），留空则不变');
+  await typeInto(field('模型'), 'gpt-image-1.5');
+  await act(async () => { container.querySelector('.ga-sform')!.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); });
+  await settle();
+  assert.deepEqual(sent().at(-1), { action: 'saveSource', source: { id: 'a', name: 'Relay', kind: 'openai', baseUrl: 'https://relay.example/v1', model: 'gpt-image-1.5' } });
+  // Removing asks once more.
+  await click(button('.ga-srow:nth-child(2)', '删除'));
+  assert.equal(sent().at(-1)!.action, 'saveSource');
+  await click(button('.ga-srow:nth-child(2)', '确认删除'));
+  await settle();
+  assert.deepEqual(sent().at(-1), { action: 'deleteSource', id: 'g' });
+  assert.deepEqual(texts('.ga-srow b'), ['Relay默认']);
 });

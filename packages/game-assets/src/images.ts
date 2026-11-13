@@ -56,3 +56,13 @@ export function imageSize(data: Buffer): { width: number; height: number } | und
     return svgSize(data);
   } catch { return undefined; }
 }
+
+/** The raster format of an image's bytes, by their first bytes; undefined for anything else, SVG included. */
+export function rasterType(data: Uint8Array): 'png' | 'jpeg' | 'webp' | 'gif' | undefined {
+  const at = (offset: number, text: string) => [...text].every((char, i) => data[offset + i] === char.charCodeAt(0));
+  if (data.length >= 8 && data[0] === 0x89 && at(1, 'PNG')) return 'png';
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'jpeg';
+  if (data.length >= 12 && at(0, 'RIFF') && at(8, 'WEBP')) return 'webp';
+  if (data.length >= 6 && (at(0, 'GIF87a') || at(0, 'GIF89a'))) return 'gif';
+  return undefined;
+}

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -7,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { gzipSync } from 'node:zlib';
 import { build } from 'esbuild';
-import { CLIENT_HEADER, type MoveResult, type ProjectStatus, type ScanResult, type TagResult } from '../src/domain.js';
+import { CLIENT_HEADER, type MoveResult, type ProjectStatus, type SaveResult, type ScanResult, type TagResult } from '../src/domain.js';
 import { createHandler } from '../src/http.js';
 import { REMOTE_BEGIN, REMOTE_END, remoteAnswer, remoteCommand, type RemoteMachines, type RemoteTarget } from '../src/remote.js';
 import { AssetError, AssetService } from '../src/service.js';
@@ -32,7 +33,7 @@ const exists = (file: string) => access(file).then(() => true, () => false);
  * A game on a "remote machine": this computer, reached only by running the shell commands the plugin sends, with a home
  * folder of its own. The conversation's local folder is Remote Agents' anchor, which holds none of the game's files.
  */
-async function remoteGame(options: { stream?: (command: string) => { output: string; code: number } | undefined } = {}) {
+async function remoteGame(options: { stream?: (command: string) => { output: string; code: number } | undefined; attach?: false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'dsh-game-remote-')), home = await mkdtemp(join(tmpdir(), 'dsh-game-remote-home-')), state = await mkdtemp(join(tmpdir(), 'dsh-game-remote-state-'));
   const outside = await mkdtemp(join(tmpdir(), 'dsh-game-remote-out-'));
   made.push(root, home, state, outside);
@@ -44,7 +45,7 @@ async function remoteGame(options: { stream?: (command: string) => { output: str
   await put('public/art/cast-v2/a.png', png(3, 80));
   await put('secret.png', png(9), outside);
   await symlink(outside, join(root, 'public/linked'));
-  const runs: string[] = [], verified: (RemoteTarget | undefined)[] = [];
+  const runs: string[] = [], verified: (RemoteTarget | undefined)[] = [], uploads: { path: string; size: number }[] = [];
   let moved = false;
   const machines: RemoteMachines = {
     async target(sessionId, _signal, expected) {
@@ -62,7 +63,20 @@ async function remoteGame(options: { stream?: (command: string) => { output: str
         const child = spawn('/bin/sh', ['-c', command], { cwd, env: { ...process.env, ...env, HOME: home } });
         child.stdout.on('data', output); child.stderr.on('data', output);
         child.on('close', code => resolve(code));
-      }) });
+      }),
+      // Remote Agents' upload: a private file under the attachments folder, checked against its digest.
+      ...(options.attach === false ? {} : { async attach(cwd: string, path: string, input: AsyncIterable<Uint8Array>, size: number, sha256: string) {
+        assert.match(path, /^\.dsh-remote-agents\/attachments\//);
+        const chunks: Buffer[] = [];
+        for await (const chunk of input) chunks.push(Buffer.from(chunk));
+        const data = Buffer.concat(chunks);
+        assert.equal(data.length, size);
+        assert.equal(createHash('sha256').update(data).digest('hex'), sha256);
+        uploads.push({ path, size });
+        await mkdir(dirname(join(cwd, path)), { recursive: true });
+        await writeFile(join(cwd, path), data, { mode: 0o400 });
+        return join(cwd, path);
+      } }) });
     },
   };
   const cwds: Record<string, string> = { remote: '/home/me/.dsh/remote-workspaces/mini/game', local: root };
@@ -73,7 +87,7 @@ async function remoteGame(options: { stream?: (command: string) => { output: str
     return { status: answer.status, body: await answer.json() as T };
   };
   const image = (path: string) => handler(new Request(`http://dsh.test/api/game-assets?sessionId=remote&path=${encodeURIComponent(path)}`, { headers: { [CLIENT_HEADER]: '1' } }));
-  return { root, home, outside, put, call, image, runs, verified, service, move: () => { moved = true; } };
+  return { root, home, outside, put, call, image, runs, verified, uploads, service, move: () => { moved = true; } };
 }
 
 test('the command carries the script and its request to node; the answer is found among other output', () => {
@@ -177,3 +191,31 @@ test('what cannot work says why: no Remote Agents service, no Node.js, a convers
   const moved = await game.call<{ error: string }>({ action: 'scan' });
   assert.deepEqual([moved.status, moved.body.error], [502, 'The remote machine could not be reached: The conversation moved to another machine']);
 });
+
+test('a picture for a remote workspace is uploaded first and put in place there; replacing retires the image on that machine', async () => {
+  const game = await remoteGame();
+  await game.call<ScanResult>({ action: 'scan' });
+  const picture = png(30, 120);
+  const saved = await game.call<SaveResult>({ action: 'save', path: 'public/art/hero-redraw.png', data: picture.toString('base64') });
+  assert.equal(saved.status, 200, JSON.stringify(saved.body));
+  assert.deepEqual(await readFile(join(game.root, 'public/art/hero-redraw.png')), picture);
+  assert.deepEqual(game.uploads, [{ path: `.dsh-remote-agents/attachments/game-assets/${createHash('sha256').update(picture).digest('hex')}.png`, size: 120 }]);
+  // The command stays small: the picture went by upload, and the upload is gone once the picture is in place.
+  assert.ok(game.runs.at(-2)!.length < 64 * 1024 && !game.runs.at(-2)!.includes(picture.toString('base64')));
+  assert.deepEqual(await readdir(join(game.root, '.dsh-remote-agents/attachments/game-assets')), []);
+  assert.ok(saved.body.scan.assets.some(asset => asset.path === 'public/art/hero-redraw.png'));
+
+  const replaced = await game.call<SaveResult>({ action: 'save', path: 'public/art/hero.png', data: picture.toString('base64'), replace: true });
+  assert.deepEqual([replaced.body.path, replaced.body.retired], ['public/art/hero.png', '_retired/public/art/hero.png']);
+  assert.deepEqual(await readFile(join(game.root, '_retired/public/art/hero.png')), png(1));
+  assert.deepEqual(await readFile(join(game.root, 'public/art/hero.png')), picture);
+});
+
+test('saving to a remote workspace through a Remote Agents without uploads says so and changes nothing', async () => {
+  const game = await remoteGame({ attach: false });
+  await game.call<ScanResult>({ action: 'scan' });
+  const saved = await game.call<{ error: string }>({ action: 'save', path: 'public/art/hero-redraw.png', data: png(30).toString('base64') });
+  assert.deepEqual([saved.status, saved.body.error], [409, 'Saving pictures in a remote workspace needs a newer Remote Agents']);
+  assert.equal(await exists(join(game.root, 'public/art/hero-redraw.png')), false);
+});
+

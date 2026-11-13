@@ -30,6 +30,8 @@ export interface DetailProps {
   onNote(note: string): void;
   /** Asks to retire this image, or restores it when it is retired. */
   onMove(): void;
+  /** Opens the dialog that redraws this image with an image source; absent for images an image API cannot take. */
+  onRedraw?(): void;
 }
 
 /** An image's tags as removable chips with a field to add one, and its note, saved when the field is left. */
@@ -51,7 +53,7 @@ function Labels({ asset, knownTags, onTag, onNote }: Pick<DetailProps, 'asset' |
 }
 
 /** One image: a large preview, what it is, every reference to it, and the other files of the same name. */
-export function Detail({ sessionId, asset, result, twins, onSelect, onClose, onCopy, openFile, knownTags, onTag, onNote, onMove }: DetailProps) {
+export function Detail({ sessionId, asset, result, twins, onSelect, onClose, onCopy, openFile, knownTags, onTag, onNote, onMove, onRedraw }: DetailProps) {
   const [detail, setDetail] = useState<AssetDetail>(), [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
@@ -78,6 +80,7 @@ export function Detail({ sessionId, asset, result, twins, onSelect, onClose, onC
       <p className="ga-actions">
         <button type="button" className="ga-button" onClick={() => onCopy(asset.path)}>{ui('Copy path')}</button>
         {openFile && <button type="button" className="ga-button" onClick={() => openFile(asset.path)}>{ui('Open beside chat')}</button>}
+        {onRedraw && <button type="button" className="ga-button" onClick={onRedraw}>{ui('Redraw…')}</button>}
         {(!asset.retired || asset.origin) && <button type="button" className="ga-button" onClick={onMove}>{ui(asset.retired ? 'Restore' : 'Retire…')}</button>}
       </p>
       {asset.retired

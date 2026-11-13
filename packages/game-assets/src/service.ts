@@ -1,12 +1,14 @@
 /** Scans, settings and changes of workspaces, local or on a remote machine, reached only through a conversation's working directory. */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
-import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, REMOTE_ANCHOR, SELECTION_LIMIT, type AssetDetail, type ProjectStatus, type ScanResult, type ScannedAsset, type TabMode } from './domain.js';
-import { Library, cleanRetireDir, cleanTag, type Failure, type Moved } from './manage.js';
+import { basename, dirname, join } from 'node:path';
+import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, extensionOf, isReference, type Aspect, type AssetDetail, type GeneratedImage, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
+import { rasterType } from './images.js';
+import { Library, cleanImagePath, cleanRetireDir, cleanTag, type Failure, type Moved, type Placed } from './manage.js';
 import { REMOTE_CHUNK, runRemote, type RemoteMachines } from './remote.js';
 import { Scanner, type Rules } from './scan.js';
-import { AssetError, handle, readImage, type ReadAnswer, type WorkspaceAnswers, type WorkspaceRequest } from './workspace.js';
+import { SourceStore, generateImage } from './sources.js';
+import { AssetError, STAGING_DIR, handle, readImage, type ReadAnswer, type WorkspaceAnswers, type WorkspaceRequest } from './workspace.js';
 
 type FullScan = ScanResult<ScannedAsset>;
 
@@ -85,18 +87,28 @@ export interface ServiceOptions {
   machines?: () => RemoteMachines | undefined;
   /** The bundled script that runs on a remote machine. */
   remoteScript?: () => Promise<string>;
+  /** How image APIs are reached; tests answer for them. */
+  fetch?: (input: string, init?: RequestInit) => Promise<Response>;
 }
+const ASPECTS: readonly Aspect[] = ['square', 'wide', 'tall'];
+/** The file type a saved picture's extension promises. */
+const TYPE_OF: Record<string, string> = { png: 'png', webp: 'webp', jpg: 'jpeg', jpeg: 'jpeg' };
 
 export class AssetService {
   private readonly scanner = new Scanner();
   private readonly settings: Settings;
+  private readonly sourceStore: SourceStore;
   private readonly results = new Map<string, FullScan>();
   private readonly running = new Map<string, Promise<FullScan>>();
   private readonly libraries = new Map<string, Library>();
   /** Engines found lately, so a tab switch does not read the workspace's manifests again. */
   private readonly engines = new Map<string, { at: number; engine: string | null }>();
   private readonly reads = new Map<string, { workspace: Workspace; waiting: { path: string; resolve(data: Buffer): void; reject(error: unknown): void }[]; timer?: ReturnType<typeof setTimeout> }>();
-  constructor(private readonly cwdOf: (sessionId: string) => Promise<string | undefined>, settingsFile: string, private readonly options: ServiceOptions = {}) { this.settings = new Settings(settingsFile); }
+  /** Image sources and their keys sit beside the settings, in a file of their own that only its owner may read. */
+  constructor(private readonly cwdOf: (sessionId: string) => Promise<string | undefined>, settingsFile: string, private readonly options: ServiceOptions = {}) {
+    this.settings = new Settings(settingsFile);
+    this.sourceStore = new SourceStore(join(dirname(settingsFile), 'image-sources.json'));
+  }
 
   private library(root: string): Library {
     let library = this.libraries.get(root);
@@ -123,6 +135,11 @@ export class AssetService {
           const all: Moved = { moved: [], failed: [] };
           for (let i = 0; i < request.paths.length; i += REMOTE_CHUNK) { const part = await run({ ...request, paths: request.paths.slice(i, i + REMOTE_CHUNK) }) as Moved; all.moved.push(...part.moved); all.failed.push(...part.failed); }
           return all;
+        }
+        if (request.op === 'place' && request.data !== undefined) {
+          const data = Buffer.from(request.data, 'base64'), sha256 = createHash('sha256').update(data).digest('hex');
+          const staged = `${STAGING_DIR}/${sha256}.${extensionOf(request.path)}`;
+          return runRemote(machines, sessionId, target, await script(), { ...request, data: undefined, staged, sha256 }, { path: staged, data, sha256 });
         }
         if (request.op === 'tag') {
           const all: Record<string, string[]> = {};
@@ -265,5 +282,55 @@ export class AssetService {
       };
       if (batch.waiting.length >= READ_BATCH) flush(); else batch.timer ??= setTimeout(flush, READ_WAIT_MS);
     });
+  }
+
+  sources(): Promise<SourcesAnswer> { return this.sourceStore.list(); }
+  saveSource(source: unknown): Promise<SourcesAnswer & { id: string }> { return this.sourceStore.put(source); }
+  deleteSource(id: unknown): Promise<SourcesAnswer> { return this.sourceStore.remove(id); }
+  setDefaultSource(id: unknown): Promise<SourcesAnswer> { return this.sourceStore.setDefault(id); }
+
+  /**
+   * Asks an image source for one picture, with images of the last scan as references. Nothing is written: the picture
+   * comes back for the user to look at, and `save` puts it in the workspace.
+   */
+  async generate(sessionId: string, input: { sourceId?: unknown; prompt?: unknown; references?: unknown; aspect?: unknown; transparent?: unknown }, signal?: AbortSignal): Promise<GeneratedImage> {
+    const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
+    if (!prompt || prompt.length > PROMPT_LIMIT) throw new AssetError('Describe the picture in up to 8000 characters');
+    if (!ASPECTS.includes(input.aspect as Aspect) || typeof input.transparent !== 'boolean') throw new AssetError('Invalid picture settings');
+    const paths = input.references ?? [];
+    if (!Array.isArray(paths) || paths.length > REFERENCE_LIMIT || paths.some(path => typeof path !== 'string')) throw new AssetError('Up to 4 images can be sent as references');
+    const source = await this.sourceStore.get(input.sourceId);
+    const listed = new Set((await this.scan(sessionId)).assets.map(asset => asset.path));
+    for (const path of paths as string[]) {
+      if (!listed.has(path)) throw new AssetError('Not an image of this workspace', 404);
+      if (!isReference(path)) throw new AssetError('Only PNG, WebP and JPEG images can be sent to an image API');
+    }
+    const references = await Promise.all([...new Set(paths as string[])].map(async path => {
+      const data = await this.raw(sessionId, path), type = rasterType(data);
+      if (type !== 'png' && type !== 'jpeg' && type !== 'webp') throw new AssetError(`${path} is not the image its name says`);
+      return { name: basename(path), data, mediaType: `image/${type}` };
+    }));
+    const started = Date.now();
+    const picture = await generateImage(source, { prompt, references, aspect: input.aspect as Aspect, transparent: input.transparent }, { fetch: this.options.fetch, signal });
+    return { data: picture.data.toString('base64'), mediaType: picture.mediaType, ...(picture.width ? { width: picture.width, height: picture.height } : {}),
+      model: source.model, source: source.name, ms: Date.now() - started, ...(picture.text ? { text: picture.text } : {}) };
+  }
+
+  /**
+   * Writes a picture to the workspace. A new path must be free and outside the retired folder; `replace` takes the place
+   * of an image of the last scan, which is retired first and can be restored.
+   */
+  async save(sessionId: string, path: unknown, data: unknown, replace: unknown): Promise<Placed & { scan: FullScan }> {
+    const clean = cleanImagePath(path);
+    if (!clean || clean !== path) throw new AssetError('Save pictures as .png, .webp or .jpg files in a visible folder of the workspace');
+    if (typeof data !== 'string' || !data || data.length > Math.ceil(RAW_LIMIT / 3) * 4) throw new AssetError('The picture is missing or too large');
+    const bytes = Buffer.from(data, 'base64');
+    if (rasterType(bytes) !== TYPE_OF[extensionOf(clean)]) throw new AssetError(`The picture is not a ${extensionOf(clean).toUpperCase()} file`);
+    const workspace = await this.workspace(sessionId), retireDir = await this.settings.retireDir(workspace.key);
+    if (clean === retireDir || clean.startsWith(`${retireDir}/`)) throw new AssetError('Pictures cannot be saved in the retired folder');
+    const listed = (await this.last(workspace)).assets.find(asset => asset.path === clean);
+    if (replace === true ? !listed || listed.retired : listed) throw new AssetError(replace === true ? 'Only an image of the last scan can be replaced' : 'A file of that name is already there', 409);
+    const placed = await workspace.call({ op: 'place', path: clean, replace: replace === true, retireDir, data });
+    return { ...placed, scan: await this.fresh(workspace) };
   }
 }

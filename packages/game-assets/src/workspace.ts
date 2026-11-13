@@ -2,11 +2,12 @@
  * Everything the plugin does in one workspace folder, as requests with JSON answers. The host runs them in its own
  * process for a local workspace and, for a remote one, inside the script it sends to that machine (remote-agent.ts).
  */
-import { readFile, realpath, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { lstat, readFile, realpath, rm, stat } from 'node:fs/promises';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { detectEngine } from './detect.js';
 import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage, type ImageAnswer, type ScanResult, type ScannedAsset } from './domain.js';
-import type { Library, Moved } from './manage.js';
+import type { Library, Moved, Placed } from './manage.js';
 import type { Rules, Scanner } from './scan.js';
 
 export class AssetError extends Error { constructor(message: string, readonly status = 400) { super(message); } }
@@ -17,11 +18,34 @@ export type WorkspaceRequest =
   | { op: 'retire' | 'restore'; retireDir: string; paths: string[] }
   | { op: 'tag'; paths: string[]; add: string[]; remove: string[] }
   | { op: 'note'; path: string; note: string }
-  | { op: 'read'; paths: string[] };
+  | { op: 'read'; paths: string[] }
+  /**
+   * Writes a picture to `path`, replacing the image there if `replace`. Its bytes come in `data` (base64) or, on a remote
+   * machine, were uploaded beforehand to `staged`, relative to the workspace, with the digest `sha256`.
+   */
+  | { op: 'place'; path: string; replace: boolean; retireDir: string; data?: string; staged?: string; sha256?: string };
 export type ReadAnswer = ImageAnswer;
 export interface WorkspaceAnswers {
   scan: ScanResult<ScannedAsset>; detect: { engine: string | null }; retire: Moved; restore: Moved;
-  tag: Record<string, string[]>; note: { note: string }; read: ReadAnswer[];
+  tag: Record<string, string[]>; note: { note: string }; read: ReadAnswer[]; place: Placed;
+}
+
+/** Where Remote Agents' upload leaves a picture on a remote machine before the script puts it in place. */
+export const STAGING_DIR = '.dsh-remote-agents/attachments/game-assets';
+const STAGED = /^[a-f0-9]{64}\.(?:png|webp|jpe?g)$/;
+
+/** The bytes of an uploaded picture, checked against its digest; the upload is removed either way. */
+async function takeStaged(root: string, staged: string | undefined, sha256: string | undefined): Promise<Buffer> {
+  const name = staged?.startsWith(`${STAGING_DIR}/`) ? staged.slice(STAGING_DIR.length + 1) : '';
+  if (!STAGED.test(name) || !sha256 || !name.startsWith(sha256)) throw new AssetError('Invalid upload');
+  const file = join(root, STAGING_DIR, name);
+  try {
+    const info = await lstat(file).catch(fsError);
+    if (!info.isFile() || info.size > RAW_LIMIT) throw new AssetError('Invalid upload');
+    const data = await readFile(file);
+    if (createHash('sha256').update(data).digest('hex') !== sha256) throw new AssetError('The upload arrived damaged', 502);
+    return data;
+  } finally { await rm(file, { force: true }); }
 }
 
 const fsError = (error: unknown): never => {
@@ -56,6 +80,11 @@ export async function handle(root: string, request: WorkspaceRequest, scanner: S
     case 'restore': return library.restore(request.retireDir, request.paths);
     case 'tag': return library.tag(request.paths, request.add, request.remove);
     case 'note': return { note: await library.note(request.path, request.note) };
+    case 'place': {
+      const data = request.data !== undefined ? Buffer.from(request.data, 'base64') : await takeStaged(root, request.staged, request.sha256);
+      try { return await library.place(request.path, data, request.replace, request.retireDir); }
+      catch (error) { throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409); }
+    }
     case 'read': {
       const answers: ReadAnswer[] = [];
       let bytes = 0;
