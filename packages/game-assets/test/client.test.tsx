@@ -4,7 +4,7 @@ import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { offerTuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
-import type { Asset, ProjectSource, ScanResult, SourceView } from '../src/domain.js';
+import type { Asset, MadeInfo, ProjectSource, ScanResult, SourceView } from '../src/domain.js';
 import { BUNDLE_KEY, VIEW_ID, apply, fileAddress } from '../src/client/index.js';
 import { resetProjects } from '../src/client/projects.js';
 import { resetSources } from '../src/client/sources.js';
@@ -25,14 +25,14 @@ const scan = (): ScanResult => ({
 
 let root: Root | undefined, container: HTMLElement, requests: Record<string, unknown>[], opened: unknown[][];
 /** What the simulated host has saved: where the tab appears, and the user's choice per conversation's workspace. */
-let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string; project: ProjectSource | null };
+let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string; project: ProjectSource | null; extra: Asset[]; made: Record<string, MadeInfo> };
 /** A PNG of 1024 × 1024, as an image API answers. */
 const GENERATED = (() => { const data = Buffer.alloc(40); data.writeUInt32BE(0x89504e47, 0); data.writeUInt32BE(0x0d0a1a0a, 4); data.writeUInt32BE(13, 8); data.write('IHDR', 12, 'latin1'); data.writeUInt32BE(1024, 16); data.writeUInt32BE(1024, 20); return data; })();
 /** The workspace as the simulated host answers it: retired images sit in the retired folder, tags are attached. */
 const library = (): ScanResult => {
   const base = scan();
   return { ...base, assets: base.assets.map(a => saved.retired.includes(a.path) ? { path: `_retired/${a.path}`, usage: 'unused' as const, size: a.size, mtimeMs: 1, width: 32, height: 32, refCount: 0, retired: true as const, origin: a.path } : a)
-    .map(a => saved.tags[a.path]?.length ? { ...a, tags: saved.tags[a.path] } : a) };
+    .map(a => saved.tags[a.path]?.length ? { ...a, tags: saved.tags[a.path] } : a).concat(saved.extra).map(a => saved.made[a.path] ? { ...a, made: saved.made[a.path] } : a) };
 };
 const globals = ['window', 'document', 'navigator', 'MutationObserver', 'getComputedStyle', 'Node', 'Element', 'HTMLElement', 'Event', 'fetch'] as const;
 /** `s1` is a Phaser game, `plain` a website, `broken` has no workspace folder. */
@@ -44,7 +44,7 @@ const project = (sessionId: string) => {
 };
 beforeEach(() => {
   const { window } = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true });
-  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [], project: null };
+  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [], project: null, extra: [], made: {} };
   const fetch = async (url: string, init: { method?: string; body?: string; headers: Record<string, string> }) => {
     assert.equal(init.headers['X-DSH-Game-Assets'], '1');
     if (!init.body) { requests.push({ image: new URL(url, 'http://localhost/').searchParams.get('path') }); return new Response(new Uint8Array([1, 2, 3])); }
@@ -83,6 +83,12 @@ beforeEach(() => {
       if (saved.failGenerate) return Response.json({ error: saved.failGenerate }, { status: 502 });
       const source = saved.sources.find(entry => entry.id === body.sourceId)!;
       return Response.json({ data: GENERATED.toString('base64'), mediaType: 'image/png', width: 1024, height: 1024, model: source.model, source: source.name, ms: 12_400 });
+    }
+    if (body.action === 'revert') {
+      const version = saved.extra.find(a => a.path === body.path)!;
+      saved.extra = [...saved.extra.filter(a => a !== version), { ...version, path: `${version.path}.parked.png`, retiredAt: '2026-11-13T11:00:00.000Z' }];
+      [saved.made[version.origin!], saved.made[`${version.path}.parked.png`]] = [saved.made[version.path], saved.made[version.origin!]];
+      return Response.json({ path: version.origin, retired: `${version.path}.parked.png`, scan: library() });
     }
     if (body.action === 'save') {
       saved.written.push(body.path);
@@ -608,7 +614,8 @@ test('a picture can replace the image it was drawn for; failures and GIF referen
   await settle();
   const save = sent().filter(request => request.action === 'save').at(-1)!;
   assert.deepEqual([save.path, save.replace], ['assets/cast-v2/hero.png', true]);
-  assert.equal(container.querySelector('.ga-status')!.textContent!.startsWith('Replaced assets/cast-v2/hero.png; the old image is in _retired/assets/cast-v2/hero.png'), true);
+  assert.equal(container.querySelector('.ga-status')!.textContent!.startsWith('Replaced assets/cast-v2/hero.png; the old one is under Earlier versions'), true);
+  assert.deepEqual(save.made, { source: 'Relay', model: 'gpt-image-2', prompt: 'Redraw this image in the same art style. Keep the subject, the pose and the framing.' });
 });
 
 test('the settings page lists image sources without their keys, and sets the default, edits and removes them', async () => {
@@ -676,5 +683,38 @@ test('a Codex source is added with a name only', async () => {
   await settle();
   assert.deepEqual(sent().at(-1), { action: 'saveSource', source: { name: 'Codex', kind: 'codex', model: '', baseUrl: '' } });
   assert.deepEqual(texts('.ga-srow .ga-wname > span'), ['Codex · Codex’s default · signed in on the workspace’s machine']);
+});
+
+test('an image lists its earlier versions with where each came from, and goes back to one in a click', async () => {
+  const at = (hour: number) => `2026-11-13T${String(hour).padStart(2, '0')}:00:00.000Z`;
+  saved.extra = [
+    asset('_retired/public/art/npc.png', 'unused', { retired: true, origin: 'public/art/npc.png', retiredAt: at(9) }),
+    asset('_retired/public/art/npc.2.png', 'unused', { retired: true, origin: 'public/art/npc.png', retiredAt: at(10) }),
+  ];
+  saved.made = { 'public/art/npc.png': { at: at(10), source: 'Relay', model: 'gpt-image-2', prompt: 'a green npc' }, '_retired/public/art/npc.png': { at: at(8), source: 'Codex', prompt: 'an older npc', by: 'agent' } };
+  await mount('history');
+  await click(container.querySelector('.ga-cell[title="public/art/npc.png"]'));
+  await settle();
+  assert.match(container.querySelector('.ga-made')!.textContent!, /^Made with Relay · gpt-image-2 · .+a green npc$/);
+  assert.equal(container.querySelector('.ga-detail h4:has(+ .ga-history)')!.textContent, 'Earlier versions 2');
+  // Newest first: the one retired at ten, which was not generated here, then the agent's at nine.
+  assert.deepEqual([...container.querySelectorAll('.ga-history li')].map(row => [row.querySelector('.ga-twin')!.getAttribute('title'), row.querySelector('.ga-meta')!.textContent]),
+    [['_retired/public/art/npc.2.png', 'Not generated here · 32×32'], ['_retired/public/art/npc.png', 'Made by an agent with Codex · 32×32']]);
+
+  await click(container.querySelectorAll('.ga-history li')[1].querySelector('.ga-button'));
+  await settle();
+  assert.deepEqual(sent().at(-1), { action: 'revert', sessionId: 'history', path: '_retired/public/art/npc.png' });
+  assert.equal(container.querySelector('.ga-status')!.textContent!.startsWith('Back to an earlier version of public/art/npc.png; the one it replaced is under Earlier versions'), true);
+  assert.equal(container.querySelector('.ga-cell[aria-selected=true]')!.getAttribute('title'), 'public/art/npc.png');
+  assert.match(container.querySelector('.ga-made')!.textContent!, /^Made by an agent with Codex · .+an older npc$/);
+
+  // A retired version opened on its own offers the same, as its place is taken.
+  await click(container.querySelector('.ga-history .ga-twin'));
+  await settle();
+  assert.equal(button('.ga-detail', 'Restore'), undefined);
+  const opened = container.querySelector('.ga-cell[aria-selected=true]')!.getAttribute('title')!;
+  await click(button('.ga-detail', 'Go back to this version'));
+  await settle();
+  assert.deepEqual(sent().filter(request => request.action === 'revert').at(-1), { action: 'revert', sessionId: 'history', path: opened });
 });
 

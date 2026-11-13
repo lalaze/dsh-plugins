@@ -1,4 +1,4 @@
-import { CLIENT_HEADER, ROUTE, type Aspect, type AssetDetail, type FolderRule, type GeneratedImage, type ImageAnswer, type ProjectSourceStatus, type MoveResult, type ProjectStatus, type SaveResult, type ScanResult, type SourceInput, type SourcesAnswer, type TabMode, type TagResult } from '../domain.js';
+import { CLIENT_HEADER, ROUTE, type Aspect, type AssetDetail, type FolderRule, type GeneratedImage, type ImageAnswer, type ProjectSourceStatus, type MadeInfo, type MoveResult, type ProjectStatus, type RevertResult, type SaveResult, type ScanResult, type SourceInput, type SourcesAnswer, type TabMode, type TagResult } from '../domain.js';
 
 export class AssetRequestError extends Error { constructor(message: string, readonly status: number) { super(message); } }
 
@@ -37,7 +37,9 @@ export interface GenerateOptions { sourceId: string; prompt: string; references:
 /** Asks the source for a picture; nothing is written. Aborting stops the call to the image API. */
 export const generatePicture = (sessionId: string, options: GenerateOptions, signal?: AbortSignal) => post<GeneratedImage>({ action: 'generate', sessionId, ...options }, signal);
 /** Writes a picture, given in base64, to a free path, or in place of an image that is retired first. */
-export const savePicture = (sessionId: string, path: string, data: string, replace: boolean) => post<SaveResult>({ action: 'save', sessionId, path, data, replace });
+export const savePicture = (sessionId: string, path: string, data: string, replace: boolean, made?: Omit<MadeInfo, 'at'>) => post<SaveResult>({ action: 'save', sessionId, path, data, replace, ...(made ? { made } : {}) });
+/** Brings a retired version back to its place; the image there now becomes a version in turn. */
+export const revertAsset = (sessionId: string, path: string) => post<RevertResult>({ action: 'revert', sessionId, path });
 /** The image source the workspace records for its agents. */
 export const projectSource = (sessionId: string) => post<ProjectSourceStatus>({ action: 'projectSource', sessionId });
 /** Records a source in the workspace for its agents, or with null removes it. */

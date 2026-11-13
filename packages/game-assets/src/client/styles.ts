@@ -161,6 +161,11 @@ export const styles = `
 .ga-compare .ga-preview{height:clamp(140px,26vh,236px)}
 .ga-compare figcaption{margin-top:4px;font-size:11.5px;text-align:center;color:var(--dsw-alias-label-secondary,inherit);font-variant-numeric:tabular-nums}
 .ga-gen>.ga-dim{margin:8px 0 0;font-size:11.5px;line-height:1.5}
+.ga-made{margin:8px 0;font-size:11.5px;line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}
+.ga-prompt{display:-webkit-box;margin-top:2px;overflow:hidden;-webkit-box-orient:vertical;-webkit-line-clamp:2;opacity:.8}
+.ga-history{display:grid;gap:2px;margin:0;padding:0;list-style:none}
+.ga-history li{display:flex;align-items:center;gap:6px}
+.ga-history .ga-twin{flex:1;min-width:0}
 .ga-project{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;margin-top:8px;padding:7px 10px;border-radius:6px;background:color-mix(in srgb,currentColor 6%,transparent);font-size:12px;line-height:1.5}
 .ga-project .ga-link{font-family:inherit;font-size:12px}
 .ga-project .ga-link:disabled{opacity:.5}

@@ -4,7 +4,7 @@ import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promis
 import { basename, dirname, join } from 'node:path';
 import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, extensionOf, isReference, usesApi, type Aspect, type AssetDetail, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
 import { rasterType } from './images.js';
-import { Library, cleanImagePath, cleanRetireDir, cleanTag, type Failure, type Moved, type Placed } from './manage.js';
+import { Library, cleanImagePath, cleanMade, cleanRetireDir, cleanTag, type Failure, type Making, type Moved, type Placed } from './manage.js';
 import { REMOTE_CHUNK, runRemote, type RemoteMachines } from './remote.js';
 import { Scanner, type Rules } from './scan.js';
 import { SourceStore, generateImage } from './sources.js';
@@ -341,7 +341,7 @@ export class AssetService {
    * Writes a picture to the workspace. A new path must be free and outside the retired folder; `replace` takes the place
    * of an image of the last scan, which is retired first and can be restored.
    */
-  async save(sessionId: string, path: unknown, data: unknown, replace: unknown): Promise<Placed & { scan: FullScan }> {
+  async save(sessionId: string, path: unknown, data: unknown, replace: unknown, made?: unknown): Promise<Placed & { scan: FullScan }> {
     const clean = cleanImagePath(path);
     if (!clean || clean !== path) throw new AssetError('Save pictures as .png, .webp or .jpg files in a visible folder of the workspace');
     if (typeof data !== 'string' || !data || data.length > Math.ceil(RAW_LIMIT / 3) * 4) throw new AssetError('The picture is missing or too large');
@@ -351,7 +351,19 @@ export class AssetService {
     if (clean === retireDir || clean.startsWith(`${retireDir}/`)) throw new AssetError('Pictures cannot be saved in the retired folder');
     const listed = (await this.last(workspace)).assets.find(asset => asset.path === clean);
     if (replace === true ? !listed || listed.retired : listed) throw new AssetError(replace === true ? 'Only an image of the last scan can be replaced' : 'A file of that name is already there', 409);
-    const placed = await workspace.call({ op: 'place', path: clean, replace: replace === true, retireDir, data });
+    // How the picture was made is kept with it, for its history; the time is the machine's own.
+    const record = cleanMade(made, new Date().toISOString()), making: Making | undefined = record && (({ at: _at, ...rest }) => rest)(record);
+    const placed = await workspace.call({ op: 'place', path: clean, replace: replace === true, retireDir, data, ...(making ? { made: making } : {}) });
+    return { ...placed, scan: await this.fresh(workspace) };
+  }
+  /**
+   * Goes back to an earlier version: the retired image `path` returns where it came from, and the image there now is
+   * retired in its place, so it can be gone back to as well.
+   */
+  async revert(sessionId: string, path: unknown): Promise<Placed & { scan: FullScan }> {
+    const { workspace, picked } = await this.chosen(sessionId, [path], asset => !!asset.retired && !!asset.origin);
+    if (!picked.length) throw new AssetError('Only a retired image whose place was recorded can be brought back', 409);
+    const placed = await workspace.call({ op: 'revert', path: picked[0].path, retireDir: await this.settings.retireDir(workspace.key) });
     return { ...placed, scan: await this.fresh(workspace) };
   }
 
@@ -369,7 +381,7 @@ export class AssetService {
     if (typeof sourceId !== 'string' || !sourceId) throw new AssetError('Invalid image source');
     const source = await this.sourceStore.get(sourceId), script = await this.options.projectScript?.();
     if (!script) throw new AssetError('The generate-image script is missing from this build of the plugin', 500);
-    const bundle: ProjectBundle = { source: { id: source.id, name: source.name, kind: source.kind, model: source.model, baseUrl: source.baseUrl }, script,
+    const bundle: ProjectBundle = { source: { id: source.id, name: source.name, kind: source.kind, model: source.model, baseUrl: source.baseUrl, retireDir: await this.settings.retireDir(workspace.key) }, script,
       ...(usesApi(source.kind) ? { key: source.apiKey } : {}) };
     return workspace.call({ op: 'setProjectSource', bundle });
   }

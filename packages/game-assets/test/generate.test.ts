@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, test } from 'node:test';
-import { CLIENT_HEADER, type GeneratedImage, type ProjectSourceStatus, type SaveResult, type ScanResult, type SourcesAnswer } from '../src/domain.js';
+import { CLIENT_HEADER, type GeneratedImage, type ProjectSourceStatus, type RevertResult, type SaveResult, type ScanResult, type SourcesAnswer } from '../src/domain.js';
 import { createHandler } from '../src/http.js';
 import { cleanImagePath } from '../src/manage.js';
 import { AssetService } from '../src/service.js';
@@ -247,7 +247,7 @@ test('the source is recorded in the project for its agents, its key on the machi
     const added = (await call<SourcesAnswer & { id: string }>({ action: 'saveSource', source: { name: 'Relay', kind: 'openai', baseUrl: 'https://relay.example/v1', model: 'gpt-image-2', apiKey: 'sk-recorded-5555' } })).body;
     const recorded = await call<ProjectSourceStatus>({ action: 'setProjectSource', sourceId: added.id });
     assert.equal(recorded.status, 200, recorded.body.error);
-    assert.deepEqual(recorded.body, { source: { id: added.id, name: 'Relay', kind: 'openai', model: 'gpt-image-2', baseUrl: 'https://relay.example/v1' },
+    assert.deepEqual(recorded.body, { source: { id: added.id, name: 'Relay', kind: 'openai', model: 'gpt-image-2', baseUrl: 'https://relay.example/v1', retireDir: '_retired' },
       files: ['.game-assets/image-source.json', '.game-assets/generate-image.cjs', '.game-assets/README.md', 'AGENTS.md', 'CLAUDE.md'] });
     assert.equal(await readFile(join(root, '.game-assets/generate-image.cjs'), 'utf8'), '#!/usr/bin/env node\n// the generate-image script\n');
     for (const file of ['.game-assets/image-source.json', '.game-assets/README.md', 'AGENTS.md', 'CLAUDE.md']) assert.doesNotMatch(await readFile(join(root, file), 'utf8'), /sk-recorded/, file);
@@ -263,3 +263,48 @@ test('the source is recorded in the project for its agents, its key on the machi
   } finally { process.env.HOME = before; }
 });
 
+
+test('each version keeps how it was made; going back swaps the versions, so the one replaced can be gone back to as well', async () => {
+  const { root, call } = await game();
+  await call<ScanResult>({ action: 'scan' });
+  await call({ action: 'tag', paths: ['public/art/hero.png'], add: ['cast'] });
+  const first = png(30, 90), second = png(31, 90);
+  const made = (prompt: string) => ({ source: 'Codex', model: 'Codex', prompt, at: '1999-01-01T00:00:00.000Z', extra: 'dropped' });
+
+  const one = (await call<SaveResult>({ action: 'save', path: 'public/art/hero.png', data: first.toString('base64'), replace: true, made: made('winter hero') })).body;
+  const live = (scan: ScanResult, path = 'public/art/hero.png') => scan.assets.find(asset => asset.path === path)!;
+  assert.deepEqual(Object.keys(live(one.scan).made!), ['at', 'source', 'model', 'prompt']);
+  assert.equal(live(one.scan).made!.prompt, 'winter hero');
+  assert.notEqual(live(one.scan).made!.at, '1999-01-01T00:00:00.000Z', 'the time is the machine’s own');
+  const two = (await call<SaveResult>({ action: 'save', path: 'public/art/hero.png', data: second.toString('base64'), replace: true, made: made('spring hero') })).body;
+  assert.equal(live(two.scan).made!.prompt, 'spring hero');
+  // The versions it replaced: the original without a record, then the winter one with its own.
+  const versions = two.scan.assets.filter(asset => asset.retired && asset.origin === 'public/art/hero.png').sort((a, b) => (b.retiredAt ?? '').localeCompare(a.retiredAt ?? ''));
+  assert.deepEqual(versions.map(asset => [asset.path, asset.made?.prompt]), [['_retired/public/art/hero.2.png', 'winter hero'], ['_retired/public/art/hero.png', undefined]]);
+  assert.ok(versions.every(asset => /^\d{4}-\d\d-\d\dT/.test(asset.retiredAt!)));
+
+  // Back to the original: the spring picture is retired in its turn, under a free name, with its record.
+  const back = await call<RevertResult>({ action: 'revert', path: '_retired/public/art/hero.png' });
+  assert.deepEqual([back.status, back.body.path, back.body.retired], [200, 'public/art/hero.png', '_retired/public/art/hero.3.png']);
+  assert.deepEqual(await readFile(join(root, 'public/art/hero.png')), png(1));
+  assert.deepEqual(await readFile(join(root, '_retired/public/art/hero.3.png')), second);
+  assert.equal(live(back.body.scan).made, undefined);
+  assert.deepEqual(live(back.body.scan).tags, ['cast'], 'the tags stay with the place');
+  assert.equal(live(back.body.scan, '_retired/public/art/hero.3.png').made!.prompt, 'spring hero');
+  const list = JSON.parse(await readFile(join(root, '_retired/retired.json'), 'utf8')) as { entries: { from: string; to: string }[] };
+  assert.deepEqual(list.entries.map(entry => entry.to), ['_retired/public/art/hero.2.png', '_retired/public/art/hero.3.png']);
+
+  // And forward again to the winter one; the original goes back to the retired folder's first free name.
+  const forward = (await call<RevertResult>({ action: 'revert', path: '_retired/public/art/hero.2.png' })).body;
+  assert.deepEqual(await readFile(join(root, 'public/art/hero.png')), first);
+  assert.equal(live(forward.scan).made!.prompt, 'winter hero');
+  assert.equal(forward.retired, '_retired/public/art/hero.png');
+  assert.deepEqual(await readFile(join(root, '_retired/public/art/hero.png')), png(1));
+  assert.equal(forward.scan.assets.filter(asset => asset.origin === 'public/art/hero.png').length, 2, 'every version is still there');
+
+  // An image retired the ordinary way comes back without anything being retired.
+  await call({ action: 'retire', paths: ['public/art/spin.gif'] });
+  const restored = (await call<RevertResult>({ action: 'revert', path: '_retired/public/art/spin.gif' })).body;
+  assert.deepEqual([restored.path, restored.retired], ['public/art/spin.gif', undefined]);
+  assert.equal((await call({ action: 'revert', path: 'public/art/hero.png' })).body.error, 'Only a retired image whose place was recorded can be brought back');
+});

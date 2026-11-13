@@ -56,7 +56,18 @@ export interface Asset {
   origin?: string;
   tags?: string[];
   note?: string;
+  /** How the picture was made, when the plugin or the project's script generated it. */
+  made?: MadeInfo;
+  /** When a retired image was retired, from the retired list. */
+  retiredAt?: string;
 }
+/**
+ * How a picture was made, kept in the tag file under the picture's path and moved with the file when it is retired or
+ * brought back, so an image's history can say where each version came from.
+ */
+export interface MadeInfo { at: string; source: string; model?: string; prompt: string; by?: 'agent' }
+/** The longest prompt kept with a picture. */
+export const MADE_PROMPT_LIMIT = 2000;
 
 /** An image as the host keeps it: with the strongest references to it. A scan answers the plain {@link Asset}. */
 export interface ScannedAsset extends Asset { refs: Reference[] }
@@ -87,6 +98,8 @@ export interface ScanResult<A extends Asset = Asset> {
 }
 /** What retiring or restoring answers: how many images moved, which did not and why, and the workspace as it is now. */
 export interface MoveResult { moved: number; failed: { path: string; error: string }[]; scan: ScanResult }
+/** What going back to an earlier version answers: where it is now, where the image it replaced went, and the workspace. */
+export interface RevertResult { path: string; retired?: string; scan: ScanResult }
 /** What a tag change answers: the tags of each changed image afterwards. */
 export interface TagResult { tags: Record<string, string[]> }
 
@@ -179,7 +192,7 @@ export const PROJECT_README = `${PROJECT_DIR}/README.md`;
 export const AGENT_FILES = ['AGENTS.md', 'CLAUDE.md'] as const;
 /** On the machine the project is on, under the user's home: keys of the sources projects there use, readable by the user alone. */
 export const KEYS_DIR = '.dsh-game-assets', KEYS_FILE = 'keys.json';
-/** The image source recorded in a project. */
-export interface ProjectSource { id: string; name: string; kind: SourceKind; model: string; baseUrl: string }
+/** The image source recorded in a project, and the retired folder its script puts replaced images in. */
+export interface ProjectSource { id: string; name: string; kind: SourceKind; model: string; baseUrl: string; retireDir?: string }
 /** What a workspace records: its source, and the files that carry it. */
 export interface ProjectSourceStatus { source: ProjectSource | null; files: string[] }

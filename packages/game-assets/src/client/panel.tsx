@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from '@dsh-plugins/i18n/react';
 import { REFERENCE_LIMIT, ROOT_FOLDER, isReference, type Asset, type FolderRule, type SaveResult, type ScanResult } from '../domain.js';
-import { configureFolders, moveAssets, noteAsset, scanWorkspace, tagAssets } from './api.js';
+import { configureFolders, moveAssets, noteAsset, revertAsset, scanWorkspace, tagAssets } from './api.js';
 import { RetireDialog, SendDialog, TagDialog } from './dialogs.js';
 import { Detail } from './detail.js';
 import { GenerateDialog } from './generate.js';
@@ -181,6 +181,16 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
       if (report) setError(report);
     });
   };
+  /** Brings an earlier version back to its place, and shows it there. */
+  const revert = (path: string) => {
+    let report = '', place = '';
+    void run(async () => {
+      const answer = await revertAsset(sessionId, path);
+      place = answer.path;
+      report = answer.retired ? ui('Back to an earlier version of {path}; the one it replaced is under Earlier versions', { path: answer.path }) : ui('Restored {path}', { path: answer.path });
+      return answer.scan;
+    }).then(ok => { if (ok && alive.current) { setNotice(report); setFilter(old => old.usage === 'retired' ? { ...old, usage: 'all', folder: '' } : old); setSelected(place); } });
+  };
   /** Tags and notes are saved at once and shown without another scan. */
   const patch = (change: (asset: Asset) => Asset) => { const current = scans.get(sessionId); if (current) adopt({ ...current, assets: current.assets.map(change) }); };
   const tag = (paths: string[], add: string[], remove: string[]) => {
@@ -214,7 +224,7 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
     adopt(answer.scan); setDialog(undefined);
     if (!items.some(asset => asset.path === answer.path)) setFilter({ query: '', usage: 'all', folder: '', tag: '' });
     setSelected(answer.path);
-    setNotice(replaced && answer.retired ? ui('Replaced {path}; the old image is in {retired}', { path: answer.path, retired: answer.retired }) : ui('Saved {path}', { path: answer.path }));
+    setNotice(replaced && answer.retired ? ui('Replaced {path}; the old one is under Earlier versions', { path: answer.path }) : ui('Saved {path}', { path: answer.path }));
   };
   const allShown = items.length > 0 && items.every(asset => checked.has(asset.path));
 
@@ -279,7 +289,9 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
             onCopy={text => copy(text, ui('Copied'))} openFile={openFile && ((path, line) => openFile(sessionId, path, line))}
             knownTags={tagNames} onTag={(add, remove) => tag([chosen.path], add, remove)} onNote={text => note(chosen.path, text)}
             onMove={() => chosen.retired ? move('restore', [chosen.path]) : setDialog({ kind: 'retire', paths: [chosen.path] })}
-            onRedraw={!chosen.retired && isReference(chosen.path) ? () => generateFrom([chosen]) : undefined} />}
+            onRedraw={!chosen.retired && isReference(chosen.path) ? () => generateFrom([chosen]) : undefined}
+            history={chosen.retired ? [] : assets.filter(asset => asset.retired && asset.origin === chosen.path).sort((a, b) => (b.retiredAt ?? '').localeCompare(a.retiredAt ?? ''))}
+            onRevert={revert} />}
         </>}
     </div>
     {result && <footer className="ga-status">

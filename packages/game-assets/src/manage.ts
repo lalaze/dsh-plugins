@@ -7,14 +7,25 @@ import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { copyFile, link, lstat, mkdir, readFile, realpath, rename, rm, rmdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
-import { RETIRED_LIST, TAGS_FILE, extensionOf, isImage, isReference } from './domain.js';
+import { MADE_PROMPT_LIMIT, RETIRED_LIST, TAGS_FILE, extensionOf, isImage, isReference, type MadeInfo } from './domain.js';
 
 export interface RetiredEntry { from: string; to: string; at: string }
 export interface Failure { path: string; error: string }
 export interface Moved { moved: { from: string; to: string }[]; failed: Failure[] }
 /** Where a picture was written, and where the image it replaced was retired to. */
 export interface Placed { path: string; retired?: string }
-export interface TagFile { tags: Record<string, string[]>; notes: Record<string, string> }
+export interface TagFile { tags: Record<string, string[]>; notes: Record<string, string>; made: Record<string, MadeInfo> }
+/** How a picture being saved was made; the time is added when it is written. */
+export type Making = Omit<MadeInfo, 'at'>;
+
+/** A record of how a picture was made, as it may be kept; undefined when it is not one. */
+export function cleanMade(value: unknown, at?: string): MadeInfo | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>, text = (key: string, limit: number) => typeof raw[key] === 'string' ? (raw[key] as string).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, limit) : '';
+  const time = at ?? text('at', 40), source = text('source', 100), prompt = text('prompt', MADE_PROMPT_LIMIT), model = text('model', 200);
+  if (!time || Number.isNaN(Date.parse(time)) || !source) return undefined;
+  return { at: time, source, ...(model ? { model } : {}), prompt, ...(raw.by === 'agent' ? { by: 'agent' as const } : {}) };
+}
 
 export const TAG_LIMIT = 40, TAGS_PER_IMAGE = 20, NOTE_LIMIT = 2000;
 /** A tag as kept: trimmed, single-spaced, without commas or control characters; undefined when nothing usable is left. */
@@ -72,18 +83,26 @@ export async function readRetired(root: string, retireDir: string): Promise<Reti
   } catch { return []; }
 }
 export async function readTags(root: string): Promise<TagFile> {
-  const file: TagFile = { tags: {}, notes: {} };
+  const file: TagFile = { tags: {}, notes: {}, made: {} };
   try {
-    const raw = JSON.parse(await readFile(join(root, TAGS_FILE), 'utf8')) as { tags?: unknown; notes?: unknown };
+    const raw = JSON.parse(await readFile(join(root, TAGS_FILE), 'utf8')) as { tags?: unknown; notes?: unknown; made?: unknown };
     for (const [path, tags] of Object.entries(raw.tags && typeof raw.tags === 'object' ? raw.tags : {})) {
       const clean = Array.isArray(tags) ? [...new Set(tags.map(cleanTag).filter((tag): tag is string => !!tag))] : [];
       if (clean.length) file.tags[path] = clean;
     }
     for (const [path, note] of Object.entries(raw.notes && typeof raw.notes === 'object' ? raw.notes : {})) if (typeof note === 'string' && note.trim()) file.notes[path] = note.slice(0, NOTE_LIMIT);
+    for (const [path, made] of Object.entries(raw.made && typeof raw.made === 'object' ? raw.made : {})) { const clean = cleanMade(made); if (clean) file.made[path] = clean; }
   } catch { /* no file yet, or one a person broke: start from nothing rather than refuse to tag */ }
   return file;
 }
-const writeTags = (root: string, file: TagFile) => writeJson(join(root, TAGS_FILE), { version: 1, tags: sorted(file.tags), notes: sorted(file.notes) });
+const writeTags = (root: string, file: TagFile) => writeJson(join(root, TAGS_FILE), { version: 1, tags: sorted(file.tags), notes: sorted(file.notes), ...(Object.keys(file.made).length ? { made: sorted(file.made) } : {}) });
+/** Moves one path's entry of a record to another path, or drops it when there is no destination. */
+function shift<T>(record: Record<string, T>, from: string, to?: string): boolean {
+  if (!(from in record)) return false;
+  if (to) record[to] = record[from];
+  delete record[from];
+  return true;
+}
 
 /** Changes to one workspace, one at a time, so two requests cannot both rewrite the retired list or the tag file. */
 export class Library {
@@ -117,6 +136,7 @@ export class Library {
     for (const { from, to } of pairs) {
       if (file.tags[from]) { file.tags[to] = file.tags[from]; delete file.tags[from]; changed = true; }
       if (file.notes[from]) { file.notes[to] = file.notes[from]; delete file.notes[from]; changed = true; }
+      if (shift(file.made, from, to)) changed = true;
     }
     if (changed) await writeTags(this.root, file);
   }
@@ -206,9 +226,10 @@ export class Library {
   /**
    * Writes a new picture at `path`, which must be free. With `replace`, the image at `path` is retired first, to a free
    * name in the retired folder, and moved back if the picture cannot be written; its tags and note stay with the path,
-   * as the new picture takes over its role in the game.
+   * as the new picture takes over its role in the game, while the record of how it was made goes with it. `made` says
+   * how the new picture was made.
    */
-  place(path: string, data: Buffer, replace: boolean, retireDir: string): Promise<Placed> {
+  place(path: string, data: Buffer, replace: boolean, retireDir: string, made?: Making): Promise<Placed> {
     return this.queue(async () => {
       const target = join(this.root, path);
       if (!inside(this.root, target) || !isImage(path)) throw new Error('Not an image of this workspace');
@@ -238,7 +259,40 @@ export class Library {
           throw error;
         }
       } finally { await rm(temporary, { force: true }); }
+      const file = await readTags(this.root), record = made && cleanMade(made, new Date().toISOString());
+      const moved = shift(file.made, path, retired);
+      if (record) file.made[path] = record;
+      if (moved || record) await writeTags(this.root, file);
       return { path, ...(retired ? { retired } : {}) };
+    });
+  }
+
+  /**
+   * Brings the retired image `path` back to where it came from. An image there now is retired first, to a free name, so
+   * going back is itself a version that can be gone back to; if the move fails it returns to its place. The record of
+   * how each picture was made goes with its file; the tags and note stay with the place unless it had none.
+   */
+  revert(path: string, retireDir: string): Promise<Placed> {
+    return this.queue(async () => {
+      const entries = await readRetired(this.root, retireDir), entry = entries.find(item => item.to === path);
+      if (!entry) throw new Error('Where this image came from was not recorded');
+      const origin = entry.from;
+      let parked: string | undefined;
+      if (await exists(join(this.root, origin))) { parked = await this.freeRetired(retireDir, origin); await this.move(origin, parked); }
+      try { await this.move(path, origin); }
+      catch (error) { if (parked) await this.move(parked, origin).catch(() => {}); throw error; }
+      const at = new Date().toISOString();
+      await this.writeRetired(retireDir, [...entries.filter(item => item.to !== path), ...(parked ? [{ from: origin, to: parked, at }] : [])]);
+      const file = await readTags(this.root), current = file.made[origin], chosen = file.made[path];
+      delete file.made[origin]; delete file.made[path];
+      if (parked && current) file.made[parked] = current;
+      if (chosen) file.made[origin] = chosen;
+      if (!file.tags[origin] && file.tags[path]) file.tags[origin] = file.tags[path];
+      if (!file.notes[origin] && file.notes[path]) file.notes[origin] = file.notes[path];
+      delete file.tags[path]; delete file.notes[path];
+      await writeTags(this.root, file);
+      await this.prune([path], join(this.root, retireDir));
+      return { path: origin, ...(parked ? { retired: parked } : {}) };
     });
   }
 }

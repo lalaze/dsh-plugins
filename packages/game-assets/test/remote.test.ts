@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { gzipSync } from 'node:zlib';
 import { build } from 'esbuild';
-import { CLIENT_HEADER, type GeneratedImage, type MoveResult, type ProjectSourceStatus, type ProjectStatus, type SaveResult, type ScanResult, type SourcesAnswer, type TagResult } from '../src/domain.js';
+import { CLIENT_HEADER, type GeneratedImage, type MoveResult, type ProjectSourceStatus, type ProjectStatus, type RevertResult, type SaveResult, type ScanResult, type SourcesAnswer, type TagResult } from '../src/domain.js';
 import { createHandler } from '../src/http.js';
 import { REMOTE_BEGIN, REMOTE_END, remoteAnswer, remoteCommand, type RemoteMachines, type RemoteTarget } from '../src/remote.js';
 import { AssetError, AssetService } from '../src/service.js';
@@ -250,5 +250,18 @@ test('recording a source in a remote project sends the key and the script by upl
   assert.deepEqual((await game.call<ProjectSourceStatus>({ action: 'projectSource' })).body, recorded.body);
   assert.deepEqual((await game.call<ProjectSourceStatus>({ action: 'setProjectSource', sourceId: null })).body, { source: null, files: [] });
   assert.equal(await exists(join(game.root, '.game-assets')), false);
+});
+
+test('going back to an earlier version works on the remote machine too', async () => {
+  const game = await remoteGame();
+  await game.call<ScanResult>({ action: 'scan' });
+  const picture = png(40, 120);
+  const replaced = (await game.call<SaveResult>({ action: 'save', path: 'public/art/hero.png', data: picture.toString('base64'), replace: true, made: { source: 'Codex', prompt: 'remote hero' } })).body;
+  assert.equal(replaced.scan.assets.find(asset => asset.path === 'public/art/hero.png')?.made?.prompt, 'remote hero');
+  const back = await game.call<RevertResult & { error?: string }>({ action: 'revert', path: '_retired/public/art/hero.png' });
+  assert.equal(back.status, 200, back.body.error);
+  assert.deepEqual([back.body.path, back.body.retired], ['public/art/hero.png', '_retired/public/art/hero.2.png']);
+  assert.deepEqual(await readFile(join(game.root, 'public/art/hero.png')), png(1));
+  assert.deepEqual(await readFile(join(game.root, '_retired/public/art/hero.2.png')), picture);
 });
 

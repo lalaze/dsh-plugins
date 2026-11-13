@@ -140,7 +140,18 @@ test('an agent runs the project script with Codex: references from the project, 
   assert.match(call.prompt, /portrait \(2:3\), on a transparent background\.[\s\S]*winter hero$/);
 
   const taken = await run(root, ['--prompt', 'again', '--out', 'art/hero-winter.png']);
-  assert.deepEqual([taken.code, taken.err], [1, 'generate-image: A file of that name is already there']);
+  assert.deepEqual([taken.code, taken.err], [1, 'generate-image: art/hero-winter.png already exists: pass --replace to redraw it in place (the old one is kept), or choose another --out']);
+
+  // With --replace the image is redrawn in place; the old one is a version DSH can go back to, and the new one says an agent made it.
+  const replaced = await run(root, ['--prompt', 'winter hero again', '--out', 'art/hero.png', '--replace']);
+  assert.equal(replaced.code, 0, replaced.err);
+  assert.deepEqual([JSON.parse(replaced.out).path, JSON.parse(replaced.out).retired], ['art/hero.png', '_retired/art/hero.png']);
+  assert.deepEqual(await readFile(join(root, 'art/hero.png')), PICTURE);
+  assert.deepEqual(await readFile(join(root, '_retired/art/hero.png')), png(1));
+  assert.deepEqual(JSON.parse(await readFile(join(root, '_retired/retired.json'), 'utf8')).entries.map((entry: { from: string; to: string }) => [entry.from, entry.to]), [['art/hero.png', '_retired/art/hero.png']]);
+  const records = JSON.parse(await readFile(join(root, '.game-assets.json'), 'utf8')).made;
+  assert.deepEqual([records['art/hero.png'].by, records['art/hero.png'].prompt, records['art/hero.png'].source], ['agent', 'winter hero again', 'Codex']);
+  assert.equal(records['art/hero-winter.png'].prompt, 'winter hero');
   const outside = await run(root, ['--prompt', 'p', '--out', '../escape.png']);
   assert.match(outside.err, /^--out must be inside the project: \.\.\/escape\.png/);
   const missing = await run(root, ['--out', 'a.png']);

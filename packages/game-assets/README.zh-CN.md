@@ -60,9 +60,15 @@ DSH 的对话标签页是对所有对话统一注册的，所以插件的做法�
 
 - 新图显示在原图旁边，并已缩放到原图的像素尺寸：小图（128 像素以内）默认 **保留像素锐利**，其他默认 **平滑缩放**，也可以选 **保持接口返回的尺寸**。透明的图完整放进原尺寸；不透明的图（比如背景）会裁切铺满。
 - **另存为新文件**：写到一个空闲路径，默认是原图旁边的 `<文件名>-redraw.<扩展名>`，或当前查看的文件夹里的 `generated.png`。
-- **替换原图**：先把原图退役（移到退役文件夹，已有同名旧图时自动编号），再把新图写到原路径，代码照常能找到它，标签也保留。把新图退役后，在 **已退役** 里点 **恢复** 就能找回旧图。
+- **替换原图**：先把原图退役（移到退役文件夹，已有同名旧图时自动编号），再把新图写到原路径，代码照常能找到它，标签也保留。旧图会出现在这张图的[历史版本](#历史版本)里。
 
 生成过程中关闭对话框会停止请求。单次生成超过五分钟会放弃。
+
+### 历史版本
+
+每次替换都会留下前一版：图片详情里列出它的 **历史版本**，新的在前，每一版都标明用到什么时候、是怎么生成的。点 **回退** 会把那一版放回原路径，同时把当前的图退役；所以回退本身也成为一个可以再回去的版本，任何文件都不会被删除。单独打开某个已退役的版本时，也有 **回退到这个版本**。
+
+从生成对话框或项目脚本保存的每张图，都会在 `.game-assets.json` 里按路径记下生成方式：来源、模型、提示词、时间，以及是不是 agent 生成的。这条记录跟着文件走（退役或回退时一起移动），标签和备注留在原路径。每个版本都是退役文件夹里的一份完整文件，不再需要的旧版本可以在那里自己清理。
 
 ### 项目里的 agent
 
@@ -75,10 +81,10 @@ DSH 的对话标签页是对所有对话统一注册的，所以插件的做法�
 不管 agent 由谁运行（DSH、远程 Claude Code 或 Codex、终端），都可以这样生图：
 
 ```sh
-node .game-assets/generate-image.cjs --prompt "a blue slime, pixel art" --out assets/slime.png [--ref assets/hero.png] [--shape wide] [--transparent]
+node .game-assets/generate-image.cjs --prompt "a blue slime, pixel art" --out assets/slime.png [--ref assets/hero.png] [--shape wide] [--transparent] [--replace]
 ```
 
-脚本把一张图保存到项目里的空闲路径，从不覆盖文件，尺寸是来源生成的尺寸，并以 JSON 输出路径和尺寸。接口类来源的密钥保存到项目所在机器的 `~/.dsh-game-assets/keys.json`，只有本人可读，远程工作区通过 Remote Agents 的上传通道送过去；也可以用 `DSH_IMAGE_API_KEY` 环境变量覆盖，比如在别的机器上。Codex 用运行脚本那台机器上的登录。**从项目中移除** 会删掉这些文件和说明段；之后在设置里修改来源，不会自动更新项目，需要重新写入。
+脚本把一张图保存到项目里的空闲路径，从不覆盖文件；加 `--replace` 时会就地重绘 `--out` 指向的图，像 **替换原图** 一样先把旧图退役，所以它也会出现在那张图的历史版本里。图片尺寸是来源生成的尺寸，并以 JSON 输出路径和尺寸。接口类来源的密钥保存到项目所在机器的 `~/.dsh-game-assets/keys.json`，只有本人可读，远程工作区通过 Remote Agents 的上传通道送过去；也可以用 `DSH_IMAGE_API_KEY` 环境变量覆盖，比如在别的机器上。Codex 用运行脚本那台机器上的登录。**从项目中移除** 会删掉这些文件和说明段；之后在设置里修改来源，不会自动更新项目，需要重新写入。
 
 ### 它会改什么
 
@@ -86,7 +92,8 @@ node .game-assets/generate-image.cjs --prompt "a blue slime, pixel art" --out as
 | --- | --- |
 | 图片移到 `_retired/<原路径>`，或移回去 | 退役和恢复 |
 | `_retired/retired.json` 记录每张退役图片的原位置 | 退役和恢复 |
-| `.game-assets.json` 按图片路径保存标签和备注 | 打标签、写备注 |
+| `.game-assets.json` 按图片路径保存标签、备注和每张图的生成方式 | 打标签、写备注、保存生成的图片 |
+| 当前的图退役，选中的版本移回原路径 | 回退 |
 | 生成的图片写到你选的空闲路径 | 另存为新文件 |
 | 原图按上面的方式退役，新图写到原路径 | 替换原图 |
 | 写入或删除 `.game-assets/`，以及 `AGENTS.md`、`CLAUDE.md` 里带标记的一段 | 记录项目的生图来源 |
@@ -132,7 +139,7 @@ node .game-assets/generate-image.cjs --prompt "a blue slime, pixel art" --out as
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.3.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.4.0.tgz"
 ```
 
 重启对应 profile 并刷新浏览器。桌面版请先完全退出 DSH，再用它自带的 `dsh` 加 `--profile desktop` 安装。要求 DSH `>=0.2.1-rc.2 <0.3.0`。

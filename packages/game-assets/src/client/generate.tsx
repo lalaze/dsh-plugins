@@ -127,7 +127,7 @@ export function GenerateDialog({ sessionId, target, references: given, assets, f
     setSaving(true); setError('');
     try {
       const blob = await renderPicture(result.blob, type, fit, size, !alpha);
-      const saved = await savePicture(sessionId, where, await base64Of(blob), replace);
+      const saved = await savePicture(sessionId, where, await base64Of(blob), replace, { source: result.image.source, ...(result.image.model ? { model: result.image.model } : {}), prompt });
       if (alive.current) onSaved(saved, replace);
     } catch (e) { if (alive.current) { setError(localizePictureError(e)); setSaving(false); } }
   };

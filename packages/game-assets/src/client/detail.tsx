@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { RAW_LIMIT, extensionOf, type Asset, type AssetDetail, type ScanResult, type Usage } from '../domain.js';
+import { RAW_LIMIT, extensionOf, type Asset, type AssetDetail, type MadeInfo, type ScanResult, type Usage } from '../domain.js';
 import { assetDetail } from './api.js';
 import { Picture } from './grid.js';
-import { localizeError, ui } from './i18n.js';
+import { i18n, localizeError, ui } from './i18n.js';
 import { dirOf, formatBytes, nameOf } from './model.js';
 
 export const USAGE_LABEL: Record<Usage, string> = { used: 'In use', maybe: 'Maybe in use', unused: 'Unreferenced' };
@@ -32,6 +32,19 @@ export interface DetailProps {
   onMove(): void;
   /** Opens the dialog that redraws this image with an image source; absent for images an image API cannot take. */
   onRedraw?(): void;
+  /** Earlier versions of this image: retired images that came from its path, newest first. */
+  history: Asset[];
+  /** Brings a retired version back to its place. */
+  onRevert(path: string): void;
+}
+
+const when = (at: string) => { try { return new Date(at).toLocaleString(i18n.formatLocale(), { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }); } catch { return at; } };
+/** Where a picture came from, in one line: the source, the model, who asked, and when. */
+function Made({ made }: { made: MadeInfo }) {
+  return <p className="ga-made" title={made.prompt || undefined}>
+    {ui(made.by === 'agent' ? 'Made by an agent with {source}' : 'Made with {source}', { source: made.model && made.model !== made.source ? `${made.source} · ${made.model}` : made.source })} · {when(made.at)}
+    {made.prompt && <span className="ga-prompt">{made.prompt}</span>}
+  </p>;
 }
 
 /** An image's tags as removable chips with a field to add one, and its note, saved when the field is left. */
@@ -53,7 +66,7 @@ function Labels({ asset, knownTags, onTag, onNote }: Pick<DetailProps, 'asset' |
 }
 
 /** One image: a large preview, what it is, every reference to it, and the other files of the same name. */
-export function Detail({ sessionId, asset, result, twins, onSelect, onClose, onCopy, openFile, knownTags, onTag, onNote, onMove, onRedraw }: DetailProps) {
+export function Detail({ sessionId, asset, result, twins, onSelect, onClose, onCopy, openFile, knownTags, onTag, onNote, onMove, onRedraw, history, onRevert }: DetailProps) {
   const [detail, setDetail] = useState<AssetDetail>(), [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
@@ -64,6 +77,7 @@ export function Detail({ sessionId, asset, result, twins, onSelect, onClose, onC
   const family = asset.family ? result.families.find(entry => entry.id === asset.family) : undefined;
   const latest = family?.versions[family.versions.length - 1].label;
   const others = asset.dup === undefined ? 0 : result.assets.filter(other => other.dup === asset.dup).length - 1;
+  const occupied = !!asset.origin && result.assets.some(other => other.path === asset.origin && !other.retired);
 
   return <aside className="ga-detail" aria-label={nameOf(asset.path)}>
     <header className="ga-detail-head">
@@ -81,12 +95,30 @@ export function Detail({ sessionId, asset, result, twins, onSelect, onClose, onC
         <button type="button" className="ga-button" onClick={() => onCopy(asset.path)}>{ui('Copy path')}</button>
         {openFile && <button type="button" className="ga-button" onClick={() => openFile(asset.path)}>{ui('Open beside chat')}</button>}
         {onRedraw && <button type="button" className="ga-button" onClick={onRedraw}>{ui('Redraw…')}</button>}
-        {(!asset.retired || asset.origin) && <button type="button" className="ga-button" onClick={onMove}>{ui(asset.retired ? 'Restore' : 'Retire…')}</button>}
+        {/* A retired version whose place is taken goes back by taking that image's place, which keeps it as a version. */}
+        {asset.retired && asset.origin && occupied
+          ? <button type="button" className="ga-button" onClick={() => onRevert(asset.path)}>{ui('Go back to this version')}</button>
+          : (!asset.retired || asset.origin) && <button type="button" className="ga-button" onClick={onMove}>{ui(asset.retired ? 'Restore' : 'Retire…')}</button>}
       </p>
       {asset.retired
         ? <p className="ga-verdict" data-usage="retired"><i className="ga-dot" /><b>{ui('Retired')}</b> {asset.origin ? ui('From {path}.', { path: asset.origin }) : ui('Where it came from was not recorded, so it cannot be restored from here.')}</p>
         : <p className="ga-verdict" data-usage={asset.usage}><i className="ga-dot" /><b>{ui(USAGE_LABEL[asset.usage])}</b> {ui(USAGE_NOTE[asset.usage])}</p>}
       {others > 0 && <p className="ga-verdict"><b className="ga-tag">{ui('copy')}</b> {ui('{count} other files have exactly the same bytes.', { count: others })}</p>}
+      {asset.made && <Made made={asset.made} />}
+
+      {history.length > 0 && <section>
+        <h4>{ui('Earlier versions')} <span className="ga-dim">{history.length}</span></h4>
+        <ul className="ga-history">
+          {history.map(version => <li key={version.path}>
+            <button type="button" className="ga-twin" onClick={() => onSelect(version.path)} title={version.path}>
+              <span className="ga-twin-thumb"><Picture sessionId={sessionId} asset={version} box={36} /></span>
+              <span className="ga-twin-path">{version.retiredAt ? ui('Until {time}', { time: when(version.retiredAt) }) : version.path}</span>
+              <span className="ga-meta">{version.made ? ui(version.made.by === 'agent' ? 'Made by an agent with {source}' : 'Made with {source}', { source: version.made.source }) : ui('Not generated here')}{version.width ? ` · ${version.width}×${version.height}` : ''}</span>
+            </button>
+            <button type="button" className="ga-button" onClick={() => onRevert(version.path)}>{ui('Go back')}</button>
+          </li>)}
+        </ul>
+      </section>}
 
       <Labels asset={asset} knownTags={knownTags} onTag={onTag} onNote={onNote} />
 

@@ -8,7 +8,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { runCodex } from './codex.js';
 import { detectEngine } from './detect.js';
 import { IMAGE_BATCH_BYTES, RAW_LIMIT, isImage, isReference, type Aspect, type ImageAnswer, type ProjectSourceStatus, type ScanResult, type ScannedAsset } from './domain.js';
-import type { Library, Moved, Placed } from './manage.js';
+import type { Library, Making, Moved, Placed } from './manage.js';
 import { readProjectSource, writeProjectSource, type ProjectBundle } from './project.js';
 import type { Rules, Scanner } from './scan.js';
 
@@ -25,7 +25,9 @@ export type WorkspaceRequest =
    * Writes a picture to `path`, replacing the image there if `replace`. Its bytes come in `data` (base64) or, on a remote
    * machine, were uploaded beforehand to `staged`, relative to the workspace, with the digest `sha256`.
    */
-  | { op: 'place'; path: string; replace: boolean; retireDir: string; data?: string; staged?: string; sha256?: string }
+  | { op: 'place'; path: string; replace: boolean; retireDir: string; data?: string; staged?: string; sha256?: string; made?: Making }
+  /** Brings the retired image `path` back where it came from, retiring the image there first. */
+  | { op: 'revert'; path: string; retireDir: string }
   /** Generates a picture with the Codex CLI signed in on this machine; `references` are workspace paths. */
   | { op: 'codex'; prompt: string; references: string[]; aspect: Aspect; transparent: boolean; model?: string; loginShell?: boolean }
   | { op: 'projectSource' }
@@ -36,7 +38,7 @@ export interface CodexAnswer { data: string; mediaType: string; width?: number; 
 export type ReadAnswer = ImageAnswer;
 export interface WorkspaceAnswers {
   scan: ScanResult<ScannedAsset>; detect: { engine: string | null }; retire: Moved; restore: Moved;
-  tag: Record<string, string[]>; note: { note: string }; read: ReadAnswer[]; place: Placed;
+  tag: Record<string, string[]>; note: { note: string }; read: ReadAnswer[]; place: Placed; revert: Placed;
   codex: CodexAnswer; projectSource: ProjectSourceStatus; setProjectSource: ProjectSourceStatus;
 }
 /** What a request may be given besides itself, in the process that runs it. */
@@ -94,9 +96,12 @@ export async function handle(root: string, request: WorkspaceRequest, scanner: S
     case 'note': return { note: await library.note(request.path, request.note) };
     case 'place': {
       const data = request.data !== undefined ? Buffer.from(request.data, 'base64') : await takeStaged(root, request.staged, request.sha256);
-      try { return await library.place(request.path, data, request.replace, request.retireDir); }
+      try { return await library.place(request.path, data, request.replace, request.retireDir, request.made); }
       catch (error) { throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409); }
     }
+    case 'revert':
+      try { return await library.revert(request.path, request.retireDir); }
+      catch (error) { throw error instanceof AssetError ? error : new AssetError(error instanceof Error ? error.message : String(error), 409); }
     case 'codex': {
       const references: string[] = [];
       for (const path of request.references) {

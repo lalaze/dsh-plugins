@@ -163,18 +163,19 @@ export class Scanner {
     const families = groupVersions(assets);
 
     // Retired images are listed, not judged: their paths mirror the ones code names, so matching them would call them used.
-    const origins = new Map((await readRetired(root, retireDir)).map(entry => [entry.to, entry.from]));
+    const origins = new Map((await readRetired(root, retireDir)).map(entry => [entry.to, entry]));
     const shelf = shelved.slice(0, Math.max(0, ASSET_LIMIT - assets.length));
     (await mapLimit(shelf, CONCURRENCY, path => this.measure(join(root, path)))).forEach((entry, index) => {
       if (!entry) return;
       const path = shelf[index], origin = origins.get(path);
       assets.push({ path, size: entry.size, mtimeMs: entry.mtimeMs, ...(entry.width ? { width: entry.width, height: entry.height } : {}), usage: 'unused', refs: [], refCount: 0,
-        retired: true, ...(origin ? { origin } : {}) });
+        retired: true, ...(origin ? { origin: origin.from, retiredAt: origin.at } : {}) });
     });
     const labels = await readTags(root);
     for (const asset of assets) {
       if (labels.tags[asset.path]) asset.tags = labels.tags[asset.path];
       if (labels.notes[asset.path]) asset.note = labels.notes[asset.path];
+      if (labels.made[asset.path]) asset.made = labels.made[asset.path];
     }
 
     // Forget files that are gone, so a long-lived host does not keep every path it ever saw.

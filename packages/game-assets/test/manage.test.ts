@@ -62,7 +62,7 @@ test('retiring moves images under the retired folder with a list of where they c
   // The answer carries the workspace as it is now: retired images are listed apart, with their origin and their tags.
   assert.deepEqual(retired.scan.assets.map(asset => asset.path), ['public/art/hero.png', '_retired/public/art/old/npc.png', '_retired/public/art/old/sign.png']);
   assert.deepEqual(row(retired.scan, '_retired/public/art/old/npc.png'), { path: '_retired/public/art/old/npc.png', size: 70, mtimeMs: row(retired.scan, '_retired/public/art/old/npc.png')!.mtimeMs, width: 16, height: 16,
-    usage: 'unused', refCount: 0, retired: true, origin: 'public/art/old/npc.png', tags: ['npc'] });
+    usage: 'unused', refCount: 0, retired: true, origin: 'public/art/old/npc.png', retiredAt: list.entries[0].at, tags: ['npc'] });
   // The retired folder is not one of the folders to scan.
   assert.deepEqual(retired.scan.folders.map(folder => folder.name), ['public', 'src']);
 

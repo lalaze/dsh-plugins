@@ -29,7 +29,7 @@ This project generates images with the image source ${describe(source)}, chosen 
 
     ${COMMAND}
 
-Add \`--ref <image>\` (up to four) to draw from existing images, \`--shape square|wide|tall\` and \`--transparent\`. It writes one picture at the size the source makes and never overwrites a file; resize it yourself if the game needs another size. It prints the saved path and pixel size as JSON. More in \`${PROJECT_README}\`.
+Add \`--ref <image>\` (up to four) to draw from existing images, \`--shape square|wide|tall\` and \`--transparent\`. It writes one picture at the size the source makes and never overwrites a file; resize it yourself if the game needs another size. To redraw an image in place, pass \`--replace\` with its path as \`--out\`: the old one is kept in the retired folder, and DSH's Assets tab can go back to it. It prints the saved path and pixel size as JSON. More in \`${PROJECT_README}\`.
 ${END}
 `;
 }
@@ -52,7 +52,8 @@ node ${PROJECT_SCRIPT} --prompt "redraw this sprite as a winter version" --ref a
 | Option | Meaning |
 | --- | --- |
 | \`--prompt <text>\` | What to draw (required). \`--prompt-file <file>\` reads it from a file. |
-| \`--out <path>\` | Where to save, inside the project: \`.png\`, \`.webp\` or \`.jpg\` (required). An existing file is never replaced. |
+| \`--out <path>\` | Where to save, inside the project: \`.png\`, \`.webp\` or \`.jpg\` (required). An existing file is never overwritten. |
+| \`--replace\` | Redraw the image at \`--out\` in place: it is retired first, to \`${source.retireDir ?? '_retired'}/\`, where DSH's Assets tab lists it under the image's history and can bring it back. |
 | \`--ref <image>\` | A PNG, WebP or JPEG to draw from; repeat for up to four. |
 | \`--shape square\\|wide\\|tall\` | The shape asked for (default square). |
 | \`--transparent\` | Ask for a transparent background (not with Gemini). |
@@ -82,7 +83,7 @@ function parseSource(text: string): ProjectSource | null {
     const raw = JSON.parse(text) as Record<string, unknown>;
     const field = (name: string) => typeof raw[name] === 'string' ? raw[name] as string : '';
     if (!field('id') || !field('name') || !SOURCE_KINDS.includes(raw.kind as SourceKind)) return null;
-    return { id: field('id'), name: field('name'), kind: raw.kind as SourceKind, model: field('model'), baseUrl: field('baseUrl') };
+    return { id: field('id'), name: field('name'), kind: raw.kind as SourceKind, model: field('model'), baseUrl: field('baseUrl'), ...(field('retireDir') ? { retireDir: field('retireDir') } : {}) };
   } catch { return null; }
 }
 
