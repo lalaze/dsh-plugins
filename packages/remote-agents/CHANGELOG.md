@@ -4,6 +4,11 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.133 — Remote workspaces from DSH 0.2.2-rc.3's import dialog
+
+- DSH 0.2.2-rc.3 has a workspace picker that other plugins show, first in the experimental **Import DeepSeek chats** dialog. Its **Add workspace…** now opens this plugin's window too, the same one the sidebar and a new conversation open, so a remote machine's folder can be chosen there. Before, it offered only folders on the DSH computer.
+- Nothing changes on earlier DSH versions. Refresh the page after updating; on the desktop app restart DSH.
+
 ## 0.2.132 — Shared MCP servers work again on DSH 0.2.2
 
 - On DSH 0.2.2 every call a remote CLI made to an MCP server shared from DSH failed with "DSH could not run this tool: Tool batch execution failed", and the CLI was told to ask you to reconnect the host. The connection was fine: DSH 0.2.2 runs tool calls in a different form and the plugin still sent the form of DSH 0.2.1. Calls are now sent in the form the running DSH takes, on both. The tools a CLI gets as an AgentTeams member failed the same way and are fixed with it.

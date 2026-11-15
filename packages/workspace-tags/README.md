@@ -25,10 +25,16 @@ dsh plugin --profile web add "$PWD/dist/dsh-workspace-tags-0.2.0.tgz"
 
 Requires DSH 0.2.2-rc.1 or a later 0.2 release. On DSH 0.2.1, stay on 0.2.4: DSH refuses to install this version there.
 
+## 0.3.3 Adding a workspace on DSH 0.2.2-rc.3
+
+- On DSH 0.2.2-rc.3, with this plugin installed, DSH's own **Add workspace…** disappeared from the sidebar and from the workspace picker of a new conversation, and the workspace choice in the experimental **Import DeepSeek chats** dialog opened nothing. rc.3 added a workspace picker that other plugins show, and DSH's folder picker now waits for it; the sidebar copy did not have it. It does now, so both come back. With dsh-remote-agents installed its own **Add workspace** window was still there and still is.
+- The workspace picker of a new conversation, and the one in the import dialog, open under their button again on DSH 0.2.2-rc.2 and later, instead of beside it.
+- Works on DSH 0.2.2-rc.1, rc.2 and rc.3. Refresh the page after updating; on the desktop app restart DSH.
+
 ## 0.3.2 The tag panel on DSH 0.2.2-rc.2
 
 - On DSH 0.2.2-rc.2 the **Tags…** panel opened in the top-left corner of the window. It opens where you clicked again. Earlier DSH versions are unchanged.
-- Still off on DSH 0.2.2-rc.2: the workspace picker of a new conversation opens beside its button, not under it. The sidebar is still the copy of DSH 0.2.2-rc.1's, so it does not have rc.2's sidebar changes yet.
+- Still off on DSH 0.2.2-rc.2: the workspace picker of a new conversation opens beside its button, not under it (fixed in 0.3.3). The sidebar is still the copy of DSH 0.2.2-rc.1's, so it does not have rc.2's sidebar changes yet.
 
 ## 0.3.0 The sidebar of DSH 0.2.2
 
