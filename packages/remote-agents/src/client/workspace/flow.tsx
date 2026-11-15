@@ -21,8 +21,11 @@ export interface LocalDirectories {
   pickDirectory(): Promise<string | null>;
   listDirectory?(path?: string, signal?: AbortSignal): Promise<LocalListing>;
 }
-/** The two Add workspace holes. Both are `single`; the native picker sits at priority 0, dsh-remote at -100. */
-export const DIRECTORY_FLOWS = ['conversation.hero.workspace.directoryFlow', 'sidebar.workspaces.directoryFlow'] as const;
+/**
+ * The Add workspace holes, all `single`; the native picker sits at priority 0, dsh-remote at -100. The third belongs to
+ * the `workspace.picker` Factory other plugins render (DSH 0.2.2-rc.3's DeepSeek chat import) and is absent before rc.3.
+ */
+export const DIRECTORY_FLOWS = ['conversation.hero.workspace.directoryFlow', 'sidebar.workspaces.directoryFlow', 'workspace.picker.directoryFlow'] as const;
 export const DIRECTORY_FLOW_PRIORITY = -50;
 
 interface Listing { path: string; home: string; parent?: string; entries: { name: string; path: string; hidden: boolean }[]; truncated: boolean }

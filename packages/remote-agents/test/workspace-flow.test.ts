@@ -5,13 +5,14 @@ import { apply, type Client } from '../src/client/index.js';
 import { DIRECTORY_FLOWS } from '../src/client/workspace/flow.js';
 
 test('Add workspace shadows DSH\'s own picker, yields to dsh-remote and restores the picker on unload', () => {
-  for (const withDshRemote of [false, true]) {
+  // A DSH before 0.2.2-rc.3 declares only the first two holes; the Factory hole must not hold the others back.
+  for (const declared of [DIRECTORY_FLOWS, DIRECTORY_FLOWS.slice(0, 2)]) for (const withDshRemote of [false, true]) {
     const core = new SlotCore();
     const register = core.register.bind(core) as (options: Record<string, unknown>, component: unknown) => () => void;
     const slots = core as unknown as { spec(name: string): unknown; entriesOfSlot(name: string): readonly { component: unknown }[] };
-    register({ name: 'root', children: Object.fromEntries(DIRECTORY_FLOWS.map(name => [name, { kind: 'single', scope: 'root' }])) }, () => null);
+    register({ name: 'root', children: Object.fromEntries(declared.map(name => [name, { kind: 'single', scope: 'root' }])) }, () => null);
     const native = () => null, dshRemote = () => null;
-    for (const name of DIRECTORY_FLOWS) {
+    for (const name of declared) {
       register({ name }, native);
       if (withDshRemote) register({ name, id: 'dsh-remote', priority: -100 }, dshRemote);
     }
@@ -22,12 +23,12 @@ test('Add workspace shadows DSH\'s own picker, yields to dsh-remote and restores
       slots: { inject(name: string, factory: () => unknown) { if (!slots.spec(name)) return; const dispose = factory(); if (typeof dispose === 'function') cleanups.push(dispose as () => void); }, register },
     } as Client;
     apply(ctx);
-    const winners = () => DIRECTORY_FLOWS.map(name => slots.entriesOfSlot(name)[0]?.component);
+    const winners = () => declared.map(name => slots.entriesOfSlot(name)[0]?.component);
     for (const winner of winners()) {
       assert.notEqual(winner, native);
       assert.equal(winner === dshRemote, withDshRemote);
     }
     for (const cleanup of cleanups.reverse()) cleanup();
-    assert.deepEqual(winners(), DIRECTORY_FLOWS.map(() => withDshRemote ? dshRemote : native));
+    assert.deepEqual(winners(), declared.map(() => withDshRemote ? dshRemote : native));
   }
 });

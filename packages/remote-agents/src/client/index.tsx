@@ -107,8 +107,6 @@ export function apply(ctx: Client): void {
   ctx.inject?.(['workspaces'], scoped => scoped.effect(() => installWorkspaceImport(scoped as unknown as WorkspaceList)));
   // Add workspace gains a Remote machine tab. Ahead of DSH's own picker (0), behind dsh-remote's (-100) when both are installed.
   const Flow = workspaceFlow(() => (ctx.get as ((name: string) => unknown) | undefined)?.('uiWorkspace') as LocalDirectories | undefined);
-  ctx.slots.inject(DIRECTORY_FLOWS[0], () => ctx.slots.inject(DIRECTORY_FLOWS[1], () => {
-    const disposers = DIRECTORY_FLOWS.map(name => ctx.slots.register({ name, id: 'remote-agents-workspace-flow', priority: DIRECTORY_FLOW_PRIORITY }, Flow));
-    return () => { for (const dispose of disposers) if (typeof dispose === 'function') dispose(); };
-  }));
+  // Each hole on its own: a DSH without one of them (before 0.2.2-rc.3 there is no Factory hole) still gets the others.
+  for (const name of DIRECTORY_FLOWS) ctx.slots.inject(name, () => ctx.slots.register({ name, id: 'remote-agents-workspace-flow', priority: DIRECTORY_FLOW_PRIORITY }, Flow));
 }
