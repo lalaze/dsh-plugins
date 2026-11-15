@@ -10,7 +10,7 @@ const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.u
 // 0.2.2-rc.1 packages instead. The suites left out need DSH sources or runtime
 // wiring (LocaleRuntime, ShortcutRegistry, the stock ui-workspace client)
 // beyond the few unpublished files vendored under test/fixtures.
-const upstreamSuites = ['tree', 'path-suffix', 'browser-styles', 'rows', 'workspace-browser', 'workspace-picker', 'session-actions', 'session-context-menu']
+const upstreamSuites = ['tree', 'path-suffix', 'browser-styles', 'rows', 'workspace-browser', 'workspace-picker', 'session-actions', 'session-context-menu', 'workspace-picker-factory']
 
 export default defineConfig({
   plugins: [clientBundles()],

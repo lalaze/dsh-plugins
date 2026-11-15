@@ -6,6 +6,7 @@ DSH's sidebar workspace browser is one `single` slot (`sidebar.workspaces`) fill
 
 | File | Change |
 | --- | --- |
+| `contract/slots.ts`, `WorkspacePicker.tsx`, `index.ts` | Backported from `dsh-v0.2.2-rc.3`: the `workspace.picker` Component Factory and its `workspace.picker.directoryFlow` hole. From rc.3 on, DSH's native and browse directory pickers install into none of the three directory-flow holes until all of them are declared, so without it this copy loses DSH's own "Add workspace…" flow, and the DeepSeek chat import's Workspace chooser renders nothing. Factories exist since rc.1, so the backport keeps `engines.dsh` at rc.1. `WorkspacePicker.tsx` also hands its menu `anchorRef` next to `getAnchorRect`: rc.2 dropped the latter, and the menu opened beside its trigger |
 | `index.ts` | `apply(ctx, tagging)` passes the tag runtime to the browser; deleting a Workspace also drops its tags; **Tags…** joins DSH's Workspace menu as a `ctx.contextMenus` contribution, opening where `tags/menu-anchor.ts` says |
 | `contract/slots.ts` | Optional `tagging` field on the browser's injected props |
 | `locales.ts` | Tag copy (`tags/locales.ts`) joins the `workspace` namespace; languages other than Chinese and English read it in English |
@@ -24,7 +25,7 @@ DSH's sidebar workspace browser is one `single` slot (`sidebar.workspaces`) fill
 
 ## Tests
 
-Vitest runs eight of ui-workspace's fifteen spec files against the published 0.2.2-rc.1 packages: `tree`, `path-suffix`, `browser-styles`, `rows`, `workspace-browser`, `workspace-picker`, `session-actions` and `session-context-menu`. `test/fixtures/client-bundles.ts` turns DSH's module-loader `client.js` bundles back into importable modules for them. The other seven construct the stock ui-workspace client or runtime classes that DSH publishes only inside those bundles' private scope, so they would need DSH's source tree.
+Vitest runs eight of ui-workspace's fifteen spec files against the published 0.2.2-rc.1 packages: `tree`, `path-suffix`, `browser-styles`, `rows`, `workspace-browser`, `workspace-picker`, `session-actions` and `session-context-menu`, plus rc.3's `workspace-picker-factory` against this copy's `apply`. `test/fixtures/client-bundles.ts` turns DSH's module-loader `client.js` bundles back into importable modules for them. The other seven construct the stock ui-workspace client or runtime classes that DSH publishes only inside those bundles' private scope, so they would need DSH's source tree.
 
 ## If DSH refuses the plugin
 

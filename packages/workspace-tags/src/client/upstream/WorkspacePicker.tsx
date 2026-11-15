@@ -9,7 +9,7 @@
  * occupant's own create-folder affordance already covers creating one.
  */
 import type { ReactNode, RefObject } from 'react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button, IconFolderCloseRegular, IconPlusOutlineRegular, Menu, Modal, type MenuEntry,
 } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -18,7 +18,7 @@ import type {
 } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
-import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
+import type { DirectoryFlowOwnerProps, WorkspacePickerFactoryProps, WorkspacePickerProps } from './contract/slots.ts'
 import { distinguishingPathSuffixes } from './path-suffix.ts'
 import css from './WorkspacePicker.module.css'
 
@@ -80,6 +80,9 @@ export function WorkspacePickFlow({
     () => anchorRef?.current?.getBoundingClientRect() ?? null,
     [anchorRef],
   )
+  // workspace-tags: DSH 0.2.2-rc.2 dropped getAnchorRect and positions the menu against anchorRef (as in rc.3, a menu
+  // without an owner anchor stays hidden). Both are passed so the menu sits under its trigger on rc.1 and later.
+  const absentAnchor = useRef<HTMLElement>(null)
   const [errorOpen, setErrorOpen] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
   const [flowOpen, setFlowOpen] = useState(false)
@@ -222,6 +225,7 @@ export function WorkspacePickFlow({
         side={side}
         portal
         getAnchorRect={getAnchorRect}
+        {...({ anchorRef: anchorRef ?? absentAnchor } as object)}
       />
       {open && !addIsTheOnlyEntry && !menuIsEmpty && workspaceSnapshot.phase === 'pending' && <div className={css.menuStatus} role="status">{t('picker.loading')}</div>}
       {renderDirectoryFlow(flowOwner)}
@@ -272,6 +276,41 @@ export function WorkspacePicker({
       createWorkspace={createWorkspace}
       useDirectoryFlow={useDirectoryFlow}
       renderDirectoryFlow={owner => renderSlot('conversation.hero.workspace.directoryFlow', owner)}
+      selectedId={selectedId}
+      onPick={onPick}
+      onClose={onClose}
+    />
+  )
+}
+
+/**
+ * workspace-tags: backported from dsh-v0.2.2-rc.3.
+ * The `workspace.picker` Factory definition: the same flow for another
+ * plugin's surface, under the Factory's own directory-flow hole.
+ * @param props - caller input, injected creation share, and the locale seat.
+ * @returns the flow element.
+ */
+export function WorkspacePickerFactory({
+  open,
+  anchorRef,
+  useWorkspaces,
+  selectedId,
+  onPick,
+  onClose,
+  createWorkspace,
+  useDirectoryFlow,
+  renderSlot,
+  t,
+}: WorkspacePickerFactoryProps) {
+  return (
+    <WorkspacePickFlow
+      t={t}
+      open={open}
+      anchorRef={anchorRef}
+      useWorkspaces={useWorkspaces}
+      createWorkspace={createWorkspace}
+      useDirectoryFlow={useDirectoryFlow}
+      renderDirectoryFlow={owner => renderSlot('workspace.picker.directoryFlow', owner)}
       selectedId={selectedId}
       onPick={onPick}
       onClose={onClose}

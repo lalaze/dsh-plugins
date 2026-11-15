@@ -38,12 +38,13 @@ import type { PresentationProviderOwner } from '../presentation.ts'
 import type { ReactNode } from 'react'
 import type { ContextMenuTarget } from '@deepseek-ai/dsh-client-ui-context-menu/client'
 import type {
-  HostObservable, InjectFace, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore, SlotHookFactory,
+  FactoryComponentPropsOf, HostObservable, InjectFace, PropsHooks, PropsLocale, PropsRenderSlots, PropsRuntime, PropsStore,
+  SlotHookFactory,
 } from '@deepseek-ai/dsh-client-ui-slots'
 // Type-only: pull the owner SlotMap merges into programs that resolve the
 // runtime shares below.
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
-import type {} from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type { EmptyWorkspaceOwnerProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { SessionSearchResultItem } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { RemoteHostFacts } from '@deepseek-ai/dsh-api-remotes/client'
@@ -151,6 +152,15 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
     /** Directory-flow hole under the sidebar browsing region (declared by the WorkspaceBrowser entry). */
     'sidebar.workspaces.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
     /**
+     * workspace-tags: backported from dsh-v0.2.2-rc.3.
+     * Directory-flow hole under every `workspace.picker` Factory occurrence
+     * (declared by the Factory definition). A directory-picker package
+     * registers the same occupant here as in the other two directory-flow
+     * holes; while this hole is empty, Factory occurrences offer no
+     * "Add workspace…" entry.
+     */
+    'workspace.picker.directoryFlow': { kind: 'single'; scope: 'root'; owner: DirectoryFlowOwnerProps }
+    /**
      * Leading decoration of one Session row, in the 16px cell before the title
      * that the row's own state dot otherwise occupies. A higher-priority state
      * (a pending interaction, a new message, live activity) replaces the seat
@@ -224,12 +234,35 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'sidebar.workspaces.session.row.action': { kind: 'list'; scope: 'root'; owner: SessionRowOwnerProps }
   }
+
+  // workspace-tags: backported from dsh-v0.2.2-rc.3. From rc.3 on, DSH's
+  // directory pickers install into none of the directory-flow holes until all
+  // three are declared, and other plugins (DeepSeek chat import) render this
+  // Factory to choose a Workspace.
+  interface SlotFactoryMap {
+    /**
+     * The blank-session hero's Workspace picker for another plugin's surface:
+     * a menu of the existing Workspaces plus "Add workspace…", which runs the
+     * `workspace.picker.directoryFlow` occupant, creates a Workspace from the
+     * picked path, and reports it through `onPick`. The caller owns the anchor
+     * control, its open state, and what a pick means.
+     */
+    'workspace.picker': {
+      scope: 'root'
+      props: WorkspacePickerInput
+      inject: WorkspacePickerInjected
+      locale: 'workspace'
+      children: { 'workspace.picker.directoryFlow': { kind: 'single'; scope: 'root' } }
+    }
+  }
 }
 
-/** The two directory-flow holes; a flow package's client half registers its one component into both. */
+/** The three directory-flow holes; a flow package's client half registers its one component into each. */
 export type DirectoryFlowSlotName =
   | 'conversation.hero.workspace.directoryFlow'
   | 'sidebar.workspaces.directoryFlow'
+  // workspace-tags: backported from dsh-v0.2.2-rc.3.
+  | 'workspace.picker.directoryFlow'
 
 /**
  * Directory-picking share both trigger surfaces consume. Occupancy rides the
@@ -552,3 +585,20 @@ export type WorkspacePickerProps =
   & Omit<WorkspacePickerInjected, 'hooks'>
   & PropsHooks<WorkspacePickerInjected['hooks']>
   & PropsLocale<'workspace'>
+
+/**
+ * workspace-tags: backported from dsh-v0.2.2-rc.3.
+ * Caller input of one `workspace.picker` occurrence: the hero picker's owner
+ * props, so both surfaces take the same values. `open` is caller-held menu
+ * visibility; the menu portals to the document body and positions against
+ * `anchorRef`, and stays hidden without an anchor element. `selectedId`
+ * marks one row. `onPick` receives an existing Workspace the user chose or
+ * the Workspace created from a picked directory; the caller closes the menu
+ * there. `onClose` fires on outside press, Escape, and before the directory
+ * flow opens. Once the list is ready with no Workspaces, an open request
+ * raises the directory flow directly and calls `onClose`.
+ */
+export type WorkspacePickerInput = EmptyWorkspaceOwnerProps
+
+/** workspace-tags: backported from dsh-v0.2.2-rc.3. Complete props of the `workspace.picker` Factory definition. */
+export type WorkspacePickerFactoryProps = FactoryComponentPropsOf<'workspace.picker'>
