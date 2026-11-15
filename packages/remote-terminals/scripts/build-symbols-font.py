@@ -1,0 +1,117 @@
+"""Builds src/client/terminal-symbols-font.ts, the symbols a phone has no text font for, one terminal cell wide.
+
+Coding CLIs draw their interface with symbols such as Claude Code's ⏺ before each step and ⏵⏵ before its mode. A phone's
+monospace font has none of them, and of its other fonts only the colour emoji has some: so ⏺ became an orange emoji tile
+and ⏵ an empty box. The code points are those Claude Code 2.1.325 and Codex 0.166 carry in their binaries (written out or
+as \\u escapes) that Android's own fonts (Android 9, SDK platform 28) have in no text font, without default emoji
+presentation, and that Noto Sans Symbols 2 has.
+
+Each glyph is narrowed to fit a cell of 0.6 em, what monospace fonts use, and centred in it, as xterm puts each character
+in one cell: wider, it would run into the next.
+
+Not part of the build; the output is committed. To rebuild:
+  python3 -m venv /tmp/fonts && /tmp/fonts/bin/pip install fonttools brotli
+  /tmp/fonts/bin/python scripts/build-symbols-font.py path/to/NotoSansSymbols2-Regular.ttf
+The source is Noto Sans Symbols 2 2.008 (https://github.com/notofonts/symbols), under the SIL Open Font License 1.1.
+"""
+import base64
+import io
+import sys
+from pathlib import Path
+
+from fontTools.pens.recordingPen import DecomposingRecordingPen
+from fontTools.pens.transformPen import TransformPen
+from fontTools.pens.ttGlyphPen import TTGlyphPen
+from fontTools.subset import Options, Subsetter
+from fontTools.ttLib import TTFont
+
+RANGES = (
+    'U+23F4-23F5,U+23F8-23FF,U+2700,U+2B60-2B61,U+2B63-2B66,U+2B69,U+2B6D-2B70,U+2B73,U+2B78-2B7A,U+2B7C-2B7D,U+2B7F,'
+    'U+2B81-2B83,U+2B86,U+2B88-2B89,U+2B8B-2B8C,U+2B8F-2B90,U+2B93-2B95,U+2B97,U+2B99,U+2B9D,U+2B9F-2BA2,U+2BA4-2BA8,'
+    'U+2BAA-2BAB,U+2BAD-2BAF,U+2BB2-2BB3,U+2BB7,U+2BBA,U+2BBC-2BBD,U+2BBF-2BCD,U+2BCF-2BDB,U+2BDD-2BE0,U+2BE4-2BE7,'
+    'U+2BE9,U+2BEB-2BEF,U+2BF1,U+2BF3,U+2BF5-2BF7,U+2BF9,U+2BFD,U+2BFF'
+)
+FAMILY = 'DSH Terminal Symbols'
+CELL = 0.6  # em
+MARGIN = 0.03  # em left free on each side
+
+
+def code_points(ranges: str) -> list[int]:
+    points = []
+    for item in ranges.split(','):
+        first, _, last = item[2:].partition('-')
+        points.extend(range(int(first, 16), int(last or first, 16) + 1))
+    return points
+
+
+def main(source: str) -> None:
+    font = TTFont(source)
+    points = code_points(RANGES)
+    missing = [point for point in points if point not in font.getBestCmap()]
+    if missing:
+        raise SystemExit('Not in the source font: ' + ' '.join(f'U+{point:04X}' for point in missing))
+    options = Options()
+    options.hinting = False  # the hints are for the glyphs as drawn, not as narrowed here
+    options.layout_features = []
+    options.name_IDs = [0, 1, 2, 3, 4, 5, 6, 13, 14]
+    options.notdef_outline = True
+    subsetter = Subsetter(options)
+    subsetter.populate(unicodes=points)
+    subsetter.subset(font)
+
+    em = font['head'].unitsPerEm
+    cell, margin = round(CELL * em), round(MARGIN * em)
+    glyphs, metrics, glyph_set = font['glyf'], font['hmtx'], font.getGlyphSet()
+    drawn = {}
+    for name in font.getGlyphOrder():
+        recording = DecomposingRecordingPen(glyph_set)
+        glyph_set[name].draw(recording)
+        drawn[name] = recording
+    for name, recording in drawn.items():
+        glyph = glyphs[name]
+        glyph.recalcBounds(glyphs)
+        if not recording.value or not hasattr(glyph, 'xMin'):
+            metrics[name] = (cell, 0)
+            continue
+        width, middle_y = glyph.xMax - glyph.xMin, (glyph.yMin + glyph.yMax) / 2
+        scale = min(1.0, (cell - 2 * margin) / width) if width else 1.0
+        # Scaled about its own middle, then moved so that its middle is the cell's.
+        dx = cell / 2 - scale * (glyph.xMin + glyph.xMax) / 2
+        dy = middle_y - scale * middle_y
+        pen = TTGlyphPen(None)
+        recording.replay(TransformPen(pen, (scale, 0, 0, scale, dx, dy)))
+        glyphs[name] = pen.glyph()
+        glyphs[name].recalcBounds(glyphs)
+        metrics[name] = (cell, glyphs[name].xMin)
+    font['hhea'].advanceWidthMax = cell
+    font['post'].isFixedPitch = 1
+    if 'OS/2' in font:
+        font['OS/2'].xAvgCharWidth = cell
+
+    names = font['name']
+    full = f'{FAMILY} Regular'
+    for record in list(names.names):
+        if record.nameID in (1, 4, 6, 16):
+            names.removeNames(nameID=record.nameID)
+    names.setName(FAMILY, 1, 3, 1, 0x409)
+    names.setName(full, 4, 3, 1, 0x409)
+    names.setName(FAMILY.replace(' ', '') + '-Regular', 6, 3, 1, 0x409)
+    names.setName(f'{FAMILY}: Noto Sans Symbols 2 2.008, subset and narrowed for terminal cells', 3, 3, 1, 0x409)
+
+    font.flavor = 'woff2'
+    out = io.BytesIO()
+    font.save(out)
+    data = base64.b64encode(out.getvalue()).decode('ascii')
+    target = Path(__file__).resolve().parent.parent / 'src/client/terminal-symbols-font.ts'
+    target.write_text(
+        '// Generated by scripts/build-symbols-font.py, which says what this is and how to rebuild it; do not edit.\n'
+        '// Derived from Noto Sans Symbols 2 2.008, Copyright 2022 The Noto Project Authors (https://github.com/notofonts/symbols),\n'
+        '// under the SIL Open Font License 1.1 (https://openfontlicense.org): see THIRD_PARTY_NOTICES.md.\n'
+        f"export const symbolsFontRanges = '{RANGES}';\n"
+        f"export const symbolsFontWoff2 = '{data}';\n"
+    )
+    print(f'{len(points)} symbols, {len(out.getvalue())} bytes as woff2, {len(data)} as base64 -> {target}')
+
+
+if __name__ == '__main__':
+    main(sys.argv[1])

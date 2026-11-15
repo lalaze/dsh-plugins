@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.9 — Swiping a terminal and Claude Code's symbols on a phone
+
+- On a phone or tablet a terminal or a TUI conversation could not be scrolled: a swipe did nothing. The terminal DSH uses reads only a mouse wheel and has no touch handling of its own.
+- Swiping now scrolls it as a list scrolls on a phone, and a quick swipe carries on and slows down; a tap anywhere stops it. A conversation in Claude Code's classic renderer (Local scrolling, the default) or a shell scrolls its history. A program that draws the whole screen itself, such as fullscreen Claude Code, gets what a wheel would send it. A tap still opens the keyboard, a swipe does not. Sideways swipes are left to the page.
+- On a phone Claude Code's ⏺ before each step showed as an orange emoji tile, and ⏵⏵ before its mode (and similar symbols) as empty boxes: a phone has no text font with them. The plugin now carries those symbols, one terminal cell wide, made from the Noto Sans Symbols 2 font (6 KB). Touch devices only; on a desktop nothing changes.
+- Conversations already open on the phone show the symbols after the page reloads.
+
 ## 0.1.8 — Typing in a terminal on a phone or tablet
 
 - On a touch device with a phone layout plugin (dsh-web-mobile), tapping a terminal or a TUI conversation did not let you type: the on-screen keyboard did not come up, and a hardware keyboard typed nowhere.

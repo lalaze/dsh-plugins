@@ -8,6 +8,7 @@ import { api } from './api.js';
 import { installLocale } from './i18n.js';
 import { installShellMenu } from './shell-menu.js';
 import { installPendingStatus } from './terminal-pending.js';
+import { installTerminalSymbols } from './terminal-symbols.js';
 import { installTouchFocus } from './terminal-touch.js';
 import { installTerminalPreference } from './terminal-shell.js';
 import { installTuiSessions } from './tui.js';
@@ -31,6 +32,7 @@ export function apply(ctx: Client): void {
   ctx.effect(installShellMenu);
   ctx.effect(installPendingStatus);
   ctx.effect(installTouchFocus);
+  ctx.effect(() => installTerminalSymbols());
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     // Read through the service itself: this plugin's proxy would resolve dependencies from our context.
     const service = (scoped as unknown as { modelDirectories: ModelDirectories }).modelDirectories;
