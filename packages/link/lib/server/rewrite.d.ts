@@ -46,13 +46,23 @@ export declare const RAW_STORAGE = "__dshLinkStorage";
  * stores under fixed keys, so without this two machines' pages would overwrite each other's state.
  */
 export declare function injectStorageNamespace(html: string, id: string): string;
+/**
+ * Send a mounted page's requests by absolute path to its machine. DSH's own requests are relative to the page or go
+ * through the rebased stream, but plugins call their routes by absolute path (`fetch('/api/remote-agents')`), which on
+ * this host's origin reaches this computer's DSH: the Mac mini's model picker asked the MacBook's remote-agents which
+ * machines fit a Mac mini conversation, got none and hid every remote CLI. Same-origin paths outside `/dsh-link/` (this
+ * host's switcher and attention routes, and the mounts) get the mount prefix in fetch, XMLHttpRequest, EventSource and
+ * sendBeacon. Element URLs, `import()` and WebSocket are left alone: the only upgrade a mount forwards is DSH's stream.
+ */
+export declare function injectRequestBase(html: string, prefix: string): string;
 /** The page's real localStorage: the namespace script's copy on a mounted page, else the page's own. */
 export declare function rawStorage(): Storage;
 /** Make a Session the one a machine's page restores at its next boot ('' as id: this host's own page). */
 export declare function selectSession(storage: Storage, machineId: string, sessionId: string): void;
 /**
- * A machine's index as this host serves it under its mount. Scripts run in head order, so the namespace comes first
- * (everything after it reads the namespaced storage), then the desktop guard.
+ * A machine's index as this host serves it under its mount. Scripts run in head order, so the request base and the
+ * namespace come first (everything after them requests from the machine and reads the namespaced storage), then the
+ * desktop guard.
  */
 export declare function mountedIndex(html: string, id: string): Rewritten;
 /** Reads the Session a page shows, '' when none: the store {@link CURRENT_SESSION_KEY} holds `{ sessionId }`. */

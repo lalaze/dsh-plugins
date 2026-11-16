@@ -66,6 +66,18 @@ export function injectStorageNamespace(html, id) {
     const script = `<script>(()=>{const s=window.localStorage,p=${literal(storagePrefix(id))},own=()=>{const k=[];for(let i=0;i<s.length;i++){const n=s.key(i);if(n!==null&&n.startsWith(p))k.push(n.slice(p.length))}return k};const v={getItem:k=>s.getItem(p+k),setItem:(k,x)=>s.setItem(p+k,String(x)),removeItem:k=>s.removeItem(p+k),key:i=>own()[i]??null,clear:()=>{for(const k of own())s.removeItem(p+k)},get length(){return own().length}};Object.defineProperty(window,${literal(RAW_STORAGE)},{configurable:true,value:s});Object.defineProperty(window,"localStorage",{configurable:true,get:()=>v})})()</script>`;
     return injectHead(html, script);
 }
+/**
+ * Send a mounted page's requests by absolute path to its machine. DSH's own requests are relative to the page or go
+ * through the rebased stream, but plugins call their routes by absolute path (`fetch('/api/remote-agents')`), which on
+ * this host's origin reaches this computer's DSH: the Mac mini's model picker asked the MacBook's remote-agents which
+ * machines fit a Mac mini conversation, got none and hid every remote CLI. Same-origin paths outside `/dsh-link/` (this
+ * host's switcher and attention routes, and the mounts) get the mount prefix in fetch, XMLHttpRequest, EventSource and
+ * sendBeacon. Element URLs, `import()` and WebSocket are left alone: the only upgrade a mount forwards is DSH's stream.
+ */
+export function injectRequestBase(html, prefix) {
+    const script = `<script>(()=>{const m=${literal(prefix)},g=globalThis,l=g.location,to=u=>{let x;try{x=new URL(String(u),l.href)}catch{return u}if(x.protocol!==l.protocol||x.host!==l.host||x.pathname==="/dsh-link"||x.pathname.startsWith("/dsh-link/"))return u;x.pathname=m+x.pathname;return x.href};const f=g.fetch;if(typeof f==="function")g.fetch=function(i,n){if(typeof Request==="function"&&i instanceof Request){const t=to(i.url);if(t!==i.url)try{i=new Request(t,i)}catch{}}else if(typeof i==="string"||i instanceof URL)i=to(i);return f.call(this,i,n)};const X=g.XMLHttpRequest;if(typeof X==="function"){const o=X.prototype.open;X.prototype.open=function(a,u,...r){return o.call(this,a,to(u),...r)}}const E=g.EventSource;if(typeof E==="function")g.EventSource=class extends E{constructor(u,c){super(to(u),c)}};const n=g.navigator;if(n&&typeof n.sendBeacon==="function"){const b=n.sendBeacon;n.sendBeacon=function(u,d){return b.call(this,to(u),d)}}})()</script>`;
+    return injectHead(html, script);
+}
 /** The page's real localStorage: the namespace script's copy on a mounted page, else the page's own. */
 export function rawStorage() {
     return globalThis[RAW_STORAGE] ?? globalThis.localStorage;
@@ -75,13 +87,14 @@ export function selectSession(storage, machineId, sessionId) {
     storage.setItem(`${machineId ? storagePrefix(machineId) : ''}${CURRENT_SESSION_KEY}`, JSON.stringify({ sessionId }));
 }
 /**
- * A machine's index as this host serves it under its mount. Scripts run in head order, so the namespace comes first
- * (everything after it reads the namespaced storage), then the desktop guard.
+ * A machine's index as this host serves it under its mount. Scripts run in head order, so the request base and the
+ * namespace come first (everything after them requests from the machine and reads the namespaced storage), then the
+ * desktop guard.
  */
 export function mountedIndex(html, id) {
     const manifest = credentialedManifest(html);
     const guarded = guardDesktopBoot(manifest.html, mountPrefix(id));
-    return { html: injectStorageNamespace(guarded.html, id), misses: [...manifest.misses, ...guarded.misses] };
+    return { html: injectRequestBase(injectStorageNamespace(guarded.html, id), mountPrefix(id)), misses: [...manifest.misses, ...guarded.misses] };
 }
 /** Reads the Session a page shows, '' when none: the store {@link CURRENT_SESSION_KEY} holds `{ sessionId }`. */
 export function currentSession(storage) {
