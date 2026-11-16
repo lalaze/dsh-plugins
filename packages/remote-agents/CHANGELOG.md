@@ -4,6 +4,15 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.136 — Reads and a new session's first turn are no longer lost between DSHes
+
+For machines with **Share sessions and workspaces with other DSH instances** on (Settings › Remote agents):
+
+- **A conversation you read stays read everywhere.** A read taken right after a turn, before this DSH knew how far the session's history went on the host, was dropped; one taken for a session another DSH drives could be recorded at an older point. The page reports a read once per turn, so the other DSHes kept showing that turn as unread. The plugin now asks the host first and catches up, then records the read.
+- **A new session's first turn survives being taken over.** A new session was announced to the other DSHes before its history was copied to the host. If another DSH took it over right then, the first DSH dropped what it had not copied, and the first turn was gone on every DSH. The history now goes first.
+- Still open: a read in the moment between a turn ending and the driving DSH's last entries can still leave that turn unread, and sending right after Stop sometimes answers "Remote CLI connection closed".
+- Restart DSH after upgrading. Upgrade every DSH that shares sessions to get both fixes.
+
 ## 0.2.135 — Old Antigravity models no longer show up
 
 - With 0.2.134, a machine left on all CLIs could list Antigravity models such as Gemini 3.8 Flash (High) or Claude Sonnet 4.6 (Thinking). They were the list version 0.2.129 or earlier had saved for that machine from `agy models`, kept since then and shown again once Antigravity returned. `agy acp` does not take those model IDs, so choosing one failed.
