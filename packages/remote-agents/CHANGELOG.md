@@ -4,6 +4,14 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.134 — Antigravity is back, through `agy acp`
+
+- **Antigravity** is a remote CLI again. It now runs as `agy acp`, the Agent Client Protocol server of Antigravity CLI, like DSH, Grok and CodeBuddy: its models and thinking levels are in the model picker, its modes (Default, Accept edits, Plan, Auto) in the permission menu, its approval requests reach you as approval cards, images can be sent, Stop works and a conversation resumes after a reconnect. The MCP servers and skills you share with remote CLIs reach it too. Version 0.2.129 and earlier drove its headless stream-json mode instead, which could not ask for approvals.
+- **Turn it on per machine:** tick Antigravity under the machine's Enabled CLIs in Settings › Remote agents. A machine left on all CLIs picks it up by itself.
+- **Use Antigravity CLI 1.5.9 or later, signed in for SSH:** over SSH Antigravity keeps its own sign-in, apart from the one the desktop app keeps in the keychain, and 1.5.8 refuses every session with "Authentication required" even when it has one. Until both are in order the machine's CLI list says so; run `agy update` and, if it still says so, `agy acp --login` in a terminal on that machine, then refresh.
+- A session started by 0.2.129 or earlier through the old integration says it cannot be continued, rather than failing in an unclear way; start a new conversation for it.
+- Restart DSH after upgrading.
+
 ## 0.2.133 — Remote workspaces from DSH 0.2.2-rc.3's import dialog
 
 - DSH 0.2.2-rc.3 has a workspace picker that other plugins show, first in the experimental **Import DeepSeek chats** dialog. Its **Add workspace…** now opens this plugin's window too, the same one the sidebar and a new conversation open, so a remote machine's folder can be chosen there. Before, it offered only folders on the DSH computer.

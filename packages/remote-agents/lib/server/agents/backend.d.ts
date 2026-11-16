@@ -82,19 +82,32 @@ export declare const CLI_PROVIDERS: ({
     command: string;
     protocol: "claude";
     args: never[];
+    signIn?: undefined;
 } | {
     id: string;
     label: string;
     command: string;
     protocol: "codex";
     args: string[];
+    signIn?: undefined;
 } | {
     id: string;
     label: string;
     command: string;
     protocol: "acp";
     args: string[];
+    signIn?: undefined;
+} | {
+    id: string;
+    label: string;
+    command: string;
+    protocol: "acp";
+    args: string[];
+    signIn: string;
 })[];
+/** ACP's `auth_required` error, replaced by how to sign in when the CLI says how. */
+export declare function signInHint(definition: Pick<typeof CLI_PROVIDERS[number], 'signIn'>, message: string): string;
+export declare const OLD_ANTIGRAVITY = "This Antigravity session was started by Remote Agents 0.2.129 or earlier and cannot be continued. Start a new conversation.";
 /** Claude's `list_models` control response: `supportedEffortLevels` holds per-model reasoning choices. */
 export declare function claudeModels(result: unknown): Model[];
 /** Codex speed tiers. `serviceTiers` carries request IDs such as `priority`; older CLIs only list `additionalSpeedTiers` names. */

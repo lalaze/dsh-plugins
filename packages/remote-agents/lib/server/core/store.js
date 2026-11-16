@@ -40,7 +40,7 @@ export class Store {
                 throw new Error('Invalid saved remote host');
             if (host.modelError !== undefined && typeof host.modelError !== 'string')
                 throw new Error('Invalid saved host discovery error');
-            // A CLI this version no longer has, as Antigravity after 0.2.129, is dropped from a saved selection.
+            // A CLI this version does not have is dropped from a saved selection (Antigravity was missing from 0.2.130 to 0.2.133).
             if (Array.isArray(host.enabledProviders))
                 host.enabledProviders = host.enabledProviders.filter(id => Object.hasOwn(PROVIDER_LABELS, String(id)));
             if (host.enabledProviders !== undefined)
