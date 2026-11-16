@@ -49,6 +49,7 @@ class FakeCli implements Child {
     if (m.method === 'thread/start' || m.method === 'thread/resume') this.reply(m, { thread: { id: m.params.threadId ?? 'thread-remote' } });
     if (m.method === 'account/read') this.reply(m, { account: { type: 'chatgpt', email: 'dev@example.com', planType: 'plus' } });
     if (m.method === 'account/rateLimits/read') { this.transport.accountChecks.push(this.provider); this.reply(m, { rateLimits: { limitId: 'codex', primary: { usedPercent: 18, windowDurationMins: 300 } } }); }
+    if (m.method === 'session/new' && this.transport.acpAuthRequired) { this.emit({ jsonrpc: '2.0', id: m.id, error: { code: -32000, message: 'Authentication required' } }); return; }
     if (m.method === 'session/new' || m.method === 'session/load' || m.method === 'session/resume') {
       this.configOptions = structuredClone(this.transport.configOptions);
       this.reply(m, { sessionId: m.params.sessionId ?? 'acp-session', configOptions: this.configOptions, models: this.transport.acpModels ? { currentModelId: 'acp-remote', availableModels: [{ modelId: 'acp-remote', name: 'ACP remote' }] } : undefined, modes: this.transport.acpModes ? { currentModeId: 'ask', availableModes: [{ id: 'ask', name: 'Ask' }] } : undefined });
@@ -92,7 +93,7 @@ class FakeSsh implements SshTransport {
   children: FakeCli[] = [];
   scripts: string[] = [];
   admissions: { provider: string; binding: unknown }[] = [];
-  model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; dropPrompt = false; claudeInterruptError = false; noBackgroundTerminals = false; hostInfo = 'Linux\n2.1.319 (Claude Code)\n';
+  model = 'codex-remote'; loadSession = true; acpModels = true; acpModes = true; acpAuthRequired = false; dropPrompt = false; claudeInterruptError = false; noBackgroundTerminals = false; hostInfo = 'Linux\n2.1.319 (Claude Code)\n';
   configOptions?: any[];
   speeds: Record<string, unknown> = {};
   claudeContext?: unknown; claudeUsage?: unknown;
@@ -427,15 +428,16 @@ test('a non-resumable CLI refuses a model change without closing its live sessio
 
 test('SSH discovery asks each installed native CLI for models without sending a prompt', async t => {
   const { ssh, service, hostId } = await fixture(t);
-  ssh.installed.splice(0, 1, 'codex', 'claude', 'dsh', 'grok', 'codebuddy');
+  ssh.installed.splice(0, 1, 'codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigravity');
   const catalog = await service.providers(hostId, "/srv/project's $(touch ignored)");
-  assert.equal(catalog.length, 5); assert.ok(catalog.every(p => p.status === 'ready'));
+  assert.equal(catalog.length, 6); assert.ok(catalog.every(p => p.status === 'ready'));
   assert.equal(catalog.find(p => p.id === 'claude')!.models[0].thinkingOptions![0].id, 'high');
   assert.equal(ssh.admissions.length, 0);
   assert.ok(ssh.children.every(c => c.stopped));
   assert.deepEqual(ssh.children.find(c => c.provider === 'dsh')!.argv.slice(1), ['--profile', 'acp']);
   assert.deepEqual(ssh.children.find(c => c.provider === 'grok')!.argv.slice(1), ['agent', '--no-leader', 'stdio']);
   assert.deepEqual(ssh.children.find(c => c.provider === 'codebuddy')!.argv.slice(1), ['--acp']);
+  assert.deepEqual(ssh.children.find(c => c.provider === 'agy')!.argv.slice(1), ['acp']);
   assert.ok(ssh.scripts.some(s => s.includes(quote("/srv/project's $(touch ignored)"))));
 });
 
@@ -593,7 +595,7 @@ test('unloading during discovery cannot start a CLI after the backend has closed
   assert.equal(ssh.children.length, 0);
 });
 
-for (const provider of ['grok', 'codebuddy']) test(`${provider} uses native ACP permission option IDs, model/mode configuration, cancellation and session recovery`, async t => {
+for (const provider of ['grok', 'codebuddy', 'antigravity']) test(`${provider} uses native ACP permission option IDs, model/mode configuration, cancellation and session recovery`, async t => {
   const { service, ssh, request } = await fixture(t, provider);
   const agent = await service.create({ ...request, modeId: 'ask' }); const cli = ssh.live;
   cli.emit({ jsonrpc: '2.0', id: 77, method: 'session/request_permission', params: { sessionId: 'acp-session', toolCall: { title: 'Run checks' }, options: [{ optionId: 'remote-allow-once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'remote-reject', name: 'Reject', kind: 'reject_once' }] } });
@@ -648,6 +650,26 @@ test('ACP configOptions discover grouped models and per-model reasoning, and res
   await service.retry(agent.id);
   assert.deepEqual(settings(), [['native-model', 'acp-next'], ['native-mode', 'plan'], ['native-effort', 'low']]);
   assert.equal(ssh.admissions.length, 1);
+});
+
+test('Antigravity without a login for SSH sessions says how to sign in; other ACP CLIs keep their own error', async t => {
+  const { service, ssh, request, hostId } = await fixture(t, 'antigravity'); ssh.installed.push('grok'); ssh.acpAuthRequired = true;
+  const providers = await service.providers(hostId, request.cwd);
+  assert.deepEqual(providers.find(p => p.id === 'antigravity'), { id: 'antigravity', label: 'Antigravity', status: 'error', models: [], modes: [],
+    error: 'Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then refresh.' });
+  assert.equal(providers.find(p => p.id === 'grok')!.error, 'Authentication required');
+  assert.equal(ssh.admissions.length, 0); assert.ok(ssh.children.every(c => c.stopped));
+});
+
+test('an Antigravity session saved by 0.2.129 or earlier is refused before anything starts on the host', async t => {
+  const { service, ssh, request, store } = await fixture(t, 'antigravity');
+  const agent = await service.create(request); ssh.live.finish(); await tick();
+  // How the stream-json integration saved it.
+  await store.update(s => { const task = s.tasks.find(t => t.id === agent.id)!; task.native = { ...task.native!, protocol: 'antigravity' as never, sessionId: 'agy-conversation', argv: ['/usr/bin/agy', '--input-format', 'stream-json'] }; });
+  ssh.live.exit(new Error('SSH dropped'));
+  const children = ssh.children.length;
+  await assert.rejects(service.retry(agent.id), /0\.2\.129 or earlier/);
+  assert.equal(ssh.children.length, children); assert.equal(ssh.admissions.length, 1);
 });
 
 test('ACP agents without model discovery use CLI default, and unsupported resume never resubmits', async t => {
@@ -1045,7 +1067,7 @@ test('a missing workspace path is reported without executing in the discovery di
   assert.equal(ssh.admissions.length, 0); assert.equal(store.snapshot().tasks.length, 0);
 });
 
-for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy']) test(`${provider}: DSH native model streams through the real SSH backend and resumes the same conversation`, async t => {
+for (const provider of ['codex', 'claude', 'dsh', 'grok', 'codebuddy', 'antigravity']) test(`${provider}: DSH native model streams through the real SSH backend and resumes the same conversation`, async t => {
   const { ChatProjects } = await import('../src/chat/projects.js');
   const { RemoteCliAdapter, chatModelId, chatProviderId } = await import('../src/chat/native-chat.js');
   const { createUserMessage } = await import('@deepseek-ai/dsh-llm');

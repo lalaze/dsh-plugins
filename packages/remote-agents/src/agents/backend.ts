@@ -87,7 +87,15 @@ export const CLI_PROVIDERS = [
   { id: 'dsh', label: PROVIDER_LABELS.dsh, command: 'dsh', protocol: 'acp' as const, args: ['--profile', 'acp'] },
   { id: 'grok', label: PROVIDER_LABELS.grok, command: 'grok', protocol: 'acp' as const, args: ['agent', '--no-leader', 'stdio'] },
   { id: 'codebuddy', label: PROVIDER_LABELS.codebuddy, command: 'codebuddy', protocol: 'acp' as const, args: ['--acp'] },
+  // `agy acp` (Antigravity CLI 1.5.0 and later). Over SSH it keeps its own login file, apart from the desktop's keychain, and
+  // 1.5.8 and earlier answer every session with `Authentication required` even with that file in place.
+  { id: 'antigravity', label: PROVIDER_LABELS.antigravity, command: 'agy', protocol: 'acp' as const, args: ['acp'], signIn: 'Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then refresh.' },
 ];
+/** ACP's `auth_required` error, replaced by how to sign in when the CLI says how. */
+export function signInHint(definition: Pick<typeof CLI_PROVIDERS[number], 'signIn'>, message: string): string {
+  return definition.signIn && /^authentication required\.?$/i.test(message.trim()) ? definition.signIn : message;
+}
+export const OLD_ANTIGRAVITY = 'This Antigravity session was started by Remote Agents 0.2.129 or earlier and cannot be continued. Start a new conversation.';
 const SESSION_LIMIT = 8;
 const DIRECTORY_LIMIT = 2000;
 const ACCOUNT_TTL = 300_000;
@@ -348,7 +356,7 @@ done`}`, 15_000, { login: false });
       if (!models.length) throw new Error('The remote CLI returned no models. Check its login and version.');
       const provider: Provider = { ...unavailable, status: 'ready', models, modes, defaultModeId };
       return { provider, profile: { argv, protocol: definition.protocol, cwd: canonical, provider } };
-    } catch (error) { return { provider: { ...unavailable, status: 'error' as const, error: error instanceof Error ? error.message : String(error) } }; }
+    } catch (error) { return { provider: { ...unavailable, status: 'error' as const, error: signInHint(definition, error instanceof Error ? error.message : String(error)) } }; }
     finally { if (peer) { this.probes.delete(peer); peer.close(); } }
   }
   async providers(cwd: string, refresh: boolean): Promise<Provider[]> {
@@ -565,6 +573,8 @@ done`}`, 15_000, { login: false });
     let profile: Profile;
     if (resume) {
       if (!task.native) throw new Error('No saved native CLI session exists. The task will not be replayed.');
+      // 0.2.129 and earlier drove Antigravity through its stream-json mode, which this version no longer speaks.
+      if (!['codex', 'claude', 'acp'].includes(task.native.protocol)) throw new RemoteError(OLD_ANTIGRAVITY, 409);
       profile = { protocol: task.native.protocol, argv: task.native.argv, cwd: task.executionCwd ?? task.cwd, provider: { id: task.provider, label: task.provider, status: 'ready', models: [], modes: [] } };
     } else {
       // Reuses the probe `create` just ran for this task, so starting a session launches only the one CLI it needs.

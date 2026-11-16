@@ -47,15 +47,15 @@ test('the HTTP selection action validates IDs and scans only the selected catalo
 test('a saved selection naming a CLI the plugin no longer has still opens, without that CLI', async t => {
   const { service, hostId, path, store } = await fixture(t);
   await service.setHostProviders(hostId, ['codex', 'grok']);
-  // As 0.2.129 and earlier saved it: Antigravity enabled, with its models in the catalog.
+  // As a version that had another CLI saved it: that CLI enabled, with its models in the catalog.
   const saved = JSON.parse(await readFile(path, 'utf8'));
-  saved.hosts[0].enabledProviders.push('antigravity');
-  saved.hosts[0].catalog.providers.push({ id: 'antigravity', label: 'Antigravity', status: 'ready', models: [{ id: 'agy-model', label: 'Agy model' }], modes: [] });
+  saved.hosts[0].enabledProviders.push('retired-cli');
+  saved.hosts[0].catalog.providers.push({ id: 'retired-cli', label: 'Retired CLI', status: 'ready', models: [{ id: 'retired-model', label: 'Retired model' }], modes: [] });
   await store.close(); await writeFile(path, JSON.stringify(saved));
   const reopened = new Store(path); await reopened.open(); t.after(() => reopened.close());
   assert.deepEqual(reopened.hosts()[0].enabledProviders, ['codex', 'grok']);
   // A machine left on "all CLIs" offers what this version has.
   delete saved.hosts[0].enabledProviders; await reopened.close(); await writeFile(path, JSON.stringify(saved));
   const all = new Store(path); await all.open(); t.after(() => all.close());
-  assert.ok(!new ChatProjects({ store: all, onCatalogChange: () => () => {} } as never).hosts()[0].providers.some(p => p.id === 'antigravity'));
+  assert.ok(!new ChatProjects({ store: all, onCatalogChange: () => () => {} } as never).hosts()[0].providers.some(p => p.id === 'retired-cli'));
 });
