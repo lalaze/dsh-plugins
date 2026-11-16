@@ -10,7 +10,7 @@ const post = (handler: ReturnType<typeof createHandler>, body: unknown, headers:
 
 test('without Remote Agents the page learns there are no TUI conversations, and everything else says what is missing', async () => {
   const handler = createHandler(() => undefined);
-  assert.deepEqual(await (await post(handler, { action: 'tuiSessions' })).json(), { sessions: [], codex: [], localScroll: true, unavailable: true });
+  assert.deepEqual(await (await post(handler, { action: 'tuiSessions' })).json(), { sessions: [], codex: [], antigravity: [], localScroll: true, unavailable: true });
   const refused = await post(handler, { action: 'tuiStart', sessionId: 's' });
   assert.equal(refused.status, 501); assert.match((await refused.json()).error, /Install or update Remote Agents/);
   assert.equal((await post(handler, { action: 'tuiSessions' }, { 'content-type': 'application/json' })).status, 403, 'another page cannot ask');
@@ -21,7 +21,7 @@ test('requests reach TUI conversations, worktrees and the machines, each through
   const calls: unknown[][] = [], shell = '/dsh/storages/dsh-remote-terminals/terminal/Remote workspace';
   const terminals = {
     terminal: { shell },
-    tui: { list: () => ['tui-1'], codex: () => [], localScroll: () => false, setLocalScroll: async (local: boolean) => { calls.push(['scroll', local]); } },
+    tui: { list: () => ['tui-1'], codex: () => [], antigravity: () => [], localScroll: () => false, setLocalScroll: async (local: boolean) => { calls.push(['scroll', local]); } },
     worktrees: { projects: async () => [{ path: '/dsh/project', title: 'Project' }] },
   } as unknown as Terminals;
   const machines = {
@@ -29,7 +29,7 @@ test('requests reach TUI conversations, worktrees and the machines, each through
     createWorkspace: async (hostId: string, path: string) => { calls.push(['workspace', hostId, path]); return { path: '/dsh/remote-workspaces/box/app-fix' }; },
   } as unknown as RemoteAgentsMachines;
   const handler = createHandler(() => ({ terminals, machines })), ask = async (body: unknown) => (await post(handler, body)).json();
-  assert.deepEqual(await ask({ action: 'tuiSessions' }), { sessions: ['tui-1'], codex: [], localScroll: false });
+  assert.deepEqual(await ask({ action: 'tuiSessions' }), { sessions: ['tui-1'], codex: [], antigravity: [], localScroll: false });
   assert.deepEqual(await ask({ action: 'tuiScroll', local: true }), { localScroll: true });
   assert.deepEqual(await ask({ action: 'worktreeProjects' }), [{ path: '/dsh/project', title: 'Project' }]);
   // The launcher is offered only where the conversation is in a verified remote workspace.

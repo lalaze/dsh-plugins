@@ -159,6 +159,8 @@ test('for Codex each file is its own paste, in order, as its placeholder comes a
   assert.deepEqual(pastesFor(['/r/a.png', '/r/b.txt', '/r/c.png'], false, 'codex'), ['/r/a.png ', '/r/b.txt ', '/r/c.png ']);
   assert.deepEqual(pastesFor(['/r/b.txt'], true, 'codex'), ['/r/b.txt '], 'no extra space after an earlier image');
   assert.deepEqual(pastesFor(['/my app/a.txt'], false, 'codex'), [String.raw`/my\ app/a.txt `]);
+  // Antigravity makes a pasted image's path an attachment at once, as measured on 1.5.9, and takes them like Codex.
+  assert.deepEqual(pastesFor(['/r/a.png', '/r/b.txt', '/my app/c.png'], true, 'antigravity'), ['/r/a.png ', '/r/b.txt ', String.raw`/my\ app/c.png `]);
 });
 
 /** Uploads held open until the test finishes them. */

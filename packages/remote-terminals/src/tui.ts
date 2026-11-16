@@ -11,7 +11,7 @@ interface TuiAgent { phase?: { kind?: string; lastTurn?: number } }
 interface SessionRow { sessionId: string; blank?: boolean }
 
 /** What a conversation shows until its CLI has titled it. */
-export const FIRST_TITLES: Record<TuiCli, string> = { claude: 'Claude Code', codex: 'Codex' };
+export const FIRST_TITLES: Record<TuiCli, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 export const MAX_TITLE = 120;
 const MAX_PROMPT_TITLE = 80;
 /** The title 0.2.81 gave every TUI conversation, which is replaced like the plugin's own. */
@@ -19,7 +19,7 @@ export const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
 /** Model and effort reach the remote command line inside double quotes. */
 export const COMMAND_VALUE = /^[\w.:[\]-]+$/;
 /** The chat provider of each remote CLI. */
-const PROVIDERS: Record<TuiCli, string> = { claude: 'remote-cli-claude', codex: 'remote-cli-codex' };
+const PROVIDERS: Record<TuiCli, string> = { claude: 'remote-cli-claude', codex: 'remote-cli-codex', antigravity: 'remote-cli-antigravity' };
 /**
  * Codex saves a new thread only once it has a message or a name, and `codex resume` needs it saved, so a TUI conversation's
  * thread starts with this name. It keeps Codex from titling the thread by itself, so `/rename` is the only title it can have.
@@ -81,6 +81,18 @@ export function codexTitle(records: string): string | undefined {
   return typeof name === 'string' && name.trim() && name !== CODEX_THREAD_NAME ? name.trim().slice(0, MAX_TITLE) : prompt;
 }
 
+/**
+ * A conversation's title from Antigravity's summary of it: its /rename or Antigravity's own title, then its preview, which
+ * holds the first prompt while there is no title (a short greeting often gets none).
+ * @param records - the title on the first line and the preview on the second, each on one line.
+ */
+export function antigravityTitle(records: string): string | undefined {
+  const [title = '', preview = ''] = records.split('\n').map(line => line.replace(/\s+/g, ' ').trim());
+  if (title) return title.slice(0, MAX_TITLE);
+  // A slash command says nothing about the conversation.
+  return preview && !preview.startsWith('/') ? promptTitle(preview) : undefined;
+}
+
 /** The model of a chat model route, `<project>/<cli>/<model>`, if it is this CLI's. */
 function routeModel(route: unknown, expected: TuiCli): string | undefined {
   if (typeof route !== 'string') return;
@@ -89,7 +101,7 @@ function routeModel(route: unknown, expected: TuiCli): string | undefined {
 }
 
 /**
- * Conversations whose main view is the interactive Claude Code or Codex instead of DSH's chat. Each stays a real DSH
+ * Conversations whose main view is the interactive Claude Code, Codex or Antigravity instead of DSH's chat. Each stays a real DSH
  * session, so it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one
  * records an empty turn. The conversation itself lives in the remote CLI; see the launchers in terminal.ts.
  */
@@ -108,6 +120,10 @@ export class TuiSessions {
     codexThread(sessionId: string, signal: AbortSignal): Promise<string>;
     /** The title records of a Codex thread on the conversation's machine. */
     codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string>;
+    /** Starts an Antigravity conversation on the conversation's machine, and returns its ID. */
+    antigravityConversation(sessionId: string, signal: AbortSignal): Promise<string>;
+    /** The title and preview Antigravity keeps for a conversation on the conversation's machine. */
+    antigravityTitleRecords(sessionId: string, conversation: string, signal: AbortSignal): Promise<string>;
     /** Ends a terminal's holder on the conversation's machine. */
     endHolder?(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
   }) {}
@@ -122,9 +138,12 @@ export class TuiSessions {
   localScroll(): boolean { return this.store.snapshot().tuiLocalScroll !== false; }
   async setLocalScroll(local: boolean): Promise<void> { await this.store.update(state => { state.tuiLocalScroll = local; }); }
   /** Those of `list` that run Codex. */
-  codex(): string[] {
+  codex(): string[] { return this.running('codex'); }
+  /** Those of `list` that run Antigravity. */
+  antigravity(): string[] { return this.running('antigravity'); }
+  private running(cli: TuiCli): string[] {
     const { tuiSessions = [], tuiDetails } = this.store.snapshot();
-    return tuiSessions.filter(id => tuiDetails?.[id]?.cli === 'codex');
+    return tuiSessions.filter(id => tuiDetails?.[id]?.cli === cli);
   }
   /**
    * Tell DSH the conversation's model, once. A session shows its model in the workspace list only if a selection or a
@@ -142,7 +161,7 @@ export class TuiSessions {
   }
   /** @param selection - the CLI, and the composer's model route and effort, which its first launch uses. */
   async start(sessionId: string, selection: { cli?: unknown; model?: unknown; effort?: unknown }, signal: AbortSignal): Promise<void> {
-    const cli: TuiCli = selection.cli === 'codex' ? 'codex' : 'claude';
+    const cli: TuiCli = selection.cli === 'codex' || selection.cli === 'antigravity' ? selection.cli : 'claude';
     const target = await this.dsh.verify(sessionId, signal);
     if (this.list().includes(sessionId)) return;
     const session = this.dsh.session(sessionId);
@@ -151,11 +170,13 @@ export class TuiSessions {
     if ((await this.dsh.list()).find(row => row.sessionId === sessionId)?.blank === false) throw new RemoteError('Only a new conversation can start in the TUI', 409);
     signal.throwIfAborted();
     const thread = cli === 'codex' ? await this.dsh.codexThread(sessionId, signal) : undefined;
+    const conversation = cli === 'antigravity' ? await this.dsh.antigravityConversation(sessionId, signal) : undefined;
     signal.throwIfAborted();
     const model = routeModel(selection.model, cli), effort = selection.effort;
     await this.store.update(state => {
       state.tuiSessions = [...state.tuiSessions ?? [], sessionId];
       state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title: FIRST_TITLES[cli], ...(thread ? { cli: 'codex' as const, thread } : {}),
+        ...(conversation ? { cli: 'antigravity' as const, conversation } : {}),
         ...(model && COMMAND_VALUE.test(model) ? { model } : {}), ...(typeof effort === 'string' && COMMAND_VALUE.test(effort) ? { effort } : {}) } };
     });
     await this.recordModel(sessionId, target.hostId, model ? selection.model as string : undefined).catch(() => {});
@@ -188,7 +209,9 @@ export class TuiSessions {
     const target = await this.dsh.verify(sessionId, signal);
     await this.recordModel(sessionId, target.hostId).catch(() => {});
     if (renamed) return;
-    const title = saved?.thread ? codexTitle(await this.dsh.codexTitleRecords(sessionId, saved.thread, signal)) : claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(tuiKey(sessionId, saved)), signal));
+    const title = saved?.cli === 'antigravity' ? (saved.conversation ? antigravityTitle(await this.dsh.antigravityTitleRecords(sessionId, saved.conversation, signal)) : undefined)
+      : saved?.thread ? codexTitle(await this.dsh.codexTitleRecords(sessionId, saved.thread, signal))
+        : claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(tuiKey(sessionId, saved)), signal));
     if (!title || title === shown) return;
     await this.dsh.rename(sessionId, title);
     await this.store.update(state => { state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...state.tuiDetails?.[sessionId], title } }; });

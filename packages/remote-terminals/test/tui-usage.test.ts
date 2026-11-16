@@ -272,8 +272,9 @@ test('a Codex thread\'s subagent threads are found by their parent, all at first
 });
 
 test('TUI usage is saved before it is sent, per machine, once, and only for TUI conversations', async () => {
-  const claudeId = 'tui-claude', codexId = 'tui-codex', claudeSession = tuiClaudeSession(claudeId);
-  let state = { version: 1, hosts: [], tasks: [], tuiSessions: [claudeId, codexId, 'gone'], tuiDetails: { [codexId]: { cli: 'codex', thread: THREAD, model: 'gpt-x' } } } as unknown as State;
+  const claudeId = 'tui-claude', codexId = 'tui-codex', agyId = 'tui-agy', claudeSession = tuiClaudeSession(claudeId);
+  // Antigravity's turns are in a database of its own, which is not read.
+  let state = { version: 1, hosts: [], tasks: [], tuiSessions: [claudeId, codexId, agyId, 'gone'], tuiDetails: { [codexId]: { cli: 'codex', thread: THREAD, model: 'gpt-x' }, [agyId]: { cli: 'antigravity', conversation: THREAD } } } as unknown as State;
   const store = { snapshot: () => structuredClone(state), update: async (change: (draft: State) => void) => { const draft = structuredClone(state); change(draft); state = draft; saved.push(structuredClone(state)); } };
   const saved: State[] = [], records: RemoteUsageRecord[] = [], reads: { hostId: string; sessions: string[]; entries: TuiUsageEntry[] }[] = [], warnings: string[] = [];
   const outputs: Record<string, string[]> = {
@@ -297,7 +298,7 @@ test('TUI usage is saved before it is sent, per machine, once, and only for TUI 
   ]);
   assert.deepEqual(state.tuiDetails?.[claudeId]?.usage?.read, { main: 300 });
   assert.equal(state.tuiDetails?.[codexId]?.thread, THREAD, 'the rest of a conversation\'s details stay');
-  await usage.sweep([claudeId, 'not-a-tui']);
+  await usage.sweep([claudeId, agyId, 'not-a-tui']);
   assert.deepEqual(reads.slice(2).map(r => r.entries.map(e => e.read)), [[{ main: 300 }]], 'only the given TUI conversations are read, from where they were left');
   assert.equal(records.length, 2, 'nothing is counted twice');
   assert.deepEqual(warnings, []);

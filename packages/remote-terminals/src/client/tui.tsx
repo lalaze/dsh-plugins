@@ -18,11 +18,11 @@ import { KeptTerminals, type KeptTerminal } from './tui-kept.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
 const TERMINAL_TAB = '@deepseek-ai/dsh-client-ui-sidebar-terminal', SHELL_KEY = 'dsh.terminal.shell';
-const CACHE_KEY = 'remote-agents.tui.sessions', CODEX_CACHE_KEY = 'remote-agents.tui.codex', GENERATION_KEY = 'remote-agents.tui.generation';
+const CACHE_KEY = 'remote-agents.tui.sessions', CODEX_CACHE_KEY = 'remote-agents.tui.codex', ANTIGRAVITY_CACHE_KEY = 'remote-agents.tui.antigravity', GENERATION_KEY = 'remote-agents.tui.generation';
 const REMOTE_ANCHOR = /(?:^|[/\\])remote-workspaces[/\\]/;
-const CLI_NAMES: Record<TuiCli, string> = { claude: 'Claude Code', codex: 'Codex' };
+const CLI_NAMES: Record<TuiCli, string> = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 /** Only these chat providers' models offer the TUI. */
-const PROVIDER_CLIS: Record<string, TuiCli | undefined> = { 'remote-cli-claude': 'claude', 'remote-cli-codex': 'codex' };
+const PROVIDER_CLIS: Record<string, TuiCli | undefined> = { 'remote-cli-claude': 'claude', 'remote-cli-codex': 'codex', 'remote-cli-antigravity': 'antigravity' };
 const TITLE_INTERVAL = 15_000;
 const KEPT_TERMINALS = 6;
 /**
@@ -91,26 +91,35 @@ const write = (key: string, value: string | null) => {
   try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* storage may be unavailable */ }
 };
 
-/** Which conversations are TUI ones, and which of them run Codex. Cached in the browser: DSH picks the view and composer before any request returns. */
+/** The conversations of each CLI but Claude Code, which is what a TUI conversation listed in neither runs. */
+type OtherClis = { codex: Set<string>; antigravity: Set<string> };
+const OTHER_CACHE_KEYS: Record<keyof OtherClis, string> = { codex: CODEX_CACHE_KEY, antigravity: ANTIGRAVITY_CACHE_KEY };
+const otherClis = Object.keys(OTHER_CACHE_KEYS) as (keyof OtherClis)[];
+
+/** Which conversations are TUI ones, and which CLI each runs. Cached in the browser: DSH picks the view and composer before any request returns. */
 class TuiStore {
   private ids = new Set<string>();
-  private codex = new Set<string>();
+  private others: OtherClis = { codex: new Set(), antigravity: new Set() };
   private readonly listeners = new Set<() => void>();
   constructor() {
     try {
       this.ids = new Set(JSON.parse(read(CACHE_KEY) ?? '[]') as string[]);
-      this.codex = new Set(JSON.parse(read(CODEX_CACHE_KEY) ?? '[]') as string[]);
+      for (const cli of otherClis) this.others[cli] = new Set(JSON.parse(read(OTHER_CACHE_KEYS[cli]) ?? '[]') as string[]);
     } catch { /* a damaged cache only delays the view */ }
   }
   has = (id: string | undefined) => id !== undefined && this.ids.has(id);
-  cli = (id: string): TuiCli => (this.codex.has(id) ? 'codex' : 'claude');
+  cli = (id: string): TuiCli => otherClis.find(cli => this.others[cli].has(id)) ?? 'claude';
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
-  set(ids: Iterable<string>, codex: Iterable<string> = []) {
-    this.ids = new Set(ids); this.codex = new Set(codex);
-    write(CACHE_KEY, JSON.stringify([...this.ids])); write(CODEX_CACHE_KEY, JSON.stringify([...this.codex]));
+  set(ids: Iterable<string>, others: Partial<Record<keyof OtherClis, Iterable<string>>> = {}) {
+    this.ids = new Set(ids);
+    write(CACHE_KEY, JSON.stringify([...this.ids]));
+    for (const cli of otherClis) { this.others[cli] = new Set(others[cli] ?? []); write(OTHER_CACHE_KEYS[cli], JSON.stringify([...this.others[cli]])); }
     for (const listener of this.listeners) listener();
   }
-  add(id: string, cli: TuiCli) { this.set([...this.ids, id], cli === 'codex' ? [...this.codex, id] : this.codex); }
+  add(id: string, cli: TuiCli) {
+    const others = Object.fromEntries(otherClis.map(other => [other, cli === other ? [...this.others[other], id] : this.others[other]]));
+    this.set([...this.ids, id], others);
+  }
 }
 
 const terminalKey = (generation: number) => `remote-agents-tui-${generation}`;
@@ -298,10 +307,17 @@ function CodexMark({ size }: { size: number }) {
     <path fill="#fff" d="M7.282 8.307a.848.848 0 00-1.473.842l1.694 2.965-1.688 2.848a.849.849 0 001.46.864l1.94-3.272a.849.849 0 00.007-.854l-1.94-3.393zm5.446 6.24a.849.849 0 000 1.695h4.848a.849.849 0 000-1.696h-4.848z" />
   </svg>;
 }
+/** Antigravity's logo, from @lobehub/icons-static-svg (see THIRD_PARTY_NOTICES.md), in the blue DSH's row icons give it. */
+function AntigravityMark({ size }: { size: number }) {
+  return <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true" fillRule="evenodd">
+    <path fill="#3186FF" d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" />
+  </svg>;
+}
 /** @param large - for the drop notice rather than the button. */
-const CliMark = ({ cli, large = false }: { cli: TuiCli; large?: boolean }) => (cli === 'codex' ? <CodexMark size={large ? 72 : 20} /> : <ClaudeMascot width={large ? 96 : 24} />);
+const CliMark = ({ cli, large = false }: { cli: TuiCli; large?: boolean }) => (cli === 'codex' ? <CodexMark size={large ? 72 : 20} />
+  : cli === 'antigravity' ? <AntigravityMark size={large ? 72 : 20} /> : <ClaudeMascot width={large ? 96 : 24} />);
 
-/** Offered in a new conversation of a remote workspace while a remote Claude or Codex model is selected; DSH lists it once started. */
+/** Offered in a new conversation of a remote workspace while a remote Claude, Codex or Antigravity model is selected; DSH lists it once started. */
 function StartButton({ sessionId, sessions, store }: { sessionId?: string; sessions: SessionList; store: TuiStore }) {
   useLocale();
   const session = useSyncExternalStore(sessions.subscribe, () => (sessionId === undefined ? undefined : sessions.getSnapshot()?.byId?.[sessionId]));
@@ -321,7 +337,7 @@ function StartButton({ sessionId, sessions, store }: { sessionId?: string; sessi
 }
 
 /**
- * Conversations that are the interactive Claude Code or Codex: a row in the workspace list, with the terminal as the conversation
+ * Conversations that are the interactive Claude Code, Codex or Antigravity: a row in the workspace list, with the terminal as the conversation
  * area and no composer. DSH's chat view entry is swapped in place, as git-view's takeover does, so the tab row stays as it
  * is and DSH's chat is untouched elsewhere.
  */
@@ -352,9 +368,9 @@ export function installTuiSessions(ctx: Client): void {
     slots.inject('shell.overlay', () => slots.register({ name: 'shell.overlay', id: 'remote-agents-tui-terminals' }, () => <TuiTerminalLayer services={services} />));
     scoped.effect(() => {
       const controller = new AbortController();
-      const load = (first: boolean) => void api<{ sessions: string[]; codex?: string[]; localScroll?: boolean }>('tuiSessions', {}, controller.signal).then(value => {
+      const load = (first: boolean) => void api<{ sessions: string[]; codex?: string[]; antigravity?: string[]; localScroll?: boolean }>('tuiSessions', {}, controller.signal).then(value => {
         // Asking again only looks for conversations that came from another DSH; the same answer changes nothing.
-        if (first || value.sessions.some(id => !store.has(id))) store.set(value.sessions, value.codex);
+        if (first || value.sessions.some(id => !store.has(id))) store.set(value.sessions, { codex: value.codex, antigravity: value.antigravity });
         if (first && typeof value.localScroll === 'boolean') services.scroll.load(value.localScroll);
       }, () => {});
       load(true);

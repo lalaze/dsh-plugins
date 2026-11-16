@@ -1,20 +1,20 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenSshTransport, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
-import { codexTitle, CODEX_THREAD_NAME } from '../src/tui.js';
-import { TuiRemote } from '../src/tui-remote.js';
+import { antigravityTitle, codexTitle, CODEX_THREAD_NAME } from '../src/tui.js';
+import { ANTIGRAVITY_SIGN_IN, TuiRemote } from '../src/tui-remote.js';
 
 /** A machine's TUI commands, over its connection. */
 const tui = (files: { transport: SshTransport }) => new TuiRemote(files.transport);
 
 class LocalTransport extends OpenSshTransport {
-  constructor(private readonly home: string) { super('ssh://test.invalid'); }
+  constructor(private readonly home: string, private readonly path = process.env.PATH) { super('ssh://test.invalid'); }
   protected override spawnRemote(command: string): ChildProcessWithoutNullStreams {
-    return spawn('/bin/sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, SHELL: '/bin/sh', HOME: this.home } });
+    return spawn('/bin/sh', ['-c', command], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, SHELL: '/bin/sh', HOME: this.home, PATH: this.path } });
   }
 }
 /** A home folder that the commands run in as if it were the machine's. */
@@ -88,4 +88,86 @@ test('a Codex thread\'s title records come from the name index and its own recor
   assert.equal(codexTitle(await tui(d.files).codexTitleRecords(THREAD)), 'Login work', 'the newest name wins');
   assert.equal(codexTitle(await tui(d.files).codexTitleRecords('01a1a95c-0000-7df3-8065-26d0933aeb53')), undefined, 'a thread that is gone has none');
   assert.throws(() => tui(d.files).codexTitleRecords('$(touch x)'), /Invalid Codex thread/);
+});
+
+/** Antigravity's ACP server, answering each method from `answers`, or with the error in `errors`. */
+function acpServer(answers: Record<string, unknown>, errors: Record<string, string> = {}, path = '/usr/local/bin/agy') {
+  const sent: { id?: unknown; method?: string; params?: unknown; error?: unknown }[] = [], state = { stopped: 0, started: undefined as { cwd: string; argv: string[] } | undefined };
+  let deliver: (data: Buffer) => void = () => {};
+  const line = (value: unknown) => setImmediate(() => deliver(Buffer.from(`${JSON.stringify(value)}\n`)));
+  const transport: SshTransport = {
+    exec: async () => path,
+    start: (cwd, argv) => {
+      state.started = { cwd, argv };
+      return {
+        write(value) {
+          const message = JSON.parse(value) as { id?: string; method?: string }; sent.push(message);
+          if (message.method === 'session/new') line({ id: 'agent-1', method: 'session/request_permission', params: {} });
+          if (message.id === undefined || !message.method) return;
+          if (message.method in errors) line({ id: message.id, error: { code: -32000, message: errors[message.method] } });
+          else if (message.method in answers) line({ id: message.id, result: answers[message.method] });
+        },
+        stop() { state.stopped += 1; }, onData(callback) { deliver = callback; }, onExit() {},
+      };
+    },
+  };
+  return { files: { transport }, sent, state };
+}
+const CONVERSATION = 'f07744bd-6fff-40a9-9b40-d1ff3c5ccb69';
+
+test('an Antigravity conversation is made on its ACP server and closed there, which lets the interactive CLI run turns in it', async () => {
+  const { files, sent, state } = acpServer({ initialize: { protocolVersion: 1 }, 'session/new': { sessionId: CONVERSATION }, 'session/close': {} });
+  assert.equal(await tui(files).antigravityConversation('/srv/app', new AbortController().signal), CONVERSATION);
+  assert.deepEqual(state.started, { cwd: '/srv/app', argv: ['/usr/local/bin/agy', 'acp'] });
+  assert.deepEqual(sent.map(message => message.method ?? `reply ${message.id}`), ['initialize', 'session/new', 'reply agent-1', 'session/close']);
+  assert.deepEqual(sent.find(message => message.method === 'session/new')?.params, { cwd: '/srv/app', mcpServers: [] });
+  assert.deepEqual(sent.find(message => message.method === 'session/close')?.params, { sessionId: CONVERSATION });
+  assert.ok(sent.find(message => message.id === 'agent-1')?.error, 'whatever it asks is refused, as this connection runs nothing');
+  assert.equal(state.stopped, 1, 'the ACP server goes away afterwards');
+});
+
+test('making an Antigravity conversation reports a missing CLI, a missing sign-in or a bad answer, and leaves no server behind', async () => {
+  const signal = new AbortController().signal;
+  const missing = acpServer({}, {}, '');
+  await assert.rejects(tui(missing.files).antigravityConversation('/srv/app', signal), /Antigravity is not installed/);
+  assert.equal(missing.state.started, undefined);
+  const out = acpServer({ initialize: { protocolVersion: 1 } }, { 'session/new': 'Authentication required' });
+  await assert.rejects(tui(out.files).antigravityConversation('/srv/app', signal), (error: Error) => error.message === ANTIGRAVITY_SIGN_IN);
+  assert.equal(out.state.stopped, 1);
+  const odd = acpServer({ initialize: { protocolVersion: 1 }, 'session/new': { sessionId: '$(touch x)' } });
+  await assert.rejects(tui(odd.files).antigravityConversation('/srv/app', signal), /did not start a conversation/);
+  assert.equal(odd.sent.some(message => message.method === 'session/close'), false, 'an odd ID goes no further');
+  assert.equal(odd.state.stopped, 1);
+  const other = acpServer({ initialize: { protocolVersion: 1 } }, { 'session/new': 'Workspace is not trusted' });
+  await assert.rejects(tui(other.files).antigravityConversation('/srv/app', signal), /Workspace is not trusted/, 'other errors are passed on as they are');
+});
+
+const commandPath = (name: string) => { try { return execFileSync('/bin/sh', ['-c', `command -v ${name}`]).toString().trim(); } catch { return ''; } };
+/** An Antigravity summary database in a home folder, as Antigravity 1.5.9 lays it out, with only the columns read. */
+async function antigravityHome(t: TestContext, rows: [string, string, string][]) {
+  const d = await directory(t), folder = join(d.root, '.gemini/antigravity-cli');
+  await mkdir(folder, { recursive: true });
+  const sql = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  execFileSync(commandPath('sqlite3'), [join(folder, 'conversation_summaries.db'), ['create table conversation_summaries (conversation_id text primary key, title text not null default "", preview text not null default "")',
+    ...rows.map(([id, title, preview]) => `insert into conversation_summaries values (${sql(id)}, ${sql(title)}, ${sql(preview)})`)].join('; ')]);
+  return d;
+}
+
+test('an Antigravity conversation\'s title comes from its summary database through sqlite3, on the real shell', { skip: !commandPath('sqlite3') && 'no sqlite3 here' }, async t => {
+  const d = await antigravityHome(t, [[CONVERSATION, 'Say Ping Request', 'Say Ping Request'], ['01a1a95c-0000-4df3-8065-26d0933aeb53', '', 'Reply with\nexactly hello'], ['01a1a95c-1111-4df3-8065-26d0933aeb53', "It's 'quoted'", '']]);
+  assert.equal(antigravityTitle(await tui(d.files).antigravityTitleRecords(CONVERSATION)), 'Say Ping Request');
+  assert.equal(await tui(d.files).antigravityTitleRecords('01a1a95c-0000-4df3-8065-26d0933aeb53'), '\nReply with exactly hello\n', 'a line break stays inside its line');
+  assert.equal(antigravityTitle(await tui(d.files).antigravityTitleRecords('01a1a95c-1111-4df3-8065-26d0933aeb53')), "It's 'quoted'");
+  assert.equal(await tui(d.files).antigravityTitleRecords('01a1a95c-2222-4df3-8065-26d0933aeb53'), '', 'one not summarized yet has none');
+  const empty = await directory(t);
+  assert.equal(await tui(empty.files).antigravityTitleRecords(CONVERSATION), '', 'nor a machine without Antigravity');
+  assert.throws(() => tui(d.files).antigravityTitleRecords("' or 1=1 --"), /Invalid Antigravity conversation/);
+});
+
+test('without the sqlite3 command the title is read through Python', { skip: (!commandPath('sqlite3') || !commandPath('python3')) && 'needs sqlite3 to build the database and python3 to read it' }, async t => {
+  const d = await antigravityHome(t, [[CONVERSATION, '测试 agy 行', '测试 agy 行']]);
+  const bin = join(d.root, 'bin'); await mkdir(bin);
+  await symlink(commandPath('python3'), join(bin, 'python3'));
+  const pythonOnly = { transport: new LocalTransport(d.root, bin) as SshTransport };
+  assert.equal(antigravityTitle(await tui(pythonOnly).antigravityTitleRecords(CONVERSATION)), '测试 agy 行');
 });

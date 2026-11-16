@@ -17,10 +17,10 @@ test('local scrolling is on until switched off, and the server keeps the choice'
   const tui = new TuiSessions(f.store, {} as ConstructorParameters<typeof TuiSessions>[1]);
   const signal = new AbortController().signal;
   assert.equal(tui.localScroll(), true);
-  assert.deepEqual(await tuiAction(tui, 'tuiSessions', {}, signal), { sessions: [], codex: [], localScroll: true });
+  assert.deepEqual(await tuiAction(tui, 'tuiSessions', {}, signal), { sessions: [], codex: [], antigravity: [], localScroll: true });
   assert.deepEqual(await tuiAction(tui, 'tuiScroll', { local: false }, signal), { localScroll: false });
   assert.equal(f.store.snapshot().tuiLocalScroll, false);
-  assert.deepEqual(await tuiAction(tui, 'tuiSessions', {}, signal), { sessions: [], codex: [], localScroll: false });
+  assert.deepEqual(await tuiAction(tui, 'tuiSessions', {}, signal), { sessions: [], codex: [], antigravity: [], localScroll: false });
   await tuiAction(tui, 'tuiScroll', { local: true }, signal);
   assert.equal(tui.localScroll(), true);
   await assert.rejects(tuiAction(tui, 'tuiScroll', { local: 'yes' }, signal), /Invalid scrolling choice/);

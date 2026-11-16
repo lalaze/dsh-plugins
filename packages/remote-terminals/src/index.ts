@@ -45,7 +45,7 @@ export function createHandler(live: () => { terminals: Terminals; machines: Remo
       try { raw = JSON.parse(text); } catch { throw new RemoteError('Request must be valid JSON'); }
       const input = record(raw), action = field(input.action, 'action', 50), now = live();
       // A page without Remote Agents has no TUI conversations, and asks before it shows anything.
-      if (!now && action === 'tuiSessions') return Response.json({ sessions: [], codex: [], localScroll: true, unavailable: true }, { headers });
+      if (!now && action === 'tuiSessions') return Response.json({ sessions: [], codex: [], antigravity: [], localScroll: true, unavailable: true }, { headers });
       if (!now) throw new RemoteError('Install or update Remote Agents: remote terminals work on the machines saved there.', 501);
       const { terminals, machines } = now;
       let result: unknown;

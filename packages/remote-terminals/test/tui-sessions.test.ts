@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
-import { claudeTitle, CODEX_THREAD_NAME, codexTitle, TuiSessions, tuiClaudeSession } from '../src/tui.js';
+import { antigravityTitle, claudeTitle, CODEX_THREAD_NAME, codexTitle, TuiSessions, tuiClaudeSession } from '../src/tui.js';
 import { fixture } from './state-fixture.js';
 
-const THREAD = '01a1a960-0696-7481-b86c-ea7a878c6479';
+const THREAD = '01a1a960-0696-7481-b86c-ea7a878c6479', CONVERSATION = 'f07744bd-6fff-40a9-9b40-d1ff3c5ccb69';
 const signal = new AbortController().signal, record = (type: string, field: string, value: string) => JSON.stringify({ type, [field]: value, sessionId: 'x' });
 async function setup(t: Parameters<typeof fixture>[0], blank: boolean | undefined = true) {
-  const f = await fixture(t), events: [string, unknown][] = [], titles: string[] = [], remote = { records: '', reads: [] as string[], selections: [] as Record<string, unknown>[], selectFails: false, codexRecords: '', codexReads: [] as string[], threads: 0, threadFails: false, agent: undefined as { phase?: { kind: string; lastTurn?: number } } | undefined };
+  const f = await fixture(t), events: [string, unknown][] = [], titles: string[] = [], remote = { records: '', reads: [] as string[], selections: [] as Record<string, unknown>[], selectFails: false, codexRecords: '', codexReads: [] as string[], threads: 0, threadFails: false, agyRecords: '', agyReads: [] as string[], conversations: 0, conversationFails: false, agent: undefined as { phase?: { kind: string; lastTurn?: number } } | undefined };
   const tui = new TuiSessions(f.store, {
     verify: async id => { if (id === 'local') throw new RemoteError('Not a remote workspace', 409); return { hostId: 'host-1' }; },
     session: id => (id === 'closed' ? undefined : { append: (type, data) => { events.push([type, data]); } }),
@@ -18,6 +18,8 @@ async function setup(t: Parameters<typeof fixture>[0], blank: boolean | undefine
     titleRecords: async (_id, claudeSession) => { remote.reads.push(claudeSession); return remote.records; },
     codexThread: async () => { remote.threads += 1; if (remote.threadFails) throw new RemoteError('Codex is not installed on this SSH host', 409); return THREAD; },
     codexTitleRecords: async (_id, thread) => { remote.codexReads.push(thread); return remote.codexRecords; },
+    antigravityConversation: async () => { remote.conversations += 1; if (remote.conversationFails) throw new RemoteError('Antigravity is not installed on this SSH host', 409); return CONVERSATION; },
+    antigravityTitleRecords: async (_id, conversation) => { remote.agyReads.push(conversation); return remote.agyRecords; },
   });
   return { f, tui, events, titles, remote };
 }
@@ -185,7 +187,7 @@ test('a Codex conversation that cannot get a thread records nothing, so it can b
   assert.deepEqual(tui.codex(), ['remote']);
 });
 
-test('each CLI takes only its own model, and anything but Codex is Claude Code', async t => {
+test('each CLI takes only its own model, and anything but Codex or Antigravity is Claude Code', async t => {
   const { f, tui, remote } = await setup(t);
   await tui.start('remote', { cli: 'codex', model: 'project-1/claude/opus' }, signal);
   assert.equal(f.store.snapshot().tuiDetails?.remote?.model, undefined);
@@ -242,3 +244,51 @@ test('a title cut from a prompt ends in no space', () => {
   assert.equal(codexTitle(codexMessage(`${'x'.repeat(79)} and more`))?.length, 79, 'DSH trims titles, and a difference would read as a rename');
 });
 
+
+test('an Antigravity conversation starts its conversation first and remembers it, with its model and effort', async t => {
+  const { f, tui, events, titles, remote } = await setup(t);
+  await tui.start('remote', { cli: 'antigravity', model: 'project-1/antigravity/gemini-3.8-flash', effort: 'low' }, signal);
+  assert.equal(remote.conversations, 1);
+  assert.deepEqual(f.store.snapshot().tuiDetails?.remote, { title: 'Antigravity', cli: 'antigravity', conversation: CONVERSATION, model: 'gemini-3.8-flash', effort: 'low', modelRecorded: true });
+  assert.deepEqual([tui.list(), tui.antigravity(), tui.codex()], [['remote'], ['remote'], []]);
+  assert.equal(events.length, 2);
+  assert.deepEqual(titles, ['Antigravity']);
+  assert.deepEqual(remote.selections, [{ sessionId: 'remote', provider: 'remote-cli-antigravity', model: 'project-1/antigravity/gemini-3.8-flash', reasoningEffort: 'low' }], 'the row gets Antigravity\'s icon');
+  assert.equal(remote.threads, 0);
+  await tui.start('remote', { cli: 'antigravity' }, signal);
+  assert.equal(remote.conversations, 1, 'starting it again makes no second conversation');
+});
+
+test('an Antigravity conversation that cannot be made records nothing, so it can be started again', async t => {
+  const { f, tui, events, titles, remote } = await setup(t);
+  remote.conversationFails = true;
+  await assert.rejects(tui.start('remote', { cli: 'antigravity' }, signal), /not installed/);
+  assert.deepEqual([tui.list(), f.store.snapshot().tuiDetails?.remote, events, titles], [[], undefined, [], []]);
+  remote.conversationFails = false;
+  await tui.start('remote', { cli: 'antigravity', model: 'project-1/codex/gpt-5' }, signal);
+  assert.deepEqual(tui.antigravity(), ['remote']);
+  assert.equal(f.store.snapshot().tuiDetails?.remote?.model, undefined, 'another CLI\'s model is not its own');
+});
+
+test('an Antigravity conversation is titled from its summary: its title, else its first prompt', () => {
+  assert.equal(antigravityTitle(''), undefined, 'not summarized yet');
+  assert.equal(antigravityTitle('Say Ping Request\nSay Ping Request\n'), 'Say Ping Request');
+  assert.equal(antigravityTitle('\nReply with  exactly hello\n'), 'Reply with exactly hello', 'a greeting often gets no title');
+  assert.equal(antigravityTitle('\n/rewind\n'), undefined, 'a slash command says nothing');
+  assert.equal(antigravityTitle('测试 agy 行\n测试 agy 行'), '测试 agy 行', 'a /rename');
+  assert.equal(antigravityTitle(`\n${'x'.repeat(200)}`)?.length, 80);
+  assert.equal(antigravityTitle(`${'y'.repeat(200)}\n`)?.length, 120);
+});
+
+test('an Antigravity conversation follows its title from its own conversation, not Claude Code\'s or Codex\'s', async t => {
+  const { tui, titles, remote } = await setup(t);
+  await tui.start('remote', { cli: 'antigravity' }, signal);
+  titles.length = 0;
+  assert.equal(await tui.syncTitle('remote', 'Antigravity', signal), undefined, 'nothing to read yet');
+  remote.agyRecords = 'Hermes Version Check\nHermes Version Check\n';
+  assert.equal(await tui.syncTitle('remote', 'Antigravity', signal), 'Hermes Version Check');
+  assert.deepEqual(titles, ['Hermes Version Check']);
+  assert.deepEqual(remote.agyReads, [CONVERSATION, CONVERSATION]);
+  assert.deepEqual([remote.reads, remote.codexReads], [[], []]);
+  assert.equal(await tui.syncTitle('remote', 'Mine', signal), undefined, 'a rename in DSH wins');
+});

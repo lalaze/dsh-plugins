@@ -5,6 +5,8 @@ import { endHolderScript } from './holder-protocol.js';
 import { TUI_CODEX_CHILD, TUI_SUBAGENT_FILE, TUI_USAGE_CAP, type TuiUsageEntry } from './tui-usage.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** What Antigravity's `Authentication required` means over SSH; Remote Agents says the same for its chats. */
+export const ANTIGRAVITY_SIGN_IN = 'Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then try again.';
 /** A listed TUI conversation's file, named as its terminal holder is; how many are read, and how large one may be. */
 
 /** What terminals and TUI conversations run on a machine, over its SSH connection. */
@@ -25,6 +27,23 @@ true`, 20_000);
 grep -a ${quote(thread)} "$dsh_home/session_index.jsonl" 2>/dev/null | tail -n 1
 dsh_file=$(find "$dsh_home/sessions" -maxdepth 4 -name ${quote(`rollout-*-${thread}.jsonl`)} 2>/dev/null | head -n 1)
 [ -z "$dsh_file" ] || grep -a -m 5 '"type":"UserMessage"' "$dsh_file"
+true`, 20_000);
+  }
+  /**
+   * The title and preview Antigravity keeps for a conversation, each on a line of its own; nothing for a conversation it
+   * has not summarized yet, which it does after the first prompt. They are in its summary database: through `sqlite3`,
+   * which macOS always has, or else Python's, as many Linux machines have Python without the `sqlite3` command.
+   */
+  antigravityTitleRecords(conversation: string): Promise<string> {
+    if (!UUID.test(conversation)) throw new RemoteError('Invalid Antigravity conversation');
+    const line = (column: string) => `replace(replace(${column}, char(13), ' '), char(10), ' ')`;
+    const query = `select ${line('title')} || char(10) || ${line('preview')} from conversation_summaries where conversation_id = '${conversation}'`;
+    const python = "import sqlite3, sys; [print(row[0]) for row in sqlite3.connect('file:' + sys.argv[1] + '?mode=ro', uri=True, timeout=2).execute(sys.argv[2])]";
+    return this.transport.exec(`dsh_db="$HOME/.gemini/antigravity-cli/conversation_summaries.db"
+if [ ! -f "$dsh_db" ]; then :
+elif command -v sqlite3 >/dev/null 2>&1; then sqlite3 -readonly -cmd '.timeout 2000' "$dsh_db" ${quote(query)} 2>/dev/null
+elif command -v python3 >/dev/null 2>&1; then python3 -c ${quote(python)} "$dsh_db" ${quote(query)} 2>/dev/null
+fi
 true`, 20_000);
   }
   /**
@@ -122,6 +141,35 @@ true`, { maxBytes: 64 * 1024 * 1024, signal });
       const result = await peer.request('thread/start', { cwd }) as { thread?: { id?: unknown } } | undefined, id = result?.thread?.id;
       if (typeof id !== 'string' || !UUID.test(id)) throw new RemoteError('Codex did not start a thread', 502);
       await peer.request('thread/name/set', { threadId: id, name });
+      return id;
+    } finally { signal.removeEventListener('abort', abort); peer.close(); }
+  }
+  /**
+   * Starts an Antigravity conversation for `agy --conversation` to open, as Antigravity cannot be told the ID of one it
+   * starts: it ignores an ID it does not know and starts another. Its ACP server makes one that the interactive CLI opens,
+   * and closing it there first is what lets that CLI run turns in it.
+   * @returns the conversation's ID.
+   */
+  async antigravityConversation(cwd: string, signal: AbortSignal): Promise<string> {
+    const path = await this.transport.exec(`printf '%s' "$(command -v agy 2>/dev/null || true)"`, 20_000);
+    signal.throwIfAborted();
+    if (!path.startsWith('/')) throw new RemoteError('Antigravity is not installed on this SSH host', 409);
+    const peer = new JsonlPeer(this.transport.start(remotePath(cwd), [path, 'acp']));
+    const abort = () => peer.close();
+    signal.addEventListener('abort', abort, { once: true });
+    try {
+      peer.onMessage(message => { if (message.method && message.id !== undefined) peer.send({ jsonrpc: '2.0', id: message.id, error: { code: -32601, message: 'Starting a conversation executes nothing' } }); });
+      await peer.request('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false }, clientInfo: { name: 'dsh-remote-terminals', version: '1' } });
+      let result: { sessionId?: unknown } | undefined;
+      try { result = await peer.request('session/new', { cwd, mcpServers: [] }, 60_000); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (/^authentication required\.?$/i.test(message.trim())) throw new RemoteError(ANTIGRAVITY_SIGN_IN, 409);
+        throw error;
+      }
+      const id = result?.sessionId;
+      if (typeof id !== 'string' || !UUID.test(id)) throw new RemoteError('Antigravity did not start a conversation', 502);
+      await peer.request('session/close', { sessionId: id });
       return id;
     } finally { signal.removeEventListener('abort', abort); peer.close(); }
   }

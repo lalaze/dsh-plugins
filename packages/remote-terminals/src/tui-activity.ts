@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { TuiStore } from './tui-state.js';
-import { TUI_LAUNCHERS } from '@dsh-plugins/remote-core/workspace.js';
+import { TUI_LAUNCHERS, type TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 
 /** What a TUI conversation's CLI is doing. Approval and question are the kinds DSH's sidebar shows as waiting on the user. */
 export type TuiActivity = 'idle' | 'running' | 'approval' | 'question';
@@ -75,10 +75,30 @@ export function compactingOnScreen(rows: readonly string[]): boolean {
   return prompt >= 0 && rows.slice(Math.max(0, prompt - 6), prompt).some(row => /^\S\s+Compacting conversation…/.test(row));
 }
 
+/** Antigravity's spinner, braille dots ahead of what it is at (`⣾  Working...`, `⣷  Generating...`), right above its prompt. */
+const ANTIGRAVITY_SPINNER = /^\s*[\u2801-\u28FF]\s{1,3}\S.*(?:\.\.\.|…)/;
+/** How far up from the bottom of what Antigravity drew its spinner can stand: a long prompt being typed pushes it up. */
+const ANTIGRAVITY_BOTTOM = 16;
+
+/**
+ * What Antigravity's screen says, the only signal it gives: measured on 1.5.9, it sets no terminal title and sends no
+ * status report. A turn shows its spinner; a permission it asks for replaces the spinner with numbered choices, the one
+ * highlighted marked `>`, below `Requesting permission for:`. Its footer reads `esc to cancel` in a turn but also while
+ * its command menu is open, so that does not tell.
+ */
+export function antigravityActivity(rows: readonly string[]): TuiActivity {
+  const drawn = rows.filter(row => row.trim()), bottom = drawn.slice(-ANTIGRAVITY_BOTTOM);
+  const choice = bottom.findLastIndex(row => /^\s*> \d+\. /.test(row));
+  if (choice >= 0 && bottom.slice(choice + 1).some(row => /↑\/↓ Navigate/.test(row))) {
+    return bottom.slice(0, choice).some(row => /\bRequesting permission\b/i.test(row)) ? 'approval' : 'question';
+  }
+  return bottom.some(row => ANTIGRAVITY_SPINNER.test(row)) ? 'running' : 'idle';
+}
+
 const screenRows = ({ rows, buffer: { active } }: WatchedScreen): string[] =>
   Array.from({ length: rows }, (_, row) => active.getLine(active.viewportY + row)?.translateToString(true) ?? '');
 
-interface Watch { terminal: WatchedTerminal; dispose(): void; title: string; report?: TuiActivity; shown: TuiActivity; started: number; spinSince?: number; restSince?: number; reported?: number }
+interface Watch { terminal: WatchedTerminal; cli: TuiCli; dispose(): void; title: string; report?: TuiActivity; shown: TuiActivity; started: number; spinSince?: number; restSince?: number; reported?: number }
 
 /**
  * Watches TUI conversations' CLIs, so that they show as running, waiting and finished like every other conversation. DSH
@@ -110,26 +130,27 @@ export class TuiActivityWatcher {
     const sessions = new Set(this.deps.sessions());
     for (const sessionId of this.watches.keys()) if (!sessions.has(sessionId)) this.stop(sessionId);
     for (const sessionId of sessions) {
-      const terminal = this.cliTerminal(sessionId);
+      const found = this.cliTerminal(sessionId), terminal = found?.terminal;
       let watch = this.watches.get(sessionId);
       if (watch && watch.terminal !== terminal) { this.stop(sessionId); watch = undefined; }
-      if (!terminal) continue;
-      watch ??= this.start(sessionId, terminal);
+      if (!found) continue;
+      watch ??= this.start(sessionId, found.terminal, found.cli);
       this.update(sessionId, watch);
     }
   }
   close(): void { for (const sessionId of [...this.watches.keys()]) this.stop(sessionId); }
 
-  /** The conversation's running terminal started from its CLI's launcher, as it may have others open. */
-  private cliTerminal(sessionId: string): WatchedTerminal | undefined {
-    const launchers = Object.values(TUI_LAUNCHERS);
+  /** The conversation's running terminal started from its CLI's launcher, as it may have others open, and that CLI. */
+  private cliTerminal(sessionId: string): { terminal: WatchedTerminal; cli: TuiCli } | undefined {
+    const launchers = Object.entries(TUI_LAUNCHERS) as [TuiCli, string][];
     for (const terminal of this.deps.terminals(sessionId)) {
-      if (terminal.info.state === 'running' && launchers.includes(terminal.info.shell?.name?.replace(/\.cmd$/i, '') ?? '')) return terminal;
+      const name = terminal.info.shell?.name?.replace(/\.cmd$/i, '') ?? '', cli = launchers.find(([, launcher]) => launcher === name)?.[0];
+      if (terminal.info.state === 'running' && cli) return { terminal, cli };
     }
     return undefined;
   }
-  private start(sessionId: string, terminal: WatchedTerminal): Watch {
-    const watch: Watch = { terminal, dispose: () => {}, title: '', shown: 'idle', started: this.deps.now?.() ?? Date.now() };
+  private start(sessionId: string, terminal: WatchedTerminal, cli: TuiCli): Watch {
+    const watch: Watch = { terminal, cli, dispose: () => {}, title: '', shown: 'idle', started: this.deps.now?.() ?? Date.now() };
     const title = terminal.screen.onTitleChange((text) => { watch.title = text; });
     // Only reads it: xterm passes it on to any other handler, and the terminal behaves as before.
     const report = terminal.screen.parser.registerOscHandler(STATUS_REPORT, (data) => {
@@ -151,8 +172,12 @@ export class TuiActivityWatcher {
   }
   private update(sessionId: string, watch: Watch): void {
     const now = this.deps.now?.() ?? Date.now();
-    let next: TuiActivity = watch.report ?? titleActivity(watch.title);
-    if (next === 'idle' && watch.report === undefined) next = dialogOnScreen(screenRows(watch.terminal.screen)) ?? 'idle';
+    let next: TuiActivity;
+    if (watch.cli === 'antigravity') next = antigravityActivity(screenRows(watch.terminal.screen));
+    else {
+      next = watch.report ?? titleActivity(watch.title);
+      if (next === 'idle' && watch.report === undefined) next = dialogOnScreen(screenRows(watch.terminal.screen)) ?? 'idle';
+    }
     if (next === 'running' && watch.shown === 'idle' && now - watch.started < START_MS) return;
     // A compaction nobody asked for is no run, or it would end as a finished task. Only a run's start is judged: a turn goes
     // on running through one, and one a message waits for gives way to that turn, which then counts.

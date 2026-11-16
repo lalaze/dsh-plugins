@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { compactingOnScreen, dialogOnScreen, reportActivity, titleActivity, TuiActivityWatcher, type WatchedTerminal } from '../src/tui-activity.js';
+import { antigravityActivity, compactingOnScreen, dialogOnScreen, reportActivity, titleActivity, TuiActivityWatcher, type WatchedTerminal } from '../src/tui-activity.js';
 
 /** A terminal whose title, status reports and screen a test sets by hand, as the CLI would over the wire. */
 function fakeTerminal(name = 'Remote Claude') {
@@ -320,4 +320,55 @@ test('a conversation that is no longer a TUI one lets go of its terminal', () =>
   assert.deepEqual(emitted, [['a', true], ['a', false]]);
   assert.equal(terminal.disposed(), true);
   assert.equal(watcher.isBusy('a'), false);
+});
+
+/** Antigravity 1.5.9's screens as measured, below its banner and the conversation so far. */
+const LINE = '─'.repeat(120), SHORT = '─'.repeat(60);
+const AGY = {
+  idle: [SHORT, '> Say pong', '  pong', LINE, '>', LINE, '? for shortcuts                                         auto · Gemini 4 Carbon · medium', '', ''],
+  working: [SHORT, '> Say pong', '⣾  Working...', LINE, '>', LINE, 'esc to cancel                                           auto · Gemini 4 Carbon · medium'],
+  generating: [SHORT, '> Say pong', '⣷  Generating...', LINE, '> and a second line', 'of a prompt typed meanwhile', LINE, 'esc to cancel   Gemini 3.8 Flash · low'],
+  approval: [SHORT, '> Run the shell command: rm made-by-agy.txt', '● Ran (rm made-by-agy.txt) (ctrl+o to expand)', 'Command', LINE, 'Requesting permission for:', '   rm made-by-agy.txt', 'Run this command?',
+    '> 1. Yes, run command', "  2. Yes, and always allow in this conversation for commands that start with 'rm made-by-agy.txt'", "  3. Yes, and always allow for commands that start with 'rm made-by-agy.txt' (Persist to settings.json)",
+    '  4. No, cancel', '  ↑/↓ Navigate · tab Amend · ctrl+g edit/expand command', 'esc to cancel                                    Gemini 3.8 Flash · low'],
+  menu: [LINE, '> /', LINE, '> /add-dir             Add a directory to the workspace', '  /agents              List available custom agents', '   ↓ 45 more', '  ↑/↓ Navigate · enter Select · tab Complete', 'esc to cancel   Gemini 3.8 Flash · low'],
+  trust: ['Accessing workspace:', '', '/srv/app', '', 'Do you trust the contents of this project?', '', 'Antigravity CLI requires permission to read, edit, and execute files here.', '', '> Yes, I trust this folder', '  No, exit', '', '  ↑/↓ Navigate · enter Confirm'],
+};
+
+test('Antigravity\'s screen reads as what it is doing, as it sets no title and sends no report', () => {
+  assert.equal(antigravityActivity(AGY.idle), 'idle');
+  assert.equal(antigravityActivity(AGY.working), 'running');
+  assert.equal(antigravityActivity(AGY.generating), 'running', 'with a long prompt typed below the spinner');
+  assert.equal(antigravityActivity(AGY.approval), 'approval');
+  assert.equal(antigravityActivity(AGY.menu), 'idle', 'its footer says esc to cancel while the command menu is open too');
+  assert.equal(antigravityActivity(AGY.trust), 'idle', 'the trust dialog at its start asks nothing of a turn');
+  assert.equal(antigravityActivity([...AGY.approval.slice(0, 5), 'Pick one', ...AGY.approval.slice(8)]), 'question');
+  assert.equal(antigravityActivity(['⣾  Working...', ...Array.from({ length: 20 }, (_, index) => `line ${index}`)]), 'idle', 'a spinner long gone up the screen is history');
+  assert.equal(antigravityActivity(['> 1. a list in a reply', '  2. with no dialog around it', LINE, '>', LINE, '? for shortcuts']), 'idle');
+});
+
+test('an Antigravity conversation runs, waits and finishes by its screen alone', () => {
+  const { watcher, terminals, changes, advance, settled } = rig();
+  const terminal = fakeTerminal('Remote Antigravity');
+  terminal.rows = AGY.idle;
+  terminals.set('a', [terminal]);
+  watcher.check();
+  settled();
+  // A Codex-like title or report from what runs inside is no signal of Antigravity's.
+  terminal.title('⠙ proj');
+  terminal.report('state=working');
+  advance(1000); advance(1000);
+  assert.deepEqual(changes(), []);
+  terminal.rows = AGY.working;
+  advance(1000); advance(1000);
+  assert.deepEqual(changes(), [['a', true]]);
+  terminal.rows = AGY.approval;
+  advance(1000);
+  assert.deepEqual(watcher.waiting(), { a: 'approval' });
+  terminal.rows = AGY.generating;
+  advance(1000);
+  assert.deepEqual(watcher.waiting(), {});
+  terminal.rows = AGY.idle;
+  advance(1000); advance(2000);
+  assert.deepEqual(changes(), [['a', true], ['a', false]]);
 });

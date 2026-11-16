@@ -19,7 +19,7 @@ test('beside Remote Agents the plugin takes over the TUI conversations, serves i
   await mkdir(agentsDir);
   // What Remote Agents 0.2.129 saved: a machine, and two TUI conversations.
   await writeFile(join(agentsDir, 'state.json'), JSON.stringify({ version: 1, hosts: [{ id: 'host-box-1', label: 'Box', connection: 'ssh://builder@box.invalid', enabledProviders: [] }], tasks: [],
-    tuiSessions: ['tui-claude', 'tui-codex'], tuiDetails: { 'tui-codex': { cli: 'codex', thread: '01a1a960-0696-7481-b86c-ea7a878c6479' } }, tuiLocalScroll: false }));
+    tuiSessions: ['tui-claude', 'tui-codex', 'tui-agy'], tuiDetails: { 'tui-codex': { cli: 'codex', thread: '01a1a960-0696-7481-b86c-ea7a878c6479' }, 'tui-agy': { cli: 'antigravity', conversation: 'f07744bd-6fff-40a9-9b40-d1ff3c5ccb69' } }, tuiLocalScroll: false }));
   const ctx = new Context(), routes: Route[] = [];
   const dispose = ctx.provide('connection', { fetch: { register: (route: Route) => { routes.push(route); return () => {}; } } });
   const ask = async (body: unknown) => {
@@ -32,7 +32,7 @@ test('beside Remote Agents the plugin takes over the TUI conversations, serves i
   const terminals = ctx.plugin(await import('../src/index.js'), { stateDir: ownDir }); await terminals.await();
   t.after(() => terminals.dispose());
   assert.deepEqual(routes.map(r => `${r.methods.join('/')} ${r.path} ${r.requestBody}`), ['POST /api/remote-terminals buffered']);
-  assert.deepEqual((await ask({ action: 'tuiSessions' })).body, { sessions: [], codex: [], localScroll: true, unavailable: true });
+  assert.deepEqual((await ask({ action: 'tuiSessions' })).body, { sessions: [], codex: [], antigravity: [], localScroll: true, unavailable: true });
   assert.equal((await ask({ action: 'worktreeProjects' })).status, 501);
   assert.equal((ctx.get('remoteTerminals') as RemoteTerminals).isTui('tui-claude'), false);
 
@@ -45,10 +45,10 @@ test('beside Remote Agents the plugin takes over the TUI conversations, serves i
     'POST /api/remote-terminals buffered',
     'POST /api/remote-terminals/tui-files streaming',
   ]);
-  assert.deepEqual((await ask({ action: 'tuiSessions' })).body, { sessions: ['tui-claude', 'tui-codex'], codex: ['tui-codex'], localScroll: false });
+  assert.deepEqual((await ask({ action: 'tuiSessions' })).body, { sessions: ['tui-claude', 'tui-codex', 'tui-agy'], codex: ['tui-codex'], antigravity: ['tui-agy'], localScroll: false });
   assert.equal((ctx.get('remoteTerminals') as RemoteTerminals).isTui('tui-codex'), true);
   const own = JSON.parse(await readFile(join(ownDir, 'state.json'), 'utf8'));
-  assert.deepEqual([own.adopted, own.tuiSessions], [true, ['tui-claude', 'tui-codex']]);
+  assert.deepEqual([own.adopted, own.tuiSessions], [true, ['tui-claude', 'tui-codex', 'tui-agy']]);
   // A conversation that is not in a remote workspace gets no remote shell, through Remote Agents' own check.
   assert.deepEqual(await ask({ action: 'terminalShell', sessionId: 'local-session' }), { status: 200, body: {} });
   const started = await ask({ action: 'tuiStart', sessionId: 'local-session', cli: 'claude' });

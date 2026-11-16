@@ -49,14 +49,15 @@ export const terminalPath = (path: string) => path.replace(/[^\p{L}\p{N}\p{M}_./
 /** The files Claude Code turns into a placeholder such as `[Image #1]`. It reads them first, so the placeholder comes late. */
 const CLAUDE_IMAGE = /\.(?:png|jpe?g|gif|webp)$/i;
 /**
- * What to paste for files that are ready together: one paste per file, as neither CLI takes several images in one. Each
- * ends in a space, as a terminal's drop does, so typing can carry on. Codex places its placeholder at once, with a space.
+ * What to paste for files that are ready together: one paste per file, as no CLI takes several images in one. Each
+ * ends in a space, as a terminal's drop does, so typing can carry on. Codex places its placeholder at once, with a space;
+ * Antigravity turns a pasted image's path into an attachment at once, leaving the prompt as it was.
  * Claude Code's comes late, so other files go before images, since it would land after whatever is pasted behind it
  * anyway; and it drops that space, so text coming after an earlier image needs its own.
  * @param afterImage - whether the terminal was last given an image.
  */
 export function pastesFor(paths: readonly string[], afterImage: boolean, cli: TuiCli): string[] {
-  if (cli === 'codex') return paths.map(path => `${terminalPath(path)} `);
+  if (cli !== 'claude') return paths.map(path => `${terminalPath(path)} `);
   const images = paths.filter(path => CLAUDE_IMAGE.test(path)), others = paths.filter(path => !CLAUDE_IMAGE.test(path));
   return [...others.map((path, index) => `${!index && afterImage ? ' ' : ''}${terminalPath(path)} `), ...images.map(path => `${terminalPath(path)} `)];
 }

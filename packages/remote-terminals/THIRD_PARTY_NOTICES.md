@@ -4,7 +4,7 @@ The browser artifact bundles this workspace's private `@dsh-plugins/i18n` helper
 
 The interaction model follows [Paseo](https://github.com/getpaseo/paseo); no Paseo source, SDK or runtime dependency is included.
 
-The Codex logo in `src/client/tui.tsx` is adapted from [`@lobehub/icons-static-svg`](https://github.com/lobehub/lobe-icons) (1.102.0, MIT License, Copyright (c) 2023 LobeHub).
+The Codex logo in `src/client/tui.tsx` is adapted from [`@lobehub/icons-static-svg`](https://github.com/lobehub/lobe-icons) (1.102.0, MIT License, Copyright (c) 2023 LobeHub), and so is the Antigravity logo there (1.101.0, the same license). The logos identify the CLIs and remain trademarks of their owners.
 
 `lib/terminal-holder.mjs`, which runs on SSH hosts, bundles `@xterm/headless` 6.0.0 and `@xterm/addon-serialize` 0.14.0, each under the MIT License: Copyright (c) 2017-2019, The xterm.js authors (https://github.com/xtermjs/xterm.js).
 

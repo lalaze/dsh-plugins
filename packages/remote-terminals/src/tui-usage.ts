@@ -302,8 +302,9 @@ export class TuiUsage {
   }
   private async read(only?: readonly string[]): Promise<void> {
     if (this.closed) return;
-    const signal = this.abort.signal, listed = this.store.snapshot().tuiSessions ?? [];
-    const ids = only ? listed.filter(id => only.includes(id)) : listed;
+    const signal = this.abort.signal, { tuiSessions: listed = [], tuiDetails } = this.store.snapshot();
+    // Antigravity keeps its turns in a database of its own rather than a log, and that is not read: its usage is not counted.
+    const ids = (only ? listed.filter(id => only.includes(id)) : listed).filter(id => tuiDetails?.[id]?.cli !== 'antigravity');
     const machines = new Map<string, { sessionId: string; target: Target }[]>();
     for (const sessionId of ids) {
       // A conversation that is gone, or whose workspace is no longer a verified remote one, is passed over.

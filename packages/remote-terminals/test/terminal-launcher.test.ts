@@ -69,6 +69,22 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   assert.equal(await launchCodex('session-tui'), plainCodex, 'in a Claude conversation Remote Codex is plain Codex');
   assert.equal(await launchTui('session-codex'), `cd '/srv/app' && export COLORTERM=truecolor CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 && exec "\${SHELL:-/bin/sh}" -lic 'claude; exec "\${SHELL:-/bin/sh}" -l'`, 'and in a Codex conversation Remote Claude is plain Claude');
   assert.doesNotMatch(await launchTui('session-chat'), /--resume/, 'another conversation runs a plain claude');
+  // Remote Antigravity opens the conversation made when the TUI conversation started, with its model every time, as
+  // Antigravity keeps none with a conversation.
+  const antigravity = controller.config.shellCandidates[4]!; assert.equal(basename(antigravity), 'Remote Antigravity');
+  const conversation = 'f07744bd-6fff-40a9-9b40-d1ff3c5ccb69';
+  const launchAgy = async (session?: string) => { await promisify(execFile)(antigravity, [], { cwd: anchor, env: { ...env, ...(session ? { DSH_SESSION_ID: session } : {}) }, timeout: 5000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
+  const agyCommand = (command: string) => `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic '${command}; exec "\${SHELL:-/bin/sh}" -l'`;
+  assert.equal(await launchAgy(), agyCommand('agy'), 'outside a TUI conversation it is plain Antigravity');
+  const saved = JSON.parse(await readFile(f.path, 'utf8'));
+  await writeFile(f.path, JSON.stringify({ ...saved, tuiSessions: [...saved.tuiSessions, 'session-agy', 'session-agy-bare'], tuiDetails: { ...saved.tuiDetails,
+    'session-agy': { cli: 'antigravity', conversation, model: 'gemini-3.8-flash', effort: 'low', title: 'Antigravity' }, 'session-agy-bare': { cli: 'antigravity', conversation, title: 'Antigravity' } } }));
+  assert.equal(await launchAgy('session-agy'), agyCommand(`agy --conversation ${conversation} --model "gemini-3.8-flash" --effort "low"`));
+  assert.equal(await launchAgy('session-agy'), agyCommand(`agy --conversation ${conversation} --model "gemini-3.8-flash" --effort "low"`), 'the model goes with every launch');
+  assert.equal(await launchAgy('session-agy-bare'), agyCommand(`agy --conversation ${conversation}`), 'with no model chosen Antigravity uses its own');
+  assert.equal(await launchAgy('session-codex'), agyCommand('agy'), 'in a Codex conversation Remote Antigravity is plain Antigravity');
+  assert.equal(await launchCodex('session-agy'), plainCodex, 'and Remote Codex in an Antigravity conversation plain Codex');
+  assert.equal(await launchTui('session-agy'), `cd '/srv/app' && export COLORTERM=truecolor CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 && exec "\${SHELL:-/bin/sh}" -lic 'claude; exec "\${SHELL:-/bin/sh}" -l'`, 'and Remote Claude plain Claude');
   // The composer's model applies to the first launch; a resumed session keeps what /model chose since.
   const opus = await launchTui('session-opus'), opusId = /--resume ([0-9a-f-]{36});/.exec(opus)?.[1];
   assert.ok(opus.includes(`then claude --resume ${opusId}; else claude --session-id ${opusId} --model "opus[1m]" --effort "high"; fi`), opus);
@@ -89,5 +105,6 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   assert.match((await launchClaude(local)).stderr, /Not a remote workspace/, 'Remote Claude never starts Claude on the DSH machine');
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
   assert.match((await promisify(execFile)(codex, [], { cwd: local, env, timeout: 5000 })).stderr, /Not a remote workspace/, 'nor Remote Codex Codex');
+  assert.match((await promisify(execFile)(antigravity, [], { cwd: local, env, timeout: 5000 })).stderr, /Not a remote workspace/, 'nor Remote Antigravity Antigravity');
   cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);
 });

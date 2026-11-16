@@ -3,11 +3,11 @@ import { RemoteError } from './domain.js';
 
 /** The launcher's file name, which DSH's terminal shell menu shows as the item label. */
 export const TERMINAL_LAUNCHER = 'Remote workspace';
-/** Beside it in the same directory: the same terminal, starting Claude Code or Codex. */
-export const CLAUDE_LAUNCHER = 'Remote Claude', CODEX_LAUNCHER = 'Remote Codex';
+/** Beside it in the same directory: the same terminal, starting Claude Code, Codex or Antigravity. */
+export const CLAUDE_LAUNCHER = 'Remote Claude', CODEX_LAUNCHER = 'Remote Codex', ANTIGRAVITY_LAUNCHER = 'Remote Antigravity';
 /** The CLIs a TUI conversation can run. */
-export type TuiCli = 'claude' | 'codex';
-export const TUI_LAUNCHERS: Record<TuiCli, string> = { claude: CLAUDE_LAUNCHER, codex: CODEX_LAUNCHER };
+export type TuiCli = 'claude' | 'codex' | 'antigravity';
+export const TUI_LAUNCHERS: Record<TuiCli, string> = { claude: CLAUDE_LAUNCHER, codex: CODEX_LAUNCHER, antigravity: ANTIGRAVITY_LAUNCHER };
 export interface WorkspaceTarget { hostId: string; label: string; cwd: string }
 export interface WorkspaceEntry { name: string; path: string; kind: 'file' | 'directory' | 'symlink' | 'other'; size: number; modified: string }
 export interface WorkspaceFile { path: string; content: string; revision: string; size: number }

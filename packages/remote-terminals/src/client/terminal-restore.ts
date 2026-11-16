@@ -1,6 +1,6 @@
-import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from '@dsh-plugins/remote-core/workspace.js';
+import { TERMINAL_LAUNCHER, TUI_LAUNCHERS } from '@dsh-plugins/remote-core/workspace.js';
 
-const LAUNCHERS = new Set<string>([TERMINAL_LAUNCHER, CLAUDE_LAUNCHER, CODEX_LAUNCHER]);
+const LAUNCHERS = new Set<string>([TERMINAL_LAUNCHER, ...Object.values(TUI_LAUNCHERS)]);
 const KEY = 'remote-agents.terminal.shell.';
 /** What DSH's New terminal opens; see terminal-preference.ts. */
 const DSH_KEY = 'dsh.terminal.shell';

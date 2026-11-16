@@ -37,8 +37,8 @@ export interface RemoteAgentsWorktrees {
 export interface Terminals { terminal: { shell?: string }; worktrees: WorktreeService; tui: TuiSessions }
 
 /**
- * Terminals that open in a conversation's remote workspace and outlive DSH, conversations whose view is Claude Code or
- * Codex in such a terminal, and workspaces made from a project's Git worktrees. They reach the saved machines only
+ * Terminals that open in a conversation's remote workspace and outlive DSH, conversations whose view is Claude Code,
+ * Codex or Antigravity in such a terminal, and workspaces made from a project's Git worktrees. They reach the saved machines only
  * through `machines`, which Remote Agents provides.
  * @param tuiFile - the file `store` saves to, which a terminal's launcher reads.
  */
@@ -112,6 +112,8 @@ export function installTerminals(ctx: Context, machines: RemoteAgentsMachines, s
     titleRecords: (id, claudeSession, signal) => remote(id, signal, tui => tui.claudeTitleRecords(claudeSession)),
     codexThread: (id, signal) => remote(id, signal, (tui, target) => tui.codexThread(target.cwd, CODEX_THREAD_NAME, signal)),
     codexTitleRecords: (id, thread, signal) => remote(id, signal, tui => tui.codexTitleRecords(thread)),
+    antigravityConversation: (id, signal) => remote(id, signal, (tui, target) => tui.antigravityConversation(target.cwd, signal)),
+    antigravityTitleRecords: (id, conversation, signal) => remote(id, signal, tui => tui.antigravityTitleRecords(conversation)),
     endHolder,
   });
   const files = new TuiFiles({
@@ -160,7 +162,7 @@ export async function worktreeAction(worktrees: WorktreeService, action: string,
 
 /** The requests about TUI conversations. */
 export async function tuiAction(tui: TuiSessions, action: string, input: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
-  if (action === 'tuiSessions') return { sessions: tui.list(), codex: tui.codex(), localScroll: tui.localScroll() };
+  if (action === 'tuiSessions') return { sessions: tui.list(), codex: tui.codex(), antigravity: tui.antigravity(), localScroll: tui.localScroll() };
   if (action === 'tuiScroll') {
     if (typeof input.local !== 'boolean') throw new RemoteError('Invalid scrolling choice');
     await tui.setLocalScroll(input.local);
