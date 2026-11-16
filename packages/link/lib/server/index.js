@@ -125,12 +125,35 @@ export function apply(ctx, config) {
         board.seen(body.machine);
         sendJson(res, 200, { ok: true });
     };
+    // What the window's pages report about switching (connection, frames coming up): read through a mount, it tells how
+    // another machine's window behaves, such as the desktop app's, without its devtools.
+    const diagnostics = [];
+    const diag = async (req, res) => {
+        if (req.method === 'GET') {
+            sendJson(res, 200, diagnostics);
+            return;
+        }
+        if (req.method !== 'POST') {
+            sendJson(res, 405, { error: 'GET or POST' });
+            return;
+        }
+        const body = await readJson(req, 4096).catch(() => undefined);
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+            sendJson(res, 400, { error: 'expected an object' });
+            return;
+        }
+        diagnostics.push({ at: new Date().toISOString(), ...body });
+        if (diagnostics.length > 60)
+            diagnostics.splice(0, diagnostics.length - 60);
+        sendJson(res, 200, { ok: true });
+    };
     const routes = {
         '/dsh-link/hello': hello,
         '/dsh-link/peers': peers,
         '/dsh-link/attention': (_req, res) => board.serve(res),
         '/dsh-link/attention/seen': seen,
         '/dsh-link/restart': (req, res) => restart.serve(req, res),
+        '/dsh-link/diag': diag,
     };
     ctx.effect(() => {
         const disposers = Object.entries(routes).map(([path, handler]) => ctx.webServer.register({ kind: 'exact', path, handler: fenced(handler) }));

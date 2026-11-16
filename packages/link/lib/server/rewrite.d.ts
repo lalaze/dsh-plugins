@@ -42,6 +42,20 @@ export declare function credentialedManifest(html: string): Rewritten;
  * already booted, so the guard takes the stream URL the window's page got and rebases it the same way.
  */
 export declare function guardDesktopBoot(html: string, prefix: string): Rewritten;
+/** The window's own page keeps the machines it shows in frames (client/shell.ts); these keys are shared with it. */
+export declare const SHELL_KEYS: {
+    readonly keepPages: "dsh-link:keep-pages";
+    readonly shown: "dsh-link:shown";
+    readonly direct: "dsh-link:direct";
+    readonly returned: "dsh-link:returned";
+};
+/**
+ * A machine's page opened as the window's page (by its address, a bookmark, a reload of a page an older version
+ * opened) goes to this computer's own page, which shows the machine in a frame: otherwise switching away from it loads
+ * a whole page every time. Not when keeping pages is off (by choice, or by default over HTTP/1.1: see client/shell.ts),
+ * nor for the machine the user chose to open directly.
+ */
+export declare function injectShellReturn(html: string, id: string): string;
 /** Where the namespace script leaves the page's real localStorage, for the switcher to pick another machine's Session. */
 export declare const RAW_STORAGE = "__dshLinkStorage";
 /**
