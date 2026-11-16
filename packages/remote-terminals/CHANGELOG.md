@@ -4,6 +4,15 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.12 — Antigravity as a TUI conversation
+
+- A remote Antigravity model now offers the TUI too: in a new conversation of a remote workspace, select one and click the blue A at the bottom left of the composer. The conversation's Chat tab becomes the interactive `agy`, started with the model and effort you selected. **Remote Antigravity** joins Remote Claude and Remote Codex in the terminal's shell menu.
+- Antigravity cannot be told the ID of a conversation it starts, so the plugin makes the conversation through Antigravity's ACP server first and opens it with `agy --conversation`. It keeps no model with a conversation, so the model and effort go with every launch; a `/model` inside lasts until the CLI starts again.
+- The row is titled from Antigravity's own title or `/rename`, then the first message, read from its summary database on the remote machine (with `sqlite3`, or `python3` where that is missing). Its state in the sidebar comes from its screen alone, as it sets no terminal title.
+- Antigravity's token usage is not counted, as it keeps its turns in a database of its own rather than a log.
+- Over SSH Antigravity needs a sign-in of its own (`agy acp --login` on that machine), as in Remote Agents' chat; without one, starting the TUI says so. The first time it opens a folder it asks whether to trust it; the first choice is yes.
+- It can be upgraded on its own; no restart is needed.
+
 ## 0.1.11 — TUI conversations no longer appear in other DSH instances
 
 - A TUI conversation stays in the DSH that started it, and is no longer listed on the machine for other DSH instances to show. To use it from another computer or a phone, open that DSH itself, for example its web page. A conversation open on two devices at once still shares one terminal, whose screen follows the device you are using.
