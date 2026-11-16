@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 import { RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { tuiKey, type TuiStore } from './tui-state.js';
-import type { SharedTui } from './tui-shared.js';
 import type { TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { tuiHolder } from './holder-protocol.js';
 
@@ -171,41 +170,6 @@ export class TuiSessions {
     // refuses to load.
     const phase = (this.dsh.agent?.(sessionId) as TuiAgent | undefined)?.phase;
     if (phase?.kind === 'idle') phase.lastTurn = 1;
-  }
-  /**
-   * Shows a TUI conversation another DSH started, in a conversation of this DSH made for it. Nothing is started on the
-   * machine: its CLI runs there already, or resumes when the conversation is opened here.
-   * @param sessionId - this DSH's conversation, in the remote workspace of the conversation's directory.
-   * @param blank - whether that conversation is new, and so needs the turn that makes DSH show it.
-   */
-  async adopt(sessionId: string, hostId: string, shared: SharedTui, blank: boolean, now = new Date()): Promise<void> {
-    if (this.list().includes(sessionId)) return;
-    const cli = shared.cli, title = shared.title ?? FIRST_TITLES[cli];
-    // DSH makes a conversation's agent when its model is chosen, and the workspace list shows the model's icon.
-    const modelRecorded = await this.dsh.selectModel({ sessionId, provider: PROVIDERS[cli], model: `${hostId}/${cli}/${encodeURIComponent(shared.model ?? 'default')}`,
-      ...(shared.effort ? { reasoningEffort: shared.effort } : {}) }).then(() => true, () => false);
-    if (blank) {
-      const session = this.dsh.session(sessionId);
-      if (!session) throw new RemoteError('This conversation is not open', 409);
-      this.firstTurn(sessionId, session);
-    }
-    await this.store.update(state => {
-      if (state.tuiSessions?.includes(sessionId)) return;
-      state.tuiSessions = [...state.tuiSessions ?? [], sessionId];
-      state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title, ...(cli === 'codex' && shared.thread ? { cli: 'codex' as const, thread: shared.thread } : {}),
-        ...(shared.model ? { model: shared.model } : {}), ...(shared.effort ? { effort: shared.effort } : {}), ...(modelRecorded ? { modelRecorded } : {}),
-        ...(shared.key !== sessionId ? { key: shared.key } : {}), shared: { archived: false, title }, usageFrom: now.toISOString() } };
-    });
-    await this.dsh.rename(sessionId, title);
-  }
-  /**
-   * Gives a conversation the title another DSH read from its CLI.
-   * @param rename - false for a conversation renamed in DSH, which keeps its name and only notes the CLI's title.
-   */
-  async retitle(sessionId: string, title: string, rename = true): Promise<void> {
-    if (!this.list().includes(sessionId)) return;
-    if (rename) await this.dsh.rename(sessionId, title);
-    await this.store.update(state => { if (state.tuiDetails?.[sessionId]) state.tuiDetails = { ...state.tuiDetails, [sessionId]: { ...state.tuiDetails[sessionId], title } }; });
   }
   /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
   async end(sessionId: string, signal: AbortSignal): Promise<void> {

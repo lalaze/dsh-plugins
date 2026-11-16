@@ -3,7 +3,6 @@ import { FILE_LIMIT, GIT_LIMITS, TEXT_LIMIT, type FileOperation, type GitBatch, 
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { WORKSPACE_SHELL } from './shell.js';
-import { nativeRpc } from '../chat/native-registry.js';
 import { quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 
 interface Location { path: string; parent: string; base: string }
@@ -49,7 +48,6 @@ const BASIC_PATH = 'PATH="$HOME/.local/bin:/usr/local/bin:/opt/homebrew/bin:$PAT
 
 export class WorkspaceFiles {
   constructor(readonly transport: SshTransport) {}
-  nativeSharing(request: Record<string, unknown>): Promise<any> { return nativeRpc(this.transport, request); }
   /** Runs one shell operation and returns its data; the program reports handled failures with their status. */
   private async run(op: string, cwd: string, at: Location, values: Record<string, string>, options: { input?: AsyncIterable<Uint8Array>; maxBytes: number; signal?: AbortSignal; login?: boolean }): Promise<Buffer> {
     if (!this.transport.transfer) throw new RemoteError('File transfers are unavailable on this host', 501);

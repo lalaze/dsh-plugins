@@ -1,12 +1,11 @@
 import { notReadyReason, SshBackend, type BackendFactory } from './backend.js';
 import { HostConnections } from './host-connections.js';
-import { SharedSync } from './shared-sync.js';
 import type { LaunchSharing } from '../sharing/sharing.js';
 import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '@dsh-plugins/remote-core/ssh-config.js';
 import { attachmentInput, inputModalitiesOf } from '@dsh-plugins/remote-core/domain.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import { browsePath, busy, enabledProvidersOf, permissionModes, field, identifier, questionsOf, record, RemoteError, sharesSessions, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type PermissionAnswer, type SharedTag, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '@dsh-plugins/remote-core/domain.js';
+import { browsePath, busy, enabledProvidersOf, permissionModes, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type PermissionAnswer, type Task, type TimelinePage, type UsageReport } from '@dsh-plugins/remote-core/domain.js';
 
 export interface UsageOptions {
   /** The conversation's selected route; picks its CLI when the conversation used several. */
@@ -31,13 +30,8 @@ export interface SendOptions {
 }
 export class RemoteAgentsService {
   private readonly hostConnections: HostConnections;
-  private readonly sharedSync: SharedSync;
-  /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
-  readonly sharedWorkspaceListeners = new Set<(hostId: string) => void>();
-  /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
-  readonly sharedHistoryListeners = new Set<(taskId: string) => void>();
-  /** Called with a DSH conversation when how far it has been read changes, here or on another DSH. */
-  readonly chatReadListeners = new Set<(sessionId: string) => void>();
+  /** Told a task whose CLI runs a turn by itself, when the turn starts and when it ends; its conversation shows the turn. */
+  readonly ownTurnListeners = new Set<(taskId: string) => void>();
   private readonly locks = new Map<string, Promise<unknown>>();
   private readonly restoring = new Map<string, Promise<void>>();
   private readonly delegationRecovery = new Map<string, { relayId: string; retryAt: number }>();
@@ -47,12 +41,8 @@ export class RemoteAgentsService {
     this.hostConnections = new HostConnections(store,
       factory ?? (host => new SshBackend(host, store, undefined, () => this.sharing)),
       (key, action) => this.serial(key, action),
-      (hostId, backend) => this.sharedSync.bind(hostId, backend));
-    this.sharedSync = new SharedSync(store, this.hostConnections, {
-      workspaces: hostId => { for (const listener of this.sharedWorkspaceListeners) listener(hostId); },
-      history: taskId => { for (const listener of this.sharedHistoryListeners) listener(taskId); },
-      read: sessionId => { for (const listener of this.chatReadListeners) listener(sessionId); },
-    });
+      // Subscribed as soon as a backend exists: a restored CLI may start a turn before anything connects.
+      (_hostId, backend) => { backend.onOwnTurn?.(taskId => { for (const listener of this.ownTurnListeners) listener(taskId); }); });
   }
   async sshConfig() { return this.readSshConfig(); }
   /** Reuse the agent host's transport and machine-identity checks for workspace operations. */
@@ -87,8 +77,6 @@ export class RemoteAgentsService {
    */
   resume(hostId?: string): Promise<void> {
     const tasks = this.store.tasks(t => !!t.relay && (!hostId || t.hostId === hostId));
-    // Sharing hosts list the sessions other DSH instances started, whether or not this one has any.
-    for (const host of this.store.hosts()) if (!this.stopped && (!hostId || host.id === hostId)) this.hostConnections.backend(host.id).startSharing?.();
     return Promise.allSettled([
       ...tasks.map(task => this.restore(task)),
       ...this.store.hosts().filter(host => !hostId || host.id === hostId).map(host => this.stopped ? undefined : this.hostConnections.backend(host.id).cleanup?.()),
@@ -97,12 +85,8 @@ export class RemoteAgentsService {
   /** Reattach only the remote tasks behind one open DSH conversation; unrelated hosts stay offline. */
   resumeConversation(sessionId: string): Promise<void> {
     const tasks = this.store.tasks(t => !!t.relay && t.chat?.sessionId === sessionId);
-    for (const hostId of new Set(tasks.map(task => task.hostId))) if (!this.stopped) this.hostConnections.backend(hostId).startSharing?.();
     return Promise.allSettled(tasks.map(task => this.restore(task))).then(() => {});
   }
-  /** Shared read state is observational; marking read starts sharing for this conversation only. */
-  chatReadMark(sessionId: string): string | undefined { return this.sharedSync.chatReadMark(sessionId); }
-  async markChatRead(sessionId: string): Promise<void> { return this.sharedSync.markChatRead(sessionId); }
   /** Observe only this conversation's delegated CLIs, including saved/archived history.
    * Recovery attaches existing relays only; it never starts a new CLI or sends a prompt.
    * Do not use snapshot/resume here: opening one conversation must not connect unrelated hosts.
@@ -115,7 +99,7 @@ export class RemoteAgentsService {
     const summary = this.summarize(task, live);
     if (!task.relay || !task.native || task.archived || summary.attached || this.stopped) return summary;
     const recovery = this.delegationRecovery.get(task.id), now = Date.now();
-    // Polls must not repeatedly acquire a shared lease or retry an offline/quota failure.
+    // Polls must not retry an offline/quota failure each time.
     // The backend owns reconnecting once attached. A changed relay gets a fresh attempt.
     if (!recovery || recovery.relayId !== task.relay.id || recovery.retryAt <= now) {
       this.delegationRecovery.set(task.id, { relayId: task.relay.id, retryAt: now + 30_000 });
@@ -169,7 +153,6 @@ export class RemoteAgentsService {
       : live?.status === 'closed' && resumable === false ? 'closed' : 'idle';
     const error = status === 'error' ? live?.lastError ?? task.error ?? 'Starting this agent was interrupted. Retry to finish starting it.'
       : status === 'closed' || (status === 'idle' && live?.lastError) ? live?.lastError : undefined;
-    const controller = this.stopped ? undefined : this.hostConnections.peek(task.hostId)?.controller?.(task.id);
     return {
       id: task.id, hostId: task.hostId, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model,
       ...(task.chat ? { chatSessionId: task.chat.sessionId } : {}),
@@ -181,7 +164,6 @@ export class RemoteAgentsService {
       ...(status === 'running' && live?.activeTurn?.unprompted ? { unprompted: true as const } : {}),
       ...(error ? { error } : {}), ...(resumable !== undefined ? { resumable } : {}), ...(task.native?.sessionId ? { nativeSessionId: task.native.sessionId } : {}),
       ...(live?.persistent ? { persistent: true } : {}), ...(live?.reconnecting && live.status !== 'closed' ? { reconnecting: true } : {}),
-      ...(task.shared?.imported && task.shared.creator ? { creator: task.shared.creator } : {}), ...(controller ? { controller } : {}),
     };
   }
   async summary(id: string): Promise<AgentSummary> { const task = this.task(id); return this.summarize(task, await this.live(task)); }
@@ -198,19 +180,11 @@ export class RemoteAgentsService {
     if (options.discoverModels) return this.discoverHost(hostId);
     return this.snapshot();
   }
-  /** `everywhere` also deletes a shared host's sessions for the other DSH instances. */
-  async removeHost(id: string, options: { deleteAgents?: boolean; everywhere?: boolean } = {}): Promise<Dashboard> {
+  async removeHost(id: string, options: { deleteAgents?: boolean } = {}): Promise<Dashboard> {
     return this.serial(`catalog:${id}`, async () => {
       this.hostConnections.host(id);
-      // Forget local sessions and output without probing an unreachable SSH host. Shared sessions stay on the host
-      // for the other DSH instances, and their CLIs keep running, unless deleted everywhere, which needs the host.
-      const shared = sharesSessions(this.hostConnections.host(id)) && this.store.tasks(t => t.hostId === id).length > 0;
-      if (options.deleteAgents && options.everywhere && shared && !await this.hostConnections.backend(id).sharingReachable?.(10_000)) {
-        throw new RemoteError('Connect to this machine to delete its sessions in every DSH, or remove it from this DSH only.', 409);
-      }
-      if (options.deleteAgents) for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id)) {
-        if (sharesSessions(this.hostConnections.host(id)) && !options.everywhere) await this.forgetLocal(task.id); else await this.delete(task.id);
-      }
+      // Forget local sessions and output without probing an unreachable SSH host.
+      if (options.deleteAgents) for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id)) await this.delete(task.id);
       // Give queued relay removals a short chance; an offline host never blocks removing it.
       const queued = this.hostConnections.peek(id)?.cleanup?.();
       if (queued) await Promise.race([queued, new Promise(resolve => setTimeout(resolve, 5000).unref())]);
@@ -221,9 +195,8 @@ export class RemoteAgentsService {
         state.mainChatProjects = state.mainChatProjects?.filter(p => p.hostId !== id);
         state.relayCleanups = state.relayCleanups?.filter(c => c.hostId !== id);
         if (!state.relayCleanups?.length) delete state.relayCleanups;
-        state.sharedDeletions = state.sharedDeletions?.filter(d => d.hostId !== id);
-        if (!state.sharedDeletions?.length) delete state.sharedDeletions;
-        delete state.seenWorkspaces?.[id];
+        delete state.sharedWithdrawals?.[id];
+        if (state.sharedWithdrawals && !Object.keys(state.sharedWithdrawals).length) delete state.sharedWithdrawals;
       });
       await this.hostConnections.release(id);
       this.sharing?.forget(id);
@@ -231,42 +204,6 @@ export class RemoteAgentsService {
       return this.snapshot();
     });
   }
-  /** Share this host's sessions and workspaces with other DSH instances, or stop. CLIs keep running either way. */
-  async setHostSharing(hostId: string, share: unknown): Promise<Dashboard> {
-    if (typeof share !== 'boolean') throw new RemoteError('Invalid sharing setting');
-    await this.serial(`catalog:${hostId}`, async () => {
-      if (sharesSessions(this.hostConnections.host(hostId)) === share) return;
-      if (!share) {
-        // Sessions started here are withdrawn, so the other DSH instances stop showing them; this DSH keeps them.
-        await this.hostConnections.backend(hostId).withdrawSharing?.(this.store.tasks(t => t.hostId === hostId && !t.shared?.imported).map(t => t.id));
-        // Copies of sessions other DSH instances started are theirs.
-        for (const task of this.store.tasks(t => t.hostId === hostId && !!t.shared?.imported)) await this.forgetLocal(task.id);
-      }
-      await this.store.update(state => {
-        const host = state.hosts.find(h => h.id === hostId);
-        if (!host) throw new RemoteError('Remote host was removed', 409);
-        if (share) delete host.share; else host.share = false;
-        if (!share) delete state.seenWorkspaces?.[hostId];
-      });
-      // A new backend starts or stops sharing, and reattaches the CLIs the old one released.
-      await this.hostConnections.release(hostId);
-      void this.resume(hostId);
-    });
-    return this.snapshot();
-  }
-  private async forgetLocal(id: string): Promise<void> {
-    return this.serial(id, async () => {
-      const task = this.task(id), backend = this.hostConnections.backend(task.hostId);
-      if (backend.forgetLocal) await backend.forgetLocal(task); else await backend.forget(task);
-      await this.store.update(state => { state.tasks = state.tasks.filter(t => t.id !== id); });
-    });
-  }
-  /** Shared workspaces not yet offered to this DSH. */
-  async sharedWorkspaces(hostId: string): Promise<SharedWorkspace[]> { return this.sharedSync.sharedWorkspaces(hostId); }
-  async seeWorkspaces(hostId: string, paths: string[]): Promise<void> { return this.sharedSync.seeWorkspaces(hostId, paths); }
-  async sharedWorkspaceList(hostId: string, timeout = 3000): Promise<SharedWorkspace[] | undefined> { return this.sharedSync.sharedWorkspaceList(hostId, timeout); }
-  async setWorkspaceTags(hostId: string, path: string, tags: SharedTag[]): Promise<SharedWorkspace> { return this.sharedSync.setWorkspaceTags(hostId, path, tags); }
-  async shareWorkspace(hostId: string, path: string): Promise<void> { return this.sharedSync.shareWorkspace(hostId, path); }
   async connect(hostId: string): Promise<Dashboard> {
     await this.hostConnections.use(hostId, async () => {});
     return this.snapshot();
@@ -362,8 +299,6 @@ export class RemoteAgentsService {
     const task = this.task(id);
     return task.agentId ? this.hostConnections.backend(task.hostId).timeline(task.agentId, cursor, direction) : null;
   }
-  /** Identify the DSH that sent a shared message without opening a connection. */
-  sender(hostId: string, instance: string, label: string): { self: true } | { name: string } { return this.sharedSync.sender(hostId, instance, label); }
   async reply(id: string): Promise<string> {
     const task = this.task(id);
     return task.agentId ? this.hostConnections.backend(task.hostId).reply(task.agentId) : '';

@@ -4,13 +4,9 @@ import { TOOL_STATUS_URL, type TimelineEntry } from '@dsh-plugins/remote-core/do
 const CONTEXT = /^Conversation context \(already occurred; do not repeat completed actions\):\n[\s\S]*?\n\nCurrent user request:\n/;
 const USER_LIMIT = 4000, REPLY_LIMIT = 8000, TOTAL_LIMIT = 60_000;
 
-/** Where turns this conversation did not send came from: another DSH by name, Open sessions in this one, or not recorded. */
-export type TurnSource = { name: string } | { self: true } | undefined;
-
 const LABELS = {
   en: {
-    title: (cli: string, creator: string | undefined, turns: number) => `**History of this ${cli} session**${creator ? ` (started on ${creator})` : ''}, ${turns} ${turns === 1 ? 'turn' : 'turns'}. Messages sent here continue the same session.`,
-    elsewhere: (cli: string, from: TurnSource, turns: number) => `**${turns} ${turns === 1 ? 'turn' : 'turns'} ${from && 'name' in from ? `on ${from.name}` : from ? 'in Open sessions' : 'sent elsewhere'}**, in the same ${cli} session.`,
+    elsewhere: (cli: string, turns: number) => `**${turns} ${turns === 1 ? 'turn' : 'turns'} sent elsewhere**, in the same ${cli} session.`,
     omitted: (turns: number) => `_${turns} earlier ${turns === 1 ? 'turn is' : 'turns are'} not shown. The full record is in Settings → Remote agents → Open sessions._`,
     you: 'You', continued: (cli: string) => `${cli} continued on its own`, tools: 'Tools', interrupted: 'Interrupted', attachments: (n: number) => `${n} ${n === 1 ? 'attachment' : 'attachments'}`,
     switched: (from: string, to: string) => `Switched from ${from} to ${to}`,
@@ -19,8 +15,7 @@ const LABELS = {
     waiting: (cli: string) => `${cli} is running a turn it started itself. Your message is sent when that turn ends. Stop interrupts the turn now.`,
   },
   zh: {
-    title: (cli: string, creator: string | undefined, turns: number) => `**这段 ${cli} 会话的历史记录**${creator ? `（在 ${creator} 上开始）` : ''}，共 ${turns} 轮。在这里发消息会接着同一个会话继续。`,
-    elsewhere: (cli: string, from: TurnSource, turns: number) => `**${from && 'name' in from ? `在 ${from.name} 上` : from ? '在「打开会话」里' : '在别处'}进行的 ${turns} 轮**，同一个 ${cli} 会话。`,
+    elsewhere: (cli: string, turns: number) => `**在别处进行的 ${turns} 轮**，同一个 ${cli} 会话。`,
     omitted: (turns: number) => `_前面还有 ${turns} 轮没有显示，完整记录在「设置 → 远程智能体 → 打开会话」里。_`,
     you: '你', continued: (cli: string) => `${cli} 自行继续`, tools: '工具', interrupted: '已中断', attachments: (n: number) => `${n} 个附件`,
     switched: (from: string, to: string) => `从 ${from} 切换到 ${to}`,
@@ -113,13 +108,12 @@ function stamp(value: string | undefined): string {
 }
 
 /**
- * One markdown block of a remote CLI session's saved history: what the user asked, what the CLI answered, and which
- * tools it used. Latest turns win when the history is long; the full record stays in the sessions panel.
- * With `elsewhere` the entries are turns sent outside this conversation, headed by where they came from.
+ * One markdown block of turns a remote CLI session ran without a message from its conversation: what was asked, what the
+ * CLI answered, and which tools it used. Latest turns win when there are many; the full record stays in the sessions panel.
  * `writing` is what the CLI is still writing at the end, left out for whoever follows the turn: it still names the CLI and sets the language.
  * `language` is what the user wrote in the conversation, which sets the language when these turns hold nothing they wrote.
  */
-export function transcript(entries: readonly TimelineEntry[], options: { cli: string; creator?: string; elsewhere?: { from: TurnSource }; writing?: string; language?: string }): { text: string; lastMessageId?: string } {
+export function transcript(entries: readonly TimelineEntry[], options: { cli: string; writing?: string; language?: string }): { text: string; lastMessageId?: string } {
   const turns: Turn[] = [];
   let turn: Turn | undefined, replying = false, lastMessageId: string | undefined;
   const current = () => turn ??= (turns.push({ attachments: 0, replies: [], tools: new Map(), errors: [], switches: [], interrupted: false }), turns.at(-1)!);
@@ -187,8 +181,7 @@ export function transcript(entries: readonly TimelineEntry[], options: { cli: st
   }
   const omitted = blocks.length - shown.length;
   // Turns the CLI ran by itself need no title: each one's heading says so.
-  const title = !options.elsewhere ? labels.title(options.cli, options.creator, turns.length)
-    : turns.length && turns.every(t => t.unprompted) ? undefined : labels.elsewhere(options.cli, options.elsewhere.from, turns.length);
+  const title = turns.length && turns.every(t => t.unprompted) ? undefined : labels.elsewhere(options.cli, turns.length);
   const text = [...(title ? [title] : []), ...(omitted ? [labels.omitted(omitted)] : []), ...shown].join('\n\n---\n\n');
   return { text, ...(lastMessageId ? { lastMessageId } : {}) };
 }

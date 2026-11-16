@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { connectionInput, type Backend, type BackendFactory } from './backend.js';
 import type { Store } from '../core/store.js';
-import { enabledProvidersOf, field, providerSelection, record, RemoteError, sharesSessions, type Host, type HostConfig } from '@dsh-plugins/remote-core/domain.js';
+import { enabledProvidersOf, field, providerSelection, record, RemoteError, type Host, type HostConfig } from '@dsh-plugins/remote-core/domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
 /** The facade supplies its single queue, shared by host configuration and task mutations. */
@@ -16,7 +16,7 @@ export class HostConnections {
     private readonly store: Store,
     private readonly factory: BackendFactory,
     private readonly serial: Serial,
-    private readonly created: (hostId: string, backend: Backend) => void,
+    private readonly created: (hostId: string, backend: Backend) => void = () => {},
   ) {}
   get stopped(): boolean { return this.closed; }
   /** Observation only: never constructs a backend, even after shutdown. */
@@ -26,9 +26,7 @@ export class HostConnections {
   hosts(): Host[] {
     return this.store.hosts().map(({ password, catalog, ...host }) => {
       const enabled = enabledProvidersOf(host), providers = catalog?.providers.filter(p => enabled.includes(p.id)) ?? [];
-      // An unreachable host already reports its own error.
-      const connection = this.connections.get(host.id), shareError = sharesSessions(host) && connection?.status === 'connected' ? connection.backend.sharingError?.() : undefined;
-      return { ...host, enabledProviders: enabled, share: sharesSessions(host), ...(shareError ? { shareError: this.safeError(shareError) } : {}), status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
+      return { ...host, enabledProviders: enabled, status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
         ...(!enabled.length ? { modelCount: 0 } : {}),
         ...(catalog ? { modelsCheckedAt: catalog.checkedAt, modelCount: providers.filter(p => p.status === 'ready').reduce((n, p) => n + p.models.length, 0),
           providerErrors: providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) };
@@ -72,7 +70,6 @@ export class HostConnections {
             saved.serverId = serverId;
           });
           current.status = 'connected'; current.error = undefined;
-          current.backend.startSharing?.();
         })();
       }
       await current.ready;
@@ -89,6 +86,7 @@ export class HostConnections {
     try {
       if (expectedServerId && host.serverId !== expectedServerId) throw new RemoteError('Agent belongs to a different remote SSH machine', 409);
       void current.backend.cleanup?.();
+      void current.backend.withdrawShared?.();
       return await action(current.backend, host);
     } catch (error) { throw new RemoteError(this.safeError(error), error instanceof RemoteError ? error.status : 502); }
   }

@@ -328,9 +328,6 @@ export const zh: Record<string, string> = {
   "The SSH host returned an unexpected workspace response": "SSH 主机返回了无法识别的工作区响应",
   "This tool requires a DSH conversation workspace": "此工具需要 DSH 对话工作区",
   "Remote workspace action was not approved": "远程工作区操作未获批准",
-  "Invalid sharing setting": "共享设置无效",
-  "Connect to this machine to delete its sessions in every DSH, or remove it from this DSH only.": "需要连上这台机器才能在所有 DSH 中删除它的会话；也可以只从当前 DSH 移除。",
   "default": "默认",
   "Edit": "编辑",
-  "Shared": "已共享"
 };

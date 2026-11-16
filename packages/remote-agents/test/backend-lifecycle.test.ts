@@ -14,7 +14,7 @@ function deferred() {
 }
 /** Real backend/session/link lifecycle; only persistence, SSH and CLI initialization are replaced. */
 function fixture(t: TestContext) {
-  const host: HostConfig = { id: 'host', label: 'Host', connection: 'ssh://host', share: false };
+  const host: HostConfig = { id: 'host', label: 'Host', connection: 'ssh://host' };
   const tasks: Task[] = [], sessions: CliSession[] = [];
   let launches = 0, opens = 0;
   const store = { directory: '/unused', hosts: () => [host], task: (predicate: (task: Task) => boolean) => tasks.find(predicate),

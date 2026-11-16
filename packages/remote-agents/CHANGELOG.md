@@ -4,6 +4,20 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.139 — Sessions are no longer shared between DSH instances
+
+Remote CLI sessions, remote workspaces, workspace tags and read marks are no longer kept alike in every DSH connected to the same machine. Each DSH has the sessions it started. To continue a conversation of one DSH from another computer or a phone, open that DSH itself, for example its web page.
+
+- **What stays.** Sessions this DSH started, their output and their conversations stay as they are and continue as before. A turn Claude runs by itself still shows in its conversation as it goes, and so does output produced while DSH was disconnected.
+- **What goes.** Sessions another DSH started are no longer listed in **Open sessions** here; the DSH that started them still has them. The conversations made here for them stay in the sidebar with what they already show. A message sent in one starts a new CLI session, with the conversation's text as context; one that was never opened here stays empty.
+- **Gone from the interface:** the **Share sessions and workspaces with other DSH instances** switch of a machine, the **In use on …** and **Started on …** labels of a session, the choice between **Remove from this DSH only** and **Delete sessions everywhere** when removing a machine, and the **turns on …** block naming another DSH. Remote workspaces and their tags are no longer added from other DSH instances.
+- **Upgrading one DSH before another.** The first time an upgraded DSH connects to a machine, it marks the sessions it started as withdrawn in the machine's registry, as switching sharing off did. A DSH still on 0.2.138 then drops its copies of them, instead of taking their CLIs over a few minutes later. Upgrade every DSH soon; until then, one still on 0.2.138 keeps showing the sessions it started itself.
+- **One thing to do before upgrading, if it matters to you.** If the last turns of a session this DSH started ran on another DSH, and its conversation was not opened here since, those turns are not in this DSH's record. The CLI itself has them, so continuing is unaffected. Opening the conversation once on 0.2.138 copies them.
+- **Left on disk.** The registry on each machine, `~/.dsh-remote-agents/shared-v1`, is no longer used and is not deleted; remove it once every DSH is upgraded. The saved output of the dropped copies stays in `events/` under the plugin's state directory.
+- **Sharing ordinary DSH conversations by hand is gone too** (**Ordinary DSH conversations** in the settings, off by default). The copies each DSH already has of conversations shared that way stay; an original that was closed for writing needs a model picked again to continue. `~/.dsh-remote-agents/shared-native-v1` on the machines and `native-sharing.json` in the plugin's state directory are no longer used and are not deleted.
+- **TUI conversations** no longer appearing in other DSH instances is a change of [Remote Terminals](../remote-terminals/README.md) 0.1.11; while that plugin is on 0.1.10 they still do.
+- Restart DSH after upgrading.
+
 ## 0.2.138 — "The selected CLI is not ready" now says why
 
 - **The refusal names the cause.** Before a message starts a session, the plugin checks the chosen CLI on that machine. When the check failed, the message only said "The selected CLI is not ready in this remote project" and dropped the reason the check had. It now carries the CLI's own reason, such as how to sign in, or, when the CLI is not installed there, names the command it looked for: "claude was not found on this machine…" (on the PATH a login shell sets).

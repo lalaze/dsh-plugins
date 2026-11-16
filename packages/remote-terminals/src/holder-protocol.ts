@@ -47,8 +47,6 @@ export const tabHolder = (sessionId: string, terminalId: string) => hashed('tab'
 
 /** Under `~` on the SSH host. */
 export const HOLDER_FOLDER = '.dsh-remote-agents/terminal', HOLDERS_FOLDER = '.dsh-remote-agents/terminals-v1';
-/** Under `~` on the SSH host: the TUI conversations every DSH using this account shows, one file each. See tui-shared.ts. */
-export const SHARED_TUI_FOLDER = '.dsh-remote-agents/tui-v1';
 /**
  * Shell that ends a holder and what runs in it. The process is checked first, as a saved process ID may belong to something else after a reboot.
  * Written without the holder's script, so that it works on any holder an older version of the plugin started.

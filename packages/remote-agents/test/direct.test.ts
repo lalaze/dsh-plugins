@@ -1196,7 +1196,7 @@ test('a turn Claude starts by itself after a background task is saved as its own
   const { service, ssh, request, backend } = await fixture(t, 'claude');
   const announced: string[] = [];
   const agent = await service.create(request); await tick();
-  backend().onSharedHistory(id => announced.push(id));
+  backend().onOwnTurn(id => announced.push(id));
   ssh.live.finish(); await tick();
   const live = ssh.live;
   // A notice during a turn is that turn's own business, and a result without output is not a turn.

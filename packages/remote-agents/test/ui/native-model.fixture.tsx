@@ -36,6 +36,8 @@ export async function nativeModelFixture(modelDirectories = { directoryFor: (_id
     // Declared by ui-workspace's picker and browser entries.
     'conversation.hero.workspace.directoryFlow': { kind: 'single', scope: 'root' },
     'sidebar.workspaces.directoryFlow': { kind: 'single', scope: 'root' },
+    // DSH 0.2.2-rc.3's Import folder dialog.
+    'workspace.picker.directoryFlow': { kind: 'single', scope: 'root' },
   } }, () => null);
   let dictionary: Record<string, string> = {};
   const t = (key: string, params?: Record<string, unknown>) => (dictionary[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(params?.[name] ?? ''));

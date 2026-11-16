@@ -22,15 +22,13 @@ import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDire
 import { symbols } from '@deepseek-ai/cordis';
 import { WorkspacePanel } from './workspace/panel.js';
 import { installWorkspaceSidebar } from './workspace/sidebar.js';
-import { installReadSync } from './sessions/read-sync.js';
-import { installWorkspaceImport, type WorkspaceList } from './workspace/import.js';
 
 export interface Client extends LocaleContext {
   effect(factory: () => () => void): void;
   inject?(services: string[], factory: (scoped: Client) => void): unknown;
   slots: { inject(name: string, factory: () => void): unknown; register(spec: Record<string, unknown>, component: React.FC<any>): unknown } & Partial<Pick<CatalogSlots<React.ComponentType<any>>, 'entries' | 'subscribe'>>;
 }
-function Settings({ openSessions, openWorkspace, sessionId, sessionTitle, openChat }: { openSessions: () => void; openWorkspace: () => void; sessionId?: string; sessionTitle?: string; openChat: (id: string) => void }) {
+function Settings({ openSessions, openWorkspace }: { openSessions: () => void; openWorkspace: () => void }) {
   useLocale();
   const [dashboard, setDashboard] = useState<Dashboard | null>(null), [error, setError] = useState(''), [revision, setRevision] = useState(0);
   useEffect(() => {
@@ -44,7 +42,7 @@ function Settings({ openSessions, openWorkspace, sessionId, sessionTitle, openCh
     <div className="ra-settings-heading"><h2>{ui('Remote agents')}</h2><div className="ra-actions"><button data-open-sessions onClick={openSessions}>{ui('Open sessions')}</button><button data-open-workspace onClick={openWorkspace}>{ui('Remote workspace')}</button></div></div>
     <p className="ra-muted ra-intro">{ui('Select remote CLIs in the DSH model picker and chat in the main conversation.')}</p>
     <p className="ra-muted ra-intro">{ui('Remote models are only available in workspaces belonging to the same machine.')}</p>
-    {dashboard ? <><HostManager dashboard={dashboard} update={setDashboard} /><SharingSettings dashboard={dashboard} sessionId={sessionId} sessionTitle={sessionTitle} openChat={openChat} /></>
+    {dashboard ? <><HostManager dashboard={dashboard} update={setDashboard} /><SharingSettings dashboard={dashboard} /></>
       : error ? <div className="ra-banner" data-tone="error" role="alert">{localizeError(error)}<button type="button" onClick={() => setRevision(value => value + 1)}>{ui('Retry')}</button></div>
       : <div className="ra-empty" role="status">{ui('Loading settings…')}</div>}
   </section>;
@@ -76,13 +74,13 @@ export function apply(ctx: Client): void {
       if (!navigation?.openSession) throw new Error('Open this conversation from the DSH sidebar.');
       navigation.openSession(id); setVisible(false);
     };
-    const sessions = (ctx.get as ((name: string) => unknown) | undefined)?.('sessions') as { list?: { getSnapshot(): { byId?: Record<string, { cwd?: string; title?: string; retainedBy?: Record<string, number> }> }; subscribe(listener: () => void): () => void } } | undefined;
+    const sessions = (ctx.get as ((name: string) => unknown) | undefined)?.('sessions') as { list?: { getSnapshot(): { byId?: Record<string, { cwd?: string; retainedBy?: Record<string, number> }> }; subscribe(listener: () => void): () => void } } | undefined;
     const active = useSyncExternalStore(useCallback(listener => sessions?.list?.subscribe(listener) ?? (() => {}), [sessions]), () => {
       const entry = Object.entries(sessions?.list?.getSnapshot()?.byId ?? {}).find(([, s]) => (s.retainedBy?.mainView ?? 0) > 0);
-      return JSON.stringify(entry ? [entry[0], entry[1].cwd, entry[1].title] : []);
+      return JSON.stringify(entry ? [entry[0], entry[1].cwd] : []);
     });
-    const [sessionId, cwd, sessionTitle] = JSON.parse(active) as [string?, string?, string?];
-    return <><Settings openSessions={() => { setWorkspace(false); setVisible(true); }} openWorkspace={() => { setWorkspace(true); setVisible(true); }} sessionId={sessionId} sessionTitle={sessionTitle} openChat={openChat} />{visible && <SessionDialog close={() => setVisible(false)} openChat={openChat} sessionId={sessionId} cwd={cwd} workspace={workspace} />}</>;
+    const [sessionId, cwd] = JSON.parse(active) as [string?, string?];
+    return <><Settings openSessions={() => { setWorkspace(false); setVisible(true); }} openWorkspace={() => { setWorkspace(true); setVisible(true); }} />{visible && <SessionDialog close={() => setVisible(false)} openChat={openChat} sessionId={sessionId} cwd={cwd} workspace={workspace} />}</>;
   };
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: 'remote-agents', order: 74, label: () => ui('Remote agents') }, Surface));
   // A native label contribution is a fallback; another plugin may already own priority 0.
@@ -92,7 +90,6 @@ export function apply(ctx: Client): void {
   ctx.effect(installToolStatusStyles);
   ctx.effect(installLiveImages);
   installWorkspaceSidebar(ctx);
-  installReadSync(ctx);
   ctx.inject?.(['modelDirectories'], scoped => scoped.effect(() => {
     // Read through the service itself: this plugin's proxy would resolve dependencies from our context.
     const service = (scoped as unknown as { modelDirectories: ModelDirectories }).modelDirectories;
@@ -103,8 +100,6 @@ export function apply(ctx: Client): void {
   // Codex's Fast switch sits after the permission control, before the translate button (order 60).
   ctx.slots.inject('conversation.input.left', () => ctx.slots.register({ name: 'conversation.input.left', id: 'remote-agents-fast', order: 10 }, FastToggle));
   ctx.inject?.(['modelDirectories', 'sessions', 'workspaces'], scoped => installWorkspaceModels(scoped as unknown as WorkspaceClient));
-  // Remote workspaces other DSH instances added on shared machines appear in the sidebar.
-  ctx.inject?.(['workspaces'], scoped => scoped.effect(() => installWorkspaceImport(scoped as unknown as WorkspaceList)));
   // Add workspace gains a Remote machine tab. Ahead of DSH's own picker (0), behind dsh-remote's (-100) when both are installed.
   const Flow = workspaceFlow(() => (ctx.get as ((name: string) => unknown) | undefined)?.('uiWorkspace') as LocalDirectories | undefined);
   // Each hole on its own: a DSH without one of them (before 0.2.2-rc.3 there is no Factory hole) still gets the others.

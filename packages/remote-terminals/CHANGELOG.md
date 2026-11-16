@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.11 — TUI conversations no longer appear in other DSH instances
+
+- A TUI conversation stays in the DSH that started it, and is no longer listed on the machine for other DSH instances to show. To use it from another computer or a phone, open that DSH itself, for example its web page. A conversation open on two devices at once still shares one terminal, whose screen follows the device you are using.
+- TUI conversations brought over from another DSH earlier stay and still open the same terminal; their titles and archiving no longer follow the other DSH.
+- `~/.dsh-remote-agents/tui-v1/` on each machine is no longer used and is not deleted; remove it by hand if you like. A DSH still on 0.1.10 keeps listing its own TUI conversations there, which an upgraded DSH does not read.
+- It can be upgraded on its own, whatever the Remote Agents version. Restart DSH after upgrading.
+
 ## 0.1.10 — A TUI open on two devices fits the one you turn to, and text no longer comes out too large in device mode
 
 - A TUI conversation open on two devices, such as a computer and a phone, shares one screen with one size: that of the device that typed last. Until you typed on the other one it stayed in the wrong size, so a computer showed the conversation in a narrow column, and a phone a screen laid out for a wide window.

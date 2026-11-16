@@ -23,10 +23,10 @@ function HostProviders({ host, busy, apply }: { host: Host; busy: boolean; apply
 
 type Run = (key: string, action: () => Promise<void>) => void;
 
-/** One saved machine: a compact header always shown, its sharing and CLI settings behind a disclosure. */
+/** One saved machine: a compact header always shown, its CLI settings behind a disclosure. */
 function HostRow({ host, agents, busy, run, update, removing, setRemoving, remove }: {
   host: Host; agents: number; busy: string; run: Run; update(next: Dashboard): void;
-  removing: string; setRemoving(id: string): void; remove(hostId: string, deleteAgents?: boolean, everywhere?: boolean): void;
+  removing: string; setRemoving(id: string): void; remove(hostId: string, deleteAgents?: boolean): void;
 }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
@@ -36,7 +36,7 @@ function HostRow({ host, agents, busy, run, update, removing, setRemoving, remov
     <div className="ra-host-top">
       <button type="button" className="ra-host-expand" aria-expanded={open} aria-controls={bodyId} aria-label={ui(open ? 'Hide machine settings' : 'Show machine settings')} onClick={() => setOpen(value => !value)}><Chevron open={open} /></button>
       <div className="ra-host-name">
-        <div className="ra-host-title"><strong>{host.label}</strong><span className="ra-mono ra-muted">{host.connection}</span><span className="ra-badge" data-status={host.status}>{ui(host.status)}</span>{host.share && <span className="ra-badge ra-share-badge">{ui('Shared')}</span>}</div>
+        <div className="ra-host-title"><strong>{host.label}</strong><span className="ra-mono ra-muted">{host.connection}</span><span className="ra-badge" data-status={host.status}>{ui(host.status)}</span></div>
         <span className="ra-muted">{host.modelCount === undefined ? ui('Models have not been detected yet.') : ui('{count} models in the DSH picker', { count: host.modelCount })}{!open && ` · ${enabled.length ? ui('CLIs: {list}', { list: cliList }) : ui('No CLIs enabled')}`}</span>
         {host.modelCount === 0 && <span className="ra-muted">{ui(enabled.length ? 'Install and sign in to a CLI on this machine, then refresh models.' : 'No CLIs enabled. Select the ones you want to use.')}</span>}
         {(host.modelError || host.error) && <span className="ra-host-error">{localizeError(host.modelError ?? host.error ?? '')}</span>}
@@ -49,19 +49,11 @@ function HostRow({ host, agents, busy, run, update, removing, setRemoving, remov
       </>}</ActionsMenu>
     </div>
     {removing === host.id && <div className="ra-banner ra-remove-confirm" role="alert">
-      {host.share ? <><span>{ui('Remove {host} from this DSH? Its {count} sessions can stay on the machine for the other DSH instances, with their CLIs running, or be deleted in every DSH, which stops their CLIs.', { host: host.label, count: agents })}</span>
-        <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
-          <button type="button" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove from this DSH only')}</button>
-          <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true, true)}>{ui('Delete sessions everywhere')}</button></div></>
-      : <><span>{ui('Remove {host} and permanently delete its {count} saved sessions, including archived sessions, and their output? Attached CLI processes will be stopped.', { host: host.label, count: agents })}</span>
-        <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
-          <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove host and sessions')}</button></div></>}
+      <span>{ui('Remove {host} and permanently delete its {count} saved sessions, including archived sessions, and their output? Attached CLI processes will be stopped.', { host: host.label, count: agents })}</span>
+      <div className="ra-actions"><button type="button" disabled={!!busy} onClick={() => setRemoving('')}>{ui('Cancel')}</button>
+        <button type="button" className="ra-danger" disabled={!!busy} onClick={() => remove(host.id, true)}>{ui('Remove host and sessions')}</button></div>
     </div>}
     {open && <div className="ra-host-settings" id={bodyId}>
-      <div className="ra-share-setting"><label title={ui(host.share ? 'Every DSH connected to this SSH account sees its history, running tasks and remote workspaces, and can continue them.' : 'Sessions started here stay in this DSH, and sessions from other DSH instances are not shown.')}><input type="checkbox" checked={host.share} disabled={!!busy} onChange={event => { const share = event.target.checked; void run(`share:${host.id}`, async () => update(await api<Dashboard>('setHostSharing', { hostId: host.id, share }))); }} />
-        <span>{ui('Share sessions and workspaces with other DSH instances')}</span></label>
-        {host.share && host.shareError && <span className="ra-host-error">{localizeError(host.shareError)}</span>}
-      </div>
       <HostProviders key={enabled.join(',')} host={host} busy={!!busy} apply={providers => void run(`providers:${host.id}`, async () => update(await api<Dashboard>('setHostProviders', { hostId: host.id, providers })))} />
     </div>}
   </li>;
@@ -80,8 +72,8 @@ export function HostManager({ dashboard, update }: { dashboard: Dashboard; updat
     setBusy(key); setError('');
     try { await action(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setBusy(''); }
   };
-  const remove = (hostId: string, deleteAgents = false, everywhere = false) => void run(`remove:${hostId}`, async () => {
-    update(await api<Dashboard>('removeHost', { hostId, deleteAgents, everywhere })); setRemoving('');
+  const remove = (hostId: string, deleteAgents = false) => void run(`remove:${hostId}`, async () => {
+    update(await api<Dashboard>('removeHost', { hostId, deleteAgents })); setRemoving('');
   });
   return <div className="ra-page ra-hosts">
     <h2>{ui('Hosts')}</h2>

@@ -9,10 +9,6 @@ export class TaskHistory {
   private failure?: unknown;
   /** Raised when entries are replaced, so readers holding cursors start over. */
   private generation = 0;
-  /** Called after entries written here are saved; a shared host copies them to its registry. Not called for imports. */
-  onAppend?: () => void;
-  /** Entries handed to `appendBatch` whose write has not finished. */
-  private writing = 0;
   constructor(private readonly directory: string, private readonly taskId: string) {}
   get epoch(): string { return `task-${this.taskId}${this.generation ? `-${this.generation}` : ''}`; }
   private get file(): string { return join(this.directory, 'events', `${this.taskId}.jsonl`); }
@@ -38,25 +34,18 @@ export class TaskHistory {
    */
   appendBatch(items: { item: TimelineEntry['item']; turnId?: string }[], relay?: RelayPosition, before?: () => Promise<void>): Promise<void> {
     const saved = structuredClone(items), position = relay && structuredClone(relay);
-    let pending = saved.length; this.writing += pending;
-    const done = () => { this.writing -= pending; pending = 0; };
     const next = this.queue.then(async () => {
-      try {
-        if (this.failure) throw this.failure;
-        if (!saved.length) return;
-        await before?.();
-        const timestamp = new Date().toISOString();
-        const entries = saved.map(({ item, turnId }, index): TimelineEntry => ({ seqStart: this.entries.length + index + 1, seqEnd: this.entries.length + index + 1, timestamp, item, ...(turnId ? { turnId } : {}), ...(position ? { relay: position } : {}) }));
-        await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
-        await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
-        this.entries.push(...entries); done();
-        try { this.onAppend?.(); } catch { /* Copying is retried by its owner. */ }
-      } finally { done(); }
+      if (this.failure) throw this.failure;
+      if (!saved.length) return;
+      await before?.();
+      const timestamp = new Date().toISOString();
+      const entries = saved.map(({ item, turnId }, index): TimelineEntry => ({ seqStart: this.entries.length + index + 1, seqEnd: this.entries.length + index + 1, timestamp, item, ...(turnId ? { turnId } : {}), ...(position ? { relay: position } : {}) }));
+      await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
+      await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
+      this.entries.push(...entries);
     });
     this.queue = next.catch(error => { this.failure = error; }); return next;
   }
-  /** Number of entries recorded so far, counting those whose write is still queued. */
-  get recorded(): number { return this.entries.length + this.writing; }
   /** Number of saved entries, once queued writes finished. */
   async length(): Promise<number> { await this.queue; return this.entries.length; }
   /** Entries `from`…`to` (1-based, inclusive) as saved lines. */
@@ -64,24 +53,7 @@ export class TaskHistory {
     await this.queue;
     return this.entries.slice(Math.max(0, from - 1), Math.min(this.entries.length, to)).map(e => JSON.stringify(e));
   }
-  /** Append entries another DSH recorded. They must continue this history's sequence. */
-  importLines(lines: string[]): Promise<void> {
-    const next = this.queue.then(async () => {
-      if (this.failure) throw this.failure;
-      const entries = lines.map((line, index) => {
-        let entry: TimelineEntry;
-        try { entry = JSON.parse(line); } catch { throw new Error('A shared history entry is damaged'); }
-        if (entry?.seqStart !== this.entries.length + index + 1 || entry.seqEnd !== entry.seqStart || typeof entry.item?.type !== 'string') throw new Error('A shared history entry is out of sequence');
-        return entry;
-      });
-      if (!entries.length) return;
-      await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
-      await appendFile(this.file, entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
-      this.entries.push(...entries);
-    });
-    this.queue = next.catch(error => { this.failure = error; }); return next;
-  }
-  /** Keep only the first `seq` entries: what this DSH recorded after losing a shared session is replaced by the shared history. */
+  /** Keep only the first `seq` entries. */
   truncate(seq: number): Promise<void> {
     const next = this.queue.then(async () => {
       if (this.failure) throw this.failure;

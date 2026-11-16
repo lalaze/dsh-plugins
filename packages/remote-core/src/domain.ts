@@ -11,15 +11,9 @@ export interface Host {
   modelsCheckedAt?: string;
   providerErrors?: { label: string; error: string }[];
   enabledProviders?: string[];
-  /** Sessions and workspaces are shared with every DSH connected to this SSH account. On unless switched off. */
-  share: boolean;
-  /** Why the shared session registry is unavailable, while sharing is on. */
-  shareError?: string;
 }
 export interface HostCatalog { cwd: string; providers: Provider[]; checkedAt: string }
-/** `share: false` keeps this host's sessions to this DSH; any other value shares them. */
-export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string; catalog?: HostCatalog; modelError?: string; enabledProviders?: string[]; share?: boolean }
-export const sharesSessions = (host: Pick<HostConfig, 'share'>): boolean => host.share !== false;
+export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string; catalog?: HostCatalog; modelError?: string; enabledProviders?: string[] }
 export interface SshConfigHost { alias: string; connection: string }
 export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }
@@ -45,11 +39,6 @@ const PRESET_MODES: Readonly<Record<string, Readonly<Record<DshPermission, strin
   claude: { 'read-only': 'default', 'workspace-write': 'acceptEdits', 'danger-full-access': 'bypassPermissions', auto: 'auto' },
   codex: { 'read-only': 'read-only', 'workspace-write': 'workspace-write', 'danger-full-access': 'full-access', auto: 'auto-review' },
 };
-/** The DSH permission matching a CLI mode, for a conversation that continues a session started elsewhere. */
-export function modePermission(provider: string, modeId: string | undefined): DshPermission | undefined {
-  const modes = PRESET_MODES[provider];
-  return modes && modeId ? (Object.keys(modes) as DshPermission[]).find(permission => modes[permission] === modeId) : undefined;
-}
 /** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
 export function presetMode(provider: string, modes: Choice[], permission: DshPermission | undefined): string | undefined {
   const mode = permission && PRESET_MODES[provider]?.[permission];
@@ -188,9 +177,7 @@ export interface Task extends TaskInput {
   /** Native DSH conversation binding, independent of background delegation. */
   chat?: { sessionId: string; route: string; receiptRoute?: string; lastUserId?: string;
     /** How much of a message's output reached the DSH conversation; the rest is shown with the next response. */
-    delivered?: { messageId: string; cursor: Cursor | null; done?: true };
-    /** A session another DSH started, continued here: its saved history is the conversation's first response. */
-    history?: 'pending' };
+    delivered?: { messageId: string; cursor: Cursor | null; done?: true } };
   serverId: string;
   title: string;
   createdAt: string;
@@ -217,8 +204,6 @@ export interface Task extends TaskInput {
   tokenUsage?: TokenUsage;
   /** Codex's running thread totals when the turn began, so a DSH reattaching during that turn still counts all of it. */
   codexTurnStart?: { turnId: string; total?: Record<string, number> };
-  /** The shared record revision this copy matches. `imported` copies were started by another DSH, named by `creator`. */
-  shared?: { rev: number; creator?: string; imported?: true };
   state: 'creating' | 'ready' | 'uncertain';
   error?: string;
 }
@@ -269,10 +254,6 @@ export interface AgentSummary {
   nativeSessionId?: string;
   persistent?: boolean;
   reconnecting?: boolean;
-  /** The DSH that started a shared session, when it was another one. */
-  creator?: string;
-  /** Another DSH drives this shared session's CLI; sending, answering or stopping here takes it over. */
-  controller?: string;
 }
 export interface AgentState { agent: AgentSummary; permissions: Permission[] }
 export interface AgentDetail extends AgentState { timeline: TimelinePage | null }
@@ -281,13 +262,6 @@ export interface Dashboard { hosts: Host[]; agents: AgentSummary[] }
 export interface DirectoryListing { path: string; home: string; entries: { name: string; path: string }[]; truncated: boolean }
 /** A remote directory adopted as a DSH workspace through its local anchor folder. */
 export interface RemoteWorkspace { hostId: string; path: string; remotePath: string }
-/** A remote workspace a DSH added on a machine whose sessions are shared, by that DSH's name. */
-export interface SharedWorkspace {
-  path: string; by?: string; at?: string;
-  /** Its Workspace Tags, by name, as the DSH that changed them last (`tagsBy`) left them, at `tagsAt` on the host's clock. */
-  tags?: SharedTag[]; tagsAt?: string; tagsBy?: string;
-}
-export interface SharedTag { name: string; color: string }
 export const busy =(agent: Pick<AgentSummary, 'status'>) => agent.status === 'starting' || agent.status === 'running' || agent.status === 'attention';
 
 /**

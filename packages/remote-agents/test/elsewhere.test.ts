@@ -14,9 +14,8 @@ const user = (text: string) => createUserMessage({ content: [{ type: 'text', tex
 const collect = async (stream: AsyncIterable<StreamChunk>) => { const chunks: StreamChunk[] = []; for await (const chunk of stream) chunks.push(chunk); return chunks; };
 const text = (chunks: StreamChunk[]) => chunks.filter(c => c.type === 'text-delta').map(c => c.text).join('');
 const entry = (seq: number, item: TimelineEntry['item']): TimelineEntry => ({ seqStart: seq, seqEnd: seq, timestamp: '2026-11-03T10:03:36.000Z', item });
-const MAC_MINI = { instance: 'dsh-mac-mini', label: 'Mac mini' };
 
-/** A conversation on this DSH that ran one turn in a CLI session another DSH also drives. */
+/** A conversation that ran one turn in a CLI session, which then runs turns the conversation did not send. */
 async function setup(t: TestContext, first = '修复登录问题', lapseMs?: number) {
   const base = await fixture(t), projects = new ChatProjects(base.service);
   await base.service.discoverHost(base.hostId); const [project] = projects.hosts();
@@ -31,9 +30,9 @@ async function setup(t: TestContext, first = '修复登录问题', lapseMs?: num
   messages.push(createAssistantMessage({ source: { provider: CODEX_PROVIDER, model: route }, content: [{ type: 'text', text: text(await collect(adapter.stream(request(messages)))) }] }));
   function request(messages: Message[]): GenerateOptions { return { provider: CODEX_PROVIDER, model: route, sessionId: SessionId(sessionId), messages }; }
   const task = () => base.store.snapshot().tasks[0], agentId = task().agentId!;
-  /** A turn another DSH, or Open sessions, ran in the same CLI session. */
-  const elsewhere = (id: string, prompt: string, reply: string, sentBy?: { instance: string; label: string }, done = true) => {
-    base.remote.append(agentId, { type: 'user_message', text: prompt, clientMessageId: id, ...(sentBy ? { sentBy } : {}) });
+  /** A turn something other than this conversation sent in the same CLI session, such as a DSH agent's `remote_agent_send`. */
+  const elsewhere = (id: string, prompt: string, reply: string, done = true) => {
+    base.remote.append(agentId, { type: 'user_message', text: prompt, clientMessageId: id });
     base.remote.append(agentId, { type: 'assistant_message', text: reply });
     base.remote.append(agentId, { type: 'tool_call', callId: `${id}-tool`, name: 'Bash', status: 'completed' });
     if (done) base.remote.append(agentId, { type: 'turn_end', clientMessageId: id, status: 'completed' });
@@ -50,17 +49,17 @@ async function setup(t: TestContext, first = '修复登录问题', lapseMs?: num
 }
 const prompts = (entries: TimelineEntry[] | undefined) => (entries ?? []).filter(e => e.item.type === 'user_message').map(e => e.item.text);
 
-test('a turn another DSH ran in the same CLI session shows here once it ends, and nothing is sent to the CLI', async t => {
+test('a turn sent elsewhere in the same CLI session shows here once it ends, and nothing is sent to the CLI', async t => {
   const { adapter, remote, task, agentId, elsewhere, agent, sent, answer } = await setup(t);
-  elsewhere('phone-1', '提交发布', '已发布 0.2.1。', MAC_MINI);
+  elsewhere('phone-1', '提交发布', '已发布 0.2.1。');
   assert.equal(await adapter.catchUp(agent), true);
   assert.equal(await adapter.catchUp(agent), false, 'woken once');
   const [notice] = sent;
   assert.equal(notice.source?.kind, SYNC_SOURCE);
-  assert.equal((notice.source as { summary?: string }).summary, 'Codex turn on Mac mini');
+  assert.equal((notice.source as { summary?: string }).summary, 'Codex turn sent elsewhere');
 
   const sends = remote.sends, shown = await answer(notice);
-  assert.match(shown, /^\*\*在 Mac mini 上进行的 1 轮\*\*，同一个 Codex 会话。/);
+  assert.match(shown, /^\*\*在别处进行的 1 轮\*\*，同一个 Codex 会话。/);
   assert.match(shown, /提交发布[\s\S]*已发布 0\.2\.1。[\s\S]*工具: Bash/);
   assert.doesNotMatch(shown, /修复登录问题|找到问题了/, 'what this conversation already shows is not repeated');
   assert.equal(remote.sends, sends, 'showing it sends nothing');
@@ -72,15 +71,15 @@ test('a turn another DSH ran in the same CLI session shows here once it ends, an
   assert.deepEqual(prompts(remote.entries.get(agentId)), ['修复登录问题', '提交发布', '再跑一遍测试']);
 });
 
-test('a turn another DSH is running shows here as it goes, after the turns that ended before it', async t => {
+test('a turn running elsewhere shows here as it goes, after the turns that ended before it', async t => {
   const { adapter, remote, task, agentId, elsewhere, agent, sent, messages, request } = await setup(t);
   const live = remote.live(task().id);
-  elsewhere('phone-0', '先跑测试', '测试通过。', MAC_MINI);
+  elsewhere('phone-0', '先跑测试', '测试通过。');
   live.status = 'running';
-  elsewhere('phone-1', '提交发布', '正在构建。', MAC_MINI, false);
+  elsewhere('phone-1', '提交发布', '正在构建。', false);
   assert.equal(await adapter.catchUp(agent), true);
   assert.equal(await adapter.catchUp(agent), false, 'woken once');
-  assert.equal((sent[0].source as { summary?: string }).summary, 'Codex turns on Mac mini');
+  assert.equal((sent[0].source as { summary?: string }).summary, 'Codex turns sent elsewhere');
 
   const sends = remote.sends;
   let shown = '', whileRunning = false;
@@ -98,18 +97,18 @@ test('a turn another DSH is running shows here as it goes, after the turns that 
     }
   }
   assert.ok(whileRunning);
-  assert.match(shown, /^\*\*在 Mac mini 上进行的 2 轮\*\*[\s\S]*测试通过。[\s\S]*提交发布[\s\S]*正在构建。[\s\S]*\n\n---\n\n已发布 0\.2\.1。$/);
+  assert.match(shown, /^\*\*在别处进行的 2 轮\*\*[\s\S]*测试通过。[\s\S]*提交发布[\s\S]*正在构建。[\s\S]*\n\n---\n\n已发布 0\.2\.1。$/);
   assert.equal(shown.match(/正在构建/g)?.length, 1, 'output already shown is not repeated');
   assert.equal(remote.sends, sends, 'showing it sends nothing');
   assert.deepEqual(task().chat?.delivered, { messageId: 'phone-1', cursor: null, done: true });
   assert.equal(await adapter.catchUp(agent), false, 'nothing is left to show');
 });
 
-test('a running turn shown here outlasts a moment when the other DSH reports nothing, and ends by its record', async t => {
+test('a running turn shown here outlasts a moment when its CLI reports nothing, and ends by its record', async t => {
   const { adapter, remote, task, agentId, elsewhere, agent, sent, answer } = await setup(t);
   const live = remote.live(task().id);
   live.status = 'running';
-  elsewhere('phone-1', '提交发布', '正在构建。', MAC_MINI, false);
+  elsewhere('phone-1', '提交发布', '正在构建。', false);
   assert.equal(await adapter.catchUp(agent), true);
   setTimeout(() => { live.status = 'idle'; }, 30);
   setTimeout(() => {
@@ -119,15 +118,15 @@ test('a running turn shown here outlasts a moment when the other DSH reports not
   assert.match(await answer(sent[0]), /正在构建。[\s\S]*已发布 0\.2\.1。$/);
 });
 
-test('a running turn shown here lasts through silence and the lapse after it, as when the DSH running it goes away', async t => {
+test('a running turn shown here lasts through silence and the lapse after it', async t => {
   const { adapter, remote, task, agentId, elsewhere, agent, sent, answer } = await setup(t, undefined, 200);
   const live = remote.live(task().id);
   live.status = 'running';
-  elsewhere('phone-1', '提交发布', '正在构建。', MAC_MINI, false);
+  elsewhere('phone-1', '提交发布', '正在构建。', false);
   assert.equal(await adapter.catchUp(agent), true);
-  // Its status holds until its lease expires, here after longer than the limit, with nothing recorded meanwhile.
+  // Its status holds for longer than the limit, with nothing recorded meanwhile.
   setTimeout(() => { live.status = 'idle'; }, 300);
-  // Then another DSH takes the CLI over and the relay replays what it missed.
+  // Then what it wrote meanwhile is recorded.
   setTimeout(() => {
     remote.append(agentId, { type: 'assistant_message', text: '已发布 0.2.1。' });
     remote.append(agentId, { type: 'turn_end', clientMessageId: 'phone-1', status: 'completed' });
@@ -136,14 +135,14 @@ test('a running turn shown here lasts through silence and the lapse after it, as
   assert.deepEqual(task().chat?.delivered, { messageId: 'phone-1', cursor: null, done: true });
 });
 
-test('a running turn nobody takes over ends here without being marked shown, and what follows still appears', async t => {
+test('a running turn that stops reporting ends here without being marked shown, and what follows still appears', async t => {
   const { adapter, remote, task, agentId, elsewhere, agent, sent, answer } = await setup(t, undefined, 40);
   const live = remote.live(task().id);
   live.status = 'running';
-  elsewhere('phone-1', '提交发布', '正在构建。', MAC_MINI, false);
+  elsewhere('phone-1', '提交发布', '正在构建。', false);
   assert.equal(await adapter.catchUp(agent), true);
   setTimeout(() => { live.status = 'idle'; }, 30);
-  assert.match(await answer(sent[0]), /正在构建。\n\n_工具: Bash_[\s\S]*The DSH running this turn went away\. Any further output appears here later\.$/);
+  assert.match(await answer(sent[0]), /正在构建。\n\n_工具: Bash_[\s\S]*The end of this turn was not recorded\. Any further output appears here later\.$/);
   const delivered = task().chat?.delivered;
   assert.equal(delivered?.messageId, 'phone-1');
   assert.ok(!delivered?.done, 'the turn has not ended');
@@ -158,11 +157,11 @@ test('a running turn nobody takes over ends here without being marked shown, and
   assert.equal(task().chat?.delivered?.done, true);
 });
 
-test('Stop here stops a turn another DSH is running that this conversation shows', async t => {
+test('Stop here stops a turn running elsewhere that this conversation shows', async t => {
   const { adapter, remote, task, elsewhere, agent, sent, messages, request } = await setup(t);
   const live = remote.live(task().id);
   live.status = 'running';
-  elsewhere('phone-1', '提交发布', '正在构建。', MAC_MINI, false);
+  elsewhere('phone-1', '提交发布', '正在构建。', false);
   assert.equal(await adapter.catchUp(agent), true);
   const controller = new AbortController(), stopped = assert.rejects(collect(adapter.stream({ ...request([...messages, sent[0]]), signal: controller.signal })), /abort/i);
   await new Promise(resolve => setTimeout(resolve, 30));
@@ -170,9 +169,9 @@ test('Stop here stops a turn another DSH is running that this conversation shows
   assert.equal(remote.stops, 1);
 });
 
-test('a turn without a recorded end waits, even while the DSH running it has not reported it busy yet', async t => {
+test('a turn without a recorded end waits while its CLI does not report it busy', async t => {
   const { adapter, remote, agentId, elsewhere, agent } = await setup(t);
-  elsewhere('phone-1', '提交发布', '已发布 0.2.1。', MAC_MINI, false);
+  elsewhere('phone-1', '提交发布', '已发布 0.2.1。', false);
   assert.equal(await adapter.catchUp(agent), false);
   // One that never ends, as when its CLI vanished, is shown once it has been quiet for a while.
   for (const saved of remote.entries.get(agentId)!) saved.timestamp = new Date(Date.now() - 61_000).toISOString();
@@ -181,58 +180,43 @@ test('a turn without a recorded end waits, even while the DSH running it has not
 
 test('turns that ended are shown even when another one has started since', async t => {
   const { adapter, elsewhere, agent, sent, answer, task } = await setup(t);
-  elsewhere('phone-1', '提交发布', '已发布 0.2.1。', MAC_MINI);
+  elsewhere('phone-1', '提交发布', '已发布 0.2.1。');
   assert.equal(await adapter.catchUp(agent), true);
-  // The phone sends again before this DSH answers the notice.
-  elsewhere('phone-2', '再检查一下市场', '正在看…', MAC_MINI, false);
+  // Another message is sent before the notice is answered.
+  elsewhere('phone-2', '再检查一下市场', '正在看…', false);
   const shown = await answer(sent[0]);
-  assert.match(shown, /^\*\*在 Mac mini 上进行的 1 轮\*\*[\s\S]*已发布 0\.2\.1。/);
+  assert.match(shown, /^\*\*在别处进行的 1 轮\*\*[\s\S]*已发布 0\.2\.1。/);
   assert.doesNotMatch(shown, /再检查一下市场/, 'the running turn waits');
   assert.equal(task().chat?.delivered?.messageId, 'phone-1');
 });
 
-test('turns another DSH ran come first in the reply to the next message sent here', async t => {
+test('turns sent elsewhere come first in the reply to the next message sent here', async t => {
   const { remote, agentId, elsewhere, answer, task } = await setup(t);
-  elsewhere('phone-1', '提交发布', '已发布 0.2.1。', MAC_MINI);
-  elsewhere('phone-2', '再检查一下市场', '市场上是 0.2.1。', MAC_MINI);
+  elsewhere('phone-1', '提交发布', '已发布 0.2.1。');
+  elsewhere('phone-2', '再检查一下市场', '市场上是 0.2.1。');
   const reply = await answer(user('好的，继续'));
-  assert.match(reply, /^\*\*在 Mac mini 上进行的 2 轮\*\*[\s\S]*提交发布[\s\S]*再检查一下市场[\s\S]*市场上是 0\.2\.1。[\s\S]*\n\n---\n\nFollow-up completed\.$/);
+  assert.match(reply, /^\*\*在别处进行的 2 轮\*\*[\s\S]*提交发布[\s\S]*再检查一下市场[\s\S]*市场上是 0\.2\.1。[\s\S]*\n\n---\n\nFollow-up completed\.$/);
   assert.deepEqual(prompts(remote.entries.get(agentId)), ['修复登录问题', '提交发布', '再检查一下市场', '好的，继续'], 'the turns shown are not sent again');
   assert.equal(task().chat?.delivered?.done, true);
   assert.equal(await answer(user('再来')), 'Follow-up completed.', 'shown once');
 });
 
-test('the heading names where the turns ran: another DSH, Open sessions here, or elsewhere when not recorded', async t => {
-  const { adapter, store, elsewhere, agent, sent, answer } = await setup(t, 'Fix the login bug');
-  const me = await store.instance();
-  elsewhere('panel-1', 'Ship it', 'Shipped.', { instance: me.id, label: me.label });
-  assert.equal(await adapter.catchUp(agent), true);
-  assert.equal((sent.at(-1)!.source as { summary?: string }).summary, 'Codex turn in Open sessions');
-  assert.match(await answer(sent.at(-1)!), /^\*\*1 turn in Open sessions\*\*, in the same Codex session\./);
-
-  elsewhere('old-1', 'Check the release', 'Released.');
-  elsewhere('phone-1', 'And the market', 'Listed.', MAC_MINI);
-  assert.equal(await adapter.catchUp(agent), true);
-  assert.equal((sent.at(-1)!.source as { summary?: string }).summary, 'Codex turns sent elsewhere', 'a mix, or a message without its sender');
-  assert.match(await answer(sent.at(-1)!), /^\*\*2 turns sent elsewhere\*\*/);
-});
-
-test('a cut-off response here and the turns another DSH ran after it are shown together, in order', async t => {
+test('a cut-off response here and the turns sent elsewhere after it are shown together, in order', async t => {
   const { adapter, store, remote, agentId, elsewhere, agent, sent, answer, task } = await setup(t);
   const first = task().chat!.delivered!.messageId;
-  // DSH quit while its response was still arriving; the CLI finished it, then the phone sent a message.
+  // DSH quit while its response was still arriving; the CLI finished it, then a message was sent elsewhere.
   remote.append(agentId, { type: 'assistant_message', text: '修好了。' });
   await store.update(state => { state.tasks[0].chat!.delivered = { messageId: first, cursor: { epoch: 'epoch-one', seq: 2 } }; });
-  elsewhere('phone-1', '提交发布', '已发布 0.2.1。', MAC_MINI);
+  elsewhere('phone-1', '提交发布', '已发布 0.2.1。');
   assert.equal(await adapter.catchUp(agent), false, 'the cut-off response is sync\'s to show');
   assert.equal(adapter.sync(agent), true);
-  assert.match(await answer(sent[0]), /^修好了。\n\n---\n\n\*\*在 Mac mini 上进行的 1 轮\*\*[\s\S]*已发布 0\.2\.1。/);
+  assert.match(await answer(sent[0]), /^修好了。\n\n---\n\n\*\*在别处进行的 1 轮\*\*[\s\S]*已发布 0\.2\.1。/);
   assert.deepEqual(task().chat?.delivered, { messageId: 'phone-1', cursor: null, done: true });
 });
 
 test('turns are not shown when the turn this conversation showed last is gone from the history', async t => {
   const { adapter, store, elsewhere, agent, answer } = await setup(t);
-  elsewhere('phone-1', '提交发布', '已发布 0.2.1。', MAC_MINI);
+  elsewhere('phone-1', '提交发布', '已发布 0.2.1。');
   await store.update(state => { state.tasks[0].chat!.delivered = { messageId: 'replaced', cursor: null, done: true }; });
   assert.equal(await adapter.catchUp(agent), false);
   assert.equal(await answer(user('继续')), 'Follow-up completed.');
@@ -240,7 +224,7 @@ test('turns are not shown when the turn this conversation showed last is gone fr
 
 test('a conversation switched to another model is not woken', async t => {
   const { adapter, elsewhere, sent } = await setup(t);
-  elsewhere('phone-1', '提交发布', '已发布 0.2.1。', MAC_MINI);
+  elsewhere('phone-1', '提交发布', '已发布 0.2.1。');
   const other: SyncAgent = { session: { id: SessionId('macbook-conversation'), requestHeader: () => ({ config: { provider: 'deepseek', model: 'deepseek-chat' } }) as never }, send: message => { sent.push(message); } };
   assert.equal(await adapter.catchUp(other), false, 'another model would answer the notice');
   assert.deepEqual(sent, []);
@@ -248,12 +232,11 @@ test('a conversation switched to another model is not woken', async t => {
 
 test('turns from elsewhere read in the conversation\'s language, with what was asked, answered and used', () => {
   const entries = [
-    entry(1, { type: 'user_message', text: 'Ship it', clientMessageId: 'm1', sentBy: MAC_MINI }),
+    entry(1, { type: 'user_message', text: 'Ship it', clientMessageId: 'm1' }),
     entry(2, { type: 'assistant_message', text: 'Shipped.' }), entry(3, { type: 'tool_call', callId: 'c1', name: 'Bash', status: 'completed' }),
   ];
-  assert.equal(transcript(entries, { cli: 'Claude', elsewhere: { from: { name: 'Mac mini' } } }).text,
-    `**1 turn on Mac mini**, in the same Claude session.\n\n---\n\n**You** · ${stamp(entries[0].timestamp)}\n\nShip it\n\n**Claude**\n\nShipped.\n\n_Tools: Bash_`);
-  assert.match(transcript(entries, { cli: 'Claude', elsewhere: { from: undefined } }).text, /^\*\*1 turn sent elsewhere\*\*/);
+  assert.equal(transcript(entries, { cli: 'Claude' }).text,
+    `**1 turn sent elsewhere**, in the same Claude session.\n\n---\n\n**You** · ${stamp(entries[0].timestamp)}\n\nShip it\n\n**Claude**\n\nShipped.\n\n_Tools: Bash_`);
 });
 test('a turn from elsewhere that changed model says so, in the conversation\'s language', () => {
   const entries = (text: string) => [
@@ -291,10 +274,10 @@ test('a turn the CLI ran by itself, as after a background task finished, shows h
   assert.deepEqual(task().chat?.delivered, { messageId: 'cli-1', cursor: null, done: true });
   // Among turns sent from elsewhere, the block is headed by where those ran, and each turn by who started it.
   own('cli-2', '', '再检查了一遍。');
-  elsewhere('phone-1', '提交发布', '已发布。', MAC_MINI);
+  elsewhere('phone-1', '提交发布', '已发布。');
   assert.equal(await adapter.catchUp(agent), true);
-  assert.equal((sent.at(-1)!.source as { summary?: string }).summary, 'Codex turns on Mac mini');
-  assert.match(await answer(sent.at(-1)!), /^\*\*在 Mac mini 上进行的 2 轮\*\*[\s\S]*\*\*Codex 自行继续\*\* · [^\n]+\n\n再检查了一遍。[\s\S]*\*\*你\*\*[^\n]*\n\n提交发布/);
+  assert.equal((sent.at(-1)!.source as { summary?: string }).summary, 'Codex turns sent elsewhere');
+  assert.match(await answer(sent.at(-1)!), /^\*\*在别处进行的 2 轮\*\*[\s\S]*\*\*Codex 自行继续\*\* · [^\n]+\n\n再检查了一遍。[\s\S]*\*\*你\*\*[^\n]*\n\n提交发布/);
 });
 
 test('a message sent while the CLI runs a turn of its own waits for that turn and shows it ahead of the reply', async t => {

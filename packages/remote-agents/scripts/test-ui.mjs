@@ -113,7 +113,7 @@ try {
   if (!process.argv.includes('--models-only')) {
   // Remote sessions are available only from settings.
   wait('document.querySelector(".dsh-ra input[aria-label=机器名称]")');
-  expect('window.fixture.slots.join() === "settings.section:remote-agents,conversation.input.model.label:remote-agents-model-label,conversation.input.right:remote-agents-usage,conversation.input.left:remote-agents-fast,conversation.hero.workspace.directoryFlow:remote-agents-workspace-flow,sidebar.workspaces.directoryFlow:remote-agents-workspace-flow"');
+  expect('window.fixture.slots.join() === "settings.section:remote-agents,conversation.input.model.label:remote-agents-model-label,conversation.input.right:remote-agents-usage,conversation.input.left:remote-agents-fast,conversation.hero.workspace.directoryFlow:remote-agents-workspace-flow,sidebar.workspaces.directoryFlow:remote-agents-workspace-flow,workspace.picker.directoryFlow:remote-agents-workspace-flow"');
   expect('!document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   // Add workspace: this plugin shadows DSH's own picker. Without saved machines the OS chooser opens directly.
   const openFlow = () => { wait('document.querySelector("[data-flow-open=false]")'); browser('click', '[data-open-flow]'); };
@@ -282,7 +282,7 @@ try {
   wait('document.querySelector(".ra-settings [role=alert]")?.textContent.includes("模拟连接中断")');
   fixture({ failReads: false }); browser('click', 'button:text-is("重试")');
   wait('document.querySelector(".ra-hosts input[aria-label=机器名称]")');
-  expect('window.fixture.slots.length === 6 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
+  expect('window.fixture.slots.length === 7 && !document.querySelector(".ra-launch,.ra-workspace,.ra-session-launch,dialog")');
   const errors = browser('errors'); if (errors.errors?.length) throw new Error(JSON.stringify(errors.errors));
   console.log('PASS: settings load failure and retry; session entry remains in settings without a sidebar or composer launcher');
 
@@ -406,7 +406,7 @@ try {
   const visible = '[data-model-group-option]:not([data-model-group-hidden])';
   browser('set', 'viewport', '1440', '1000');
   wait('document.querySelector("[data-native-picker] button")');
-  expect('window.fixture.slots.length === 6');
+  expect('window.fixture.slots.length === 7');
   browser('click', trigger); wait('document.querySelector("[data-menu-material] > button")');
   image('model-groups-native-root');
   browser('click', rootModel); wait('document.querySelector("[data-model-group]")');
