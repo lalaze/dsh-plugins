@@ -39,6 +39,7 @@ Settings (Plugins → DSH Link):
 
 - Anyone signed in to your Tailscale account has full control of every DSH running this plugin.
 - In the desktop app, files dropped, pasted or picked on another machine's page are uploaded to that machine (DSH would otherwise name their path on this computer). Folders cannot be sent that way and are refused with a note.
+- Plugins on another machine's page talk to that machine: their requests by absolute path (`fetch('/api/…')`, XMLHttpRequest, EventSource, beacons) are sent through its mount. Plugin WebSockets other than DSH's own stream, and images or scripts a plugin loads by absolute path, still come from this computer.
 - Phones get no notifications while the page is closed.
 - Windows and systemd services cannot be restarted from the page.
 
