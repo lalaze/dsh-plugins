@@ -4,6 +4,7 @@ import { Menu, StateDot, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primi
 import { ui, useLocale } from './i18n.js';
 import { openMachine } from './navigate.js';
 import { RestartDialog } from './restart.js';
+import { keepPages, shell } from './shell.js';
 import { loadMachines, onScreen, SELF, useStore } from './store.js';
 import { dotOf, summaryOf } from './view.js';
 
@@ -15,14 +16,20 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
   const [restarting, setRestarting] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const current = onScreen();
-  useEffect(() => { if (open) void loadMachines(); }, [open]);
-
   const machines = answer?.machines ?? [];
+  useEffect(() => {
+    if (!open) return;
+    void loadMachines();
+    // About to switch: start the pages now, so they are up or nearly so by the click.
+    if (keepPages()) shell()?.prefetch(machines.filter(machine => machine.state === 'online').map(machine => machine.id));
+  }, [open]);
+
   const selfName = answer?.self.name || ui('This computer');
   const currentMachine = machines.find(machine => machine.id === current);
   const currentName = current === SELF ? selfName : currentMachine?.name ?? ui('Another machine');
   // What waits elsewhere is what the user cannot see on this page.
   const waitingElsewhere = Object.entries(attention).reduce((sum, [id, entry]) => id === current ? sum : sum + entry.waiting.length, 0);
+  const finishedElsewhere = Object.entries(attention).reduce((sum, [id, entry]) => id === current ? sum : sum + entry.finished.length, 0);
 
   const items = useMemo<MenuEntry[]>(() => {
     const row = (name: string, meta: string) => <span className="dl-row"><span className="dl-row-name">{name}</span><span className="dl-row-meta">{meta}</span></span>;
@@ -45,13 +52,16 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
     if (id === 'restart') setRestarting(true);
     else if (id !== 'none') openMachine(id);
   };
-  const title = waitingElsewhere ? ui('{name} · {count} waiting on other machines', { name: currentName, count: waitingElsewhere }) : ui('{name} · switch machine', { name: currentName });
+  const title = waitingElsewhere ? ui('{name} · {count} waiting on other machines', { name: currentName, count: waitingElsewhere })
+    : finishedElsewhere ? ui('{name} · {count} finished on other machines', { name: currentName, count: finishedElsewhere })
+    : ui('{name} · switch machine', { name: currentName });
 
   return <>
     <button ref={trigger} type="button" className="dl-trigger" data-wide={wide ? '' : undefined} aria-haspopup="menu" aria-expanded={open} title={title} aria-label={title} onClick={() => setOpen(value => !value)}>
       <StateDot state={dotOf(currentMachine, attention[current])} size={8} />
       {wide && <span className="dl-trigger-name">{currentName}</span>}
-      {waitingElsewhere > 0 && <span className="dl-badge">{waitingElsewhere}</span>}
+      {waitingElsewhere > 0 ? <span className="dl-badge">{waitingElsewhere}</span>
+        : finishedElsewhere > 0 && <span className="dl-badge" data-tone="done">{finishedElsewhere}</span>}
     </button>
     <Menu open={open} anchor={null} items={items} selectedId={current} onSelect={select} onClose={() => setOpen(false)} side="top" align="start" portal
       getAnchorRect={() => trigger.current?.getBoundingClientRect() ?? null} {...({ anchorRef: trigger } as object)} />

@@ -56,6 +56,64 @@ test('a forgotten session resolves its waits and stops running', () => {
   assert.deepEqual(tracker.snapshot().waiting, []);
 });
 
+test('a TUI conversation\'s turn, known only by its status, runs and finishes with its title', async () => {
+  const tracker = new AttentionTracker(session => session.id === 'tui' ? 'Port the parser' : undefined, 10);
+  const frames: AttentionFrame[] = [];
+  tracker.subscribe(frame => frames.push(frame));
+  tracker.status({ id: 'tui' }, true);
+  // Repeated while busy: one run.
+  tracker.status({ id: 'tui' }, true);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  tracker.status({ id: 'tui' }, true);
+  assert.deepEqual(tracker.snapshot().running.map(frame => frame.sessionId), ['tui']);
+  tracker.status({ id: 'tui' }, false);
+  assert.deepEqual(frames.map(frame => [frame.kind, frame.title]), [['running', 'Port the parser'], ['idle', 'Port the parser'], ['done', 'Port the parser']]);
+  assert.equal(frames[0]!.key, frames[2]!.key);
+  assert.deepEqual(tracker.snapshot().running, []);
+});
+
+test('DSH\'s own turns are told by the log, whichever comes first, never twice by the status', async () => {
+  const tracker = new AttentionTracker(undefined, 10);
+  const kinds: string[] = [];
+  tracker.subscribe(frame => kinds.push(`${frame.kind} ${frame.key}`));
+  // Status first, the logged turn right after.
+  tracker.status({ id: 's' }, true);
+  tracker.observe({ id: 's' }, event('turn/start', { turn: 1 }));
+  await new Promise(resolve => setTimeout(resolve, 40));
+  tracker.status({ id: 's' }, false);
+  tracker.observe({ id: 's' }, event('turn/end', { turn: 1, reason: { kind: 'completed' } }));
+  // The logged turn first, its status after.
+  tracker.observe({ id: 's' }, event('turn/start', { turn: 2 }));
+  tracker.status({ id: 's' }, true);
+  tracker.observe({ id: 's' }, event('turn/end', { turn: 2, reason: { kind: 'interrupted' } }));
+  tracker.status({ id: 's' }, false);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.deepEqual(kinds, ['running turn:1', 'idle turn:1', 'done turn:1', 'running turn:2', 'idle turn:2']);
+});
+
+test('a status run shorter than the grace, or one ended by forgetting the session, is no news', async () => {
+  const tracker = new AttentionTracker(undefined, 30);
+  const kinds: string[] = [];
+  tracker.subscribe(frame => kinds.push(frame.kind));
+  tracker.status({ id: 'a' }, true);
+  tracker.status({ id: 'a' }, false);
+  tracker.status({ id: 'b' }, true);
+  tracker.forget('b');
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.deepEqual(kinds, []);
+});
+
+test('a frame takes a title that appeared after the session was first seen', () => {
+  let title = '';
+  const tracker = new AttentionTracker(() => title);
+  const frames: AttentionFrame[] = [];
+  tracker.subscribe(frame => frames.push(frame));
+  tracker.observe({ id: 's' }, event('turn/start', { turn: 1 }));
+  title = 'Renamed later';
+  tracker.observe({ id: 's' }, event('turn/end', { turn: 1, reason: { kind: 'completed' } }));
+  assert.equal(frames.at(-1)!.title, 'Renamed later');
+});
+
 async function waitFor(check: () => boolean, ms = 3_000): Promise<void> {
   const until = Date.now() + ms;
   while (!check()) {

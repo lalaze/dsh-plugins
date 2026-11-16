@@ -87,8 +87,10 @@ export function apply(ctx: HostContext, config: Config): void {
   const self: SelfInfo = { name: config.name || hostname().replace(/\.local$/, ''), os: OS_NAMES[platform()] ?? platform(), version, tailnet: { running: false } };
 
   // Every Session's appends, open in a page or not.
-  const tracker = new AttentionTracker(session => ctx.get('sessionTitle')?.get(session)?.title);
+  const tracker = new AttentionTracker(session => ctx.get('sessionTitle')?.get(ctx.get('sessions')?.get?.(session.id) ?? session)?.title);
   ctx.on('session/event', (session, event) => tracker.observe(session, event), { global: true });
+  // TUI conversations run their turns in a terminal: only their status says when one starts and ends.
+  ctx.on('api-session/status', (sessionId, running) => { if (typeof sessionId === 'string') tracker.status({ id: sessionId }, running === true); }, { global: true });
   ctx.on('session/disposed', session => tracker.forget(session.id), { global: true });
   const board = new AttentionBoard(tracker);
   ctx.effect(() => () => board.close(), 'dsh-link: attention board');

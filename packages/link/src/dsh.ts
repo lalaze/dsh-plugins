@@ -47,6 +47,8 @@ export interface JobLike { readonly id: string; readonly label?: string; readonl
 export interface OptionalServices {
   logger: { info?(...args: unknown[]): void; warn?(...args: unknown[]): void };
   sessionTitle: { get(session: SessionLike): { readonly title: string } | undefined };
+  /** Loaded Sessions by id; `sessionTitle` needs the real Session, not just its id. */
+  sessions: { get?(id: string): SessionLike | undefined };
   agents: { list(): readonly AgentLike[] };
   jobs: { list(owner?: string): readonly JobLike[] };
   profileContext: { readonly name: string; readonly dir: string };
@@ -55,6 +57,8 @@ export interface OptionalServices {
 export interface HostEvents {
   'session/event': (session: SessionLike, event: SessionEvent) => void;
   'session/disposed': (session: SessionLike) => void;
+  /** A conversation started or stopped running: DSH's own agents, and remote-terminals' TUI conversations. */
+  'api-session/status': (sessionId: string, running: boolean) => void;
 }
 
 export interface HostContext {

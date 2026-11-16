@@ -5,6 +5,7 @@ import { ui, useLocale } from './i18n.js';
 import { openMachine } from './navigate.js';
 import { askPermission, notificationPermission, notifyPref, setNotifyPref, type NotifyPref } from './notify.js';
 import { RestartDialog } from './restart.js';
+import { keepPages, setKeepPages } from './shell.js';
 import { loadMachines, onScreen, SELF, useStore } from './store.js';
 import { dotOf, since, summaryOf } from './view.js';
 
@@ -16,6 +17,7 @@ export function SettingsSection() {
   const [pref, setPref] = useState<NotifyPref>(notifyPref());
   const [permission, setPermission] = useState(notificationPermission());
   const [restarting, setRestarting] = useState(false);
+  const [keep, setKeep] = useState(keepPages());
   useEffect(() => {
     void loadMachines();
     const timer = setInterval(() => void loadMachines(), 10_000);
@@ -57,15 +59,22 @@ export function SettingsSection() {
       </div>)}
     </div>}
 
+    <h3>{ui('Switching')}</h3>
+    <div className="dl-card">
+      <label className="dl-check"><input type="checkbox" checked={keep} onChange={event => { setKeep(event.target.checked); setKeepPages(event.target.checked); }} /> {ui('Keep machines\' pages open in this window')}</label>
+      <span className="dl-muted">{ui('Switching back to a machine is then instant and keeps where you were; each open machine uses memory like another tab. Off: each switch loads the machine\'s page again.')}</span>
+    </div>
+
     <h3>{ui('Notifications')}</h3>
     <div className="dl-card">
       <div className="dl-choices" role="radiogroup" aria-label={ui('Notifications')}>
         {([['all', ui('Waiting and finished')], ['waiting', ui('Only when waiting for me')], ['off', ui('Off')]] as const).map(([value, label]) =>
           <label key={value}><input type="radio" name="dl-notify" checked={pref === value} onChange={() => choose(value)} /> {label}</label>)}
       </div>
+      <span className="dl-muted">{ui('Other machines\' notices show in this page; system notifications are for when it is not in front.')}</span>
       {pref !== 'off' && permission === 'default' && <Button size="sm" variant="outline" onClick={() => void askPermission().then(setPermission)}>{ui('Allow notifications in this browser')}</Button>}
-      {pref !== 'off' && permission === 'denied' && <span className="dl-error">{ui('This browser blocks notifications for this site.')}</span>}
-      {pref !== 'off' && permission === 'unsupported' && <span className="dl-muted">{ui('This browser cannot show notifications; the switcher still shows what waits.')}</span>}
+      {pref !== 'off' && permission === 'denied' && <span className="dl-muted">{ui('This browser blocks system notifications for this site; the notices in the page still show.')}</span>}
+      {pref !== 'off' && permission === 'unsupported' && <span className="dl-muted">{ui('This browser cannot show system notifications; the notices in the page still show.')}</span>}
     </div>
 
     <h3>{ui('Restart')}</h3>

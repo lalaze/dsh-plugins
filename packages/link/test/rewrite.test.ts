@@ -83,6 +83,28 @@ test('outside the desktop window the guard does nothing and ownsHost is set', ()
   assert.equal(globalObject.__DSH_BOOT_READY__, undefined);
 });
 
+test('a page kept in a frame of the desktop window boots from the stream the window\'s page got', async () => {
+  const parent = { dshDesktopBoot: { ready: async () => { throw new Error('the window already booted'); } }, __DSH_TRANSPORT__: { ownsHost: true, streamBaseUrl: 'http://127.0.0.1:5173/' } };
+  const globalObject: Record<string, unknown> = { URL, parent };
+  globalObject.globalThis = globalObject;
+  const context = vm.createContext(globalObject);
+  for (const script of scripts(injectOwnsHost(guardDesktopBoot(INDEX, '/dsh-link/peer/mabc').html)).slice(0, 2)) vm.runInContext(script, context);
+  await (globalObject.__DSH_BOOT_READY__ as { promise: Promise<void> }).promise;
+  assert.deepEqual(JSON.parse(JSON.stringify(globalObject.__DSH_TRANSPORT__)), { ownsHost: true, streamBaseUrl: 'http://127.0.0.1:5173/dsh-link/peer/mabc/' });
+  vm.runInContext(scripts(INDEX).at(-1)!, context);
+});
+
+test('a page in a frame of a browser window, or of a window the page cannot read, boots as in a browser', () => {
+  for (const parent of [{ __DSH_TRANSPORT__: { streamBaseUrl: 'http://x/' } }, new Proxy({}, { get() { throw new Error('cross-origin'); } })]) {
+    const globalObject: Record<string, unknown> = { URL, parent };
+    globalObject.globalThis = globalObject;
+    const context = vm.createContext(globalObject);
+    for (const script of scripts(guardDesktopBoot(INDEX, '/p').html).slice(0, 1)) vm.runInContext(script, context);
+    assert.equal(globalObject.__DSH_BOOT_READY__, undefined);
+    assert.equal(globalObject.__DSH_TRANSPORT__, undefined);
+  }
+});
+
 test('mounted pages are recognised by their path', () => {
   assert.equal(mountedId('/dsh-link/peer/m0123456789/'), 'm0123456789');
   assert.equal(mountedId('/dsh-link/peer/m01/api/x'), 'm01');
