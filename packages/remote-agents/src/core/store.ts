@@ -31,6 +31,12 @@ export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainCha
 export interface TagSyncRecord { names: string[]; at?: string }
 /** A deleted shared session whose deletion has not reached its SSH host yet. */
 export interface SharedDeletion { hostId: string; id: string }
+/**
+ * Antigravity as 0.2.129 and earlier discovered it, through `agy models`: model IDs such as `gemini-3.8-flash-high` that
+ * `agy acp` does not take. Only that integration gave a provider a `notice`. Hidden while Antigravity was missing, the
+ * entry came back with 0.2.134 on machines left on all CLIs, offering models that fail when chosen.
+ */
+const oldAntigravity = (provider: { id: string; notice?: unknown }) => provider.id === 'antigravity' && provider.notice !== undefined;
 export class Store {
   private state: State = { version: 1, hosts: [], tasks: [] };
   private writes = Promise.resolve();
@@ -41,6 +47,8 @@ export class Store {
   readonly usageListeners = new Set<(taskId: string, usage: TurnUsage, turn: FinishedTurn) => void>();
   /** Called after every saved change; shared hosts publish the task records that changed. */
   readonly changeListeners = new Set<() => void>();
+  /** Machines whose saved model catalog lost Antigravity models from 0.2.129 or earlier on opening; see {@link oldAntigravity}. */
+  readonly staleCatalogs = new Set<string>();
   constructor(private readonly path: string) {}
   get directory(): string { return dirname(this.path); }
   async open(): Promise<void> {
@@ -63,6 +71,7 @@ export class Store {
       if (host.catalog !== undefined) {
         const catalog = record(host.catalog); remotePath(catalog.cwd);
         if (typeof catalog.checkedAt !== 'string' || !Array.isArray(catalog.providers) || !catalog.providers.every(p => p && typeof p.id === 'string' && Array.isArray(p.models) && Array.isArray(p.modes))) throw new Error('Invalid saved host model catalog');
+        if (catalog.providers.some(oldAntigravity)) { catalog.providers = catalog.providers.filter(p => !oldAntigravity(p)); this.staleCatalogs.add(host.id as string); }
       }
     }
     for (const raw of value.tasks) {

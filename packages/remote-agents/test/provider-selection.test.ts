@@ -4,6 +4,7 @@ import { ChatProjects } from '../src/chat/projects.js';
 import { Store } from '../src/core/store.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHandler } from '../src/http.js';
+import { RemoteAgentsService } from '../src/agents/service.js';
 import { fixture } from './fakes.js';
 
 test('a machine can be saved without starting discovery until a CLI is selected', async t => {
@@ -58,4 +59,32 @@ test('a saved selection naming a CLI the plugin no longer has still opens, witho
   delete saved.hosts[0].enabledProviders; await reopened.close(); await writeFile(path, JSON.stringify(saved));
   const all = new Store(path); await all.open(); t.after(() => all.close());
   assert.ok(!new ChatProjects({ store: all, onCatalogChange: () => () => {} } as never).hosts()[0].providers.some(p => p.id === 'retired-cli'));
+});
+
+test('Antigravity models saved by 0.2.129 or earlier are dropped on opening, and that machine is discovered again', async t => {
+  const { service, remote, hostId, path, store } = await fixture(t);
+  await service.discoverHost(hostId);
+  // As 0.2.129 saved a machine left on all CLIs: `agy models` IDs and the notice only that integration set.
+  const saved = JSON.parse(await readFile(path, 'utf8')), current = saved.hosts[0].catalog.providers.map((p: { id: string }) => p.id);
+  delete saved.hosts[0].enabledProviders;
+  saved.hosts[0].catalog.providers.push({ id: 'antigravity', label: 'Antigravity', status: 'ready', notice: 'Antigravity headless mode denies operations that require interactive approval.',
+    models: [{ id: 'gemini-3.8-flash-high', label: 'Gemini 3.8 Flash (High)' }, { id: 'claude-sonnet-4-6-thinking', label: 'Claude Sonnet 4.6 (Thinking)' }], defaultModeId: 'default',
+    modes: [{ id: 'default', label: 'CLI permission settings' }, { id: 'plan', label: 'Plan' }] });
+  await service.close(); await store.close(); await writeFile(path, JSON.stringify(saved));
+  const reopened = new Store(path); await reopened.open();
+  assert.deepEqual([...reopened.staleCatalogs], [hostId]);
+  assert.deepEqual(reopened.hosts()[0].catalog!.providers.map(p => p.id), current);
+  remote.store = reopened;
+  const again = new RemoteAgentsService(reopened, remote.backend); t.after(async () => { await again.close(); await reopened.close(); });
+  assert.ok(!new ChatProjects(again).hosts()[0].providers.some(p => p.id === 'antigravity'), 'the old models are never offered');
+  // What `agy acp` reports now.
+  remote.catalog.push({ id: 'antigravity', label: 'Antigravity', status: 'ready', models: [{ id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' }], modes: [{ id: 'default', label: 'Default' }] });
+  const probes = remote.discoveries;
+  await again.refreshStaleCatalogs();
+  assert.equal(remote.discoveries, probes + 1); assert.equal(reopened.staleCatalogs.size, 0);
+  assert.deepEqual(new ChatProjects(again).hosts()[0].providers.find(p => p.id === 'antigravity')!.models.map(m => m.id), ['gemini-3.8-flash']);
+  // Saved again, nothing is left to drop, and an Antigravity entry from `agy acp` is kept.
+  const third = new Store(path); await third.open(); t.after(() => third.close());
+  assert.equal(third.staleCatalogs.size, 0); assert.ok(third.hosts()[0].catalog!.providers.some(p => p.id === 'antigravity'));
+  await again.refreshStaleCatalogs(); assert.equal(remote.discoveries, probes + 1, 'nothing to discover a second time');
 });

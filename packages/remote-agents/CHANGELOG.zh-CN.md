@@ -4,6 +4,12 @@
 
 按版本从新到旧列出变化及升级后需要做的事。
 
+## 0.2.135 — 不再显示旧的 Antigravity 模型
+
+- 在 0.2.134 上，没改过 CLI 勾选的机器可能会列出 Gemini 3.8 Flash (High)、Claude Sonnet 4.6 (Thinking) 这类 Antigravity 模型。它们是 0.2.129 或更早版本当时通过 `agy models` 为这台机器保存的列表，一直留着，Antigravity 回来后又显示出来了。`agy acp` 不认这些模型 ID，选了会失败。
+- 现在 DSH 启动时会丢掉这份旧列表，并在后台重新检测这台机器的模型，Antigravity 显示的就是 `agy acp` 现在提供的模型。如果当时连不上这台机器，Antigravity 会先不出现，等你在设置 › 远程智能体里这台机器的 ⋯ 菜单中点**刷新模型**。
+- 升级后重启 DSH。
+
 ## 0.2.134 — Antigravity 回来了，改用 `agy acp`
 
 - **Antigravity** 重新成为可用的远程 CLI。现在通过 Antigravity CLI 自带的 ACP 服务 `agy acp` 运行，与 DSH、Grok、CodeBuddy 相同：模型和思考档位出现在模型选择器里，模式（Default、Accept edits、Plan、Auto）在权限菜单里，它的授权请求以审批卡片的形式交给你，可以发图片，停止按钮可用，断线后能接着原来的会话继续。你共享给远程 CLI 的 MCP 服务器和 skill 它也能用。0.2.129 及更早的版本用的是它的无头 stream-json 模式，没法请求授权。

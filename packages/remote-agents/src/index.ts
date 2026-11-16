@@ -62,6 +62,7 @@ export async function apply(ctx: Context, config: { stateDir?: string; claudeGoa
     fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing, adoptModel(name => ctx.get(name as never)), native) });
   installChat(ctx, service, projects, { access: workspace.access, files: workspace.features.files, workspaces: workspace.workspaces }, claudeGoals);
   installSharingHost(ctx, sharing);
+  void service.refreshStaleCatalogs();
   // Native conversation routes and settings also work without the delegation tool registry.
   ctx.inject(['tools', 'approval', 'userQuestions'], scoped => {
     const host = scoped as unknown as ToolHost & { tools: { register(tool: ToolDefinition): unknown } };

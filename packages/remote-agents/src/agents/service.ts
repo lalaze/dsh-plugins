@@ -125,6 +125,11 @@ export class RemoteAgentsService {
       ...(task.error ? { error: this.hostConnections.safeError(task.error) } : {}) };
   }
   onCatalogChange(listener: () => void): () => void { return this.hostConnections.onCatalogChange(listener); }
+  /** Discover once more, in the background, the machines whose saved catalog lost an outdated entry on opening. */
+  refreshStaleCatalogs(): Promise<void> {
+    const ids = [...this.store.staleCatalogs].filter(id => this.store.hosts().some(h => h.id === id)); this.store.staleCatalogs.clear();
+    return Promise.all(ids.map(id => this.hostConnections.discoverHost(id).catch(() => {}))).then(() => {});
+  }
   async discoverHost(hostId: string): Promise<Dashboard> {
     await this.hostConnections.discoverHost(hostId);
     return this.snapshot();

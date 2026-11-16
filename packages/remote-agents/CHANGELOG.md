@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.135 — Old Antigravity models no longer show up
+
+- With 0.2.134, a machine left on all CLIs could list Antigravity models such as Gemini 3.8 Flash (High) or Claude Sonnet 4.6 (Thinking). They were the list version 0.2.129 or earlier had saved for that machine from `agy models`, kept since then and shown again once Antigravity returned. `agy acp` does not take those model IDs, so choosing one failed.
+- That saved list is now dropped when DSH starts, and the machine's models are detected again in the background, so Antigravity shows what `agy acp` offers today. If the machine cannot be reached then, Antigravity stays out of the list until you choose **Refresh models** in the machine's ⋯ menu under Settings › Remote agents.
+- Restart DSH after upgrading.
+
 ## 0.2.134 — Antigravity is back, through `agy acp`
 
 - **Antigravity** is a remote CLI again. It now runs as `agy acp`, the Agent Client Protocol server of Antigravity CLI, like DSH, Grok and CodeBuddy: its models and thinking levels are in the model picker, its modes (Default, Accept edits, Plan, Auto) in the permission menu, its approval requests reach you as approval cards, images can be sent, Stop works and a conversation resumes after a reconnect. The MCP servers and skills you share with remote CLIs reach it too. Version 0.2.129 and earlier drove its headless stream-json mode instead, which could not ask for approvals.
