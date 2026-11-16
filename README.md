@@ -8,6 +8,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | --- | --- | --- |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.md) | Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them |
 | `dsh-remote-terminals` | [packages/remote-terminals](packages/remote-terminals/README.md) | Remote terminals that outlive DSH, Claude Code and Codex TUI conversations, and worktree workspaces, on the machines saved in Remote Agents |
+| `dsh-machines` | [packages/machines](packages/machines/README.md) | Open the full DSH of your other computers on the same Tailscale account from the sidebar, see what waits for you there, and restart them remotely |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.md) | Model icons and status badges on sidebar sessions, with the exact model in the hover card |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.md) | Collapsible provider groups in DSH's model picker, remembered in each browser |
 | `dsh-model-flow` | [packages/model-flow](packages/model-flow/README.md) | One command: one model plans, one implements, one reviews, and rejected work goes back |
