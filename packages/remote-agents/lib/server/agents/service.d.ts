@@ -75,6 +75,8 @@ export declare class RemoteAgentsService {
     delegations(sessionId: string): Promise<AgentSummary[]>;
     private observeDelegation;
     onCatalogChange(listener: () => void): () => void;
+    /** Discover once more, in the background, the machines whose saved catalog lost an outdated entry on opening. */
+    refreshStaleCatalogs(): Promise<void>;
     discoverHost(hostId: string): Promise<Dashboard>;
     setHostProviders(hostId: string, value: unknown): Promise<Dashboard>;
     snapshot(): Promise<Dashboard>;

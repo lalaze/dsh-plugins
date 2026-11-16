@@ -68,6 +68,8 @@ export declare class Store {
     readonly usageListeners: Set<(taskId: string, usage: TurnUsage, turn: FinishedTurn) => void>;
     /** Called after every saved change; shared hosts publish the task records that changed. */
     readonly changeListeners: Set<() => void>;
+    /** Machines whose saved model catalog lost Antigravity models from 0.2.129 or earlier on opening; see {@link oldAntigravity}. */
+    readonly staleCatalogs: Set<string>;
     constructor(path: string);
     get directory(): string;
     open(): Promise<void>;

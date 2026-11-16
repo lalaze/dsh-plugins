@@ -3,6 +3,12 @@ import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import { identifier, record, remotePath, field, taskInput, providerSelection, PROVIDER_LABELS, RemoteError } from './domain.js';
+/**
+ * Antigravity as 0.2.129 and earlier discovered it, through `agy models`: model IDs such as `gemini-3.8-flash-high` that
+ * `agy acp` does not take. Only that integration gave a provider a `notice`. Hidden while Antigravity was missing, the
+ * entry came back with 0.2.134 on machines left on all CLIs, offering models that fail when chosen.
+ */
+const oldAntigravity = (provider) => provider.id === 'antigravity' && provider.notice !== undefined;
 export class Store {
     path;
     state = { version: 1, hosts: [], tasks: [] };
@@ -14,6 +20,8 @@ export class Store {
     usageListeners = new Set();
     /** Called after every saved change; shared hosts publish the task records that changed. */
     changeListeners = new Set();
+    /** Machines whose saved model catalog lost Antigravity models from 0.2.129 or earlier on opening; see {@link oldAntigravity}. */
+    staleCatalogs = new Set();
     constructor(path) {
         this.path = path;
     }
@@ -52,6 +60,10 @@ export class Store {
                 remotePath(catalog.cwd);
                 if (typeof catalog.checkedAt !== 'string' || !Array.isArray(catalog.providers) || !catalog.providers.every(p => p && typeof p.id === 'string' && Array.isArray(p.models) && Array.isArray(p.modes)))
                     throw new Error('Invalid saved host model catalog');
+                if (catalog.providers.some(oldAntigravity)) {
+                    catalog.providers = catalog.providers.filter(p => !oldAntigravity(p));
+                    this.staleCatalogs.add(host.id);
+                }
             }
         }
         for (const raw of value.tasks) {
