@@ -1,6 +1,6 @@
 import { JsonlPeer, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { SHARED_SCRIPT, SHARED_VERSION } from './shared-script.js';
-import { attachmentInput, identifier, PROVIDER_LABELS, type Agent, type SharedTag, type SharedWorkspace, type Task } from '@dsh-plugins/remote-core/domain.js';
+import { attachmentInput, identifier, PROVIDER_LABELS, type Agent, type SharedTag, type SharedWorkspace, type Task, type TimelineEntry } from '@dsh-plugins/remote-core/domain.js';
 import type { TaskHistory } from './history.js';
 import type { Instance, Store } from '../core/store.js';
 import { REMOTE_HOME, remoteScript } from '@dsh-plugins/remote-core/remote-host.js';
@@ -61,6 +61,8 @@ function pick(value: object, invalid?: Set<Field>): Fields {
 }
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const CHUNK = 1024 * 1024;
+/** How long a turn's end waits for its last history entries to reach the host before it is published anyway. */
+const SETTLE_MS = 3000;
 
 interface Lease { instance: string; label: string; age: number; at: number }
 interface Manifest extends Fields { rev: number; creator?: { instance: string; label: string } }
@@ -75,6 +77,8 @@ export interface SharedOwner {
   history(taskId: string): Promise<TaskHistory>;
   /** The CLI session this DSH drives, while it has not handed it over. */
   live(taskId: string): Agent | undefined;
+  /** How many history entries the session this DSH drives has recorded, counting those still being written. */
+  recorded?(taskId: string): number | undefined;
   /** Another DSH took the session over: stop reading its CLI here. The CLI keeps running. */
   yield(taskId: string): void;
   /** Another DSH deleted the session: forget it here without touching its CLI. */
@@ -131,6 +135,8 @@ export class SharedSessions {
   private readonly lives = new Map<string, string>();
   private readonly chains = new Map<string, Promise<unknown>>();
   private readonly pushes = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Since when a session's end of turn waits for its last history entries to reach the host; see {@link sendLive}. */
+  private readonly settling = new Map<string, number>();
   private readonly adopting = new Set<string>();
   private readonly listener = () => this.schedulePublish();
   constructor(private readonly transport: SshTransport, private readonly store: Store, private readonly owner: SharedOwner) {
@@ -429,13 +435,26 @@ export class SharedSessions {
       if (result?.conflict === 'lease') { this.held.delete(id); await this.lost(id); return; }
       if (result?.conflict === 'seq') {
         const seq = Number(result.head?.seq ?? 0);
-        // The host lost entries this DSH copied: copy them again. More than this DSH has: it was driven elsewhere.
+        // The host lost entries this DSH copied: copy them again.
         if (seq < acked) { acked = seq; this.acked.set(id, seq); continue; }
+        // The host holds more than this DSH knew it copied. When its last entry is the one recorded here, those are this
+        // DSH's own entries, as when it took its lease again before the session's record was on the host: copying goes on
+        // from there. Rebuilding from the host instead would drop what was not copied yet, such as the message just sent.
+        if (seq <= length && await this.holds(id, history, seq)) { acked = seq; this.acked.set(id, seq); continue; }
+        // Different entries: another DSH drove the session.
         await this.resync(id, acked); return;
       }
       acked = Number(result.head.seq); this.acked.set(id, acked);
       const session = this.sessions.get(id); if (session) session.head = result.head;
     }
+    // A turn's end waiting for these entries is published now rather than at the next tick.
+    if (this.settling.has(id)) this.sendLive(id);
+  }
+  /** Whether the host's entry at `seq` is the one recorded here, so the host holds this history's first `seq` entries. */
+  private async holds(id: string, history: TaskHistory, seq: number): Promise<boolean> {
+    const [local] = await history.lines(seq, seq);
+    const result = await this.call('read', { id, seq }, 60_000).catch(() => undefined);
+    return typeof local === 'string' && Array.isArray(result?.lines) && result.lines[0] === local;
   }
   /** History here and on the host diverged while this DSH held the lease: take the shared history and drive the CLI again from it. */
   private async resync(id: string, acked: number): Promise<void> {
@@ -505,8 +524,12 @@ export class SharedSessions {
         await this.apply(id, current.manifest, before);
       } else if (session) session.lease = lease;
       const history = await this.owner.history(id), length = await history.length(), head = Number(current?.head?.seq ?? 0);
-      // This DSH drove it last, or the host has no record of it yet: its own history is kept, and copied next.
-      if ((before || !current?.manifest) && length >= head) { this.acked.set(id, Math.min(this.acked.get(id) ?? head, head)); void this.serial(id, () => this.push(id)).catch(() => {}); return { status: 'claimed' as const }; }
+      // This DSH drove it last, or the host has no record of it yet: its own history is kept, and copied next. Without a
+      // record the host reports no history either, though it may hold what this DSH copied: how far it did stays known.
+      if ((before || !current?.manifest) && length >= head) {
+        if (current?.manifest) this.acked.set(id, Math.min(this.acked.get(id) ?? head, head));
+        void this.serial(id, () => this.push(id)).catch(() => {}); return { status: 'claimed' as const };
+      }
       return { status: 'claimed' as const, changed: await this.download(id, history, head) };
     });
   }
@@ -519,19 +542,31 @@ export class SharedSessions {
     if (result.changed) { setTimeout(() => this.owner.adopt(id), 0); return false; }
     return true;
   }
+  /**
+   * Publish the live status of a CLI this DSH drives. A turn's end is published once the history it recorded is on the
+   * host: other DSHes read the history when they see a turn end, and a read taken short of its last entries would leave
+   * the turn unread everywhere. A host that does not take the history holds it back for {@link SETTLE_MS} at most.
+   */
+  private sendLive(id: string): void {
+    const agent = this.owner.live(id);
+    if (!agent || !this.peer || !this.listed) return;
+    const busy = agent.status === 'running' || agent.status === 'initializing' || !!agent.activeTurn || !!agent.pendingPermissions?.length;
+    if (!busy && (this.owner.recorded?.(id) ?? 0) > (this.acked.get(id) ?? 0)) {
+      const since = this.settling.get(id) ?? Date.now(); this.settling.set(id, since);
+      if (Date.now() - since < SETTLE_MS) return;
+    }
+    this.settling.delete(id);
+    const live = { status: agent.status, activeTurn: agent.activeTurn ?? null, pendingPermissions: agent.pendingPermissions, ...(agent.lastError ? { lastError: agent.lastError } : {}),
+      ...(agent.reconnecting ? { reconnecting: true } : {}), ...(agent.resumable !== undefined ? { resumable: agent.resumable } : {}), ...(agent.context ? { context: agent.context } : {}) };
+    const json = JSON.stringify(live);
+    if (this.lives.get(id) === json) return;
+    this.lives.set(id, json);
+    void this.call('live', { id, live }).catch(() => { if (this.lives.get(id) === json) this.lives.delete(id); });
+  }
   /** Publish live status and keep the leases of driven CLIs from expiring. */
   private tick(): void {
     if (!this.peer || !this.listed) return;
-    for (const id of this.held) {
-      const agent = this.owner.live(id);
-      if (!agent) continue;
-      const live = { status: agent.status, activeTurn: agent.activeTurn ?? null, pendingPermissions: agent.pendingPermissions, ...(agent.lastError ? { lastError: agent.lastError } : {}),
-        ...(agent.reconnecting ? { reconnecting: true } : {}), ...(agent.resumable !== undefined ? { resumable: agent.resumable } : {}), ...(agent.context ? { context: agent.context } : {}) };
-      const json = JSON.stringify(live);
-      if (this.lives.get(id) === json) continue;
-      this.lives.set(id, json);
-      void this.call('live', { id, live }).catch(() => { if (this.lives.get(id) === json) this.lives.delete(id); });
-    }
+    for (const id of this.held) this.sendLive(id);
     if (Date.now() - this.refreshedAt < this.ttl / 4) return;
     this.refreshedAt = Date.now();
     // An expired lease changes no file on the host, so expiry is checked here.
@@ -562,10 +597,14 @@ export class SharedSessions {
     // The host's list reaches this DSH a moment after the host changes. A session published just now has no position here
     // yet, and one another DSH drives may have ended its turn there already. The page reports a read once per turn, so a
     // read dropped for want of a position, or taken at a stale one, would leave the other DSHes showing the turn unread.
-    if (!this.held.has(id) || !this.sessions.get(id)?.head) {
+    // A read is about a finished turn. Another DSH may end one before its last entries are on the host: until the history
+    // here records the turn's end, it is read again for SETTLE_MS at most, so the read covers the whole turn.
+    for (const deadline = Date.now() + SETTLE_MS + 2000; !this.held.has(id) || !this.sessions.get(id)?.head;) {
       const current: RemoteSession | undefined = await this.call('get', { id }, 5000).catch(() => undefined);
       if (current?.manifest && !current.deleted) await this.update({ ...current, ...(current.lease ? { lease: { ...current.lease, at: Date.now() } } : {}) }).catch(() => {});
       await this.catchUp(id);
+      if (this.held.has(id) || !current?.manifest || current.deleted || Date.now() > deadline || await this.turnEnded(id)) break;
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
     const session = this.sessions.get(id);
     if (!session?.head || (session.read?.seq ?? 0) >= session.head.seq) return;
@@ -574,6 +613,16 @@ export class SharedSessions {
     if (!current || !read || (current.read?.seq ?? 0) >= read.seq) return;
     current.read = read;
     this.owner.read?.(id);
+  }
+  /** Whether the history here has the end of its last turn, or no turn at all. */
+  private async turnEnded(id: string): Promise<boolean> {
+    const history = await this.owner.history(id), length = await history.length();
+    for (const line of (await history.lines(Math.max(1, length - 499), length)).reverse()) {
+      const type = (JSON.parse(line) as TimelineEntry).item?.type;
+      if (type === 'turn_end') return true;
+      if (type === 'user_message') return false;
+    }
+    return true;
   }
   /** Whether the other DSH driving a session reports a turn in it. */
   private remoteBusy(id: string): boolean {

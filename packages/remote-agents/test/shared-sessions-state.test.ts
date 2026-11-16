@@ -235,16 +235,58 @@ test('a session read in one DSH reads as read in another until a new turn, and a
   await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'second turn finished');
   await waitFor(async () => (await second.service.summary(agent.id)).status === 'idle', 'followed to its end');
 
-  // Now the other direction: the DSH that does not drive the CLI reads it.
-  // The DSH driving the CLI reports the end of the turn before the turn's last entries are on the host. A read reported
-  // in between covers less than the turn, and both DSHes go on showing it unread: that gap is open, and the page reports a
-  // read only once per turn. So this reads until the turn has settled, which is the case a person usually meets.
-  const next = await waitFor(async () => {
-    await second.service.markChatRead(other);
-    const now = second.service.chatReadMark(other);
-    return now && now !== mark && h.first.service.chatReadMark(chat) === now ? now : undefined;
-  }, 'a later read has a new mark, and it reaches the DSH driving the CLI');
-  assert.equal(second.service.chatReadMark(other), next);
+  // Now the other direction: the DSH that does not drive the CLI reads it, once, as the page does after a turn.
+  await second.service.markChatRead(other);
+  const next = second.service.chatReadMark(other);
+  assert.ok(next && next !== mark, 'a later read has a new mark');
+  await waitFor(() => h.first.service.chatReadMark(chat) === next, 'and it reaches the DSH driving the CLI');
+});
+
+test('a read taken the moment the driving DSH ends a turn covers the whole turn on both DSHes', { skip: !supported }, async t => {
+  const { h, second } = await twoInstances(t);
+  const chat = 'conversation-read-here', other = 'conversation-read-there';
+  const agent = await h.first.service.create(h.request('codex', 'stream 2'), { chat: { sessionId: chat, route: 'route' } });
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'turn finished');
+  await imported(second.service, agent.id);
+  await second.store.update(state => { state.tasks.find(task => task.id === agent.id)!.chat = { sessionId: other, route: 'route' }; });
+  const dir = join(sessionsDir(h.home), agent.id), head = async () => Number(JSON.parse(await readFile(join(dir, 'head.json'), 'utf8')).seq);
+  const before = await head();
+  await h.first.service.send(agent.id, message('stream 2'));
+  await waitFor(async () => await head() > before, 'the new turn reached the host');
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'the driving DSH ended the turn');
+  // Its last entries may still be on their way to the host: the read waits for the turn's end rather than falling short.
+  await second.service.markChatRead(other);
+  const mark = second.service.chatReadMark(other);
+  assert.ok(mark, 'read here');
+  await new Promise(resolve => setTimeout(resolve, 1000));
+  assert.equal(second.service.chatReadMark(other), mark, 'still read once the turn has settled');
+  await waitFor(() => h.first.service.chatReadMark(chat) === mark, 'read on the DSH driving the CLI');
+});
+
+test('the DSH driving a CLI shares the end of a turn only once its history is on the host', { skip: !supported }, async t => {
+  const { h } = await twoInstances(t);
+  const agent = await h.first.service.create(h.request('codex', 'stream 2'));
+  await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'first turn');
+  const dir = join(sessionsDir(h.home), agent.id);
+  const read = async (name: string) => { try { return JSON.parse(await readFile(join(dir, name), 'utf8')); } catch { return undefined; } };
+  // Status is shared every half second and history a tenth of a second after it changes. Turns ending at different
+  // points of that cycle: before this was fixed, about one in four ended on the host before its history arrived.
+  for (let turn = 0; turn < 6; turn++) {
+    await rm(join(h.home, 'gate'), { force: true });
+    const id = `message-${randomUUID()}`;
+    await h.first.service.send(agent.id, { id, text: 'gate' });
+    await waitFor(async () => (await read('live.json'))?.status === 'running', 'the turn is shared as running');
+    await new Promise(resolve => setTimeout(resolve, turn * 83));
+    await h.gate();
+    // The first time the host says the turn is over, its end is already in the history there. Looked at closely: the
+    // history follows tens of milliseconds later when the status goes first.
+    for (const deadline = Date.now() + 15_000; (await read('live.json'))?.status === 'running';) {
+      assert.ok(Date.now() < deadline, 'the turn is shared as ended'); await new Promise(resolve => setTimeout(resolve, 2));
+    }
+    const events = (await readFile(join(dir, 'events.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line).item);
+    assert.ok(events.some(item => item.type === 'turn_end' && item.clientMessageId === id), `turn ${turn}: its end reached the host before the status said so`);
+    await waitFor(async () => (await h.first.service.summary(agent.id)).status === 'idle', 'ended here');
+  }
 });
 
 test('a read reported for a session with no shared registry does nothing', { skip: !supported }, async t => {

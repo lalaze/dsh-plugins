@@ -200,6 +200,7 @@ export class SshBackend implements Backend {
       hostId: host.id,
       history: id => this.history(id),
       live: id => { const session = this.sessions.get(id); return session && !session.detached ? session.agent : undefined; },
+      recorded: id => { const session = this.sessions.get(id); return session && !session.detached ? session.history.recorded : undefined; },
       yield: id => { const session = this.sessions.get(id); if (session && !session.detached) session.release(); },
       removed: id => this.removeLocal(id),
       adopt: id => { const task = this.store.task(t => t.id === id); if (task && !this.closed) void this.restore(task).catch(() => {}); },

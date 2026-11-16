@@ -11,6 +11,8 @@ export class TaskHistory {
   private generation = 0;
   /** Called after entries written here are saved; a shared host copies them to its registry. Not called for imports. */
   onAppend?: () => void;
+  /** Entries handed to `appendBatch` whose write has not finished. */
+  private writing = 0;
   constructor(private readonly directory: string, private readonly taskId: string) {}
   get epoch(): string { return `task-${this.taskId}${this.generation ? `-${this.generation}` : ''}`; }
   private get file(): string { return join(this.directory, 'events', `${this.taskId}.jsonl`); }
@@ -36,19 +38,25 @@ export class TaskHistory {
    */
   appendBatch(items: { item: TimelineEntry['item']; turnId?: string }[], relay?: RelayPosition, before?: () => Promise<void>): Promise<void> {
     const saved = structuredClone(items), position = relay && structuredClone(relay);
+    let pending = saved.length; this.writing += pending;
+    const done = () => { this.writing -= pending; pending = 0; };
     const next = this.queue.then(async () => {
-      if (this.failure) throw this.failure;
-      if (!saved.length) return;
-      await before?.();
-      const timestamp = new Date().toISOString();
-      const entries = saved.map(({ item, turnId }, index): TimelineEntry => ({ seqStart: this.entries.length + index + 1, seqEnd: this.entries.length + index + 1, timestamp, item, ...(turnId ? { turnId } : {}), ...(position ? { relay: position } : {}) }));
-      await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
-      await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
-      this.entries.push(...entries);
-      try { this.onAppend?.(); } catch { /* Copying is retried by its owner. */ }
+      try {
+        if (this.failure) throw this.failure;
+        if (!saved.length) return;
+        await before?.();
+        const timestamp = new Date().toISOString();
+        const entries = saved.map(({ item, turnId }, index): TimelineEntry => ({ seqStart: this.entries.length + index + 1, seqEnd: this.entries.length + index + 1, timestamp, item, ...(turnId ? { turnId } : {}), ...(position ? { relay: position } : {}) }));
+        await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
+        await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
+        this.entries.push(...entries); done();
+        try { this.onAppend?.(); } catch { /* Copying is retried by its owner. */ }
+      } finally { done(); }
     });
     this.queue = next.catch(error => { this.failure = error; }); return next;
   }
+  /** Number of entries recorded so far, counting those whose write is still queued. */
+  get recorded(): number { return this.entries.length + this.writing; }
   /** Number of saved entries, once queued writes finished. */
   async length(): Promise<number> { await this.queue; return this.entries.length; }
   /** Entries `from`…`to` (1-based, inclusive) as saved lines. */

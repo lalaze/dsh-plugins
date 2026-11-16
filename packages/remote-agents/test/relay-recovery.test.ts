@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { existsSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { relayHarness, transcript, waitFor } from './relay-harness.js';
@@ -170,6 +170,34 @@ for (const [provider, label] of PROTOCOLS) test(`${label}: stopping a native DSH
   for await (const chunk of adapter.stream(options([first, user('after stop')]))) if (chunk.type === 'text-delta') text += chunk.text;
   assert.doesNotMatch(text, /disconnected/);
   assert.doesNotMatch(text, /---/);
+});
+
+for (const [provider, label] of PROTOCOLS) test(`${label}: a message sent right after Stop runs, and nothing sent is lost`, async t => {
+  // Before the session's record is on the host, the host reports no history for it, though it holds what this DSH copied.
+  // Taking the lease again for the next message then lost track of that, the next copy conflicted, and the history was
+  // rebuilt from the host's: the message just sent and the stopped turn's end were gone, so the message read as never
+  // delivered ("Remote message delivery was not recorded"), or its CLI was let go mid-send ("Remote CLI connection closed").
+  const h = await relayHarness(t);
+  const { service } = h.first;
+  const agent = await service.create(h.request(provider, 'stream 1'));
+  await waitFor(async () => (await service.summary(agent.id)).status === 'idle', 'first turn');
+  const sent: string[] = [];
+  for (let round = 0; round < 2; round++) {
+    await rm(join(h.home, 'gate'), { force: true });
+    const gate = `gate-${randomUUID()}`; sent.push(gate);
+    await service.send(agent.id, { id: gate, text: 'gate' });
+    await waitFor(async () => (await transcript(service, agent.id)).text.split('waiting').length > round + 1, 'the turn to stop is running');
+    // Once Stop has returned, and while it is still on its way.
+    const stop = service.stop(agent.id);
+    if (round === 0) await stop;
+    const next = `after-${randomUUID()}`; sent.push(next);
+    await service.send(agent.id, { id: next, text: 'stream 2' });
+    await stop;
+    await waitFor(async () => (await transcript(service, agent.id)).entries.some(e => e.item.type === 'turn_end' && e.item.clientMessageId === next), `round ${round}: the message after Stop ran to its end`);
+  }
+  const entries = (await transcript(service, agent.id)).entries;
+  for (const id of sent) assert.ok(entries.some(e => e.item.type === 'user_message' && e.item.clientMessageId === id), `${id} is still in the history`);
+  assert.deepEqual(entries.filter(e => e.item.type === 'turn_end').map(e => e.item.status), ['completed', 'canceled', 'completed', 'canceled', 'completed']);
 });
 
 test('relay links deliver large payloads once, drop partial frames and keep exact UTF-8 byte offsets', async t => {
