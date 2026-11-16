@@ -20,6 +20,7 @@ export function installChat(ctx, service, projects, workspace, claudeGoals) {
             agent: id => host.agents.get(id), step: id => steps.get(id), cwd: id => sessionOf(id)?.header.cwd,
             permission: id => accessOf(scoped, sessionOf(id)).permission,
             unattended: id => accessOf(scoped, sessionOf(id)).unattended,
+            neverAsks: id => accessOf(scoped, sessionOf(id)).never,
             subagent: id => !!sessionOf(id)?.header.parentSession,
             teamMember: id => teamMemberOf(sessionOf(id)),
             // dsh-remote-terminals knows; without it there are no TUI conversations.

@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.140 — Full access no longer refuses what a remote CLI asks, without a word
+
+- **Antigravity follows the DSH permission.** Like Claude and Codex, an Antigravity conversation now takes its mode from the conversation's DSH permission (the composer or `/permission`): **Read Only** runs it in **Default** (it asks before edits and commands), **Workspace Write** in **Accept edits**, and **Full access** and **Auto review** in **Auto**. It used to stay in Default whatever the permission. A change applies from the next message.
+- **Full access allows what a CLI still asks.** Under Full access DSH shows no approval prompts and refuses every request. A remote CLI that asked anyway, as Antigravity in Default did before every command, was refused each time, and Antigravity then ended its turn without a word: the reply showed only that it had finished. Such a request is now allowed once, as clicking **Allow once** would, never for the whole session. This also covers Grok, CodeBuddy and DSH, which keep their own modes. Claude Code safety checks and plans are not allowed this way; with nobody asked they are still refused.
+- **A refusal you did not see is said in the reply.** When DSH refuses a CLI's request without showing it, because the conversation's permission never asks, the reply now names the request that was not run and says how to be asked instead. A request you denied yourself is not repeated there.
+- Unchanged: a DSH model delegating with the `remote_agent_*` tools still needs your approval to start a remote agent in a mode that does not ask.
+
 ## 0.2.139 — Sessions are no longer shared between DSH instances
 
 Remote CLI sessions, remote workspaces, workspace tags and read marks are no longer kept alike in every DSH connected to the same machine. Each DSH has the sessions it started. To continue a conversation of one DSH from another computer or a phone, open that DSH itself, for example its web page.

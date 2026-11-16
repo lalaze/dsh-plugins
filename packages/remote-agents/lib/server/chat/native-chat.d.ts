@@ -5,7 +5,7 @@ import { type DshPermission } from '../core/domain.js';
 import { type AttachmentAccess } from '../agents/attachments.js';
 import { ChatProjects } from './projects.js';
 import { type TeamMember } from './agent-teams.js';
-import type { ToolHost } from '../core/dsh-host.js';
+import { type ToolHost } from '../core/dsh-host.js';
 import type { WorkspacePlacement } from '../core/access.js';
 export declare const CHAT_PROVIDER = "remote-cli";
 /** Wakes a conversation whose remote turn outlived DSH, so the missed output streams in without a new message. */
@@ -59,6 +59,8 @@ export interface ChatHost extends Partial<ToolHost> {
     permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
     /** A delegated subagent nobody answers (DSH approval policy `never`): the CLI must not wait for approvals or answers. */
     unattended?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
+    /** DSH's approval policy is `never`: it refuses the conversation's approval requests without showing them. */
+    neverAsks?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
     /** Structural DSH child-session provenance, independent of labels and permission. */
     subagent?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
     /** The AgentTeams team and member this conversation runs as, when it is a team member. */

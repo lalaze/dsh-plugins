@@ -11,6 +11,7 @@ const LABELS = {
         switchNote: (from, to, category) => `**Model switched.** ${from}'s safeguards stopped this request${category}, so ${to} retried it. Later turns in this session stay on ${to}, and the model picker does not change to show it. To use another model, pick a different one; it applies to your next message.`,
         running: (what, more) => `Tool call · ${what}${more ? ` (${more} more running)` : ''}`,
         waiting: (cli) => `${cli} is running a turn it started itself. Your message is sent when that turn ends. Stop interrupts the turn now.`,
+        refused: (cli, what) => `**Not run:** ${cli} asked for \`${what}\`. This conversation's permission never asks, so DSH refused it without showing you. To be asked instead, switch the conversation to a permission that asks.`,
     },
     zh: {
         elsewhere: (cli, turns) => `**在别处进行的 ${turns} 轮**，同一个 ${cli} 会话。`,
@@ -20,6 +21,7 @@ const LABELS = {
         switchNote: (from, to, category) => `**模型已切换。** ${from} 的安全机制拦截了这条消息${category}，这一轮改由 ${to} 重试。这段会话后面的轮次也继续用 ${to}，模型选择器不会跟着变。要换模型，选另一个模型，发下一条消息时生效。`,
         running: (what, more) => `工具调用 · ${what}${more ? `（另有 ${more} 个工具在运行）` : ''}`,
         waiting: (cli) => `${cli} 正在跑它自己开始的一轮，你的消息会在这一轮结束后发送。现在按停止会中断这一轮。`,
+        refused: (cli, what) => `**没有运行：** ${cli} 请求 \`${what}\`。这个对话的权限设置从不询问，DSH 没给你看就拒绝了。想让它来问你，把对话的权限换成会询问的设置。`,
     },
 };
 /** What the chat says while a message waits for a turn the CLI started itself, in the language of that message. */
@@ -66,6 +68,16 @@ function toolTarget(input) {
     if (path)
         return clipPath(oneLine(path));
     return clip(oneLine(field('pattern', 'query', 'url', 'prompt')));
+}
+/**
+ * The line a reply shows where DSH refused a CLI's request without showing it, in the language of what the user wrote. Without it
+ * the turn can end in silence: an ACP CLI such as Antigravity hears no reason and often stops without a word.
+ */
+export function refusalNote(cli, permission, userText) {
+    const labels = /[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en;
+    const input = permission.input ?? (typeof permission.detail === 'object' && permission.detail !== null && !Array.isArray(permission.detail) ? permission.detail : {});
+    const what = toolTarget(input) || clip(oneLine(permission.title || permission.name));
+    return labels.refused(cli, what.replace(/`/g, "'"));
 }
 /**
  * The line a reply ends with while tools run: what the one started last works on, or its name if that says nothing, in the

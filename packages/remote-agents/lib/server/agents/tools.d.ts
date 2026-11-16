@@ -19,6 +19,12 @@ export interface WaitResult {
     timedOut: boolean;
 }
 /**
+ * The answer in a conversation with full access, where DSH would refuse unseen what a CLI still asks: Antigravity's Auto asks
+ * before irreversible actions, and a CLI with no matching mode asks before every command. Full access means the agent may act,
+ * so the request gets what Allow once gives. A safety check and a plan stay a person's decision: undefined, as for wider actions.
+ */
+export declare const fullAccessAnswer: (permission: Permission) => PermissionAnswer | undefined;
+/**
  * The answer for a CLI running for an unattended DSH subagent. Nobody can approve, so it is denied and the turn goes on,
  * unless it is a shell command in a task whose sandbox holds it anyway: then the sandbox is the limit, not this answer.
  * A safety check stays refused, since that one asks for a person's judgement rather than for help reading the command.

@@ -70,6 +70,19 @@ const UNATTENDED_SHELL = 'Nobody can approve this, because the session runs unat
 const reasonOf = (permission) => permission.reason ? ` The CLI's reason: ${permission.reason}` : '';
 /** The action allowing this one request: never one that grants more than it, such as for the whole session. */
 const onceAction = (permission) => permission.actions?.find(a => a.behavior === 'allow' && (!a.scope || a.scope === 'once') && !/session|project|always|remember/i.test(`${a.id} ${a.label}`));
+/** What DSH's Allow once grants: just this request, by the CLI's action for it when the CLI offers actions; none when only wider ones exist. */
+function allowOnce(permission) {
+    const once = onceAction(permission);
+    if (permission.actions?.length && !once)
+        return;
+    return { behavior: 'allow', ...(once ? { selectedActionId: once.id } : {}) };
+}
+/**
+ * The answer in a conversation with full access, where DSH would refuse unseen what a CLI still asks: Antigravity's Auto asks
+ * before irreversible actions, and a CLI with no matching mode asks before every command. Full access means the agent may act,
+ * so the request gets what Allow once gives. A safety check and a plan stay a person's decision: undefined, as for wider actions.
+ */
+export const fullAccessAnswer = (permission) => permission.kind === 'tool' && !permission.safetyCheck ? allowOnce(permission) : undefined;
 /**
  * The answer for a CLI running for an unattended DSH subagent. Nobody can approve, so it is denied and the turn goes on,
  * unless it is a shell command in a task whose sandbox holds it anyway: then the sandbox is the limit, not this answer.
@@ -77,9 +90,9 @@ const onceAction = (permission) => permission.actions?.find(a => a.behavior === 
  */
 export function unattendedAnswer(permission, sandboxed = false) {
     if (sandboxed && permission.name === 'Bash' && !permission.safetyCheck && !permission.input?.dangerouslyDisableSandbox) {
-        const once = onceAction(permission);
-        if (once || !permission.actions?.length)
-            return { behavior: 'allow', ...(once ? { selectedActionId: once.id } : {}) };
+        const allow = allowOnce(permission);
+        if (allow)
+            return allow;
     }
     const deny = denyAction(permission);
     const message = `${permission.name === 'Bash' ? UNATTENDED_SHELL : 'Nobody can approve this: the session runs unattended. Continue without it, or report it as a blocker.'}${reasonOf(permission)}`;
@@ -108,10 +121,7 @@ export async function decidePermission(host, permission, exec, signal, subject) 
     if (outcome !== 'allowed-once')
         return;
     // A one-time DSH approval must never silently grant a session-wide CLI permission.
-    const action = onceAction(permission);
-    if (permission.actions?.length && !action)
-        return;
-    return { behavior: 'allow', ...(action ? { selectedActionId: action.id } : {}) };
+    return allowOnce(permission);
 }
 export function delegationTools(host, service, accessOf = () => ({ unattended: false })) {
     /** Prompts currently shown for `${agentId}:${permissionId}`, shared so parallel waits never ask twice. */

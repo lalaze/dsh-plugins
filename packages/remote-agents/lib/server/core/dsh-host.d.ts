@@ -12,11 +12,21 @@ export declare function permissionOf(ctx: Context, session: Session | undefined)
  * How a remote CLI may act for a conversation. A subagent DSH delegated with the `never` approval policy is
  * unattended: nobody answers its prompts, and its knobs (workspace sandbox, never ask) match no preset, so its
  * sandbox sets the CLI's limits. Other conversations keep {@link permissionOf}, where `custom` keeps the CLI's mode.
+ * `never`: DSH refuses this conversation's approval requests without showing them.
  */
 export declare function accessOf(ctx: Context, session: Session | undefined): {
     permission?: DshPermission;
     unattended: boolean;
+    never: boolean;
 };
+/**
+ * Full access: the conversation lets its agent act without asking, and DSH would refuse unseen whatever a CLI still asks.
+ * A preset with a full-access sandbox that does ask keeps its prompts.
+ */
+export declare const fullAccess: (access: {
+    permission?: DshPermission;
+    never: boolean;
+}) => boolean;
 type Schema = Record<string, unknown>;
 /** The narrow DSH host surface the plugin's tools use: approvals and questions in the calling conversation. */
 export interface ToolHost {
