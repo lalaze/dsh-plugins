@@ -1,0 +1,139 @@
+/**
+ * The machines this host can open: configured listener addresses, and the same tailnet user's computers found in
+ * `tailscale status`. Each candidate is probed at its `/dsh-machines/hello`; a tailnet computer is listed once it
+ * answered, and stays listed (offline, with when it was last seen) for {@link RETAIN_MS} after.
+ */
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { describe, request } from './proxy.js';
+const RETAIN_MS = 14 * 24 * 60 * 60 * 1000;
+const DESKTOP_OS = new Set(['macOS', 'linux', 'windows']);
+/** A stable mount id for one listener URL. */
+export const machineIdOf = (url) => `m${createHash('sha256').update(url).digest('hex').slice(0, 10)}`;
+/** `http://host:port` with no path: what every candidate and the book are keyed by. */
+export function normalizeUrl(text) {
+    try {
+        const url = new URL(/^[a-z]+:\/\//i.test(text.trim()) ? text.trim() : `http://${text.trim()}`);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:')
+            return undefined;
+        return url.origin;
+    }
+    catch {
+        return undefined;
+    }
+}
+/** Who to probe this round. */
+export function candidatesOf(status, port, statics, discover) {
+    const out = new Map();
+    for (const text of statics) {
+        const url = normalizeUrl(text);
+        if (url)
+            out.set(url, { url, source: 'static', online: true });
+    }
+    if (discover && status?.running) {
+        for (const node of status.peers) {
+            if (node.tagged || node.userId !== status.self.userId || !DESKTOP_OS.has(node.os))
+                continue;
+            const ip = node.ips.find(address => !address.includes(':'));
+            if (!ip)
+                continue;
+            const url = `http://${ip}:${port}`;
+            if (!out.has(url))
+                out.set(url, { url, source: 'tailnet', online: node.online, name: node.name, os: node.os, ...(node.lastSeen ? { lastSeen: node.lastSeen } : {}) });
+        }
+    }
+    return [...out.values()];
+}
+/** A hello probe's failure in a few words. */
+export function probeReason(error) {
+    const code = error.code;
+    if (code === 'ECONNREFUSED')
+        return 'no-listener';
+    if (code === 'ETIMEDOUT')
+        return 'timeout';
+    if (code === 'not-machines')
+        return 'not-machines';
+    if (code === 'forbidden')
+        return 'forbidden';
+    return describe(error);
+}
+export async function probeHello(url, timeoutMs = 6_000) {
+    const answer = await request(new URL('/dsh-machines/hello', url), { timeoutMs, maxBytes: 16 * 1024 });
+    if (answer.status === 403 || answer.status === 421)
+        throw Object.assign(new Error(`refused (${answer.status})`), { code: 'forbidden' });
+    let hello;
+    try {
+        hello = JSON.parse(answer.body.toString('utf8'));
+    }
+    catch { /* not ours */ }
+    if (answer.status !== 200 || hello?.dshMachines !== 1 || typeof hello.id !== 'string')
+        throw Object.assign(new Error('not a DSH with this plugin'), { code: 'not-machines' });
+    return { dshMachines: 1, id: hello.id, name: String(hello.name ?? ''), os: String(hello.os ?? ''), version: String(hello.version ?? '') };
+}
+export class MachineBook {
+    file;
+    selfId;
+    remembered = new Map();
+    current = new Map();
+    listeners = new Set();
+    constructor(file, selfId) {
+        this.file = file;
+        this.selfId = selfId;
+    }
+    load() {
+        try {
+            const raw = JSON.parse(readFileSync(this.file, 'utf8'));
+            this.remembered = new Map(Object.entries(raw).filter(([, value]) => Date.now() - value.lastSeen < RETAIN_MS));
+        }
+        catch { /* first start */ }
+    }
+    list() { return [...this.current.values()].sort((a, b) => a.name.localeCompare(b.name)); }
+    get(id) { return this.current.get(id); }
+    onChange(listener) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+    /** Probe every candidate and replace the list with what answered (and what is remembered). */
+    async refresh(candidates, probe = url => probeHello(url)) {
+        const now = Date.now();
+        const next = new Map();
+        await Promise.all(candidates.map(async (candidate) => {
+            const id = machineIdOf(candidate.url);
+            const known = this.remembered.get(candidate.url);
+            const base = { id, url: candidate.url, source: candidate.source };
+            if (!candidate.online) {
+                if (known)
+                    next.set(id, { ...base, name: known.name, os: known.os, state: 'offline', lastSeen: Math.max(known.lastSeen, candidate.lastSeen ?? 0) });
+                return;
+            }
+            try {
+                const hello = await probe(candidate.url);
+                if (hello.id === this.selfId())
+                    return;
+                const name = hello.name || candidate.name || new URL(candidate.url).hostname;
+                this.remembered.set(candidate.url, { name, os: hello.os || candidate.os || '', lastSeen: now });
+                next.set(id, { ...base, name, os: hello.os || candidate.os || '', state: 'online', lastSeen: now, ...(hello.version ? { version: hello.version } : {}) });
+            }
+            catch (error) {
+                // A tailnet computer that never answered is not a machine; a configured one is listed either way.
+                if (candidate.source === 'tailnet' && !known)
+                    return;
+                next.set(id, { ...base, name: known?.name || candidate.name || new URL(candidate.url).host, os: known?.os || candidate.os || '', state: 'unreachable', reason: probeReason(error), ...(known ? { lastSeen: known.lastSeen } : {}) });
+            }
+        }));
+        const shape = (map) => JSON.stringify([...map.values()].map(({ id, url, name, os, state, reason }) => [id, url, name, os, state, reason]).sort());
+        const changed = shape(next) !== shape(this.current);
+        this.current = next;
+        this.save();
+        if (changed)
+            for (const listener of [...this.listeners])
+                listener();
+    }
+    save() {
+        try {
+            mkdirSync(dirname(this.file), { recursive: true, mode: 0o700 });
+            const temporary = `${this.file}.tmp`;
+            writeFileSync(temporary, JSON.stringify(Object.fromEntries(this.remembered), null, 2), { mode: 0o600 });
+            renameSync(temporary, this.file);
+        }
+        catch { /* the list still works in memory */ }
+    }
+}

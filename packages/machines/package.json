@@ -1,0 +1,74 @@
+{
+  "name": "dsh-machines",
+  "version": "0.1.0",
+  "description": "Open the full DSH of your other machines on the tailnet from the sidebar, see their waiting approvals and finished turns, and restart them remotely",
+  "type": "module",
+  "icon": "icon.svg",
+  "main": "lib/server/index.js",
+  "types": "lib/server/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/server/index.d.ts",
+      "default": "./lib/server/index.js"
+    },
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "README.zh-CN.md",
+    "CHANGELOG.md",
+    "CHANGELOG.zh-CN.md",
+    "THIRD_PARTY_NOTICES.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.15.0",
+    "dsh": ">=0.2.2-rc.1 <0.3.0"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "tailscale",
+    "remote",
+    "machines"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lalaze/dsh-plugins.git",
+    "directory": "packages/machines"
+  },
+  "dsh": {
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/schemastery": ">=3.18.4",
+    "react": "^18.3.1"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  }
+}
