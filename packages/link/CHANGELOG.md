@@ -4,6 +4,10 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.3 — A machine Tailscale wrongly calls offline still shows
+
+- A machine this computer already knew is asked anyway when Tailscale calls it offline, and listed online when it answers. Tailscale's flag is its coordination server's view: a computer whose Tailscale lost that server (the MacBook Air on a relay) stayed reachable but showed as offline, so the switcher could not open it and its finished turns and approvals never arrived. Update every computer; no restart needed.
+
 ## 0.1.2 — Instant switching, and notices for what happens on other machines
 
 Update every computer and restart DSH there: the page you switch from keeps the others, the page you switch to does its own switching, and each machine tells about its own TUI turns.

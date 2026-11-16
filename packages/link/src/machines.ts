@@ -12,6 +12,8 @@ import type { TailnetStatus } from './tailscale.js';
 
 const RETAIN_MS = 14 * 24 * 60 * 60 * 1000;
 const DESKTOP_OS = new Set(['macOS', 'linux', 'windows']);
+/** A machine Tailscale calls offline gets this long to answer anyway. */
+const OFFLINE_PROBE_MS = 3_000;
 
 /** A stable mount id for one listener URL. */
 export const machineIdOf = (url: string) => `m${createHash('sha256').update(url).digest('hex').slice(0, 10)}`;
@@ -85,8 +87,12 @@ export class MachineBook {
   get(id: string): MachineInfo | undefined { return this.current.get(id); }
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
 
-  /** Probe every candidate and replace the list with what answered (and what is remembered). */
-  async refresh(candidates: Candidate[], probe: (url: string) => Promise<Hello> = url => probeHello(url)): Promise<void> {
+  /**
+   * Probe every candidate and replace the list with what answered (and what is remembered). A machine Tailscale calls
+   * offline is still asked, briefly, when this book knew it: Tailscale's flag is the coordination server's view, and a
+   * machine whose Tailscale lost that server (seen with the MacBook Air on a relay) stays reachable over the tailnet.
+   */
+  async refresh(candidates: Candidate[], probe: (url: string, timeoutMs?: number) => Promise<Hello> = (url, timeoutMs) => probeHello(url, timeoutMs)): Promise<void> {
     const now = Date.now();
     const next = new Map<string, MachineInfo>();
     await Promise.all(candidates.map(async candidate => {
@@ -94,7 +100,11 @@ export class MachineBook {
       const known = this.remembered.get(candidate.url);
       const base = { id, url: candidate.url, source: candidate.source } as const;
       if (!candidate.online) {
-        if (known) next.set(id, { ...base, name: known.name, os: known.os, state: 'offline', lastSeen: Math.max(known.lastSeen, candidate.lastSeen ?? 0) });
+        const hello = known ? await probe(candidate.url, OFFLINE_PROBE_MS).catch(() => undefined) : undefined;
+        if (hello && hello.id !== this.selfId()) {
+          this.remembered.set(candidate.url, { name: hello.name || known!.name, os: hello.os || known!.os, lastSeen: now });
+          next.set(id, { ...base, name: hello.name || known!.name, os: hello.os || known!.os, state: 'online', lastSeen: now, ...(hello.version ? { version: hello.version } : {}) });
+        } else if (known) next.set(id, { ...base, name: known.name, os: known.os, state: 'offline', lastSeen: Math.max(known.lastSeen, candidate.lastSeen ?? 0) });
         return;
       }
       try {

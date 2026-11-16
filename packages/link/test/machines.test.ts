@@ -42,7 +42,15 @@ test('the book lists what answered, keeps tailnet machines it knew as offline, a
     // The same answers again change nothing.
     await book.refresh([{ url: 'http://100.0.0.1:7390', source: 'tailnet', online: true }, { url: 'http://100.0.0.4:7390', source: 'static', online: true }], probe);
     assert.equal(changes, 1);
-    // The Air goes to sleep: the tailnet says offline, the book still knows it.
+    // Tailscale lost its coordination server on the Air and calls it offline, but it still answers: online.
+    await book.refresh([{ url: 'http://100.0.0.1:7390', source: 'tailnet', online: false, lastSeen: 5 }], probe);
+    assert.deepEqual(book.list().map(machine => [machine.name, machine.state]), [['lalazemacbook-air', 'online']]);
+    // An offline machine nobody knew is not even asked.
+    const asked: string[] = [];
+    await book.refresh([{ url: 'http://100.0.0.9:7390', source: 'tailnet', online: false }], async url => { asked.push(url); return hello('x', 'x'); });
+    assert.deepEqual(asked, []);
+    // The Air goes to sleep: the tailnet says offline, it does not answer, the book still knows it.
+    answers['http://100.0.0.1:7390'] = () => { throw refused(); };
     await book.refresh([{ url: 'http://100.0.0.1:7390', source: 'tailnet', online: false, lastSeen: 5 }], probe);
     const air = book.list()[0]!;
     assert.deepEqual([air.name, air.state], ['lalazemacbook-air', 'offline']);
