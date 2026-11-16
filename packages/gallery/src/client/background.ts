@@ -2,6 +2,13 @@ import { currentWallpaper } from '../domain.js';
 import type { GalleryController } from './controller.js';
 
 const PLUGIN_BAR_SEEN = 'dsh-gallery-plugin-bar';
+const LOADING_IN = 'dsh-gallery-loading-in';
+const LOADING_SPIN = 'dsh-gallery-loading-spin';
+// DSH 0.2.2's desktop first-run cover hides the app while settings load. It is transparent on macOS, so the wallpaper
+// fills the window, and its loading line has no style of its own, so it sits at the top edge in the title bar.
+// It becomes a centred chip that fades in after 0.4 s, so a quick load shows only the wallpaper.
+// Matched by its role and the stable part of its module class names; the only child of the stage is the loading line.
+const LOADING_LINE = '[role="presentation"][class*="_onboardingOverlay"]>[class*="_onboardingStage"]>[role="status"]:only-child';
 
 // Use DSH's public slot markers and shell attributes, independent of CSS module hashes.
 // The plugin page header (DSH 0.2.2) paints a solid strip so scrolled content cannot show through it.
@@ -29,6 +36,11 @@ body[data-dsh-gallery-active] [data-plugin-bar][data-natural]:has(>[data-dsh-gal
 body[data-dsh-gallery-active] [data-testid="task-manager-page"],
 body[data-dsh-gallery-active] [data-testid="task-manager-page"] aside :is([class*="_saveFooter"],[class*="_saveFailure"],[class*="_detailNotice"]){background:transparent!important}
 body[data-dsh-gallery-active] [data-testid="task-manager-page"] aside{background:color-mix(in srgb,var(--dsw-alias-bg-base,Canvas) 55%,transparent)!important}
+${LOADING_LINE}{align-self:center;display:inline-flex;align-items:center;gap:10px;height:auto;margin:0;padding:9px 16px 9px 13px;border-radius:999px;font:500 13px/18px var(--dsw-font-family,system-ui,-apple-system,sans-serif);letter-spacing:.01em;white-space:nowrap;color:var(--dsw-alias-label-secondary,#c4c6cc);background:color-mix(in srgb,var(--dsw-alias-bg-layer-2,#202125) 72%,transparent);border:1px solid var(--dsw-alias-border-l2,#ffffff1f);box-shadow:0 12px 32px rgb(0 0 0/.18);-webkit-backdrop-filter:blur(18px) saturate(1.4);backdrop-filter:blur(18px) saturate(1.4);animation:${LOADING_IN} .24s ease-out .4s both}
+${LOADING_LINE}::before{content:"";flex:none;width:14px;height:14px;box-sizing:border-box;border-radius:50%;border:1.75px solid currentColor;border-right-color:transparent;opacity:.85;animation:${LOADING_SPIN} .8s linear infinite}
+@keyframes ${LOADING_IN}{from{opacity:0}}
+@keyframes ${LOADING_SPIN}{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){${LOADING_LINE}::before{animation:none;border-right-color:currentColor;opacity:.45}}
 `;
 
 export function installBackground(controller: GalleryController): () => void {
