@@ -12,6 +12,7 @@ A device-local wallpaper library for DeepSeek Harness, inspired by Paseo's wallp
 - Upload JPG, PNG and WebP, up to 10 MB and 40 megapixels per image, 20 files per upload.
 - Filter, search, preview, navigate with arrow keys, zoom, download and delete.
 - Adjust opacity, blur and Bing region while preserving menu and composer surfaces.
+- The desktop app's “Loading settings…” line at startup becomes a small chip in the middle of the window that fades in after 0.4 s, so a quick start shows only the wallpaper.
 - Restore images and preferences from IndexedDB after reload; cached images work offline.
 
 ## Install
