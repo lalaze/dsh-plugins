@@ -9,6 +9,8 @@ export declare class TaskHistory {
     private generation;
     /** Called after entries written here are saved; a shared host copies them to its registry. Not called for imports. */
     onAppend?: () => void;
+    /** Entries handed to `appendBatch` whose write has not finished. */
+    private writing;
     constructor(directory: string, taskId: string);
     get epoch(): string;
     private get file();
@@ -23,6 +25,8 @@ export declare class TaskHistory {
         item: TimelineEntry['item'];
         turnId?: string;
     }[], relay?: RelayPosition, before?: () => Promise<void>): Promise<void>;
+    /** Number of entries recorded so far, counting those whose write is still queued. */
+    get recorded(): number;
     /** Number of saved entries, once queued writes finished. */
     length(): Promise<number>;
     /** Entries `from`…`to` (1-based, inclusive) as saved lines. */

@@ -13,6 +13,8 @@ export interface SharedOwner {
     history(taskId: string): Promise<TaskHistory>;
     /** The CLI session this DSH drives, while it has not handed it over. */
     live(taskId: string): Agent | undefined;
+    /** How many history entries the session this DSH drives has recorded, counting those still being written. */
+    recorded?(taskId: string): number | undefined;
     /** Another DSH took the session over: stop reading its CLI here. The CLI keeps running. */
     yield(taskId: string): void;
     /** Another DSH deleted the session: forget it here without touching its CLI. */
@@ -71,6 +73,8 @@ export declare class SharedSessions {
     private readonly lives;
     private readonly chains;
     private readonly pushes;
+    /** Since when a session's end of turn waits for its last history entries to reach the host; see {@link sendLive}. */
+    private readonly settling;
     private readonly adopting;
     private readonly listener;
     constructor(transport: SshTransport, store: Store, owner: SharedOwner);
@@ -124,6 +128,8 @@ export declare class SharedSessions {
     /** Copy new history to the host while this DSH drives the session. */
     appended(id: string): void;
     private push;
+    /** Whether the host's entry at `seq` is the one recorded here, so the host holds this history's first `seq` entries. */
+    private holds;
     /** History here and on the host diverged while this DSH held the lease: take the shared history and drive the CLI again from it. */
     private resync;
     /** Another DSH took the session over: drop what this DSH recorded but never copied. */
@@ -138,6 +144,12 @@ export declare class SharedSessions {
     acquire(id: string, force: boolean, timeout?: number, retryNow?: boolean): Promise<Acquired>;
     /** Whether a relay may be attached from here. Never blocks a CLI when the registry cannot be reached. */
     mayAttach(id: string): Promise<boolean>;
+    /**
+     * Publish the live status of a CLI this DSH drives. A turn's end is published once the history it recorded is on the
+     * host: other DSHes read the history when they see a turn end, and a read taken short of its last entries would leave
+     * the turn unread everywhere. A host that does not take the history holds it back for {@link SETTLE_MS} at most.
+     */
+    private sendLive;
     /** Publish live status and keep the leases of driven CLIs from expiring. */
     private tick;
     /** Live status reported by the DSH driving the session, when that is another one. */
@@ -149,6 +161,8 @@ export declare class SharedSessions {
     } | undefined;
     /** The user read a session as far as this DSH has it: tell the other DSH instances. Failing only leaves it unread there. */
     markRead(id: string): Promise<void>;
+    /** Whether the history here has the end of its last turn, or no turn at all. */
+    private turnEnded;
     /** Whether the other DSH driving a session reports a turn in it. */
     private remoteBusy;
     /** The other DSH driving a session, by name. */

@@ -11,6 +11,8 @@ export class TaskHistory {
     generation = 0;
     /** Called after entries written here are saved; a shared host copies them to its registry. Not called for imports. */
     onAppend;
+    /** Entries handed to `appendBatch` whose write has not finished. */
+    writing = 0;
     constructor(directory, taskId) {
         this.directory = directory;
         this.taskId = taskId;
@@ -53,25 +55,36 @@ export class TaskHistory {
      */
     appendBatch(items, relay, before) {
         const saved = structuredClone(items), position = relay && structuredClone(relay);
+        let pending = saved.length;
+        this.writing += pending;
+        const done = () => { this.writing -= pending; pending = 0; };
         const next = this.queue.then(async () => {
-            if (this.failure)
-                throw this.failure;
-            if (!saved.length)
-                return;
-            await before?.();
-            const timestamp = new Date().toISOString();
-            const entries = saved.map(({ item, turnId }, index) => ({ seqStart: this.entries.length + index + 1, seqEnd: this.entries.length + index + 1, timestamp, item, ...(turnId ? { turnId } : {}), ...(position ? { relay: position } : {}) }));
-            await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
-            await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
-            this.entries.push(...entries);
             try {
-                this.onAppend?.();
+                if (this.failure)
+                    throw this.failure;
+                if (!saved.length)
+                    return;
+                await before?.();
+                const timestamp = new Date().toISOString();
+                const entries = saved.map(({ item, turnId }, index) => ({ seqStart: this.entries.length + index + 1, seqEnd: this.entries.length + index + 1, timestamp, item, ...(turnId ? { turnId } : {}), ...(position ? { relay: position } : {}) }));
+                await mkdir(join(this.directory, 'events'), { recursive: true, mode: 0o700 });
+                await appendFile(join(this.directory, 'events', `${this.taskId}.jsonl`), entries.map(e => `${JSON.stringify(e)}\n`).join(''), { mode: 0o600 });
+                this.entries.push(...entries);
+                done();
+                try {
+                    this.onAppend?.();
+                }
+                catch { /* Copying is retried by its owner. */ }
             }
-            catch { /* Copying is retried by its owner. */ }
+            finally {
+                done();
+            }
         });
         this.queue = next.catch(error => { this.failure = error; });
         return next;
     }
+    /** Number of entries recorded so far, counting those whose write is still queued. */
+    get recorded() { return this.entries.length + this.writing; }
     /** Number of saved entries, once queued writes finished. */
     async length() { await this.queue; return this.entries.length; }
     /** Entries `from`…`to` (1-based, inclusive) as saved lines. */

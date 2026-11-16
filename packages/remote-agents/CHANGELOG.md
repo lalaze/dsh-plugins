@@ -4,6 +4,14 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.137 — A turn read as it ends stays read, and a message sent right after Stop is kept
+
+Both affect machines whose sessions are shared between DSH instances, which they are unless you switched **Share sessions and workspaces with other DSH instances** off in Settings › Remote agents.
+
+- **A turn read as it ends stays read.** The DSH running a CLI told the others that a turn had ended before the turn's last entries were on the machine. A read taken in that moment, on another DSH or on the phone page, covered only part of the turn, so the turn turned unread again on every DSH, and the page reports a read only once per turn. The end of a turn is now shared once its entries are on the machine (at most 3 seconds later if the machine does not take them), and a read waits up to 5 seconds for the turn's end to arrive.
+- **A message sent right after Stop is kept.** When a session's record was not on the machine yet, as in a new session's first moments, sending right after Stop could drop that message and the stopped turn's end from the session. The message then failed with "Remote message delivery was not recorded" or "Remote CLI connection closed", and the conversation showed neither. The plugin had taken the machine's missing record for an empty history and rebuilt the session from the machine's copy; it now checks that the machine holds its own entries and carries on.
+- Restart DSH after upgrading. Upgrade every DSH that shares sessions: the first fix needs it on the DSH running the CLI, the second on the DSH you send from.
+
 ## 0.2.136 — Reads and a new session's first turn are no longer lost between DSHes
 
 For machines with **Share sessions and workspaces with other DSH instances** on (Settings › Remote agents):
