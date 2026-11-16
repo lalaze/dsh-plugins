@@ -43,7 +43,7 @@ test('discovery and model validation are scoped to the execution host', async t 
   const { service, remote, hostId, request } = await fixture(t);
   const catalog = await service.providers(hostId, '/srv/project'); assert.equal(catalog[0].models[0].id, 'remote-model');
   await assert.rejects(service.create(request({ model: 'model-on-another-host' })), /unavailable on this host/);
-  await assert.rejects(service.create(request({ provider: 'claude' })), /CLI is not ready/);
+  await assert.rejects(service.create(request({ provider: 'claude' })), /claude was not found on this machine/);
   await assert.rejects(service.create(request({ thinkingOptionId: 'unsupported' })), /thinking level/);
   assert.equal(remote.creates, 0);
 });

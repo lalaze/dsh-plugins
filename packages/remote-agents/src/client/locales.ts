@@ -201,6 +201,8 @@ export const zh: Record<string, string> = {
   "The remote CLI did not confirm interruption. The next message resumes its saved session.": "远程 CLI 未确认中断。下一条消息会恢复已保存的会话。",
   "This permission request is no longer pending": "此授权请求已失效。",
   "The selected CLI is not ready in this remote project": "所选 CLI 在此远程项目中不可用。",
+  "The selected CLI is not ready in this remote project: {reason}": "所选 CLI 在此远程项目中不可用：{reason}",
+  "{command} was not found on this machine. Install it there, or put its directory on the PATH your login shell sets, then try again.": "这台机器上找不到 {command}。请在这台机器上安装它，或把它所在的目录加入登录 shell 的 PATH，然后重试。",
   "The selected model is unavailable on this host": "所选模型在这台机器上不可用。",
   "Remote project does not exist or is not accessible": "远程项目不存在或无法访问。",
   "Enter an absolute remote project path": "请输入远程项目的绝对路径。",

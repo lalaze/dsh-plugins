@@ -1,4 +1,4 @@
-import { SshBackend, type BackendFactory } from './backend.js';
+import { notReadyReason, SshBackend, type BackendFactory } from './backend.js';
 import { HostConnections } from './host-connections.js';
 import { SharedSync } from './shared-sync.js';
 import type { LaunchSharing } from '../sharing/sharing.js';
@@ -293,7 +293,7 @@ export class RemoteAgentsService {
         if (!enabledProvidersOf(host).includes(request.provider)) throw new RemoteError('This CLI is disabled on this machine. Enable it in Settings → Remote agents.', 409);
         // Probe only the target CLI here; launching the other enabled CLIs to list their models is what made starting slow.
         const provider = await backend.target(request.cwd, request.provider);
-        if (provider.status !== 'ready') throw new RemoteError('The selected CLI is not ready in this remote project', 409);
+        if (provider.status !== 'ready') throw new RemoteError(notReadyReason(provider), 409);
         const model = provider.models.find(m => m.id === request.model);
         if (!model) throw new RemoteError('The selected model is unavailable on this host', 409);
         if (request.attachments?.some(a => a.kind === 'image') && !inputModalitiesOf(provider.id, model).includes('image')) throw new RemoteError('This remote CLI does not support image input');

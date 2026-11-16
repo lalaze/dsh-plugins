@@ -661,6 +661,19 @@ test('Antigravity without a login for SSH sessions says how to sign in; other AC
   assert.equal(ssh.admissions.length, 0); assert.ok(ssh.children.every(c => c.stopped));
 });
 
+test('a message to a CLI that cannot start says why, and is probed again as soon as the CLI is fixed', async t => {
+  const { service, ssh, request } = await fixture(t, 'antigravity'); ssh.acpAuthRequired = true;
+  // The CLI's own reason, here how to sign in, comes with the refusal instead of being dropped.
+  await assert.rejects(service.create(request), (error: Error) => error.message === 'The selected CLI is not ready in this remote project: Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then refresh.');
+  // A failed probe is not remembered: once signed in, the very next message starts.
+  ssh.acpAuthRequired = false;
+  const agent = await service.create({ ...request, id: randomUUID() });
+  assert.ok(agent.started);
+  // A CLI missing from the machine is named, with where the probe looked for it.
+  await assert.rejects(service.create({ ...request, id: randomUUID(), provider: 'claude', model: 'claude-remote' }),
+    (error: Error) => error.message === 'claude was not found on this machine. Install it there, or put its directory on the PATH your login shell sets, then try again.');
+});
+
 test('an Antigravity session saved by 0.2.129 or earlier is refused before anything starts on the host', async t => {
   const { service, ssh, request, store } = await fixture(t, 'antigravity');
   const agent = await service.create(request); ssh.live.finish(); await tick();

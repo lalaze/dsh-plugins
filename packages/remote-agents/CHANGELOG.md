@@ -4,6 +4,11 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.138 — "The selected CLI is not ready" now says why
+
+- **The refusal names the cause.** Before a message starts a session, the plugin checks the chosen CLI on that machine. When the check failed, the message only said "The selected CLI is not ready in this remote project" and dropped the reason the check had. It now carries the CLI's own reason, such as how to sign in, or, when the CLI is not installed there, names the command it looked for: "claude was not found on this machine…" (on the PATH a login shell sets).
+- **A fixed CLI works on the next message.** A failed check was remembered for 30 seconds, so after signing in or installing the CLI the next message failed the same way. Only a successful check is remembered now.
+
 ## 0.2.137 — A turn read as it ends stays read, and a message sent right after Stop is kept
 
 Both affect machines whose sessions are shared between DSH instances, which they are unless you switched **Share sessions and workspaces with other DSH instances** off in Settings › Remote agents.
