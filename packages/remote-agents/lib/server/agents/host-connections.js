@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { connectionInput } from './backend.js';
-import { enabledProvidersOf, field, providerSelection, record, RemoteError, sharesSessions } from '../core/domain.js';
+import { enabledProvidersOf, field, providerSelection, record, RemoteError } from '../core/domain.js';
 /** Owns backend instances, connection identity/status and the saved machine model catalog. */
 export class HostConnections {
     store;
@@ -10,7 +10,7 @@ export class HostConnections {
     connections = new Map();
     catalogListeners = new Set();
     closed = false;
-    constructor(store, factory, serial, created) {
+    constructor(store, factory, serial, created = () => { }) {
         this.store = store;
         this.factory = factory;
         this.serial = serial;
@@ -24,9 +24,7 @@ export class HostConnections {
     hosts() {
         return this.store.hosts().map(({ password, catalog, ...host }) => {
             const enabled = enabledProvidersOf(host), providers = catalog?.providers.filter(p => enabled.includes(p.id)) ?? [];
-            // An unreachable host already reports its own error.
-            const connection = this.connections.get(host.id), shareError = sharesSessions(host) && connection?.status === 'connected' ? connection.backend.sharingError?.() : undefined;
-            return { ...host, enabledProviders: enabled, share: sharesSessions(host), ...(shareError ? { shareError: this.safeError(shareError) } : {}), status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
+            return { ...host, enabledProviders: enabled, status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
                 ...(!enabled.length ? { modelCount: 0 } : {}),
                 ...(catalog ? { modelsCheckedAt: catalog.checkedAt, modelCount: providers.filter(p => p.status === 'ready').reduce((n, p) => n + p.models.length, 0),
                     providerErrors: providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) };
@@ -79,7 +77,6 @@ export class HostConnections {
                         });
                     current.status = 'connected';
                     current.error = undefined;
-                    current.backend.startSharing?.();
                 })();
             }
             await current.ready;
@@ -100,6 +97,7 @@ export class HostConnections {
             if (expectedServerId && host.serverId !== expectedServerId)
                 throw new RemoteError('Agent belongs to a different remote SSH machine', 409);
             void current.backend.cleanup?.();
+            void current.backend.withdrawShared?.();
             return await action(current.backend, host);
         }
         catch (error) {

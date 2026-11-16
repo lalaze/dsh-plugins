@@ -3,7 +3,6 @@ import { type SshTransport } from '../core/ssh.js';
 export declare class WorkspaceFiles {
     readonly transport: SshTransport;
     constructor(transport: SshTransport);
-    nativeSharing(request: Record<string, unknown>): Promise<any>;
     /** Runs one shell operation and returns its data; the program reports handled failures with their status. */
     private run;
     operate(cwd: string, operation: FileOperation, signal?: AbortSignal): Promise<unknown>;

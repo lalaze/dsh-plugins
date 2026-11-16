@@ -1,11 +1,9 @@
 import { join } from 'node:path';
 import { accessOf } from '../core/dsh-host.js';
-import { sharesSessions } from '../core/domain.js';
 import { dshHome, under, WorkspaceAccess } from '../core/access.js';
 import { editorHandler } from './editor-route.js';
 import { workspaceTransferHandler } from './http.js';
 import { RemoteWorkspaces } from './remote-workspaces.js';
-import { WorkspaceTagSync } from './tag-sync.js';
 import { WorkspaceService } from './service.js';
 import { workspaceTools } from './tools.js';
 /**
@@ -64,7 +62,6 @@ export async function installWorkspaces(ctx, store, machines) {
         for (const tool of workspaceTools(files, host, agent => accessOf(scoped, agent?.session).permission))
             host.tools.register(tool);
     });
-    installTagSync(ctx, store, machines, access);
     // dsh-remote-terminals runs terminals, TUI conversations and worktrees on the machines through this service alone.
     const remote = {
         version: 1, stateFile: join(store.directory, 'state.json'),
@@ -77,64 +74,4 @@ export async function installWorkspaces(ctx, store, machines) {
     };
     ctx.provide('remoteAgentsMachines', remote);
     return { access, placement, workspaces, features: { files } };
-}
-/** Workspace Tags follow a remote workspace to every DSH sharing its machine. */
-function installTagSync(ctx, store, machines, access) {
-    const root = join(dshHome(), 'remote-workspaces');
-    const listed = new Map();
-    const placements = new Map();
-    const sync = new WorkspaceTagSync(store, {
-        tags: () => ctx.get('workspaceTags'),
-        workspaces: () => [...listed.values()],
-        targets: async (path) => {
-            // Only this plugin's anchors stand for a remote directory; resolving one reads its metadata, so it is kept a while.
-            if (!under(root, path))
-                return [];
-            let cached = placements.get(path);
-            if (!cached || Date.now() - cached.at > 600_000)
-                placements.set(path, cached = { at: Date.now(), value: access.resolve(path) });
-            const placement = await cached.value.catch(() => ({ hostIds: [], cwd: undefined }));
-            const cwd = placement.cwd;
-            return cwd ? placement.hostIds.filter(id => store.hosts().some(host => host.id === id && sharesSessions(host))).map(hostId => ({ hostId, remotePath: cwd })) : [];
-        },
-        shared: hostId => machines.sharedWorkspaceList(hostId),
-        publish: (hostId, path, tags) => machines.setWorkspaceTags(hostId, path, tags),
-        warn: message => { const logger = ctx.get('logger'); if (logger?.warn)
-            logger.warn(message);
-        else
-            console.warn(`[dsh-remote-agents] ${message}`); },
-    });
-    // DSH lists its workspaces only as a stream; follow it, and start over when it ends.
-    const controller = new AbortController();
-    void (async () => {
-        while (!controller.signal.aborted) {
-            const workspaces = ctx.get('workspaceController');
-            try {
-                if (workspaces)
-                    for await (const frame of workspaces.follow(controller.signal)) {
-                        const keep = (item) => { const w = item; if (typeof w?.workspaceId === 'string' && typeof w.path === 'string')
-                            listed.set(w.workspaceId, { workspaceId: w.workspaceId, path: w.path }); };
-                        if (frame.type === 'baseline' || frame.type === 'replace') {
-                            listed.clear();
-                            for (const item of frame.value?.items ?? [])
-                                keep(item);
-                        }
-                        else if (frame.type === 'upsert')
-                            keep(frame.workspace);
-                        else if (frame.type === 'remove' && frame.workspaceId)
-                            listed.delete(frame.workspaceId);
-                        else
-                            continue;
-                        sync.trigger();
-                    }
-            }
-            catch { /* followed again below */ }
-            await new Promise(resolve => { const timer = setTimeout(resolve, 10_000); timer.unref?.(); controller.signal.addEventListener('abort', () => { clearTimeout(timer); resolve(undefined); }, { once: true }); });
-        }
-    })();
-    // Tags another DSH changed arrive with the host registry's report, so they are compared right away.
-    const changed = () => sync.trigger();
-    machines.sharedWorkspaceListeners?.add(changed);
-    sync.start();
-    ctx.effect(() => () => { controller.abort(); machines.sharedWorkspaceListeners?.delete(changed); sync.close(); });
 }

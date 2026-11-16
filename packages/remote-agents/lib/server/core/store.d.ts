@@ -17,14 +17,14 @@ export interface SharingSettings {
     skills?: Record<string, boolean>;
     secret?: string;
 }
-/** This DSH instance, as other instances sharing an SSH host's sessions see it. */
+/** This DSH instance, as the others saw it while 0.2.138 and earlier shared sessions between them. */
 export interface Instance {
     id: string;
     label: string;
 }
 /**
- * `instance` identifies this DSH to others sharing a host's sessions; `seenWorkspaces` lists, per host, the
- * shared remote workspaces already offered to DSH, so one removed from the sidebar is not added again.
+ * `instance` is kept as saved: withdrawing names it. `sharedWithdrawals` lists, per host, the sessions 0.2.138 and earlier
+ * shared with other DSH instances and that are still to be withdrawn from the host's registry; see {@link Store.open}.
  */
 export interface State {
     version: 1;
@@ -36,9 +36,7 @@ export interface State {
     chatFast?: string[];
     sharing?: SharingSettings;
     instance?: Instance;
-    seenWorkspaces?: Record<string, string[]>;
-    sharedDeletions?: SharedDeletion[];
-    tagSync?: Record<string, TagSyncRecord>;
+    sharedWithdrawals?: Record<string, string[]>;
     /**
      * What 0.2.129 and earlier saved about TUI conversations. dsh-remote-terminals took them over and keeps them now; they
      * stay here untouched, so that it can find them on its first start and an older version still has them.
@@ -46,16 +44,6 @@ export interface State {
     tuiSessions?: string[];
     tuiDetails?: Record<string, unknown>;
     tuiLocalScroll?: boolean;
-}
-/** The tags a shared workspace last carried on both sides, by `hostId` and remote path; `at` is the host's stamp of that value. */
-export interface TagSyncRecord {
-    names: string[];
-    at?: string;
-}
-/** A deleted shared session whose deletion has not reached its SSH host yet. */
-export interface SharedDeletion {
-    hostId: string;
-    id: string;
 }
 export declare class Store {
     private readonly path;
@@ -66,7 +54,7 @@ export declare class Store {
     private closed;
     /** Listeners for the tokens each finished CLI turn used; the plugin forwards them to usage statistics. */
     readonly usageListeners: Set<(taskId: string, usage: TurnUsage, turn: FinishedTurn) => void>;
-    /** Called after every saved change; shared hosts publish the task records that changed. */
+    /** Called after every saved change. */
     readonly changeListeners: Set<() => void>;
     /** Machines whose saved model catalog lost Antigravity models from 0.2.129 or earlier on opening; see {@link oldAntigravity}. */
     readonly staleCatalogs: Set<string>;
@@ -83,13 +71,10 @@ export declare class Store {
     chatFast(sessionId: string): boolean;
     /** The reasoning effort last explicitly selected for a native chat model route, if any. */
     chatEffort(route: string): string | undefined;
-    /** This DSH's identity for shared hosts, if it was created. */
-    instanceId(): string | undefined;
-    /** This DSH's identity for shared hosts, created on first use. */
-    instance(): Promise<Instance>;
-    tagSync(key: string): TagSyncRecord | undefined;
-    seenWorkspaces(hostId: string): string[];
-    sharedDeletions(hostId: string): string[];
+    /** The identity this DSH had while sessions were shared, if it ever reached a host's registry. */
+    savedInstance(): Instance | undefined;
+    /** Sessions of a host still to be withdrawn from its shared registry. */
+    sharedWithdrawals(hostId: string): string[];
     relayCleanups(hostId: string): RelayCleanup[];
     /** A copy of one saved agent record, without cloning the whole registry. */
     task(predicate: (task: Task) => boolean): Task | undefined;

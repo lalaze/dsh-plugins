@@ -60,7 +60,7 @@ export function imageExtensionOf(data) {
     if (ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP')
         return '.webp';
 }
-/** Timeline items can come from another DSH: only content-hash names are trusted as file names. */
+/** Timeline items are saved data: only content-hash names are trusted as file names. */
 const VIEWED_FILE = /^[0-9a-f]{64}\.(?:png|jpg|gif|webp)$/;
 /** An absolute remote path to an image file, the only kind of path fetched for a tool's image. */
 export const viewedImagePath = (path) => typeof path === 'string' && path.length <= 4096 && /^\/[^\0\r\n]*\.(?:png|jpe?g|gif|webp)$/i.test(path);

@@ -113,26 +113,23 @@ export declare class RemoteCliAdapter extends LlmAdapter {
     /** The conversation's remote task when its last response ended before all its output reached DSH. */
     private unsynced;
     /**
-     * Finished turns of a conversation's CLI session that the conversation never showed, because another DSH sharing the
-     * host or Open sessions sent them, after the last turn it showed and before `until`, a message it just sent, and one
-     * that is still running. Undefined when there are none, or when the turn the conversation showed last is no longer in
-     * the history. `language` is what the user last wrote here: see {@link transcript}.
+     * Finished turns of a conversation's CLI session that the conversation never showed, because the CLI ran them by itself
+     * or something else sent them, after the last turn it showed and before `until`, a message it just sent, and one that is
+     * still running. Undefined when there are none, or when the turn the conversation showed last is no longer in the
+     * history. `language` is what the user last wrote here: see {@link transcript}.
      */
     private elsewhere;
     /**
-     * Show turns that another DSH sharing the host, or Open sessions, ran in this conversation's CLI session; one still
-     * running streams on as it goes. Like `sync` it wakes the conversation with a notice and sends nothing to the CLI.
+     * Show turns this conversation's CLI session ran without a message from it; one still running streams on as it goes.
+     * Like `sync` it wakes the conversation with a notice and sends nothing to the CLI.
      */
     catchUp(agent: SyncAgent): Promise<boolean>;
     /**
      * Wake a conversation whose last remote response was cut off when DSH quit or reloaded the plugin. Its turn
      * streams the output produced meanwhile and waits for the remote turn to finish. Only a conversation still
-     * routed to a remote CLI is woken: another model would answer the notice instead. A session continued from
-     * another DSH is woken the same way to show its saved history; it has made no request yet, so it has no header.
+     * routed to a remote CLI is woken: another model would answer the notice instead.
      */
     sync(agent: SyncAgent): boolean;
-    /** A continued session's saved history, read from its start, as one markdown block. */
-    private history;
     stream(options: GenerateOptions): AsyncGenerator<StreamChunk>;
 }
 export {};

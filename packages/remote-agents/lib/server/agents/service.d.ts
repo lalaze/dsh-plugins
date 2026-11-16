@@ -3,7 +3,7 @@ import type { LaunchSharing } from '../sharing/sharing.js';
 import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
-import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type SharedTag, type SharedWorkspace, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
+import { type AgentDetail, type AgentState, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type Task, type TimelinePage, type UsageReport } from '../core/domain.js';
 export interface UsageOptions {
     /** The conversation's selected route; picks its CLI when the conversation used several. */
     route?: string;
@@ -36,13 +36,8 @@ export declare class RemoteAgentsService {
     readonly store: Store;
     private readonly readSshConfig;
     private readonly hostConnections;
-    private readonly sharedSync;
-    /** Told the host whose shared workspaces changed, as reported by its registry; Workspace Tags sync follows them. */
-    readonly sharedWorkspaceListeners: Set<(hostId: string) => void>;
-    /** Told a task whose history another DSH drives after it was brought up to date here; its conversation catches up. */
-    readonly sharedHistoryListeners: Set<(taskId: string) => void>;
-    /** Called with a DSH conversation when how far it has been read changes, here or on another DSH. */
-    readonly chatReadListeners: Set<(sessionId: string) => void>;
+    /** Told a task whose CLI runs a turn by itself, when the turn starts and when it ends; its conversation shows the turn. */
+    readonly ownTurnListeners: Set<(taskId: string) => void>;
     private readonly locks;
     private readonly restoring;
     private readonly delegationRecovery;
@@ -65,9 +60,6 @@ export declare class RemoteAgentsService {
     resume(hostId?: string): Promise<void>;
     /** Reattach only the remote tasks behind one open DSH conversation; unrelated hosts stay offline. */
     resumeConversation(sessionId: string): Promise<void>;
-    /** Shared read state is observational; marking read starts sharing for this conversation only. */
-    chatReadMark(sessionId: string): string | undefined;
-    markChatRead(sessionId: string): Promise<void>;
     /** Observe only this conversation's delegated CLIs, including saved/archived history.
      * Recovery attaches existing relays only; it never starts a new CLI or sends a prompt.
      * Do not use snapshot/resume here: opening one conversation must not connect unrelated hosts.
@@ -93,20 +85,9 @@ export declare class RemoteAgentsService {
     addHost(input: unknown, options?: {
         discoverModels?: boolean;
     }): Promise<Dashboard>;
-    /** `everywhere` also deletes a shared host's sessions for the other DSH instances. */
     removeHost(id: string, options?: {
         deleteAgents?: boolean;
-        everywhere?: boolean;
     }): Promise<Dashboard>;
-    /** Share this host's sessions and workspaces with other DSH instances, or stop. CLIs keep running either way. */
-    setHostSharing(hostId: string, share: unknown): Promise<Dashboard>;
-    private forgetLocal;
-    /** Shared workspaces not yet offered to this DSH. */
-    sharedWorkspaces(hostId: string): Promise<SharedWorkspace[]>;
-    seeWorkspaces(hostId: string, paths: string[]): Promise<void>;
-    sharedWorkspaceList(hostId: string, timeout?: number): Promise<SharedWorkspace[] | undefined>;
-    setWorkspaceTags(hostId: string, path: string, tags: SharedTag[]): Promise<SharedWorkspace>;
-    shareWorkspace(hostId: string, path: string): Promise<void>;
     connect(hostId: string): Promise<Dashboard>;
     providers(hostId: string, cwd: string, refresh?: boolean): Promise<import("../core/domain.js").Provider[]>;
     private updateTask;
@@ -120,12 +101,6 @@ export declare class RemoteAgentsService {
     detail(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<AgentDetail>;
     /** Saved output only: nothing is restored or attached, so reading many sessions never connects their relays. */
     timeline(id: string, cursor?: Cursor, direction?: 'before' | 'after'): Promise<TimelinePage | null>;
-    /** Identify the DSH that sent a shared message without opening a connection. */
-    sender(hostId: string, instance: string, label: string): {
-        self: true;
-    } | {
-        name: string;
-    };
     reply(id: string): Promise<string>;
     messageTimeline(id: string, messageId: string, cursor?: Cursor): Promise<import("../core/domain.js").MessageTimeline>;
     setThinking(id: string, thinkingOptionId?: string): Promise<void>;

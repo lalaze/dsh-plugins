@@ -3,7 +3,6 @@ import { FILE_LIMIT, GIT_LIMITS, TEXT_LIMIT } from '../core/workspace.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { posix } from 'node:path';
 import { WORKSPACE_SHELL } from './shell.js';
-import { nativeRpc } from '../chat/native-registry.js';
 import { quote } from '../core/ssh.js';
 const digest = (data) => createHash('sha256').update(data).digest('hex');
 const KINDS = { d: 'directory', f: 'file', l: 'symlink', o: 'other' };
@@ -55,7 +54,6 @@ export class WorkspaceFiles {
     constructor(transport) {
         this.transport = transport;
     }
-    nativeSharing(request) { return nativeRpc(this.transport, request); }
     /** Runs one shell operation and returns its data; the program reports handled failures with their status. */
     async run(op, cwd, at, values, options) {
         if (!this.transport.transfer)

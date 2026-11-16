@@ -68,8 +68,6 @@ export declare class CliSession {
     private stopWaiters;
     constructor(peer: JsonlPeer, task: Task, history: TaskHistory, store: Store, hooks?: SessionHooks, relay?: RelayLink | undefined);
     get alive(): boolean;
-    /** Disconnected on purpose, leaving the CLI running for DSH to reattach later or for another DSH. */
-    get detached(): boolean;
     /** A turn, approval or message admission is in progress. */
     get busy(): boolean;
     /** Only sessions that can be resumed later may be closed to free a connection slot. */
@@ -81,7 +79,7 @@ export declare class CliSession {
     private frame;
     /**
      * Queue an image's base64 bytes to be saved with this output line, and return its copy's name; undefined when the chat
-     * cannot show it. The bytes stay out of the history, which other DSHs copy: it records only the name.
+     * cannot show it. The bytes stay out of the history: it records only the name.
      */
     private keepImage;
     /**
@@ -107,11 +105,7 @@ export declare class CliSession {
      */
     restore(): Promise<void>;
     private protocol;
-    /** `sentBy` names this DSH in a shared history, so the others can tell where the message came from. */
-    send(text: string, messageId: string, attachments?: readonly NativeAttachment[], sentBy?: {
-        instance: string;
-        label: string;
-    }): Promise<void>;
+    send(text: string, messageId: string, attachments?: readonly NativeAttachment[]): Promise<void>;
     private confirm;
     private complete;
     /**

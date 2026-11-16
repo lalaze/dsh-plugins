@@ -46,7 +46,6 @@ export declare class RelayLink implements Child {
     readonly id: string;
     private readonly prepare;
     private readonly onState;
-    private readonly admit?;
     private proc?;
     private readonly unacked;
     private readonly data;
@@ -60,13 +59,8 @@ export declare class RelayLink implements Child {
     private state;
     private prepared;
     private installs;
-    private admitted;
-    private admitting;
-    /**
-     * `prepare(reinstall)` makes sure the current relay script is installed on the host. `admit`, checked before
-     * every attachment, refuses one while another DSH drives a shared session, so reconnecting never takes it back.
-     */
-    constructor(transport: SshTransport, id: string, offset: number, prepare: (reinstall: boolean) => Promise<void>, onState?: (state: RelayState) => void, admit?: (() => Promise<boolean>) | undefined);
+    /** `prepare(reinstall)` makes sure the current relay script is installed on the host. */
+    constructor(transport: SshTransport, id: string, offset: number, prepare: (reinstall: boolean) => Promise<void>, onState?: (state: RelayState) => void);
     readonly offset: number;
     get connected(): boolean;
     get error(): string | undefined;

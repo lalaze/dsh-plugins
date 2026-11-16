@@ -1,5 +1,4 @@
 import { type TuiStore } from './tui-state.js';
-import type { SharedTui } from './tui-shared.js';
 import type { TuiCli } from './core/workspace.js';
 /** The part of a DSH session this needs. */
 interface TuiSession {
@@ -96,18 +95,6 @@ export declare class TuiSessions {
     }, signal: AbortSignal): Promise<void>;
     /** DSH shows no views in a conversation until its log has a turn, so an empty one is recorded. */
     private firstTurn;
-    /**
-     * Shows a TUI conversation another DSH started, in a conversation of this DSH made for it. Nothing is started on the
-     * machine: its CLI runs there already, or resumes when the conversation is opened here.
-     * @param sessionId - this DSH's conversation, in the remote workspace of the conversation's directory.
-     * @param blank - whether that conversation is new, and so needs the turn that makes DSH show it.
-     */
-    adopt(sessionId: string, hostId: string, shared: SharedTui, blank: boolean, now?: Date): Promise<void>;
-    /**
-     * Gives a conversation the title another DSH read from its CLI.
-     * @param rename - false for a conversation renamed in DSH, which keeps its name and only notes the CLI's title.
-     */
-    retitle(sessionId: string, title: string, rename?: boolean): Promise<void>;
     /** Ends the conversation's CLI, which otherwise keeps running with no DSH around. Reopening the conversation resumes it. */
     end(sessionId: string, signal: AbortSignal): Promise<void>;
     /**

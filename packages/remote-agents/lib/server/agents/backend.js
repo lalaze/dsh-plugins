@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { enabledProvidersOf, list, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError, sharesSessions } from '../core/domain.js';
+import { enabledProvidersOf, list, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError } from '../core/domain.js';
 import { connectionInput, JsonlPeer, OpenSshTransport, quote } from '../core/ssh.js';
-import { MACHINE_IDENTITY, serverIdOf } from '../core/remote-host.js';
+import { MACHINE_IDENTITY, REMOTE_HOME, serverIdOf } from '../core/remote-host.js';
 import { CliSession, initializeAcp } from './runtime.js';
 import { initializeCodex } from '../core/codex.js';
 import { TaskHistory } from './history.js';
@@ -13,7 +13,6 @@ import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WorkspaceFiles } from '../workspace/files.js';
 import { acpServers, sharedArguments } from '../sharing/sharing.js';
-import { SharedSessions } from './shared-sessions.js';
 export { connectionInput } from '../core/ssh.js';
 export const CLI_PROVIDERS = [
     { id: 'claude', label: PROVIDER_LABELS.claude, command: 'claude', protocol: 'claude', args: [] },
@@ -136,10 +135,8 @@ export class SshBackend {
     ending = new Map();
     restoring = new Map();
     cleaning;
-    /** Sessions shared with other DSH instances on the same SSH account; needs relays. */
-    shared;
-    historyListeners = new Set();
-    readListeners = new Set();
+    withdrawing;
+    ownTurnListeners = new Set();
     constructor(host, store, transport, sharing = () => undefined) {
         this.host = host;
         this.store = store;
@@ -147,83 +144,10 @@ export class SshBackend {
         // Commands to the host share one SSH connection; its sockets live in this plugin's private state directory.
         this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') });
         this.workspaceFiles = new WorkspaceFiles(this.transport);
-        if (this.transport.relays && sharesSessions(host))
-            this.shared = new SharedSessions(this.transport, store, {
-                hostId: host.id,
-                history: id => this.history(id),
-                live: id => { const session = this.sessions.get(id); return session && !session.detached ? session.agent : undefined; },
-                recorded: id => { const session = this.sessions.get(id); return session && !session.detached ? session.history.recorded : undefined; },
-                yield: id => { const session = this.sessions.get(id); if (session && !session.detached)
-                    session.release(); },
-                removed: id => this.removeLocal(id),
-                adopt: id => { const task = this.store.task(t => t.id === id); if (task && !this.closed)
-                    void this.restore(task).catch(() => { }); },
-                loaded: id => this.histories.has(id),
-                unload: id => { if (!this.sessions.has(id) && !this.restoring.has(id) && !this.starting.has(id))
-                    this.histories.delete(id); },
-                followed: id => { for (const listener of this.historyListeners) {
-                    try {
-                        listener(id);
-                    }
-                    catch { /* A listener must not stop the registry. */ }
-                } },
-                read: id => { for (const listener of this.readListeners) {
-                    try {
-                        listener(id);
-                    }
-                    catch { /* A listener must not stop the registry. */ }
-                } },
-            });
     }
-    startSharing() { if (!this.closed)
-        this.shared?.start(); }
-    sharingError() { return this.shared?.status(); }
-    controller(taskId) { return this.shared?.controller(taskId); }
-    onSharedHistory(listener) {
-        this.historyListeners.add(listener);
-        return () => { this.historyListeners.delete(listener); };
-    }
-    readPosition(taskId) { return this.shared?.readPosition(taskId); }
-    async markRead(taskId) { await this.shared?.markRead(taskId); }
-    onSharedRead(listener) {
-        this.readListeners.add(listener);
-        return () => { this.readListeners.delete(listener); };
-    }
-    sender(instance, label) { return this.shared?.sender(instance, label) ?? { name: label }; }
-    async sharedWorkspaces(timeout) { if (!this.shared)
-        return []; return this.shared.listWorkspaces(timeout); }
-    onSharedWorkspaces(listener) {
-        const shared = this.shared;
-        if (!shared)
-            return () => { };
-        shared.workspaceListeners.add(listener);
-        return () => { shared.workspaceListeners.delete(listener); };
-    }
-    async setWorkspaceTags(path, tags) {
-        if (!this.shared)
-            throw new Error('Sessions are not shared on this host');
-        return this.shared.setWorkspaceTags(path, tags);
-    }
-    async shareWorkspace(path) { await this.shared?.addWorkspace(path); }
-    async sharingReachable(timeout) { return !this.shared || this.shared.reachable(timeout); }
-    async withdrawSharing(taskIds) {
-        try {
-            await this.shared?.withdraw(taskIds);
-        }
-        catch (error) {
-            throw new RemoteError(error instanceof Error ? error.message : String(error), 409);
-        }
-    }
-    /**
-     * Drive a shared session from this DSH before acting on its CLI, taking it over from another DSH.
-     * Without a reachable registry the action goes ahead as before.
-     */
-    async control(task, timeout) {
-        if (!this.shared)
-            return;
-        const result = await this.shared.acquire(task.id, true, timeout);
-        if (result.status === 'deleted')
-            throw new RemoteError('This session was deleted in another DSH', 404);
+    onOwnTurn(listener) {
+        this.ownTurnListeners.add(listener);
+        return () => { this.ownTurnListeners.delete(listener); };
     }
     assertOpen() { if (this.closed)
         throw new Error('SSH agent backend has stopped'); }
@@ -271,7 +195,6 @@ done`}`, 15_000, { login: false });
         let promise = this.histories.get(id);
         if (!promise) {
             const history = new TaskHistory(this.store.directory, id);
-            history.onAppend = () => this.shared?.appended(id);
             promise = history.open().then(() => history);
             this.histories.set(id, promise);
             // Reload-on-demand means a history nothing reads need not stay in memory; a hub opens many over its lifetime.
@@ -483,18 +406,50 @@ done`}`, 15_000, { login: false });
         this.cleaning = cleaning;
         return cleaning;
     }
+    /**
+     * 0.2.138 and earlier shared this host's sessions with the other DSH instances using its SSH account, through a registry
+     * on the host. The sessions this DSH started are marked there as withdrawn by it, as that version did when sharing was
+     * switched off: a DSH still on that version then forgets its copies rather than take over their CLIs once this one's
+     * leases expire. Nothing else in the registry is touched, and a host that cannot be reached is asked again later.
+     */
+    withdrawShared() {
+        const ids = this.store.sharedWithdrawals(this.host.id);
+        if (this.withdrawing || this.closed || !ids.length)
+            return this.withdrawing ?? Promise.resolve();
+        const withdrawing = (async () => {
+            // Without an identity this DSH never reached a registry.
+            const instance = this.store.savedInstance();
+            if (instance)
+                for (let at = 0; at < ids.length; at += 200) {
+                    const record = JSON.stringify({ by: instance.label, withdrawn: instance.id, at: new Date().toISOString() });
+                    await this.transport.exec(`cd ${REMOTE_HOME}/shared-v1/sessions 2>/dev/null || exit 0
+for dsh_id in ${ids.slice(at, at + 200).map(quote).join(' ')}; do
+  [ -f "$dsh_id/manifest.json" ] && [ ! -f "$dsh_id/deleted.json" ] || continue
+  printf '%s' ${quote(record)} > "$dsh_id/deleted.json.$$" && mv -f "$dsh_id/deleted.json.$$" "$dsh_id/deleted.json"
+done`, 30_000, { login: false });
+                    if (this.closed)
+                        return;
+                }
+            await this.store.update(state => {
+                delete state.sharedWithdrawals?.[this.host.id];
+                if (state.sharedWithdrawals && !Object.keys(state.sharedWithdrawals).length)
+                    delete state.sharedWithdrawals;
+            });
+        })().catch(() => { }).finally(() => { this.withdrawing = undefined; });
+        this.withdrawing = withdrawing;
+        return withdrawing;
+    }
     /** A link to a relay, installing the current relay script on the host before attaching. */
-    link(id, offset, onState, taskId) {
-        const shared = this.shared;
+    link(id, offset, onState) {
         return new RelayLink(this.transport, id, offset, async (reinstall) => {
             this.assertOpen();
             if (!await this.relays(reinstall))
                 throw new Error('Node.js 18 or newer is no longer available on this SSH host');
-        }, onState, shared && (() => shared.mayAttach(taskId)));
+        }, onState);
     }
     session(task, peer, history, relay) {
-        // A turn the CLI runs by itself grows the history without a message from here: told like one another DSH runs.
-        const historyChanged = () => { for (const listener of this.historyListeners) {
+        // A turn the CLI runs by itself grows the history without a message from here.
+        const historyChanged = () => { for (const listener of this.ownTurnListeners) {
             try {
                 listener(task.id);
             }
@@ -533,18 +488,6 @@ done`}`, 15_000, { login: false });
         const existing = this.sessions.get(task.id);
         if (existing?.alive)
             return structuredClone(existing.agent);
-        if (this.shared) {
-            // Another DSH driving it keeps it; one that went away leaves it to this one. Without the registry yet,
-            // the relay's attachment check decides once it can reach the host.
-            const result = await this.shared.acquire(task.id, false, 1500);
-            this.assertOpen();
-            if (result.status === 'held' || result.status === 'deleted')
-                return null;
-            const current = this.sessions.get(task.id);
-            if (current?.alive)
-                return structuredClone(current.agent);
-            task = this.store.task(t => t.id === task.id) ?? task;
-        }
         if (!task.relay || !task.native)
             return null;
         const release = this.reserve(task.id);
@@ -554,7 +497,7 @@ done`}`, 15_000, { login: false });
             const at = (await history.checkpoint(task.relay.id))?.at ?? 0;
             this.assertOpen();
             const link = this.link(task.relay.id, at, state => { if (session)
-                session.agent.reconnecting = !state.connected; }, task.id);
+                session.agent.reconnecting = !state.connected; });
             session = this.session({ ...task, executionCwd: task.executionCwd ?? task.cwd }, new JsonlPeer(link), history, link);
             await session.restore();
             // close() may have released all registered sessions while history was still loading.
@@ -639,7 +582,6 @@ done`}`, 15_000, { login: false });
     async open(task, resume, signal) {
         if (!CLI_PROVIDERS.some(provider => provider.id === task.provider))
             throw new Error('This CLI provider is no longer supported. Saved output remains available.');
-        await this.control(task);
         const saved = this.store.task(t => t.id === task.id) ?? task;
         if (saved.relay && saved.native) {
             // The CLI may still be running remotely: reattach instead of starting or resuming another one.
@@ -719,9 +661,6 @@ done`}`, 15_000, { login: false });
                 });
                 if (previous)
                     void this.cleanup();
-                // Another DSH taking the session over must find this relay rather than resume the CLI a second time.
-                await this.shared?.flush(task.id);
-                this.assertOpen();
                 try {
                     await relay.launch(relayId, profile.cwd, launch, prefix);
                 }
@@ -730,7 +669,7 @@ done`}`, 15_000, { login: false });
                     throw error;
                 }
                 link = this.link(relayId, 0, state => { if (this.sessions.get(task.id)?.relay === link)
-                    this.sessions.get(task.id).agent.reconnecting = !state.connected; }, task.id);
+                    this.sessions.get(task.id).agent.reconnecting = !state.connected; });
             }
             this.assertOpen();
             const session = this.session({ ...task, executionCwd: profile.cwd }, new JsonlPeer(link ?? this.transport.start(profile.cwd, launch, { prefix, endWithSession: true })), history, link);
@@ -754,19 +693,11 @@ done`}`, 15_000, { login: false });
     }
     async agent(id) {
         const task = this.task(id), session = this.sessions.get(task.id);
-        if (session && (!session.detached || !this.shared))
+        if (session)
             return structuredClone(session.agent);
-        const saved = { id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'closed', pendingPermissions: [], nativeSessionId: task.native?.sessionId, resumable: task.native?.resumable };
-        // Another DSH drives the CLI: report the state it shares.
-        const remote = this.shared?.remoteLive(task.id);
-        return remote ? { ...saved, ...remote, id, cwd: saved.cwd, provider: task.provider, model: task.model, title: task.title, persistent: true } : saved;
+        return { id, cwd: task.executionCwd ?? task.cwd, provider: task.provider, model: task.model, title: task.title, status: 'closed', pendingPermissions: [], nativeSessionId: task.native?.sessionId, resumable: task.native?.resumable };
     }
-    /** A history another DSH drives is brought up to date before it is read. */
-    async read(id) {
-        const task = this.task(id);
-        await this.shared?.catchUp(task.id);
-        return this.history(task.id);
-    }
+    read(id) { return this.history(this.task(id).id); }
     async timeline(id, cursor, direction) { return (await this.read(id)).page(cursor, direction); }
     async messageTimeline(id, messageId, cursor) { return (await this.read(id)).messagePage(messageId, cursor); }
     async reply(id) { return (await this.read(id)).lastReply(); }
@@ -798,19 +729,13 @@ done`}`, 15_000, { login: false });
         try {
             if (await (await this.history(task.id)).hasMessage(messageId))
                 return; // Durable at-most-once admission.
-            await this.control(task);
-            // Taking over brought in the shared history, which may hold a retried message that already reached the CLI.
-            if (await (await this.history(task.id)).hasMessage(messageId))
-                return;
             let session = await this.attached(this.store.task(t => t.id === task.id) ?? task);
             if (session.busy) {
                 await session.stop();
                 session = await this.attached(this.store.task(t => t.id === task.id) ?? task);
             }
             const files = await transferAttachments(this.transport, this.store.directory, task.id, messageId, task.executionCwd ?? task.cwd, attachments, signal);
-            // Other DSH instances name where a message they did not send came from.
-            const sender = this.shared?.identity;
-            await session.send(attachmentPrompt(text, files), messageId, files, sender);
+            await session.send(attachmentPrompt(text, files), messageId, files);
         }
         finally {
             release();
@@ -818,33 +743,18 @@ done`}`, 15_000, { login: false });
     }
     async stop(id) {
         const task = this.task(id);
-        let session = this.sessions.get(task.id);
-        // A turn another DSH drives is taken over to stop it.
-        if (!session?.alive && this.shared?.remoteLive(task.id))
-            session = await this.takeOver(task);
+        const session = this.sessions.get(task.id);
         if (session?.alive)
             await session.stop();
     }
     async respond(id, requestId, answer) {
         const task = this.task(id);
-        let session = this.sessions.get(task.id);
-        // Another DSH asked: take the session over; its pending requests are rebuilt from the shared history.
-        if (!session?.alive && this.shared)
-            session = await this.takeOver(task);
+        const session = this.sessions.get(task.id);
         if (!session?.alive)
             throw new RemoteError('This permission request is no longer pending', 409);
         await session.respond(requestId, answer);
     }
-    async takeOver(task) {
-        await this.control(task);
-        const saved = this.store.task(t => t.id === task.id) ?? task;
-        return saved.relay && saved.native ? this.reattach(saved) : this.sessions.get(task.id);
-    }
     async detach(task) {
-        // Stopping a CLI another DSH drives takes it over first, so that DSH lets go instead of reporting a failure.
-        // An unreachable host never delays archiving or deleting.
-        if (this.shared?.connected && !this.sessions.get(task.id)?.alive && (task.relay || this.shared.remoteLive(task.id)))
-            await this.control(task, 3000).catch(() => { });
         const session = this.sessions.get(task.id);
         if (session) {
             // Interrupting needs a connection; an unreachable relay is stopped by its queued cleanup instead.
@@ -860,23 +770,6 @@ done`}`, 15_000, { login: false });
     }
     async forget(task) {
         await this.detach(task);
-        // Every DSH sharing the host forgets it too. A summary's temporary session was never shared.
-        if (!task.chat?.sessionId.startsWith('remote-compaction-'))
-            await this.shared?.delete(task.id);
-        await this.removeFiles(task.id);
-    }
-    async forgetLocal(task) {
-        if (!this.shared) {
-            await this.forget(task);
-            return;
-        }
-        const session = this.sessions.get(task.id);
-        if (session) {
-            if (session.alive)
-                session.release();
-            this.sessions.delete(task.id);
-        }
-        await this.shared.release(task.id);
         await this.removeFiles(task.id);
     }
     async removeFiles(id) {
@@ -884,17 +777,6 @@ done`}`, 15_000, { login: false });
         this.histories.delete(id);
         await (await history.catch(() => new TaskHistory(this.store.directory, id))).remove();
         await rm(join(this.store.directory, 'attachments', id), { recursive: true, force: true });
-    }
-    /** Another DSH deleted a shared session: forget it here. Its CLI was stopped by that DSH. */
-    async removeLocal(id) {
-        const session = this.sessions.get(id);
-        if (session) {
-            if (session.alive)
-                session.release();
-            this.sessions.delete(id);
-        }
-        await this.removeFiles(id);
-        await this.store.update(state => { state.tasks = state.tasks.filter(t => t.id !== id); });
     }
     async account(provider, cwd, refresh) {
         this.assertOpen();
@@ -946,8 +828,6 @@ done`}`, 15_000, { login: false });
         this.closed = true;
         clearInterval(this.historySweep);
         this.historySweep = undefined;
-        // Leases are kept: this DSH reattaches its CLIs when it starts again, unless another took them over.
-        this.shared?.close();
         for (const probe of this.probes)
             probe.close();
         for (const session of this.sessions.values())

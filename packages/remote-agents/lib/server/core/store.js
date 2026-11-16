@@ -1,7 +1,6 @@
 import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { hostname } from 'node:os';
 import { identifier, record, remotePath, field, taskInput, providerSelection, PROVIDER_LABELS, RemoteError } from './domain.js';
 /**
  * Antigravity as 0.2.129 and earlier discovered it, through `agy models`: model IDs such as `gemini-3.8-flash-high` that
@@ -9,6 +8,27 @@ import { identifier, record, remotePath, field, taskInput, providerSelection, PR
  * entry came back with 0.2.134 on machines left on all CLIs, offering models that fail when chosen.
  */
 const oldAntigravity = (provider) => provider.id === 'antigravity' && provider.notice !== undefined;
+/**
+ * 0.2.138 and earlier shared a host's sessions with the other DSH instances using its SSH account. This DSH keeps the
+ * sessions it started and drops its copies of the ones another DSH started, which that DSH still has. Their saved output
+ * stays on disk. The sessions it started and shared are listed per host, to be withdrawn from that host's registry: a
+ * DSH still on an earlier version would otherwise take over their CLIs once this one stops renewing its leases.
+ */
+function withoutSharing(saved, hosts, pending) {
+    const withdrawals = {};
+    for (const [hostId, ids] of Object.entries(pending ?? {}))
+        if (ids.length && hosts.some(host => host.id === hostId))
+            withdrawals[hostId] = [...ids];
+    const tasks = saved.filter(task => task.shared?.imported !== true);
+    for (const task of tasks) {
+        if (task.shared)
+            (withdrawals[task.hostId] ??= []).push(task.id);
+        delete task.shared;
+        if (task.chat)
+            delete task.chat.history;
+    }
+    return { tasks, ...(Object.keys(withdrawals).length ? { withdrawals } : {}) };
+}
 export class Store {
     path;
     state = { version: 1, hosts: [], tasks: [] };
@@ -18,7 +38,7 @@ export class Store {
     closed = false;
     /** Listeners for the tokens each finished CLI turn used; the plugin forwards them to usage statistics. */
     usageListeners = new Set();
-    /** Called after every saved change; shared hosts publish the task records that changed. */
+    /** Called after every saved change. */
     changeListeners = new Set();
     /** Machines whose saved model catalog lost Antigravity models from 0.2.129 or earlier on opening; see {@link oldAntigravity}. */
     staleCatalogs = new Set();
@@ -53,8 +73,6 @@ export class Store {
                 host.enabledProviders = host.enabledProviders.filter(id => Object.hasOwn(PROVIDER_LABELS, String(id)));
             if (host.enabledProviders !== undefined)
                 host.enabledProviders = providerSelection(host.enabledProviders);
-            if (host.share !== undefined && typeof host.share !== 'boolean')
-                throw new Error('Invalid saved session sharing setting');
             if (host.catalog !== undefined) {
                 const catalog = record(host.catalog);
                 remotePath(catalog.cwd);
@@ -73,8 +91,6 @@ export class Store {
                 throw new Error('Invalid saved remote agent');
             if (task.relay !== undefined)
                 identifier(record(task.relay).id);
-            if (task.shared !== undefined && !Number.isSafeInteger(record(task.shared).rev))
-                throw new Error('Invalid saved shared session');
         }
         if (value.relayCleanups !== undefined) {
             if (!Array.isArray(value.relayCleanups))
@@ -115,27 +131,13 @@ export class Store {
             identifier(instance.id);
             field(instance.label, 'instance name', 100);
         }
-        if (value.sharedDeletions !== undefined) {
-            if (!Array.isArray(value.sharedDeletions))
-                throw new Error('Invalid saved shared deletions');
-            for (const raw of value.sharedDeletions) {
-                const deletion = record(raw);
-                identifier(deletion.hostId);
-                identifier(deletion.id);
-            }
-        }
-        if (value.seenWorkspaces !== undefined && !Object.values(record(value.seenWorkspaces)).every(paths => Array.isArray(paths) && paths.every(path => typeof path === 'string')))
-            throw new Error('Invalid saved shared workspaces');
-        // Only a sync memory: a record that does not fit is dropped and that workspace syncs as on first contact.
-        const tagSync = value.tagSync === undefined ? undefined : Object.fromEntries(Object.entries(record(value.tagSync)).filter(([, saved]) => {
-            const entry = saved;
-            return Array.isArray(entry?.names) && entry.names.every(name => typeof name === 'string') && (entry.at === undefined || typeof entry.at === 'string');
-        }));
-        this.state = { version: 1, hosts: value.hosts, tasks: value.tasks, ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects } : {}),
+        if (value.sharedWithdrawals !== undefined && !Object.values(record(value.sharedWithdrawals)).every(ids => Array.isArray(ids) && ids.every(id => typeof id === 'string')))
+            throw new Error('Invalid saved shared session withdrawals');
+        const { tasks, withdrawals } = withoutSharing(value.tasks, value.hosts, value.sharedWithdrawals);
+        this.state = { version: 1, hosts: value.hosts, tasks, ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects } : {}),
             ...(value.relayCleanups ? { relayCleanups: value.relayCleanups } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts } : {}),
             ...(value.chatFast ? { chatFast: value.chatFast } : {}), ...(value.sharing ? { sharing: value.sharing } : {}),
-            ...(value.instance ? { instance: value.instance } : {}), ...(value.seenWorkspaces ? { seenWorkspaces: value.seenWorkspaces } : {}),
-            ...(value.sharedDeletions ? { sharedDeletions: value.sharedDeletions } : {}), ...(tagSync ? { tagSync } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails } : {}),
+            ...(value.instance ? { instance: value.instance } : {}), ...(withdrawals ? { sharedWithdrawals: withdrawals } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails } : {}),
             ...(typeof value.tuiLocalScroll === 'boolean' ? { tuiLocalScroll: value.tuiLocalScroll } : {}) };
     }
     snapshot() { return structuredClone(this.state); }
@@ -148,17 +150,10 @@ export class Store {
     chatFast(sessionId) { return this.state.chatFast?.includes(sessionId) ?? false; }
     /** The reasoning effort last explicitly selected for a native chat model route, if any. */
     chatEffort(route) { return Object.hasOwn(this.state.chatEfforts ?? {}, route) ? this.state.chatEfforts[route] : undefined; }
-    /** This DSH's identity for shared hosts, if it was created. */
-    instanceId() { return this.state.instance?.id; }
-    /** This DSH's identity for shared hosts, created on first use. */
-    async instance() {
-        if (!this.state.instance)
-            await this.update(state => { state.instance ??= { id: `dsh-${randomUUID()}`, label: (hostname() || 'DSH').slice(0, 100) }; });
-        return structuredClone(this.state.instance);
-    }
-    tagSync(key) { return structuredClone(this.state.tagSync?.[key]); }
-    seenWorkspaces(hostId) { return [...(this.state.seenWorkspaces?.[hostId] ?? [])]; }
-    sharedDeletions(hostId) { return (this.state.sharedDeletions ?? []).filter(d => d.hostId === hostId).map(d => d.id); }
+    /** The identity this DSH had while sessions were shared, if it ever reached a host's registry. */
+    savedInstance() { return structuredClone(this.state.instance); }
+    /** Sessions of a host still to be withdrawn from its shared registry. */
+    sharedWithdrawals(hostId) { return [...(this.state.sharedWithdrawals?.[hostId] ?? [])]; }
     relayCleanups(hostId) { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }
     /** A copy of one saved agent record, without cloning the whole registry. */
     task(predicate) { const found = this.state.tasks.find(predicate); return found && structuredClone(found); }

@@ -14,17 +14,12 @@ export interface Host {
         error: string;
     }[];
     enabledProviders?: string[];
-    /** Sessions and workspaces are shared with every DSH connected to this SSH account. On unless switched off. */
-    share: boolean;
-    /** Why the shared session registry is unavailable, while sharing is on. */
-    shareError?: string;
 }
 export interface HostCatalog {
     cwd: string;
     providers: Provider[];
     checkedAt: string;
 }
-/** `share: false` keeps this host's sessions to this DSH; any other value shares them. */
 export interface HostConfig {
     id: string;
     label: string;
@@ -34,9 +29,7 @@ export interface HostConfig {
     catalog?: HostCatalog;
     modelError?: string;
     enabledProviders?: string[];
-    share?: boolean;
 }
-export declare const sharesSessions: (host: Pick<HostConfig, "share">) => boolean;
 export interface SshConfigHost {
     alias: string;
     connection: string;
@@ -54,8 +47,6 @@ export interface Choice {
 export declare function permissionModes(provider: string, modes: Choice[]): Choice[];
 /** The DSH conversation's permission, as its preset's sandbox mode or `auto` for Auto review. */
 export type DshPermission = 'read-only' | 'workspace-write' | 'danger-full-access' | 'auto';
-/** The DSH permission matching a CLI mode, for a conversation that continues a session started elsewhere. */
-export declare function modePermission(provider: string, modeId: string | undefined): DshPermission | undefined;
 /** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
 export declare function presetMode(provider: string, modes: Choice[], permission: DshPermission | undefined): string | undefined;
 /** `serviceTiers` are Codex speed tiers (for example Fast); without one the CLI's configured tier applies. */
@@ -278,8 +269,6 @@ export interface Task extends TaskInput {
             cursor: Cursor | null;
             done?: true;
         };
-        /** A session another DSH started, continued here: its saved history is the conversation's first response. */
-        history?: 'pending';
     };
     serverId: string;
     title: string;
@@ -320,12 +309,6 @@ export interface Task extends TaskInput {
     codexTurnStart?: {
         turnId: string;
         total?: Record<string, number>;
-    };
-    /** The shared record revision this copy matches. `imported` copies were started by another DSH, named by `creator`. */
-    shared?: {
-        rev: number;
-        creator?: string;
-        imported?: true;
     };
     state: 'creating' | 'ready' | 'uncertain';
     error?: string;
@@ -374,10 +357,6 @@ export interface AgentSummary {
     nativeSessionId?: string;
     persistent?: boolean;
     reconnecting?: boolean;
-    /** The DSH that started a shared session, when it was another one. */
-    creator?: string;
-    /** Another DSH drives this shared session's CLI; sending, answering or stopping here takes it over. */
-    controller?: string;
 }
 export interface AgentState {
     agent: AgentSummary;
@@ -405,20 +384,6 @@ export interface RemoteWorkspace {
     hostId: string;
     path: string;
     remotePath: string;
-}
-/** A remote workspace a DSH added on a machine whose sessions are shared, by that DSH's name. */
-export interface SharedWorkspace {
-    path: string;
-    by?: string;
-    at?: string;
-    /** Its Workspace Tags, by name, as the DSH that changed them last (`tagsBy`) left them, at `tagsAt` on the host's clock. */
-    tags?: SharedTag[];
-    tagsAt?: string;
-    tagsBy?: string;
-}
-export interface SharedTag {
-    name: string;
-    color: string;
 }
 export declare const busy: (agent: Pick<AgentSummary, "status">) => boolean;
 /**

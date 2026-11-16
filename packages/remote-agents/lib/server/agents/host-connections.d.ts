@@ -12,7 +12,7 @@ export declare class HostConnections {
     private readonly connections;
     private readonly catalogListeners;
     private closed;
-    constructor(store: Store, factory: BackendFactory, serial: Serial, created: (hostId: string, backend: Backend) => void);
+    constructor(store: Store, factory: BackendFactory, serial: Serial, created?: (hostId: string, backend: Backend) => void);
     get stopped(): boolean;
     /** Observation only: never constructs a backend, even after shutdown. */
     peek(hostId: string): Backend | undefined;
