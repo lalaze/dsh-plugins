@@ -45,8 +45,8 @@
       "name": "dsh-remote-terminals",
       "title": "DSH Remote Terminals",
       "description": {
-        "en": "Remote terminals that outlive DSH, Claude Code and Codex TUI conversations, and worktree workspaces, on the machines saved in Remote Agents",
-        "zh": "不随 DSH 结束的远程终端、Claude Code 与 Codex 的 TUI 对话、基于 worktree 的工作区，使用远程智能体里保存的机器"
+        "en": "Remote terminals that outlive DSH, Claude Code, Codex and Antigravity TUI conversations, and worktree workspaces, on the machines saved in Remote Agents",
+        "zh": "不随 DSH 结束的远程终端、Claude Code、Codex 与 Antigravity 的 TUI 对话、基于 worktree 的工作区，使用远程智能体里保存的机器"
       },
       "author": "lalaze",
       "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/remote-terminals",
@@ -64,12 +64,12 @@
       },
       "versions": [
         {
-          "version": "0.1.11",
-          "publishTimestamp": 1794817493,
+          "version": "0.1.12",
+          "publishTimestamp": 1794850310,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "0185bec5a2a4267ff5236c80d7b2a67a586a405e",
+            "commit": "921c4a62a2886a81bdaedf896c6ab0376da88a9e",
             "path": "packages/remote-terminals"
           },
           "engines": {
