@@ -186,11 +186,14 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   const localScroll = cli === 'claude' && saved.tuiLocalScroll !== false;
   // SSH does not carry COLORTERM. Without it Claude Code falls back to 256 colors, which turns its orange pink.
   const command = 'cd ' + quote(placement.cwd) + (interactive ? ' && export COLORTERM=truecolor' + (localScroll ? ' CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' : '') : '') + ' && exec ' + start;
+  // That renderer leaves the scrollback at the width it was printed at, so the holder rebuilds it from a copy that prints
+  // the conversation again (see holder-reflow.ts): a fork, which saves nothing, with no hooks, MCP servers or update.
+  const history = claudeSession && localScroll ? 'cd ' + quote(placement.cwd) + ' && export COLORTERM=truecolor CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 DISABLE_AUTOUPDATER=1 && exec ' + shell + " -lic '" + 'find "\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/projects" -maxdepth 2 -name ' + claudeSession + '.jsonl 2>/dev/null | grep -q . && exec claude --resume ' + claudeSession + ' --fork-session --strict-mcp-config --settings "{\\\\"disableAllHooks\\\\":true}"' + "'" : undefined;
   const ssh = ['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', ...TERMINAL_KEEPALIVE, ...TERMINAL_TYPING, ...(url.port ? ['-p', url.port] : []), '--', target];
   const terminalId = process.env[TERMINAL_ID_ENV];
   const holder = own ? tuiHolder(key) : dshSession && terminalId ? tabHolder(dshSession, terminalId) : undefined;
   const version = ${JSON.stringify(holderVersion ?? null)};
-  const kept = holder && version ? await holdTerminal({ ssh, holder, command, script: { path: ${JSON.stringify(holderPath)}, version } }) : 'direct';
+  const kept = holder && version ? await holdTerminal({ ssh, holder, command, history, script: { path: ${JSON.stringify(holderPath)}, version } }) : 'direct';
   if (kept === 'direct') run('ssh', [...ssh, command], process.env);
   else process.exitCode = kept;
 }

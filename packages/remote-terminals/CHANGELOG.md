@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## Unreleased — A TUI's history keeps one width when you switch devices
+
+- With Local scrolling on, Claude Code breaks its lines itself, and when the width changes it repaints only the screen. Everything above kept the width it was printed at, so after switching between a phone and a computer the history came out partly narrow and partly wide, and the text where the two met showed twice.
+- Now, once the new width has held for a second, the remote machine runs a copy of Claude Code that prints the conversation again at that width, and everything above the screen is replaced with it, about four seconds after the switch in all. The copy is a fork of the session, which saves nothing, and runs without hooks, MCP servers or updates; it ends as soon as it has printed. While Claude Code is working, the history is put in during a pause in its output, or once the turn ends. The screen, and what you are typing there, stay as they are.
+- History from before the conversation was last compacted is not printed again, as Claude Code does not show it when it resumes either, and the rebuilt history keeps at most 5000 lines.
+- It applies to a Claude Code started by this version, so the DSH needs this version; one already running keeps the old behaviour until it restarts, as after archiving the row and restoring it, which resumes the same session. Every device showing the conversation then sees the rebuilt history.
+
 ## 0.1.12 — Antigravity as a TUI conversation
 
 - A remote Antigravity model now offers the TUI too: in a new conversation of a remote workspace, select one and click the blue A at the bottom left of the composer. The conversation's Chat tab becomes the interactive `agy`, started with the model and effort you selected. **Remote Antigravity** joins Remote Claude and Remote Codex in the terminal's shell menu.

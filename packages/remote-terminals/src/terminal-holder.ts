@@ -10,6 +10,9 @@
  *   A client that joins gets the screen and its scrollback, then the same bytes as everyone else. The screen has the size
  *   of the client that came or resized last, or that typed or focused last if it was another's meanwhile; see `screenClaim`.
  *
+ * - A TUI conversation of Claude Code's classic renderer gives its holder a second command, which prints the conversation
+ *   again; the holder uses it to rebuild the scrollback when the width changes. See holder-reflow.ts.
+ *
  * The launcher is in terminal-hold.ts.
  */
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
@@ -19,6 +22,7 @@ import { delimiter, join } from 'node:path';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
 import { ATTACH_EXIT, attachExitCode, FOCUS_SETTLE_MS, FRAME, screenClaim } from './holder-protocol.js';
 import { HolderOutput } from './holder-output.js';
+import { alignScreen, reflowText } from './holder-reflow.js';
 
 const ID = /^[a-z]+-[0-9a-f]{16,64}$/;
 const number = (name: string, fallback: number) => (Number(process.env[name]) > 0 ? Number(process.env[name]) : fallback);
@@ -29,6 +33,15 @@ const SCROLLBACK = 2000;
 /** The CLI waits for a client this long at most: a client that stopped reading is dropped, and comes back through a new connection. */
 const STALLED_MS = number('DSH_TERMINAL_STALLED_MS', 5000);
 const PARSE_HIGH = 2 * 1024 * 1024, PARSE_LOW = 256 * 1024;
+/** How long a new width must stay before the scrollback is rebuilt: dragging a window's edge resizes it many times. */
+const REFLOW_MS = number('DSH_TERMINAL_REFLOW_MS', 1000);
+/**
+ * Lines of a rebuilt scrollback. DSH's TUI terminals keep 10000; every client is sent them all at once, over links that
+ * may be slow, and the holder's own copy keeps SCROLLBACK of them.
+ */
+const REFLOW_LINES = 5000;
+/** The copy that prints the conversation again has printed it once it has said nothing for this long; a mere start says little. */
+const PRINTED_QUIET_MS = 800, STARTED_QUIET_MS = 1500, PRINTED_BYTES = 2048, PRINT_MS = 20_000;
 
 const SHIM = String.raw`
 import fcntl, os, pty, select, signal, struct, sys, termios, time
@@ -172,12 +185,14 @@ async function daemon(id: string, python: string): Promise<void> {
   const { SerializeAddon } = await import('@xterm/addon-serialize');
   const command = Buffer.from(fs.readFileSync('command', 'utf8'), 'base64').toString('utf8');
   fs.rmSync('command', { force: true });
-  let screen: HeadlessTerminal | undefined, serialize: (() => string) | undefined, shim: ChildProcess | undefined;
-  let title = '', report = '', parsing = 0, detachedAt = Date.now(), ended = false;
+  const history = fs.existsSync('history') ? Buffer.from(fs.readFileSync('history', 'utf8'), 'base64').toString('utf8') : undefined;
+  fs.rmSync('history', { force: true });
+  let screen: HeadlessTerminal | undefined, serialize: (() => string) | undefined, serializeScreen: (() => string) | undefined, shim: ChildProcess | undefined;
+  let title = '', report = '', parsing = 0, detachedAt = Date.now(), ended = false, holding = false, outputAt = 0;
   /** Modes the serializer does not restore. */
   const modes = new Map<number, boolean>();
   const clients = new Map<Socket, { cols: number; rows: number }>(), stalled = new Map<Socket, NodeJS.Timeout>();
-  const resumeOutput = () => { if (!stalled.size && parsing < PARSE_LOW) shim?.stdout?.resume(); };
+  const resumeOutput = () => { if (!holding && !stalled.size && parsing < PARSE_LOW) shim?.stdout?.resume(); };
   const stall = (socket: Socket) => {
     if (stalled.has(socket)) return;
     shim?.stdout?.pause();
@@ -187,12 +202,107 @@ async function daemon(id: string, python: string): Promise<void> {
   const sendFrame = (socket: Socket, data: Buffer) => { if (!socket.destroyed && !socket.write(data)) stall(socket); };
   const send = (socket: Socket, type: number, payload: Buffer | string) => sendFrame(socket, frame(type, payload));
   const output = new HolderOutput<Socket>(sendFrame);
+  const setPtySize = (cols: number, rows: number) => (shim?.stdio[3] as NodeJS.WritableStream | undefined)?.write(`${rows} ${cols}\n`);
   const resize = (cols: number, rows: number) => {
     if (!screen || (screen.cols === cols && screen.rows === rows)) return;
+    const widthChanged = screen.cols !== cols;
     screen.resize(cols, rows);
-    (shim?.stdio[3] as NodeJS.WritableStream | undefined)?.write(`${rows} ${cols}\n`);
+    setPtySize(cols, rows);
     // In the order of the output, so that a client still waiting for its snapshot hears of it after that.
     output.write(frame(FRAME.size, JSON.stringify({ cols, rows })));
+    // A height alone changes nothing above the screen: the CLI repaints it with the same lines.
+    if (widthChanged) scheduleReflow();
+  };
+
+  /** Each new width starts a new rebuild, and an older one still under way stops at its next step. */
+  let reflowTimer: NodeJS.Timeout | undefined, reflowRun = 0;
+  const scheduleReflow = () => {
+    if (!history) return;
+    clearTimeout(reflowTimer);
+    const run = ++reflowRun;
+    reflowTimer = setTimeout(() => void reflow(run, true), REFLOW_MS);
+  };
+  const current = (run: number, cols: number, rows: number) => run === reflowRun && !ended && screen?.cols === cols && screen.rows === rows;
+  /** Waits until the CLI has said nothing for `ms`, or `most` has passed; whether it went quiet. */
+  const quiet = async (ms: number, most: number) => {
+    const until = Date.now() + most;
+    while (Date.now() - outputAt < ms) { if (Date.now() >= until) return false; await sleep(Math.min(20, ms / 2)); }
+    return true;
+  };
+  /** The screen's rows as text. */
+  const screenRows = (terminal: HeadlessTerminal) => {
+    const buffer = terminal.buffer.active, rows: string[] = [];
+    for (let row = buffer.baseY; row < buffer.baseY + terminal.rows; row++) rows.push(buffer.getLine(row)?.translateToString(true) ?? '');
+    return rows;
+  };
+  /** Into holder.log, which the holder removes with its folder: how each rebuild went, for when one looks wrong. */
+  const note = (text: string) => process.stderr.write(`${new Date().toISOString()} ${text}\n`);
+  const reflow = async (run: number, again: boolean) => {
+    if (!screen || !history || !current(run, screen.cols, screen.rows) || screen.buffer.active.type !== 'normal') return;
+    const { cols, rows } = screen;
+    // The CLI's own repaint after a change of width may keep the first message as it was drawn before. Another one,
+    // without a change of width, draws it all anew: Claude Code 2.1.325 did after a change of height.
+    if (rows > 2) { setPtySize(cols, rows - 1); await sleep(200); setPtySize(cols, rows); }
+    const later = (why: string) => {
+      note(`rebuild ${cols}x${rows}: ${why}${again ? ', trying again once idle' : ''}`);
+      if (again) void (async () => { await sleep(500); await quiet(2000, 10 * 60_000); if (current(run, cols, rows)) await reflow(run, false); })();
+    };
+    const printed = await printAgain(history, cols, rows);
+    try {
+      if (!printed) { note(`rebuild ${cols}x${rows}: the copy printed nothing`); return; }
+      // Between two of the CLI's writes: one cut in two by the rebuilt text would leave half an escape sequence on screen.
+      // Its spinner leaves such gaps while it works.
+      const calm = await quiet(80, 3000);
+      if (!current(run, cols, rows)) return;
+      // Held back for a slow client or a busy parser, more of it may wait in the pipe, and the last piece may end anywhere.
+      if (!calm || shim?.stdout?.isPaused()) { later('the CLI never paused'); return; }
+      // Nothing may come between that check and this: no await.
+      holding = true; shim?.stdout?.pause();
+      await new Promise<void>(resolve => screen!.write('', resolve));
+      if (!current(run, cols, rows) || screen.buffer.active.type !== 'normal') return;
+      const start = alignScreen(printed.rows, screenRows(screen));
+      // Most likely the CLI printed more than a screen since the copy read the conversation.
+      if (start === undefined) { later(`the screen is not in the copy's ${printed.rows.length} rows`); return; }
+      const from = Math.max(0, start - REFLOW_LINES);
+      const text = reflowText(start > from ? printed.history(from, start - 1) : '', start - from, rows, serializeScreen!());
+      output.write(frame(FRAME.output, text));
+      note(`rebuild ${cols}x${rows}: ${start - from} rows above the screen`);
+      parsing += text.length;
+      screen.write(text, () => { parsing -= text.length; resumeOutput(); });
+    } finally {
+      printed?.dispose();
+      holding = false; resumeOutput();
+    }
+  };
+  /**
+   * Runs `history` in a terminal of this size and waits until it has printed the conversation, then ends it. It answers what
+   * the copy asks the terminal, as the holder does for the CLI with nobody attached.
+   */
+  const printAgain = async (commandLine: string, cols: number, rows: number) => {
+    const { Terminal } = await import('@xterm/headless');
+    const { SerializeAddon } = await import('@xterm/addon-serialize');
+    const terminal = new Terminal({ cols, rows, scrollback: REFLOW_LINES + rows, allowProposedApi: true }), serializer = new SerializeAddon();
+    terminal.loadAddon(serializer);
+    const child = spawn(python, ['-IS', '-c', SHIM, String(rows), String(cols), commandLine], { stdio: ['pipe', 'pipe', 'ignore', 'pipe'] });
+    child.stdin!.on('error', () => {});
+    terminal.onData(data => child.stdin!.write(data));
+    let bytes = 0, lastAt = Date.now(), exited = false;
+    const started = Date.now();
+    child.stdout!.on('data', (chunk: Buffer) => { bytes += chunk.length; lastAt = Date.now(); terminal.write(chunk); });
+    child.on('close', () => { exited = true; });
+    child.on('error', () => { exited = true; });
+    while (!exited && Date.now() - started < PRINT_MS && Date.now() - lastAt < (bytes >= PRINTED_BYTES ? PRINTED_QUIET_MS : STARTED_QUIET_MS)) await sleep(50);
+    // The shim hangs up on the copy and its children, and kills them if they linger.
+    if (!exited) child.kill('SIGTERM');
+    await new Promise<void>(resolve => terminal.write('', resolve));
+    if (bytes === 0) { terminal.dispose(); return undefined; }
+    const buffer = terminal.buffer.active, all: string[] = [];
+    for (let row = 0; row < buffer.length; row++) all.push(buffer.getLine(row)?.translateToString(true) ?? '');
+    return {
+      rows: all,
+      history: (start: number, end: number) => serializer.serialize({ range: { start, end }, excludeModes: true }),
+      dispose: () => terminal.dispose(),
+    };
   };
   /** Everything a terminal needs to look as this one does, starting from any state, as a client reconnecting has the old screen. */
   const snapshot = () => {
@@ -217,6 +327,7 @@ async function daemon(id: string, python: string): Promise<void> {
     const terminal = new Terminal({ cols, rows, scrollback: SCROLLBACK, allowProposedApi: true }), serializer = new SerializeAddon();
     terminal.loadAddon(serializer);
     screen = terminal; serialize = () => serializer.serialize({ scrollback: SCROLLBACK });
+    serializeScreen = () => serializer.serialize({ scrollback: 0, excludeModes: true, excludeAltBuffer: true });
     // With nobody attached the CLI still asks the terminal things, such as where the cursor is, and Codex gives up if it hears nothing.
     terminal.onData(data => { if (!clients.size) shim?.stdin?.write(data); });
     terminal.onTitleChange(value => { title = value; });
@@ -232,7 +343,7 @@ async function daemon(id: string, python: string): Promise<void> {
     child.stdin!.on('error', () => {});
     (child.stdio[3] as NodeJS.WritableStream).on('error', () => {});
     child.stdout!.on('data', (chunk: Buffer) => {
-      parsing += chunk.length;
+      parsing += chunk.length; outputAt = Date.now();
       if (parsing > PARSE_HIGH) child.stdout!.pause();
       // Interactive output must not wait behind headless parsing. Joining clients alone wait for their snapshot.
       output.write(frame(FRAME.output, chunk));
@@ -309,7 +420,7 @@ function collect(): void {
   }
 }
 /** Connect to this terminal's holder, or start it. Several clients may do this at once: making the directory decides who starts it. */
-async function holderSocket(id: string, encoded: string): Promise<Socket> {
+async function holderSocket(id: string, encoded: string, history: string): Promise<Socket> {
   const dir = join(base, id);
   fs.mkdirSync(base, { recursive: true, mode: 0o700 });
   process.chdir(base);
@@ -330,14 +441,15 @@ async function holderSocket(id: string, encoded: string): Promise<Socket> {
     const python = python3();
     if (!python) { fs.rmSync(dir, { recursive: true, force: true }); process.exit(ATTACH_EXIT.noPty); }
     fs.writeFileSync(join(dir, 'command'), encoded, { mode: 0o600 });
+    if (history) fs.writeFileSync(join(dir, 'history'), history, { mode: 0o600 });
     const log = fs.openSync(join(dir, 'holder.log'), 'a', 0o600);
     spawn(process.execPath, [process.argv[1]!, 'daemon', base, id, python], { cwd: dir, detached: true, stdio: ['ignore', 'ignore', log] }).unref();
     fs.closeSync(log);
   }
   throw new Error('The terminal holder did not start');
 }
-async function attach(id: string, encoded: string): Promise<void> {
-  const socket = await holderSocket(id, encoded);
+async function attach(id: string, encoded: string, history: string): Promise<void> {
+  const socket = await holderSocket(id, encoded, history);
   // Bytes reach the terminal on the other end of SSH unchanged; setRawMode would leave \n turning into \r\n.
   if (process.stdin.isTTY) { try { execFileSync('stty', ['raw', '-echo'], { stdio: ['inherit', 'ignore', 'ignore'], timeout: 5000 }); } catch { /* the terminal will echo */ } }
   // A terminal knows its own size; the variables are for a client without one, as in the tests.
@@ -373,8 +485,9 @@ async function attach(id: string, encoded: string): Promise<void> {
   }));
 }
 
-const [command, base = '', id = '', argument = ''] = process.argv.slice(2);
+// `attach`'s last argument, the command that prints the conversation again, is optional; see holder-reflow.ts.
+const [command, base = '', id = '', argument = '', history = ''] = process.argv.slice(2);
 if (!ID.test(id)) { process.stderr.write('Invalid terminal holder ID\n'); process.exit(2); }
 if (command === 'daemon') { process.chdir(join(base, id)); await daemon(id, argument); }
-else if (command === 'attach') await attach(id, argument);
+else if (command === 'attach') await attach(id, argument, history);
 else { process.stderr.write('Unknown terminal holder command\n'); process.exit(2); }

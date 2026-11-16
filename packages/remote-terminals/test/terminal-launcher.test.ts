@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile, chmod, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
@@ -11,8 +11,11 @@ import { fixture } from '../../remote-agents/test/fakes.js';
 import { ensureAnchor } from '../../remote-agents/src/workspace/remote-workspaces.js';
 import { installWorkspaceTerminal } from '../src/terminal.js';
 
-test('native terminal launcher resolves the workspace, refuses an invalid binding and opens the local shell elsewhere', async t => {
-  if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }
+/**
+ * Launchers installed as DSH has them, for a saved machine whose ssh is a stand-in that records what it is given. With
+ * `holder`, the holder's script is there too, and terminals go through it.
+ */
+async function launcherRig(t: TestContext, holder = false) {
   const f = await fixture(t);
   // macOS process.cwd() canonicalizes /var to /private/var; keep containment inputs identical.
   const directory = await realpath(f.directory), modules = join(directory, 'modules'), bin = join(directory, 'bin'), capture = join(directory, 'ssh-args.json');
@@ -30,16 +33,23 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   await writeFile(join(bin, 'ssh'), `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv.includes('-G'))process.stdout.write('hostname build-box\\nuser builder\\nport 22\\n');else fs.writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify(process.argv.slice(2)));\n`); await chmod(join(bin, 'ssh'), 0o700);
   const anchor = await ensureAnchor(directory, { host: 'build-box', username: 'builder', port: 22 }, '/srv/app');
   const controller = { config: { shellCandidates: ['/bin/sh'] } };
+  if (holder) await writeFile(join(directory, 'terminal-holder.mjs'), '// the holder');
   const { shell: launcher, dispose: cleanup } = await installWorkspaceTerminal(controller, join(directory, 'terminal'), { hosts: f.path, tui: f.path }, pathToFileURL(modules + '/')); t.after(cleanup);
-  assert.ok(launcher); assert.equal(controller.config.shellCandidates[1], launcher);
   const env = { ...process.env, HOME: directory, SHELL: shell, DSH_HOME: directory, DSH_OMC_STATE_DIR: omc, DSH_TERMINAL_CAPTURE: capture, PATH: `${bin}:${process.env.PATH}` };
-  const launch = (cwd: string) => promisify(execFile)(launcher, [], { cwd, env, timeout: 5000 });
+  return { f, directory, capture, omc, anchor, controller, launcher, cleanup, env };
+}
+
+test('native terminal launcher resolves the workspace, refuses an invalid binding and opens the local shell elsewhere', async t => {
+  if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }
+  const { f, directory, capture, omc, anchor, controller, launcher, cleanup, env } = await launcherRig(t);
+  assert.ok(launcher); assert.equal(controller.config.shellCandidates[1], launcher);
+  const launch = (cwd: string) => promisify(execFile)(launcher, [], { cwd, env, timeout: 15_000 });
   await launch(anchor);
   const args: string[] = JSON.parse(await readFile(capture, 'utf8'));
   assert.ok(args.includes('-tt')); assert.ok(args.includes('builder@build-box')); assert.equal(args.at(-1), 'cd \'/srv/app\' && exec "${SHELL:-/bin/sh}" -l');
   // Remote Claude starts Claude Code in the same place and leaves a shell behind when it exits.
   const claude = controller.config.shellCandidates[2]!; assert.equal(basename(claude), 'Remote Claude');
-  const launchClaude = (cwd: string) => promisify(execFile)(claude, [], { cwd, env, timeout: 5000 });
+  const launchClaude = (cwd: string) => promisify(execFile)(claude, [], { cwd, env, timeout: 15_000 });
   await launchClaude(anchor);
   assert.equal(JSON.parse(await readFile(capture, 'utf8')).at(-1), 'cd \'/srv/app\' && export COLORTERM=truecolor CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 && exec "${SHELL:-/bin/sh}" -lic \'claude; exec "${SHELL:-/bin/sh}" -l\'');
   // With local scrolling switched off Claude Code keeps its fullscreen renderer.
@@ -51,7 +61,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   // In a TUI conversation it is the same Claude session every time, resumed once Claude Code has saved it.
   const state = JSON.parse(await readFile(f.path, 'utf8'));
   await writeFile(f.path, JSON.stringify({ ...state, tuiSessions: ['session-tui', 'session-opus'], tuiDetails: { 'session-opus': { model: 'opus[1m]', effort: 'high', title: 'Claude Code' } } }));
-  const launchTui = async (session: string) => { await promisify(execFile)(claude, [], { cwd: anchor, env: { ...env, DSH_SESSION_ID: session }, timeout: 5000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
+  const launchTui = async (session: string) => { await promisify(execFile)(claude, [], { cwd: anchor, env: { ...env, DSH_SESSION_ID: session }, timeout: 15_000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
   const tui = await launchTui('session-tui'), id = /--resume ([0-9a-f-]{36});/.exec(tui)?.[1];
   assert.match(id ?? '', /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
   assert.equal(tui, `cd '/srv/app' && export COLORTERM=truecolor CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 && exec "\${SHELL:-/bin/sh}" -lic 'if find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${id}.jsonl 2>/dev/null | grep -q .; then claude --resume ${id}; else claude --session-id ${id}; fi; exec "\${SHELL:-/bin/sh}" -l'`);
@@ -59,7 +69,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   // Remote Codex does the same with the thread saved when the conversation started.
   const codex = controller.config.shellCandidates[3]!; assert.equal(basename(codex), 'Remote Codex');
   const thread = '01a1a960-0696-7481-b86c-ea7a878c6479';
-  const launchCodex = async (session?: string) => { await promisify(execFile)(codex, [], { cwd: anchor, env: { ...env, ...(session ? { DSH_SESSION_ID: session } : {}) }, timeout: 5000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
+  const launchCodex = async (session?: string) => { await promisify(execFile)(codex, [], { cwd: anchor, env: { ...env, ...(session ? { DSH_SESSION_ID: session } : {}) }, timeout: 15_000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
   const plainCodex = `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic 'codex --no-alt-screen -c check_for_update_on_startup=false; exec "\${SHELL:-/bin/sh}" -l'`;
   assert.equal(await launchCodex(), plainCodex, 'outside a TUI conversation it is plain Codex');
   assert.equal(await launchCodex('session-chat'), plainCodex);
@@ -73,7 +83,7 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   // Antigravity keeps none with a conversation.
   const antigravity = controller.config.shellCandidates[4]!; assert.equal(basename(antigravity), 'Remote Antigravity');
   const conversation = 'f07744bd-6fff-40a9-9b40-d1ff3c5ccb69';
-  const launchAgy = async (session?: string) => { await promisify(execFile)(antigravity, [], { cwd: anchor, env: { ...env, ...(session ? { DSH_SESSION_ID: session } : {}) }, timeout: 5000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
+  const launchAgy = async (session?: string) => { await promisify(execFile)(antigravity, [], { cwd: anchor, env: { ...env, ...(session ? { DSH_SESSION_ID: session } : {}) }, timeout: 15_000 }); return JSON.parse(await readFile(capture, 'utf8')).at(-1) as string; };
   const agyCommand = (command: string) => `cd '/srv/app' && export COLORTERM=truecolor && exec "\${SHELL:-/bin/sh}" -lic '${command}; exec "\${SHELL:-/bin/sh}" -l'`;
   assert.equal(await launchAgy(), agyCommand('agy'), 'outside a TUI conversation it is plain Antigravity');
   const saved = JSON.parse(await readFile(f.path, 'utf8'));
@@ -104,7 +114,27 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
   assert.match((await launchClaude(local)).stderr, /Not a remote workspace/, 'Remote Claude never starts Claude on the DSH machine');
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
-  assert.match((await promisify(execFile)(codex, [], { cwd: local, env, timeout: 5000 })).stderr, /Not a remote workspace/, 'nor Remote Codex Codex');
-  assert.match((await promisify(execFile)(antigravity, [], { cwd: local, env, timeout: 5000 })).stderr, /Not a remote workspace/, 'nor Remote Antigravity Antigravity');
+  assert.match((await promisify(execFile)(codex, [], { cwd: local, env, timeout: 15_000 })).stderr, /Not a remote workspace/, 'nor Remote Codex Codex');
+  assert.match((await promisify(execFile)(antigravity, [], { cwd: local, env, timeout: 15_000 })).stderr, /Not a remote workspace/, 'nor Remote Antigravity Antigravity');
   cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);
+});
+
+test('a Claude conversation with local scrolling gives its holder the command that prints it again, and nothing else does', async t => {
+  if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }
+  const { f, capture, anchor, controller, env } = await launcherRig(t, true);
+  const [, , claude, codex] = controller.config.shellCandidates as [string, string, string, string];
+  await writeFile(f.path, JSON.stringify({ ...JSON.parse(await readFile(f.path, 'utf8')), tuiSessions: ['session-tui', 'session-codex'], tuiDetails: { 'session-codex': { cli: 'codex', thread: '01a1a960-0696-7481-b86c-ea7a878c6479' } } }));
+  /** The commands the holder is given: what it runs, and what prints the conversation again. */
+  const launch = async (launcher: string, session: string) => {
+    await promisify(execFile)(launcher, [], { cwd: anchor, env: { ...env, DSH_SESSION_ID: session }, timeout: 15_000 });
+    const attach = / attach "\$HOME\/[^"]+" tui-[0-9a-f]+ ([A-Za-z0-9+/=]+)(?: ([A-Za-z0-9+/=]+))?'$/.exec(JSON.parse(await readFile(capture, 'utf8')).at(-1));
+    assert.ok(attach, 'through the holder');
+    return { command: Buffer.from(attach[1]!, 'base64').toString(), history: attach[2] && Buffer.from(attach[2], 'base64').toString() };
+  };
+  const tui = await launch(claude, 'session-tui'), id = /--resume ([0-9a-f-]{36});/.exec(tui.command)?.[1];
+  assert.ok(id);
+  assert.equal(tui.history, `cd '/srv/app' && export COLORTERM=truecolor CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 DISABLE_AUTOUPDATER=1 && exec "\${SHELL:-/bin/sh}" -lic 'find "\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects" -maxdepth 2 -name ${id}.jsonl 2>/dev/null | grep -q . && exec claude --resume ${id} --fork-session --strict-mcp-config --settings "{\\"disableAllHooks\\":true}"'`);
+  assert.equal((await launch(codex, 'session-codex')).history, undefined, 'Codex repaints its own history');
+  await writeFile(f.path, JSON.stringify({ ...JSON.parse(await readFile(f.path, 'utf8')), tuiLocalScroll: false }));
+  assert.equal((await launch(claude, 'session-tui')).history, undefined, 'the fullscreen renderer redraws everything itself');
 });

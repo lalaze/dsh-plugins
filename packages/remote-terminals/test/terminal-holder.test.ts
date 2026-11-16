@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { build } from 'esbuild';
+import xtermHeadless from '@xterm/headless';
 import { attachExitCode, ATTACH_EXIT, endHolderScript, HOLDERS_FOLDER, screenClaim, tabHolder, tuiHolder } from '../src/holder-protocol.js';
 import { attachCommand, holdTerminal } from '../src/terminal-hold.js';
 
@@ -26,8 +27,9 @@ let counter = 0;
 const newId = () => `tab-${(++counter).toString(16).padStart(32, '0')}`;
 const until = async (check: () => boolean, ms = 8000) => { const end = Date.now() + ms; while (Date.now() < end) { if (check()) return true; await new Promise(r => setTimeout(r, 20)); } return check(); };
 interface Client { child: ChildProcess; output(): string; exited: Promise<number | null>; send(text: string): void }
-function attach(id: string, command: string, env: NodeJS.ProcessEnv = {}): Client {
-  const child = spawn(process.execPath, [script, 'attach', base, id, Buffer.from(command).toString('base64')], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...env } });
+function attach(id: string, command: string, env: NodeJS.ProcessEnv = {}, history?: string): Client {
+  const args = [script, 'attach', base, id, Buffer.from(command).toString('base64'), ...(history ? [Buffer.from(history).toString('base64')] : [])];
+  const child = spawn(process.execPath, args, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ...env } });
   let text = '';
   child.stdout!.on('data', data => { text += data; });
   child.stderr!.on('data', data => { text += data; });
@@ -217,6 +219,104 @@ test('a terminal that gains focus takes the screen back, unless the size has onl
   const holder = Number(readFileSync(join(base, id, 'pid'), 'utf8'));
   process.kill(holder, 'SIGTERM');
   await Promise.all([wide.exited, narrow.exited]);
+});
+
+/**
+ * Behaves as Claude Code's classic renderer: breaks its lines itself at the width, and when the width changes repaints the
+ * screen only. With --history it is the copy that prints the conversation again.
+ */
+const CLASSIC_CLI = `const wrap = ${String(wrapped)};
+const lines = () => wrap(process.stdout.columns);
+process.stdin.setRawMode(true); process.stdin.resume(); process.stdin.on('data', () => {});
+process.stdout.write(lines().join('\\r\\n') + '\\r\\n❯ ');
+// CLASSIC_BUSY_MS: after its first resize it spins at the prompt that long without a pause, as Claude Code does while it works.
+let spun = false;
+if (!process.argv.includes('--history')) process.stdout.on('resize', () => {
+  const rows = process.stdout.rows, tail = lines().slice(-(rows - 1));
+  process.stdout.write('\\x1b[H' + '\\x1b[2K\\x1b[1B'.repeat(rows) + '\\x1b[H' + tail.join('\\r\\n') + '\\r\\n❯ ');
+  const spin = Number(process.env.CLASSIC_BUSY_MS);
+  if (!spin || spun) return;
+  spun = true;
+  const until = Date.now() + spin, busy = setInterval(() => { process.stdout.write('|/-\\\\'[Date.now() % 4] + '\\b'); if (Date.now() > until) clearInterval(busy); }, 20);
+});
+setInterval(() => {}, 1 << 30);
+`;
+function wrapped(width: number): string[] {
+  return Array.from({ length: 40 }, (_, at) => `⏺ message ${at + 1}: ${'lorem ipsum dolor sit amet '.repeat(2 + at % 3).trim()}`).flatMap(text => {
+    const lines: string[] = []; let line = '';
+    for (const word of text.split(' ')) { if (line && line.length + 1 + word.length > width) { lines.push(line); line = `  ${word}`; } else line += line ? ` ${word}` : word; }
+    return [...lines, line, ''];
+  });
+}
+/** Every row of a terminal of this size that was sent `output`, scrollback included. */
+async function shownRows(output: string, cols: number, rows: number): Promise<string[]> {
+  const { Terminal } = xtermHeadless as unknown as typeof import('@xterm/headless');
+  const terminal = new Terminal({ cols, rows, scrollback: 10_000, allowProposedApi: true });
+  await new Promise<void>(resolve => terminal.write(output, resolve));
+  const buffer = terminal.buffer.active, shown: string[] = [];
+  for (let row = 0; row < buffer.length; row++) shown.push(buffer.getLine(row)!.translateToString(true));
+  terminal.dispose();
+  return shown;
+}
+
+/** Ends the holder when the test ends, passed or not, so that its clients exit too. */
+const endHolder = (t: { after(fn: () => void): void }, id: string) => t.after(() => { try { process.kill(Number(readFileSync(join(base, id, 'pid'), 'utf8')), 'SIGTERM'); } catch { /* gone already */ } });
+
+test('after a change of width the scrollback is printed again at the new width, once for each width', options, async t => {
+  const id = newId(), cli = join(home, `classic-${id}.mjs`), runs = join(home, `copies-${id}`);
+  endHolder(t, id);
+  writeFileSync(cli, CLASSIC_CLI);
+  const node = JSON.stringify(process.execPath), copies = () => (existsSync(runs) ? readFileSync(runs, 'utf8').split('\n').length - 1 : 0);
+  const history = `echo copy >> ${runs}; exec ${node} ${cli} --history`;
+  const wide = attach(id, `exec ${node} ${cli}`, { COLUMNS: '120', LINES: '30', DSH_TERMINAL_REFLOW_MS: '150' }, history);
+  assert.ok(await until(() => wide.output().includes('❯')), wide.output());
+  // As a phone opening the conversation: the screen becomes 50 columns, and everything above it is printed again.
+  const narrow = attach(id, 'exit 99', { COLUMNS: '50', LINES: '20' });
+  assert.ok(await until(() => copies() === 1 && narrow.output().includes('\x1b[3J')), narrow.output().slice(-500));
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.deepEqual(await shownRows(narrow.output(), 50, 20), [...wrapped(50), '❯ '], 'one copy of the conversation, all at 50 columns');
+  // Back at the computer.
+  const before = wide.output().length;
+  wide.send('x');
+  assert.ok(await until(() => copies() === 2 && wide.output().lastIndexOf('\x1b[3J') > before), wide.output().slice(-500));
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.deepEqual(await shownRows(wide.output(), 120, 30), [...wrapped(120), '❯ '], 'and all at 120 again');
+  // A change of height alone leaves what is above the screen as it is.
+  const shorter = attach(id, 'exit 99', { COLUMNS: '120', LINES: '25' });
+  assert.ok(await until(() => shorter.output().includes('❯')));
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  assert.equal(copies(), 2);
+});
+
+test('a CLI that never pauses gets its scrollback rebuilt once it is idle', options, async t => {
+  const id = newId(), cli = join(home, `classic-${id}.mjs`), runs = join(home, `copies-${id}`);
+  endHolder(t, id);
+  writeFileSync(cli, CLASSIC_CLI);
+  const node = JSON.stringify(process.execPath), copies = () => (existsSync(runs) ? readFileSync(runs, 'utf8').split('\n').length - 1 : 0);
+  const wide = attach(id, `exec ${node} ${cli}`, { COLUMNS: '120', LINES: '30', DSH_TERMINAL_REFLOW_MS: '150', CLASSIC_BUSY_MS: '4500' }, `echo copy >> ${runs}; exec ${node} ${cli} --history`);
+  assert.ok(await until(() => wide.output().includes('❯')), wide.output());
+  const narrow = attach(id, 'exit 99', { COLUMNS: '50', LINES: '20' });
+  assert.ok(await until(() => copies() >= 1), 'a copy is made at once');
+  await new Promise(resolve => setTimeout(resolve, 2500));
+  assert.ok(!narrow.output().includes('\x1b[3J'), 'nothing is put in while the CLI keeps writing');
+  assert.ok(await until(() => narrow.output().includes('\x1b[3J'), 20_000), 'but once it is idle');
+  assert.equal(copies(), 2);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  const shown = await shownRows(narrow.output(), 50, 20);
+  assert.deepEqual(shown.slice(0, -1), wrapped(50));
+  assert.match(shown.at(-1)!, /^❯ /);
+});
+
+test('without a command that prints the conversation again, a change of width only resizes', options, async t => {
+  const id = newId(), cli = join(home, `classic-${id}.mjs`);
+  endHolder(t, id);
+  writeFileSync(cli, CLASSIC_CLI);
+  const wide = attach(id, `exec ${JSON.stringify(process.execPath)} ${cli}`, { COLUMNS: '120', LINES: '30', DSH_TERMINAL_REFLOW_MS: '150' });
+  assert.ok(await until(() => wide.output().includes('❯')));
+  const narrow = attach(id, 'exit 99', { COLUMNS: '50', LINES: '20' });
+  assert.ok(await until(() => narrow.output().includes('❯')));
+  await new Promise(resolve => setTimeout(resolve, 1500));
+  assert.ok(!narrow.output().includes('\x1b[3J'));
 });
 
 test('holder IDs are stable, distinct and fit what the holder accepts', () => {

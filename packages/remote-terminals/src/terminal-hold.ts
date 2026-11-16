@@ -28,6 +28,8 @@ export interface HoldOptions {
   holder: string;
   /** Run by a new holder. Unused if it is already running. */
   command: string;
+  /** Prints the conversation again at the terminal's width, for a new holder to rebuild the scrollback with; see holder-reflow.ts. */
+  history?: string;
   /** The holder's script on this machine and its version, which names it on the host. */
   script: { path: string; version: string };
   output?: NodeJS.WritableStream;
@@ -37,10 +39,11 @@ export interface HoldOptions {
 /** Into `sh -c`: the login shell of the account, which runs what ssh is given, need not be a POSIX one. */
 const posix = (script: string) => `exec /bin/sh -c ${quote(script)}`;
 const remoteScript = (version: string) => `"$HOME/${HOLDER_FOLDER}/terminal-${version}.mjs"`;
-export const attachCommand = ({ holder, command, script }: Pick<HoldOptions, 'holder' | 'command' | 'script'>) => posix(`${REMOTE_PATH}
+const base64 = (text: string) => Buffer.from(text).toString('base64');
+export const attachCommand = ({ holder, command, history, script }: Pick<HoldOptions, 'holder' | 'command' | 'history' | 'script'>) => posix(`${REMOTE_PATH}
 [ -f ${remoteScript(script.version)} ] || exit ${ATTACH_EXIT.noScript}
 [ -n "$dsh_best_node" ] || exit ${ATTACH_EXIT.noRuntime}
-exec "$dsh_best_node" ${remoteScript(script.version)} attach "$HOME/${HOLDERS_FOLDER}" ${holder} ${Buffer.from(command).toString('base64')}`);
+exec "$dsh_best_node" ${remoteScript(script.version)} attach "$HOME/${HOLDERS_FOLDER}" ${holder} ${base64(command)}${history ? ` ${base64(history)}` : ''}`);
 const installCommand = (version: string) => posix(`umask 077
 mkdir -p "$HOME/${HOLDER_FOLDER}" "$HOME/${HOLDERS_FOLDER}" || exit 1
 dsh_file="$(mktemp "$HOME/${HOLDER_FOLDER}/.terminal.XXXXXXXXXX")" || exit 1
