@@ -540,6 +540,93 @@ test('DSH Auto review selects Codex auto review, even from a catalog saved befor
   assert.equal(remote.created!.modeId, 'auto-review');
 });
 
+/** A machine whose Antigravity offers its ACP modes; `input` writes to it from a conversation of its own. */
+async function antigravity(t: TestContext, overrides: Partial<ChatHost> = {}) {
+  const base = await setup(t, overrides);
+  base.remote.catalog.push({ id: 'antigravity', label: 'Antigravity', status: 'ready', models: [{ id: 'gemini', label: 'Gemini' }], defaultModeId: 'default',
+    modes: [{ id: 'default', label: 'Default' }, { id: 'accept-edits', label: 'Accept edits' }, { id: 'auto', label: 'Auto' }, { id: 'plan', label: 'Plan' }] });
+  await base.projects.refresh(base.project.id);
+  const input = (prompt: string, sessionId = 'antigravity-conversation') => base.options(prompt, { provider: chatProviderId('antigravity'), model: chatModelId(base.project.id, 'antigravity', 'gemini'), sessionId: SessionId(sessionId) });
+  return { ...base, input };
+}
+/** Antigravity asking before a command, as the ACP runtime records it; after the answer it ends the turn with `reply`, or silently. */
+function asksToRun(remote: Awaited<ReturnType<typeof setup>>['remote'], reply?: string) {
+  remote.onCreate = agent => {
+    agent.status = 'running';
+    agent.pendingPermissions = [{ id: 'run', kind: 'tool', name: '~/.local/bin/hermes --version && ~/.local/bin/hermes doctor', detail: { name: 'run_command', kind: 'execute' },
+      actions: [{ id: 'allow', label: 'Allow', behavior: 'allow', scope: 'once' }, { id: 'deny', label: 'Deny', behavior: 'deny', scope: 'once' }] }];
+    void (async () => {
+      while (!remote.answers.length) await pause(5);
+      agent.pendingPermissions = [];
+      if (reply) remote.append(agent.id, { type: 'assistant_message', text: reply });
+      agent.status = 'idle';
+    })();
+  };
+}
+
+test('Antigravity follows the DSH composer permission, and leaves Auto when the permission is no longer full access', async t => {
+  let permission: DshPermission | undefined = 'workspace-write';
+  const { remote, adapter, input, store } = await antigravity(t, { permission: () => permission });
+  const first = input('Edit the notes');
+  await collect(adapter.stream(first));
+  assert.equal(remote.created!.modeId, 'accept-edits');
+  permission = 'danger-full-access';
+  const second = { ...first, messages: [...first.messages, user('Now with full access')] };
+  await collect(adapter.stream(second));
+  assert.equal(store.snapshot().tasks[0].modeId, 'auto', 'its Auto is the closest it has to never asking');
+  permission = 'read-only';
+  await collect(adapter.stream({ ...second, messages: [...second.messages, user('Read only now')] }));
+  assert.equal(store.snapshot().tasks[0].modeId, 'default');
+});
+
+test('under Full access Antigravity runs a command it asks about, without a DSH prompt that could only refuse', async t => {
+  let prompts = 0;
+  const { remote, adapter, input } = await antigravity(t, { permission: () => 'danger-full-access', neverAsks: () => true,
+    approval: { request: async () => { prompts++; return 'rejected'; } } });
+  asksToRun(remote, 'Hermes is installed correctly');
+  assert.equal(text(await collect(adapter.stream(input('Check my hermes install')))), 'Hermes is installed correctly');
+  assert.equal(remote.created!.modeId, 'auto');
+  assert.equal(prompts, 0);
+  assert.deepEqual(remote.answers[0].answer, { behavior: 'allow', selectedActionId: 'allow' });
+});
+
+test('a request DSH refuses without showing it is said in the reply, even when the CLI then ends its turn in silence', async t => {
+  for (const [prompt, expected] of [
+    ['Check my hermes install', /^\n\n> \*\*Not run:\*\* Antigravity asked for `~\/\.local\/bin\/hermes --version && ~\/\.local\/bin\/hermes doctor`\. This conversation's permission never asks, so DSH refused it without showing you\./],
+    ['看一下我 hermes 安装得对不对', /^\n\n> \*\*没有运行：\*\* Antigravity 请求 `~\/\.local\/bin\/hermes --version && ~\/\.local\/bin\/hermes doctor`。这个对话的权限设置从不询问/],
+  ] as const) {
+    // A custom permission that never asks: nothing allows the command.
+    const { remote, adapter, input } = await antigravity(t, { permission: () => undefined, neverAsks: () => true, approval: { request: async () => 'rejected' } });
+    asksToRun(remote);
+    assert.match(text(await collect(adapter.stream(input(prompt)))), expected);
+    assert.equal(remote.answers[0].answer.selectedActionId, 'deny');
+    assert.equal(remote.created!.modeId, 'default');
+  }
+  // Someone who saw the prompt and denied it knows already.
+  const { remote, adapter, input } = await antigravity(t, { neverAsks: () => false, approval: { request: async () => 'rejected' } });
+  asksToRun(remote, 'Skipped the command');
+  assert.equal(text(await collect(adapter.stream(input('Check my hermes install')))), 'Skipped the command');
+  assert.equal(remote.answers[0].answer.selectedActionId, 'deny');
+});
+
+test('under Full access a Claude safety check still goes to DSH, and its refusal is said in the reply', async t => {
+  let prompts = 0;
+  const { remote, projects, project, adapter, options } = await setup(t, { permission: () => 'danger-full-access', neverAsks: () => true,
+    approval: { request: async () => { prompts++; return 'rejected'; } } });
+  remote.catalog[1] = { id: 'claude', label: 'Claude Code', status: 'ready', models: [{ id: 'claude-model', label: 'Claude model' }], modes: [{ id: 'bypassPermissions', label: 'Full access' }] };
+  await projects.refresh(project.id);
+  remote.onCreate = agent => {
+    agent.status = 'running';
+    agent.pendingPermissions = [{ id: 'check', kind: 'tool', name: 'Bash', input: { command: 'rm -rf "$DIR"/', description: 'Remove the build folder' }, safetyCheck: true }];
+    void (async () => { while (!remote.answers.length) await pause(5); agent.pendingPermissions = []; remote.append(agent.id, { type: 'assistant_message', text: 'I left the folder alone.' }); agent.status = 'idle'; })();
+  };
+  const reply = text(await collect(adapter.stream(options('Clean up', { provider: chatProviderId('claude'), model: chatModelId(project.id, 'claude', 'claude-model') }))));
+  assert.equal(prompts, 1);
+  assert.equal(remote.answers[0].answer.behavior, 'deny');
+  assert.match(reply, /\*\*Not run:\*\* Claude Code asked for `Remove the build folder`/);
+  assert.match(reply, /I left the folder alone\.$/);
+});
+
 test('a host that cannot keep the CLI running after DSH quits fails the response with the reason', async t => {
   const { remote, adapter, options } = await setup(t);
   remote.onCreate = () => { throw new Error(RELAY_UNAVAILABLE['missing-node']); };

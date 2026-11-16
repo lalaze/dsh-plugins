@@ -1,4 +1,4 @@
-import { TOOL_STATUS_URL, type TimelineEntry } from '@dsh-plugins/remote-core/domain.js';
+import { TOOL_STATUS_URL, type Permission, type TimelineEntry } from '@dsh-plugins/remote-core/domain.js';
 
 /** Main-chat prompts carry earlier DSH messages ahead of the request; the transcript shows only what the user typed. */
 const CONTEXT = /^Conversation context \(already occurred; do not repeat completed actions\):\n[\s\S]*?\n\nCurrent user request:\n/;
@@ -13,6 +13,7 @@ const LABELS = {
     switchNote: (from: string, to: string, category: string) => `**Model switched.** ${from}'s safeguards stopped this request${category}, so ${to} retried it. Later turns in this session stay on ${to}, and the model picker does not change to show it. To use another model, pick a different one; it applies to your next message.`,
     running: (what: string, more: number) => `Tool call · ${what}${more ? ` (${more} more running)` : ''}`,
     waiting: (cli: string) => `${cli} is running a turn it started itself. Your message is sent when that turn ends. Stop interrupts the turn now.`,
+    refused: (cli: string, what: string) => `**Not run:** ${cli} asked for \`${what}\`. This conversation's permission never asks, so DSH refused it without showing you. To be asked instead, switch the conversation to a permission that asks.`,
   },
   zh: {
     elsewhere: (cli: string, turns: number) => `**在别处进行的 ${turns} 轮**，同一个 ${cli} 会话。`,
@@ -22,6 +23,7 @@ const LABELS = {
     switchNote: (from: string, to: string, category: string) => `**模型已切换。** ${from} 的安全机制拦截了这条消息${category}，这一轮改由 ${to} 重试。这段会话后面的轮次也继续用 ${to}，模型选择器不会跟着变。要换模型，选另一个模型，发下一条消息时生效。`,
     running: (what: string, more: number) => `工具调用 · ${what}${more ? `（另有 ${more} 个工具在运行）` : ''}`,
     waiting: (cli: string) => `${cli} 正在跑它自己开始的一轮，你的消息会在这一轮结束后发送。现在按停止会中断这一轮。`,
+    refused: (cli: string, what: string) => `**没有运行：** ${cli} 请求 \`${what}\`。这个对话的权限设置从不询问，DSH 没给你看就拒绝了。想让它来问你，把对话的权限换成会询问的设置。`,
   },
 };
 
@@ -67,6 +69,17 @@ function toolTarget(input: Record<string, unknown>): string {
   const path = field('file_path', 'path') || (typeof changes[0]?.path === 'string' ? changes[0].path : '');
   if (path) return clipPath(oneLine(path));
   return clip(oneLine(field('pattern', 'query', 'url', 'prompt')));
+}
+
+/**
+ * The line a reply shows where DSH refused a CLI's request without showing it, in the language of what the user wrote. Without it
+ * the turn can end in silence: an ACP CLI such as Antigravity hears no reason and often stops without a word.
+ */
+export function refusalNote(cli: string, permission: Pick<Permission, 'name' | 'title' | 'input' | 'detail'>, userText: string): string {
+  const labels = /[㐀-鿿]/.test(userText) ? LABELS.zh : LABELS.en;
+  const input = permission.input ?? (typeof permission.detail === 'object' && permission.detail !== null && !Array.isArray(permission.detail) ? permission.detail as Record<string, unknown> : {});
+  const what = toolTarget(input) || clip(oneLine(permission.title || permission.name));
+  return labels.refused(cli, what.replace(/`/g, "'"));
 }
 
 /**

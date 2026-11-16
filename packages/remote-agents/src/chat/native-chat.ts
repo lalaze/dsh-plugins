@@ -11,10 +11,10 @@ import { busy, fastTierOf, inputModalitiesOf, presetMode, remotePath, type Curso
 import { localFileMentions, localFilePrompt, restoreFiles, stageAttachments, stageLocalFiles, type AttachmentAccess } from '../agents/attachments.js';
 import { CHAT_IMAGES, ChatImageLinks, chatImageName, imageExtensionOf, saveChatImage, viewedImageMarkdown, writeChatImage } from './images.js';
 import { ChatProjects } from './projects.js';
-import { modelSwitchNote, ownTurnWaitNote, toolStatus, transcript } from './transcript.js';
-import { decidePermission, unattendedAnswer } from '../agents/tools.js';
+import { modelSwitchNote, ownTurnWaitNote, refusalNote, toolStatus, transcript } from './transcript.js';
+import { decidePermission, fullAccessAnswer, unattendedAnswer } from '../agents/tools.js';
 import { isTeamPrompt, teamMemberNote, type TeamMember } from './agent-teams.js';
-import type { ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
+import { fullAccess, type ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
 import type { WorkspacePlacement } from '@dsh-plugins/remote-core/access.js';
 
 export const CHAT_PROVIDER = 'remote-cli';
@@ -70,6 +70,8 @@ export interface ChatHost extends Partial<ToolHost> {
   permission?(sessionId: NonNullable<GenerateOptions['sessionId']>): DshPermission | undefined;
   /** A delegated subagent nobody answers (DSH approval policy `never`): the CLI must not wait for approvals or answers. */
   unattended?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
+  /** DSH's approval policy is `never`: it refuses the conversation's approval requests without showing them. */
+  neverAsks?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
   /** Structural DSH child-session provenance, independent of labels and permission. */
   subagent?(sessionId: NonNullable<GenerateOptions['sessionId']>): boolean;
   /** The AgentTeams team and member this conversation runs as, when it is a team member. */
@@ -433,6 +435,8 @@ export class RemoteCliAdapter extends LlmAdapter {
     let waitingForOwnTurn = false;
     const rows = new NativeToolRows(this.host.step(sessionId), options, `${provider.label} on ${project.label}:${cwd}`);
     const questions = new Map<string, AbortController>(); let permissionFailure: unknown, permissionNotice = false;
+    /** Requests DSH refused without showing them, said in the reply where they happened; see {@link refusalNote}. */
+    const refusals: string[] = [];
     let open: { type: 'text' | 'reasoning'; index: number; text: string } | undefined;
     /** The latest closed text block, or an empty one in its place, which the line about running tools follows; and that line. */
     let tail: { index: number; text: string } | undefined, status = '';
@@ -504,8 +508,10 @@ export class RemoteCliAdapter extends LlmAdapter {
      * Stream one message's output until its turn ends. A recovered turn reports failures as text. `patient`: a turn this
      * conversation did not send, which ends by its record rather than by its CLI's running status; see {@link LAPSE_MS}.
      */
+    const refused = function* (): Generator<StreamChunk> { while (refusals.length) yield* textChunk('text', `\n\n> ${refusals.shift()}\n\n`); };
     const follow = async function* (id: string, from: Cursor | undefined, recovered: boolean, patient = false): AsyncGenerator<StreamChunk, boolean> {
       const interrupted = yield* timeline(id, from, recovered, patient);
+      yield* refused();
       yield* setStatus('');
       yield* textChunk('text', images.flush());
       return interrupted;
@@ -521,6 +527,7 @@ export class RemoteCliAdapter extends LlmAdapter {
           permissionNotice = false;
           yield* textChunk('reasoning', 'Approval is still pending. Open Remote agents to respond, or stop this turn.\n');
         }
+        yield* refused();
         // State first, history second: the idle flag can be set just before the final append settles.
         const state = await service.state(taskId), page = await service.messageTimeline(taskId, id, cursor);
         if (!page.found) throw new LlmError('Remote message delivery was not recorded. Retry without changing the message.', 'REMOTE_DELIVERY_UNKNOWN');
@@ -564,12 +571,17 @@ export class RemoteCliAdapter extends LlmAdapter {
           const agent = this.host.agent(sessionId), pending = new AbortController(); questions.set(permission.id, pending);
           if (!unattended && (!agent || !this.host.approval || !this.host.userQuestions)) throw new LlmError('DSH approvals are unavailable. Enable approval and userQuestions services before using remote CLI chat.', 'APPROVAL_UNAVAILABLE');
           const questionSignal = AbortSignal.any([signal, pending.signal]);
+          // Read for each request: the conversation's permission can change during a turn.
+          const never = unattended || this.host.neverAsks?.(sessionId) === true;
+          const granted = fullAccess({ permission: this.host.permission?.(sessionId), never }) ? fullAccessAnswer(permission) : undefined;
           // DSH rejects every prompt of an unattended subagent; deny here so the CLI goes on rather than cancelling the turn.
-          void (unattended ? Promise.resolve(unattendedAnswer(permission, service.store.task(t => t.id === taskId)?.sandboxed === true)) : decidePermission({ approval: this.host.approval!, userQuestions: this.host.userQuestions! }, permission,
+          void (granted ? Promise.resolve(granted) : unattended ? Promise.resolve(unattendedAnswer(permission, service.store.task(t => t.id === taskId)?.sandboxed === true)) : decidePermission({ approval: this.host.approval!, userQuestions: this.host.userQuestions! }, permission,
             { agent, callId: `remote-${taskId}-${permission.id}`, signal: questionSignal }, questionSignal, `${provider.label} on ${project.label}:${cwd}`))
             .then(async answer => {
               if (questionSignal.aborted) return;
               if (!answer) { permissionNotice = true; return; }
+              // Queued before the CLI hears it, so the line is shown before the turn it ends. An unattended CLI is told in its answer.
+              if (answer.behavior === 'deny' && never && !unattended) refusals.push(refusalNote(provider.label, permission, currentPrompt));
               await service.respond(taskId, permission.id, answer);
             }).catch(async error => {
               // The session panel or another client can answer while the native prompt is open.

@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { isTeamPrompt, teamMemberNote, teamMemberOf } from '../src/chat/agent-teams.js';
-import { accessOf } from '@dsh-plugins/remote-core/dsh-host.js';
-import { decidePermission, unattendedAnswer } from '../src/agents/tools.js';
+import { accessOf, fullAccess } from '@dsh-plugins/remote-core/dsh-host.js';
+import { decidePermission, fullAccessAnswer, unattendedAnswer } from '../src/agents/tools.js';
 import type { Permission } from '@dsh-plugins/remote-core/domain.js';
 
 const session = (header: Record<string, unknown>, events: unknown[] = []) =>
@@ -34,25 +34,48 @@ test('the member note names the team tools and mentions approvals only when nobo
   assert.match(teamMemberNote({ team: 'web', member: 'coder' }, true), /Nobody can answer approval prompts/);
 });
 
-function host(state: { preset: string; sandbox?: string; approval?: string }) {
+function host(state: { preset: string; sandbox?: string; approval?: string; effective?: string }) {
   const presets: Record<string, { sandbox: string; approval: string }> = { 'read-only': { sandbox: 'read-only', approval: 'ask' }, 'workspace-write': { sandbox: 'workspace-write', approval: 'ask' }, 'danger-full-access': { sandbox: 'danger-full-access', approval: 'never' } };
   const services: Record<string, unknown> = {
     permissionPresets: { current: () => state.preset, resolve: (name: string) => { if (!presets[name]) throw new Error('unknown preset'); return presets[name]; } },
     sessionProjections: { stateOf: () => ({ preset: null, sandbox: state.sandbox, approval: state.approval }) },
-    approval: { config: { policy: 'ask' } },
+    approval: { config: { policy: 'ask' }, ...(state.effective ? { effectivePolicy: () => state.effective } : {}) },
   };
   return { get: (name: string) => services[name] } as unknown as Context;
 }
 
 test('a delegated subagent that never asks is unattended and its sandbox bounds the CLI; main conversations are unchanged', () => {
   const member = session({ parentSession: 'captain' });
-  assert.deepEqual(accessOf(host({ preset: 'custom', sandbox: 'workspace-write', approval: 'never' }), member), { permission: 'workspace-write', unattended: true });
-  assert.deepEqual(accessOf(host({ preset: 'custom', sandbox: 'read-only', approval: 'never' }), member), { permission: 'read-only', unattended: true });
-  assert.deepEqual(accessOf(host({ preset: 'danger-full-access', sandbox: 'danger-full-access', approval: 'never' }), member), { permission: 'danger-full-access', unattended: true });
-  assert.deepEqual(accessOf(host({ preset: 'workspace-write', sandbox: 'workspace-write', approval: 'ask' }), member), { permission: 'workspace-write', unattended: false }, 'a subagent someone answers');
-  assert.deepEqual(accessOf(host({ preset: 'auto', sandbox: 'workspace-write', approval: 'never' }), member), { permission: 'auto', unattended: false }, 'Auto review keeps its reviewer');
-  assert.deepEqual(accessOf(host({ preset: 'custom', sandbox: 'workspace-write', approval: 'never' }), session({})), { permission: undefined, unattended: false }, 'a custom main conversation keeps the CLI mode');
-  assert.deepEqual(accessOf({ get: () => undefined } as unknown as Context, member), { permission: undefined, unattended: false }, 'without DSH permission services');
+  assert.deepEqual(accessOf(host({ preset: 'custom', sandbox: 'workspace-write', approval: 'never' }), member), { permission: 'workspace-write', unattended: true, never: true });
+  assert.deepEqual(accessOf(host({ preset: 'custom', sandbox: 'read-only', approval: 'never' }), member), { permission: 'read-only', unattended: true, never: true });
+  assert.deepEqual(accessOf(host({ preset: 'danger-full-access', sandbox: 'danger-full-access', approval: 'never' }), member), { permission: 'danger-full-access', unattended: true, never: true });
+  assert.deepEqual(accessOf(host({ preset: 'workspace-write', sandbox: 'workspace-write', approval: 'ask' }), member), { permission: 'workspace-write', unattended: false, never: false }, 'a subagent someone answers');
+  assert.deepEqual(accessOf(host({ preset: 'auto', sandbox: 'workspace-write', approval: 'never' }), member), { permission: 'auto', unattended: false, never: true }, 'Auto review keeps its reviewer');
+  assert.deepEqual(accessOf(host({ preset: 'custom', sandbox: 'workspace-write', approval: 'never' }), session({})), { permission: undefined, unattended: false, never: true }, 'a custom main conversation keeps the CLI mode');
+  assert.deepEqual(accessOf({ get: () => undefined } as unknown as Context, member), { permission: undefined, unattended: false, never: false }, 'without DSH permission services');
+});
+
+test('Full access is a full-access preset that never asks; DSH\'s own policy wins over the stored knobs', () => {
+  const main = session({});
+  const full = accessOf(host({ preset: 'danger-full-access', sandbox: 'danger-full-access', approval: 'never' }), main);
+  assert.deepEqual(full, { permission: 'danger-full-access', unattended: false, never: true }); assert.equal(fullAccess(full), true);
+  assert.equal(fullAccess(accessOf(host({ preset: 'danger-full-access', approval: 'never', effective: 'ask' }), main)), false, 'a conversation whose policy now asks keeps its prompts');
+  assert.equal(accessOf(host({ preset: 'workspace-write', approval: 'ask', effective: 'never' }), main).never, true);
+  assert.equal(fullAccess(accessOf(host({ preset: 'workspace-write', approval: 'never' }), main)), false, 'never asking without full access only refuses');
+  assert.equal(fullAccess({ permission: 'danger-full-access', never: false }), false, 'a full-access preset that asks');
+  assert.equal(fullAccess({ permission: 'auto', never: true }), false, 'Auto review is not a blanket allow');
+});
+
+test('under Full access a request gets what Allow once gives, while safety checks, plans and questions stay a person\'s', () => {
+  const ask = (over: Partial<Permission> = {}) => fullAccessAnswer({ id: 'p', kind: 'tool', name: 'run_command', ...over } as Permission);
+  const acp: Permission['actions'] = [{ id: 'allow', label: 'Allow', behavior: 'allow', scope: 'once' }, { id: 'deny', label: 'Deny', behavior: 'deny', scope: 'once' }];
+  assert.deepEqual(ask({ actions: acp }), { behavior: 'allow', selectedActionId: 'allow' }, 'Antigravity\'s run_command');
+  assert.deepEqual(ask(), { behavior: 'allow' }, 'a Claude ask without actions');
+  const wide: Permission['actions'] = [{ id: 'always', label: 'Always allow', behavior: 'allow', scope: 'session' }, { id: 'deny', label: 'Deny', behavior: 'deny' }];
+  assert.equal(ask({ actions: wide }), undefined, 'never an action wider than this one request');
+  assert.equal(ask({ safetyCheck: true }), undefined);
+  assert.equal(ask({ kind: 'plan', name: 'ExitPlanMode' }), undefined);
+  assert.equal(ask({ kind: 'question', name: 'Question' }), undefined);
 });
 
 test('a denial keeps the turn going: Codex cancel is chosen only when it is the only way to deny', async () => {
