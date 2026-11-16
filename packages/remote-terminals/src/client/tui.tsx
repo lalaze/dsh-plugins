@@ -11,6 +11,7 @@ import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useF
 import { TuiPrompts, usePromptText } from './tui-prompt.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { findXterm, TuiRenderChoices, TuiRenderMenu, useWebglRenderer, type TuiScrollControl } from './tui-render.js';
+import { useScreenClaim } from './tui-screen.js';
 import { TuiScrollChoice, useConversationScrollback } from './tui-scroll.js';
 import { followNewSessions } from './tui-new-sessions.js';
 import { KeptTerminals, type KeptTerminal } from './tui-kept.js';
@@ -179,6 +180,7 @@ export function TuiTerminal({ item, services }: { item: KeptTerminal; services: 
   useUploadedPaths(root, sessionId, services.uploads, model.state, services.cli(sessionId));
   usePromptText(root, sessionId, services.prompts, model.state);
   useWebglRenderer(item.host, visible, services.render, useSyncExternalStore(theme.subscribe, theme.getSnapshot));
+  useScreenClaim(item.host, visible);
   useTerminalCopy(item.host, visible);
   useConversationScrollback(item.host);
   const Body = slots.entries('sidebar.right.pane.tab').find(entry => entry.options.key === TERMINAL_TAB)?.component as React.FC<any> | undefined;

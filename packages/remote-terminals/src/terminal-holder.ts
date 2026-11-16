@@ -8,7 +8,7 @@
  * - `daemon` is the holder: it owns the Python process, keeps the screen in a headless xterm and accepts clients on a private socket.
  * - `attach` is run by the launcher inside `ssh -tt` and connects that terminal to the holder, starting one if there is none.
  *   A client that joins gets the screen and its scrollback, then the same bytes as everyone else. The screen has the size
- *   of the client that came or resized last, or that typed last if it was another's meanwhile; see `claimsScreen`.
+ *   of the client that came or resized last, or that typed or focused last if it was another's meanwhile; see `screenClaim`.
  *
  * The launcher is in terminal-hold.ts.
  */
@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import { createConnection, createServer, type Socket } from 'node:net';
 import { delimiter, join } from 'node:path';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
-import { ATTACH_EXIT, attachExitCode, claimsScreen, FRAME } from './holder-protocol.js';
+import { ATTACH_EXIT, attachExitCode, FOCUS_SETTLE_MS, FRAME, screenClaim } from './holder-protocol.js';
 import { HolderOutput } from './holder-output.js';
 
 const ID = /^[a-z]+-[0-9a-f]{16,64}$/;
@@ -344,11 +344,13 @@ async function attach(id: string, encoded: string): Promise<void> {
   const own = () => ({ cols: process.stdout.columns ?? (Number(process.env.COLUMNS) || undefined), rows: process.stdout.rows ?? (Number(process.env.LINES) || undefined) });
   const size = () => JSON.stringify(own());
   /** The screen's size when another client last changed it. A holder from an earlier version never says, and nothing is taken back. */
-  let theirs: { cols?: unknown; rows?: unknown } | undefined;
+  let theirs: { cols?: unknown; rows?: unknown } | undefined, theirsAt = 0;
+  const settle = Number(process.env.DSH_TERMINAL_FOCUS_SETTLE_MS) || FOCUS_SETTLE_MS;
   socket.write(frame(FRAME.hello, size()));
   process.stdout.on('resize', () => socket.write(frame(FRAME.resize, size())));
   process.stdin.on('data', (data: Buffer) => {
-    if (theirs && claimsScreen(data)) {
+    const claim = theirs ? screenClaim(data) : undefined;
+    if (theirs && (claim === 'typed' || claim === 'focus' && Date.now() - theirsAt >= settle)) {
       const { cols, rows } = own();
       if (theirs.cols !== cols || theirs.rows !== rows) socket.write(frame(FRAME.resize, size()));
       // Until the holder says what the size is now, this client has nothing more to ask for.
@@ -363,7 +365,7 @@ async function attach(id: string, encoded: string): Promise<void> {
   socket.on('close', () => process.exit(ATTACH_EXIT.lost));
   socket.on('data', frames((type, payload) => {
     if (type === FRAME.output) { if (!process.stdout.write(Buffer.from(payload))) { socket.pause(); process.stdout.once('drain', () => socket.resume()); } return; }
-    if (type === FRAME.size) { try { theirs = JSON.parse(payload.toString('utf8')) as typeof theirs; } catch { /* as if it had not said */ } return; }
+    if (type === FRAME.size) { try { theirs = JSON.parse(payload.toString('utf8')) as typeof theirs; theirsAt = Date.now(); } catch { /* as if it had not said */ } return; }
     if (type !== FRAME.exit) return;
     let code: number | null | undefined;
     try { code = (JSON.parse(payload.toString('utf8')) as { code?: number | null }).code; } catch { /* reported as a failure */ }

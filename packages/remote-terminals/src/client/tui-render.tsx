@@ -19,7 +19,7 @@ const DEFAULTS: RenderChoices = { webgl: true, blur: true };
  * so in an older value "off" need not be anyone's choice and the default applies; "on" always was one.
  */
 const SAVED_VERSION = 2;
-export type WebglIssue = 'unavailable' | 'lost';
+export type WebglIssue = 'unavailable' | 'lost' | 'scaled';
 
 interface ChoiceStorage { getItem(key: string): string | null; setItem(key: string, value: string): void }
 const browserStorage = (): ChoiceStorage | undefined => { try { return localStorage; } catch { return undefined; } };
@@ -57,8 +57,11 @@ export class TuiRenderChoices {
 export interface Xterm {
   loadAddon(addon: unknown): void;
   element?: HTMLElement;
+  textarea?: HTMLTextAreaElement;
+  /** Sends data as if the terminal had: it reaches DSH, and the CLI, like a key. */
+  input?(data: string, wasUserInput?: boolean): void;
   options: { theme?: { background?: string } & Record<string, unknown>; scrollback?: number };
-  modes: { mouseTrackingMode: string; bracketedPasteMode?: boolean };
+  modes: { mouseTrackingMode: string; bracketedPasteMode?: boolean; sendFocusMode?: boolean };
   buffer: { active: { type: string } };
   parser: {
     registerOscHandler(ident: number, handler: (data: string) => boolean): { dispose(): void };
@@ -134,15 +137,58 @@ function refit(xterm: Xterm): void {
   requestAnimationFrame(() => requestAnimationFrame(() => { node.style.width = ''; }));
 }
 
+/** How far an element's device pixels may be from its size times `devicePixelRatio`: snapping to whole pixels stays well inside. */
+const SCALE_TOLERANCE = 0.03;
+/** Narrower than this, a pixel of snapping is too much of the width to tell anything from. */
+const SCALE_MIN_WIDTH = 32;
 /**
- * Draws one terminal with WebGL while that is switched on. Only once it has been shown, as a terminal out of view has no size
- * to draw at; it then stays, because building the glyph atlas is the slow part.
+ * Whether the browser emulates the screen's pixel ratio, as Chrome's device mode does: an element's real device pixels and
+ * `devicePixelRatio` then disagree. xterm's WebGL sizes its canvas by the first and draws by the second, so the text comes
+ * out larger or smaller than the canvas and only its lower left corner shows (seen 2026-11-15 as an iPhone SE at 2x in
+ * device mode on a 1x display: text over twice its size, cut off on the right).
+ * @param width - the element's width in CSS pixels.
+ * @param device - its width in device pixels.
+ * @returns undefined when the element is too small to tell, as one out of view is.
+ */
+export function emulatedScale(width: number, device: number, ratio: number): boolean | undefined {
+  if (!(width >= SCALE_MIN_WIDTH) || !(device > 0) || !(ratio > 0)) return undefined;
+  return Math.abs(device / (width * ratio) - 1) > SCALE_TOLERANCE;
+}
+
+type ScreenScale = 'unknown' | 'real' | 'emulated';
+/** Whether the screen's scale is emulated where the terminal is, which is known once the terminal is shown with a size. */
+function useScreenScale(host: HTMLElement, visible: boolean): ScreenScale {
+  const [scale, setScale] = useState<ScreenScale>(typeof ResizeObserver === 'undefined' ? 'real' : 'unknown');
+  useEffect(() => {
+    if (!visible || typeof ResizeObserver === 'undefined') return;
+    let observer: ResizeObserver | undefined;
+    // The terminal's own element: the elements DSH and this plugin put around it are `display: contents`, with no size.
+    const stop = lookForXterm(host, xterm => {
+      if (!xterm.element) return;
+      observer = new ResizeObserver(entries => {
+        const entry = entries.at(-1);
+        const width = entry?.contentBoxSize?.[0]?.inlineSize, device = entry?.devicePixelContentBoxSize?.[0]?.inlineSize;
+        const result = width === undefined || device === undefined ? undefined : emulatedScale(width, device, window.devicePixelRatio);
+        if (result !== undefined) setScale(result ? 'emulated' : 'real');
+      });
+      // Safari has no device pixel box. xterm then sizes its canvas by devicePixelRatio too, so the two cannot disagree.
+      try { observer.observe(xterm.element, { box: 'device-pixel-content-box' }); } catch { observer.disconnect(); observer = undefined; setScale('real'); }
+    });
+    return () => { stop(); observer?.disconnect(); };
+  }, [host, visible]);
+  return scale;
+}
+
+/**
+ * Draws one terminal with WebGL while that is switched on and the screen's scale is known to be real. Only once it has been
+ * shown, as a terminal out of view has no size to draw at; it then stays, because building the glyph atlas is the slow part.
  * @param host - the element around the terminal.
  * @param visible - whether the terminal is on screen.
  * @param theme - the current theme, as a new one makes DSH set the terminal's colors again.
  */
 export function useWebglRenderer(host: HTMLElement, visible: boolean, choices: TuiRenderChoices, theme: unknown): void {
-  const { webgl } = useSyncExternalStore(choices.subscribe, choices.snapshot);
+  const { webgl: chosen } = useSyncExternalStore(choices.subscribe, choices.snapshot);
+  const scale = useScreenScale(host, visible), webgl = chosen && scale === 'real';
   const active = useRef<{ xterm: Xterm; addon: WebglAddon; background?: string }>();
   const unload = () => {
     const current = active.current;
@@ -161,7 +207,7 @@ export function useWebglRenderer(host: HTMLElement, visible: boolean, choices: T
     current.xterm.options.theme = { ...colors, background: clear };
   };
   useEffect(() => {
-    if (!webgl) { unload(); return; }
+    if (!webgl) { unload(); if (chosen && scale === 'emulated') choices.report('scaled'); return; }
     if (!visible || active.current) return;
     const load = (xterm: Xterm) => {
       try {
@@ -176,7 +222,7 @@ export function useWebglRenderer(host: HTMLElement, visible: boolean, choices: T
       } catch { choices.report('unavailable'); }
     };
     return lookForXterm(host, load, () => choices.report('unavailable'));
-  }, [webgl, visible, host]);
+  }, [webgl, chosen, scale, visible, host]);
   // After DSH's own effect for the same theme, which ran during the commit.
   useEffect(clearPaint, [theme]);
   useEffect(() => unload, []);
@@ -214,6 +260,11 @@ export interface TuiScrollControl {
   /** Ends the CLI and starts it again in the same conversation. */
   restart(): Promise<void>;
 }
+const ISSUES: Record<WebglIssue, string> = {
+  lost: 'WebGL stopped working here, so the standard rendering is back.',
+  unavailable: 'WebGL is not available here, so the standard rendering stays.',
+  scaled: 'The browser is emulating this screen\'s scale, as in device mode, which WebGL draws wrong, so the standard rendering is used.',
+};
 /** How often to look at the terminal and its turn while the menu is open: a restarted CLI takes a moment to show which buffer it uses. */
 const BUFFER_CHECK_MS = 500;
 
@@ -265,7 +316,7 @@ export function TuiRenderMenu({ choices, scroll }: { choices: TuiRenderChoices; 
       <Switch label={ui('WebGL rendering')} on={webgl} change={value => choices.set({ webgl: value })} />
       <Switch label={ui('Background blur')} on={blur} change={value => choices.set({ blur: value })} />
       {scroll && <ScrollRows scroll={scroll} />}
-      {webgl && issue && <div className="ra-tui-render-issue" role="alert">{ui(issue === 'lost' ? 'WebGL stopped working here, so the standard rendering is back.' : 'WebGL is not available here, so the standard rendering stays.')}</div>}
+      {webgl && issue && <div className="ra-tui-render-issue" role="alert">{ui(ISSUES[issue])}</div>}
     </div>}
   </div>;
 }

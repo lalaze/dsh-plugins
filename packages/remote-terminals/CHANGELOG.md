@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.10 — A TUI open on two devices fits the one you turn to, and text no longer comes out too large in device mode
+
+- A TUI conversation open on two devices, such as a computer and a phone, shares one screen with one size: that of the device that typed last. Until you typed on the other one it stayed in the wrong size, so a computer showed the conversation in a narrow column, and a phone a screen laid out for a wide window.
+- Now the screen also follows the device you turn to: clicking or tapping into its terminal, coming back to its window or tab, or opening the conversation there makes it that device's size, as does pasting. A focus change within a second of the size changing hands takes nothing, so two windows cannot keep taking it from each other.
+- In a browser that emulates the screen's scale, such as Chrome's device mode on a computer, a TUI's text came out over twice its size, and only the lower left part of the screen showed. WebGL drew it at the emulated scale on a canvas sized at the real one. The plugin now notices and draws such a terminal with the page's own rendering, and the rendering menu says why. On a real phone nothing changes.
+- Both DSHes sharing a machine need this version for the screen to follow either way: each DSH's own terminal is the one that asks for the screen.
+
 ## 0.1.9 — Swiping a terminal and Claude Code's symbols on a phone
 
 - On a phone or tablet a terminal or a TUI conversation could not be scrolled: a swipe did nothing. The terminal DSH uses reads only a mouse wheel and has no touch handling of its own.

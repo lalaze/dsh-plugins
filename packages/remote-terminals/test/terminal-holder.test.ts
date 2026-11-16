@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { build } from 'esbuild';
-import { attachExitCode, ATTACH_EXIT, claimsScreen, endHolderScript, HOLDERS_FOLDER, tabHolder, tuiHolder } from '../src/holder-protocol.js';
+import { attachExitCode, ATTACH_EXIT, endHolderScript, HOLDERS_FOLDER, screenClaim, tabHolder, tuiHolder } from '../src/holder-protocol.js';
 import { attachCommand, holdTerminal } from '../src/terminal-hold.js';
 
 let python = false;
@@ -168,8 +168,8 @@ test('two clients of different sizes: the screen is the size of whoever came las
   // Back at the computer: typing there makes the screen its size again, without resizing its window.
   await ask(wide, '40x120', 3);
   await ask(narrow, '20x50', 4);
-  // What a terminal sends by itself, here a focus report, takes nothing: the screen stays the other client's.
-  wide.send('\x1b[I');
+  // What a terminal sends by itself, here a focus-out, takes nothing: the screen stays the other client's.
+  wide.send('\x1b[O');
   await new Promise(resolve => setTimeout(resolve, 300));
   await ask(narrow, '20x50', 5);
   // The narrow one leaves, and the screen goes back to the one that is left.
@@ -181,10 +181,41 @@ test('two clients of different sizes: the screen is the size of whoever came las
   assert.equal(await wide.exited, 0);
 });
 
-test('typing takes the screen back, and what a terminal sends by itself does not', () => {
-  for (const typed of ['a', '\r', '\x7f', '\x03', '中', 'ls -la\r']) assert.equal(claimsScreen(Buffer.from(typed)), true, JSON.stringify(typed));
-  // Cursor position, device attributes, focus in and out, a mouse report, an arrow key, a bracketed paste.
-  for (const sent of ['\x1b[12;40R', '\x1b[?62;4c', '\x1b[I', '\x1b[O', '\x1b[<0;10;5M', '\x1b[A', '\x1b[200~pasted\x1b[201~', '']) assert.equal(claimsScreen(Buffer.from(sent)), false, JSON.stringify(sent));
+test('typing, pasting and focus take the screen back, and what a terminal answers by itself does not', () => {
+  for (const typed of ['a', '\r', '\x7f', '\x03', '中', 'ls -la\r', '\x1b[200~pasted\x1b[201~']) assert.equal(screenClaim(Buffer.from(typed)), 'typed', JSON.stringify(typed));
+  for (const focus of ['\x1b[I', '\x1b[I\x1b[O']) assert.equal(screenClaim(Buffer.from(focus)), 'focus', JSON.stringify(focus));
+  // Cursor position, device attributes, focus out, a mouse report, an arrow key, a lone ESC prefix of a paste.
+  for (const sent of ['\x1b[12;40R', '\x1b[?62;4c', '\x1b[O', '\x1b[<0;10;5M', '\x1b[A', '\x1b[200', '\x1b', '']) assert.equal(screenClaim(Buffer.from(sent)), undefined, JSON.stringify(sent));
+});
+
+test('a terminal that gains focus takes the screen back, unless the size has only just changed hands', options, async () => {
+  const id = newId();
+  // The command says the size whenever it changes, so reading it needs no typing, which would take the screen itself.
+  const command = `trap 'echo winch=$(stty size)' WINCH; echo ready; while :; do sleep 0.05; done`;
+  const wide = attach(id, command, { COLUMNS: '120', LINES: '40', DSH_TERMINAL_FOCUS_SETTLE_MS: '1500' });
+  assert.ok(await until(() => wide.output().includes('ready')), wide.output());
+  const changes = () => [...wide.output().matchAll(/winch=(\d+) (\d+)/g)].map(match => `${match[1]}x${match[2]}`);
+  // A phone opens the conversation: the screen becomes its size, and the computer's terminal answers a focus report at once.
+  const narrow = attach(id, 'exit 99', { COLUMNS: '50', LINES: '20' });
+  assert.ok(await until(() => changes().length === 1), wide.output());
+  wide.send('\x1b[I');
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.deepEqual(changes(), ['20x50'], 'a focus-in right after the change takes nothing');
+  // Later, back at the computer: focus-out takes nothing, focus-in takes the screen back.
+  await new Promise(resolve => setTimeout(resolve, 1200));
+  wide.send('\x1b[O');
+  await new Promise(resolve => setTimeout(resolve, 300));
+  assert.deepEqual(changes(), ['20x50']);
+  wide.send('\x1b[I');
+  assert.ok(await until(() => changes().length === 2), wide.output());
+  assert.deepEqual(changes(), ['20x50', '40x120']);
+  // A paste on the phone takes it again, settled or not.
+  narrow.send('\x1b[200~x\x1b[201~');
+  assert.ok(await until(() => changes().length === 3), wide.output());
+  assert.equal(changes().at(-1), '20x50');
+  const holder = Number(readFileSync(join(base, id, 'pid'), 'utf8'));
+  process.kill(holder, 'SIGTERM');
+  await Promise.all([wide.exited, narrow.exited]);
 });
 
 test('holder IDs are stable, distinct and fit what the holder accepts', () => {

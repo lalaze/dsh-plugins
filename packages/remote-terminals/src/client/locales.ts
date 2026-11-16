@@ -14,6 +14,7 @@ export const zh: Record<string, string> = {
   "Restart now and stop the current turn": "立即重启，并中断当前这一轮",
   "WebGL stopped working here, so the standard rendering is back.": "WebGL 在这里停止工作了，已回到普通渲染。",
   "WebGL is not available here, so the standard rendering stays.": "这里用不了 WebGL，仍在用普通渲染。",
+  "The browser is emulating this screen's scale, as in device mode, which WebGL draws wrong, so the standard rendering is used.": "浏览器正在模拟这块屏幕的缩放（如开发者工具的设备模式），WebGL 在这种情况下会画错，已改用普通渲染。",
   "Start this conversation in the {cli} terminal interface": "在 {cli} 终端界面里开始这个对话",
   "Could not start the TUI": "无法启动 TUI",
   "Starting {cli}…": "正在启动 {cli}…",

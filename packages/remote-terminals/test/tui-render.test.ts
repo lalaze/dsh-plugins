@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { findXterm, TuiRenderChoices, withoutPaint } from '../src/client/tui-render.js';
+import { emulatedScale, findXterm, TuiRenderChoices, withoutPaint } from '../src/client/tui-render.js';
 
 /** An element xterm opened in, carrying the fibers React would put on it. */
 function opened(fiber: unknown) {
@@ -96,4 +96,14 @@ test('a problem is reported once, and changing the switch clears it', () => {
   assert.equal(choices.issue(), 'lost');
   choices.set({ webgl: false });
   assert.equal(choices.issue(), undefined);
+});
+
+test('an emulated screen scale is told apart from real ones, snapped to whole pixels', () => {
+  // Real: 1x, 2x, a phone's 2.625x and 3x, off by a pixel of snapping.
+  for (const [width, device, ratio] of [[800, 800, 1], [343.5, 687, 2], [393, 1031, 2.625], [390, 1171, 3], [33, 67, 2]] as const) assert.equal(emulatedScale(width, device, ratio), false, `${width}@${ratio}`);
+  // Chrome's device mode: an iPhone SE at 2x on a 1x display, zoomed to 92%; a 3x phone on a 2x display.
+  assert.equal(emulatedScale(343, 316, 2), true);
+  assert.equal(emulatedScale(358, 716, 3), true);
+  // Out of view or too narrow to tell.
+  for (const [width, device, ratio] of [[0, 0, 2], [20, 10, 2], [300, 0, 2], [300, 600, 0], [Number.NaN, 600, 2]] as const) assert.equal(emulatedScale(width, device, ratio), undefined);
 });
