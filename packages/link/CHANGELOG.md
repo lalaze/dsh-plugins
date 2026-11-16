@@ -4,6 +4,15 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.4 — Desktop window fixes, and no stalls over HTTP/1.1
+
+Update every computer; no restart needed, reload the window once.
+
+- In the desktop app, another machine's page no longer draws its logo under the macOS window buttons: a thin title strip over it holds the buttons, moves the window and names the machine shown. Full screen hides it.
+- A machine's page that is the window's page (opened by its address, or left there by an earlier version and reloaded) goes to this computer's page and shows the machine there, so switching back and forth stops reloading. A machine opened with **Open directly** stays as it is.
+- Over HTTP/1.1 (a plain `http://` address) pages are no longer kept by default: a browser opens only six connections to one host, each DSH page holds about four, and a second page made both stall. Switching then loads the page as before; Settings → DSH Link can still turn keeping on. HTTPS (HTTP/2, such as the phone's address) and the desktop app keep pages as before.
+- `/dsh-link/diag` lists what this computer's windows reported about switching (connection, how long another machine's page took), readable through another machine's mount.
+
 ## 0.1.3 — A machine Tailscale wrongly calls offline still shows
 
 - A machine this computer already knew is asked anyway when Tailscale calls it offline, and listed online when it answers. Tailscale's flag is its coordination server's view: a computer whose Tailscale lost that server (the MacBook Air on a relay) stayed reachable but showed as offline, so the switcher could not open it and its finished turns and approvals never arrived. Update every computer; no restart needed.

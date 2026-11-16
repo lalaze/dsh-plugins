@@ -4,15 +4,22 @@
  * Every machine's page is served by this host (its mount), so the frames are same-origin: a framed page finds the
  * shell on its parent and goes through it to switch, and the shell asks a framed page to open a conversation.
  */
-import { currentSession, mountedId, mountPrefix, rawStorage, selectSession, storagePrefix } from '../rewrite.js';
+import { currentSession, mountedId, mountPrefix, rawStorage, selectSession, SHELL_KEYS, storagePrefix } from '../rewrite.js';
 
 const KEY = '__dshLinkShell';
-const SHOWN = 'dsh-link:shown';
-const MODE = 'dsh-link:keep-pages';
+const SHOWN = SHELL_KEYS.shown;
+const MODE = SHELL_KEYS.keepPages;
 /** After this long without its page coming up, a frame offers to open the machine directly. */
 const HINT_MS = 20_000;
 /** A frame whose document loaded but whose page did not come up within this is likely an error page. */
 const HINT_AFTER_LOAD_MS = 8_000;
+
+/** Tell this computer's DSH Link how switching went in this window (read back at `/dsh-link/diag`). */
+export function report(event: string, detail: Record<string, unknown> = {}): void {
+  try {
+    void fetch('/dsh-link/diag', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event, ...detail }) }).catch(() => undefined);
+  } catch { /* diagnostics only */ }
+}
 
 /** What a framed page offers the shell. */
 export interface FrameHandle { openSession(sessionId: string): void }
@@ -47,9 +54,26 @@ export const ownShell = (): Shell | undefined => {
 /** The shell that switches for this page: its own, or its parent's. */
 export const shell = (): Shell | undefined => ownShell() ?? parentShell();
 
-/** Whether switching keeps pages open (per browser; on unless turned off). */
+/**
+ * How the window's page reached its DSH. Over HTTP/1.1 a browser opens at most six connections to one host, and every
+ * DSH page holds about four open (plugin events, progress updates, this plugin's board…): a second page in a frame
+ * leaves nothing for requests, and both pages stall. HTTP/2 (the phone through HTTPS) and the desktop app's own scheme
+ * have no such limit.
+ */
+export function windowProtocol(): string {
+  try {
+    const top = window.top ?? window;
+    return (top.performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined)?.nextHopProtocol ?? '';
+  } catch { return ''; }
+}
+export const limitedConnections = () => windowProtocol() === 'http/1.1';
+
+/** Whether switching keeps pages open (per browser): on unless turned off, and off by default over HTTP/1.1. */
 export function keepPages(): boolean {
-  try { return rawStorage().getItem(MODE) !== 'off'; } catch { return true; }
+  try {
+    const chosen = rawStorage().getItem(MODE);
+    return chosen === 'on' || (chosen !== 'off' && !limitedConnections());
+  } catch { return !limitedConnections(); }
 }
 export function setKeepPages(on: boolean): void {
   try { rawStorage().setItem(MODE, on ? 'on' : 'off'); } catch { /* not kept */ }
@@ -67,6 +91,8 @@ export function currentSessionOf(machine: string): string {
 interface Frame {
   machine: string;
   iframe: HTMLIFrameElement;
+  /** When the frame was made, for the report of how long its page took. */
+  since: number;
   handle?: FrameHandle;
   /** The document that registered `handle`: a page that reloaded by itself (after a restart) registers again. */
   doc?: Document;
@@ -95,9 +121,18 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
   const frames = new Map<string, Frame>();
   const listeners = new Set<() => void>();
   let current = home;
+  // Back on this computer's own page: the next machine picked opens in a frame again. A machine opened directly keeps
+  // its flag while it is the window's page, so that reloading it does not send it back into a frame.
+  if (home === 'self') { try { sessionStorage.removeItem(SHELL_KEYS.direct); } catch { /* none */ } }
   const layer = document.createElement('div');
   layer.className = 'dl-frames';
   layer.hidden = true;
+  // In the desktop window: a title strip over the frames holds the window buttons, moves the window, and names the
+  // machine shown; the frames' pages are not desktop pages and would draw under the buttons (styles.ts).
+  const bar = document.createElement('div');
+  bar.className = 'dl-frames-bar';
+  bar.setAttribute('aria-hidden', 'true');
+  layer.appendChild(bar);
   document.body.appendChild(layer);
 
   const changed = () => {
@@ -111,6 +146,7 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
   const clearHint = (frame: Frame) => { clearTimeout(frame.hint); frame.hint = undefined; frame.note?.remove(); frame.note = undefined; };
   const offerDirect = (frame: Frame) => {
     if (live(frame) || frame.note || !frames.has(frame.machine)) return;
+    report('frame-slow', { machine: frame.machine, ms: Date.now() - frame.since });
     const { text, action } = deps.hintText(deps.name(frame.machine));
     const note = document.createElement('div');
     note.className = 'dl-frame-note';
@@ -120,7 +156,11 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = action;
-    button.addEventListener('click', () => location.assign(urlOf(frame.machine)));
+    button.addEventListener('click', () => {
+      // That machine's page then stays the window's page instead of coming back here.
+      try { sessionStorage.setItem(SHELL_KEYS.direct, frame.machine); } catch { /* it comes back once */ }
+      location.assign(urlOf(frame.machine));
+    });
     note.append(label, button);
     frame.note = note;
     layer.appendChild(note);
@@ -142,6 +182,7 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
       if (frame.note) frame.note.hidden = !shown;
     }
     layer.hidden = current === home;
+    if (current !== home) bar.textContent = deps.name(current);
   };
 
   const focusShown = () => {
@@ -181,7 +222,7 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
     iframe.setAttribute('allow', 'clipboard-read; clipboard-write; fullscreen; microphone; camera; display-capture');
     // Set before it is attached, so the first load adds no history entry.
     iframe.src = urlOf(machine);
-    const frame: Frame = { machine, iframe };
+    const frame: Frame = { machine, iframe, since: Date.now() };
     iframe.addEventListener('load', () => {
       followed(frame);
       if (!live(frame) && frames.get(frame.machine) === frame) {
@@ -234,6 +275,7 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
     register(win, handle) {
       const frame = [...frames.values()].find(entry => entry.iframe.contentWindow === win);
       if (!frame) return () => {};
+      if (!frame.handle) report('frame-up', { machine: frame.machine, ms: Date.now() - frame.since, shown: frame.machine === current });
       frame.handle = handle;
       frame.doc = win.document;
       clearHint(frame);

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
-import { credentialedManifest, guardDesktopBoot, injectOwnsHost, injectRequestBase, injectStorageNamespace, mountedId, mountedIndex, RAW_STORAGE, selectSession } from '../src/rewrite.js';
+import { credentialedManifest, guardDesktopBoot, injectOwnsHost, injectRequestBase, injectShellReturn, injectStorageNamespace, mountedId, mountedIndex, RAW_STORAGE, selectSession } from '../src/rewrite.js';
 
 const INDEX = readFileSync(new URL('./fixtures/dsh-0.2.2-rc.3-index.html', import.meta.url), 'utf8');
 const scripts = (html: string) => [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]!);
@@ -15,6 +15,8 @@ test('the rc.3 index passes every probe, and the namespace runs before the guard
   assert.ok(head.indexOf('dsh-link:mabc:') < head.indexOf('dshDesktopBoot'));
   assert.ok(head.indexOf('dshDesktopBoot') < head.indexOf('./assets/index-'));
   assert.ok(head.indexOf('"/dsh-link/peer/mabc"') < head.indexOf('./assets/index-'));
+  // Going back to this computer's page comes before anything else.
+  assert.ok(head.indexOf('location.replace("/")') < head.indexOf('dsh-link:mabc:'));
 });
 
 test('a changed index is left alone and reported', () => {
@@ -103,6 +105,33 @@ test('a page in a frame of a browser window, or of a window the page cannot read
     assert.equal(globalObject.__DSH_BOOT_READY__, undefined);
     assert.equal(globalObject.__DSH_TRANSPORT__, undefined);
   }
+});
+
+test('a machine\'s page opened as the window\'s page goes to this computer\'s page, which shows it in a frame', () => {
+  const run = (window: Record<string, unknown>, protocol = 'h2') => {
+    const replaced: string[] = [];
+    Object.assign(window, { location: { replace: (url: string) => replaced.push(url) }, performance: { getEntriesByType: () => [{ nextHopProtocol: protocol }] } });
+    window.window = window;
+    window.top ??= window;
+    vm.runInContext(scripts(injectShellReturn(INDEX, 'mabc'))[0]!, vm.createContext(window));
+    return replaced;
+  };
+  const session = storage(), local = storage();
+  assert.deepEqual(run({ sessionStorage: session, localStorage: local }), ['/']);
+  assert.equal(session.getItem('dsh-link:shown'), 'mabc');
+  assert.equal(session.getItem('dsh-link:returned'), 'mabc');
+  // Over HTTP/1.1 pages are not kept unless chosen, so the page stays; chosen, it goes.
+  assert.deepEqual(run({ sessionStorage: storage(), localStorage: storage() }, 'http/1.1'), []);
+  const chosen = storage();
+  chosen.setItem('dsh-link:keep-pages', 'on');
+  assert.deepEqual(run({ sessionStorage: storage(), localStorage: chosen }, 'http/1.1'), ['/']);
+  // Kept pages off, the machine opened directly, or a page in a frame: it stays.
+  local.setItem('dsh-link:keep-pages', 'off');
+  assert.deepEqual(run({ sessionStorage: storage(), localStorage: local }), []);
+  const direct = storage();
+  direct.setItem('dsh-link:direct', 'mabc');
+  assert.deepEqual(run({ sessionStorage: direct, localStorage: storage() }), []);
+  assert.deepEqual(run({ sessionStorage: storage(), localStorage: storage(), top: {} }), []);
 });
 
 test('mounted pages are recognised by their path', () => {

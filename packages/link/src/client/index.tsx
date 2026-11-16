@@ -6,7 +6,7 @@ import { machineName, notifyNotice } from './notify.js';
 import { installPeerFileIntake } from './peer-files.js';
 import { RestartOverlay, watchRestart } from './restart.js';
 import { SettingsSection } from './settings.js';
-import { installShell, keepPages, ownShell, parentShell } from './shell.js';
+import { installShell, keepPages, ownShell, parentShell, report, windowProtocol } from './shell.js';
 import { CSS } from './styles.js';
 import { followAttention, loadMachines, machineList, markSeen, onScreen, SELF } from './store.js';
 import { MachineSwitcher } from './switcher.js';
@@ -76,6 +76,13 @@ export function apply(ctx: Client): void {
         restorable: id => machineList().some(machine => machine.id === id && machine.state === 'online'),
       });
       let stopped = false;
+      let returned: string | null = null;
+      try { returned = sessionStorage.getItem('dsh-link:returned'); sessionStorage.removeItem('dsh-link:returned'); } catch { /* none */ }
+      report('window', {
+        home: here, scheme: location.protocol, protocol: windowProtocol(), keepPages: keepPages(), returnedFrom: returned,
+        platform: document.documentElement.getAttribute('data-platform') ?? (document.documentElement.hasAttribute('data-windows-titlebar') ? 'windows-titlebar' : ''),
+        width: innerWidth, agent: navigator.userAgent.slice(0, 160),
+      });
       void loadMachines().then(() => { if (!stopped && keepPages()) installed.restore(); });
       const timer = setTimeout(() => {
         if (!keepPages() || typeof matchMedia !== 'function' || !matchMedia(PREFETCH_MEDIA).matches) return;

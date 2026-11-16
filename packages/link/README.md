@@ -42,6 +42,7 @@ Settings (Plugins → DSH Link):
 - In the desktop app, files dropped, pasted or picked on another machine's page are uploaded to that machine (DSH would otherwise name their path on this computer). Folders cannot be sent that way and are refused with a note.
 - Plugins on another machine's page talk to that machine: their requests by absolute path (`fetch('/api/…')`, XMLHttpRequest, EventSource, beacons) are sent through its mount. Plugin WebSockets other than DSH's own stream, and images or scripts a plugin loads by absolute path, still come from this computer.
 - Phones get no notifications while the page is closed.
+- Over a plain `http://` address (HTTP/1.1) pages are not kept unless turned on in Settings: a browser opens only six connections to one host, and two DSH pages fill them.
 - Every machine kept open uses memory like another browser tab; closing the window or turning off **Keep machines' pages open** frees it.
 - A TUI conversation's turn is known only from its terminal: a stopped or failed one shows as finished, and its approvals do not show as waiting on the board.
 - Both computers need this version: the page you switch from keeps the others, and the page of the machine you switch to does its own switching. An older version on the other machine still works, with a reload whenever you switch away from it.

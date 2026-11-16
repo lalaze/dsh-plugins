@@ -69,6 +69,20 @@ export function guardDesktopBoot(html: string, prefix: string): Rewritten {
   return { html: injectHead(html, script), misses };
 }
 
+/** The window's own page keeps the machines it shows in frames (client/shell.ts); these keys are shared with it. */
+export const SHELL_KEYS = { keepPages: 'dsh-link:keep-pages', shown: 'dsh-link:shown', direct: 'dsh-link:direct', returned: 'dsh-link:returned' } as const;
+
+/**
+ * A machine's page opened as the window's page (by its address, a bookmark, a reload of a page an older version
+ * opened) goes to this computer's own page, which shows the machine in a frame: otherwise switching away from it loads
+ * a whole page every time. Not when keeping pages is off (by choice, or by default over HTTP/1.1: see client/shell.ts),
+ * nor for the machine the user chose to open directly.
+ */
+export function injectShellReturn(html: string, id: string): string {
+  const script = `<script>(()=>{try{if(window.top!==window)return;const s=window.sessionStorage,l=window.localStorage,id=${literal(id)};const k=l.getItem(${literal(SHELL_KEYS.keepPages)}),n=performance.getEntriesByType("navigation")[0];if(k==="off"||(k!=="on"&&n&&n.nextHopProtocol==="http/1.1")||s.getItem(${literal(SHELL_KEYS.direct)})===id)return;s.setItem(${literal(SHELL_KEYS.shown)},id);s.setItem(${literal(SHELL_KEYS.returned)},id);location.replace("/")}catch{}})()</script>`;
+  return injectHead(html, script);
+}
+
 /** Where the namespace script leaves the page's real localStorage, for the switcher to pick another machine's Session. */
 export const RAW_STORAGE = '__dshLinkStorage';
 
@@ -112,7 +126,9 @@ export function selectSession(storage: Storage, machineId: string, sessionId: st
 export function mountedIndex(html: string, id: string): Rewritten {
   const manifest = credentialedManifest(html);
   const guarded = guardDesktopBoot(manifest.html, mountPrefix(id));
-  return { html: injectRequestBase(injectStorageNamespace(guarded.html, id), mountPrefix(id)), misses: [...manifest.misses, ...guarded.misses] };
+  const page = injectRequestBase(injectStorageNamespace(guarded.html, id), mountPrefix(id));
+  // First of all: a page about to go to this computer's own page does nothing else.
+  return { html: injectShellReturn(page, id), misses: [...manifest.misses, ...guarded.misses] };
 }
 
 /** Reads the Session a page shows, '' when none: the store {@link CURRENT_SESSION_KEY} holds `{ sessionId }`. */

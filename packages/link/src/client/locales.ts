@@ -70,6 +70,7 @@ export const zh: Readonly<Record<string, string>> = {
   'Show': '查看',
   'Switching': '切换',
   "Keep machines' pages open in this window": '在这个窗口里保留各机器的页面',
+  'This page reaches DSH over HTTP/1.1, which allows only a few connections at once; with several machines open, pages can stall. Off unless you turn it on here.': '这个页面经 HTTP/1.1 连接 DSH，同时只能开几个连接；同时开着几台机器时页面可能卡住。所以默认关闭，需要的话在这里打开。',
   "Switching back to a machine is then instant and keeps where you were; each open machine uses memory like another tab. Off: each switch loads the machine's page again.": '这样切回一台机器是即时的，还停在原来的位置；每台打开过的机器会像多开一个标签页那样占用内存。关闭后每次切换都重新加载那台机器的页面。',
   "Other machines' notices show in this page; system notifications are for when it is not in front.": '其他机器的提醒会直接显示在页面里；页面不在前台时再用系统通知。',
   'This browser cannot show system notifications; the notices in the page still show.': '此浏览器不能显示系统通知；页面里的提醒照常显示。',

@@ -5,7 +5,7 @@ import { ui, useLocale } from './i18n.js';
 import { openMachine } from './navigate.js';
 import { askPermission, notificationPermission, notifyPref, setNotifyPref, type NotifyPref } from './notify.js';
 import { RestartDialog } from './restart.js';
-import { keepPages, setKeepPages } from './shell.js';
+import { keepPages, limitedConnections, setKeepPages } from './shell.js';
 import { loadMachines, onScreen, SELF, useStore } from './store.js';
 import { dotOf, since, summaryOf } from './view.js';
 
@@ -63,6 +63,7 @@ export function SettingsSection() {
     <div className="dl-card">
       <label className="dl-check"><input type="checkbox" checked={keep} onChange={event => { setKeep(event.target.checked); setKeepPages(event.target.checked); }} /> {ui('Keep machines\' pages open in this window')}</label>
       <span className="dl-muted">{ui('Switching back to a machine is then instant and keeps where you were; each open machine uses memory like another tab. Off: each switch loads the machine\'s page again.')}</span>
+      {limitedConnections() && <span className="dl-muted">{ui('This page reaches DSH over HTTP/1.1, which allows only a few connections at once; with several machines open, pages can stall. Off unless you turn it on here.')}</span>}
     </div>
 
     <h3>{ui('Notifications')}</h3>
