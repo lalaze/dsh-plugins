@@ -20,6 +20,8 @@ const PRESET_MODES = {
     // Claude has no read-only mode that keeps the normal workflow; asking before every tool is the closest.
     claude: { 'read-only': 'default', 'workspace-write': 'acceptEdits', 'danger-full-access': 'bypassPermissions', auto: 'auto' },
     codex: { 'read-only': 'read-only', 'workspace-write': 'workspace-write', 'danger-full-access': 'full-access', auto: 'auto-review' },
+    // Antigravity has no mode that never asks: its Auto still asks before irreversible actions, which Full access then allows.
+    antigravity: { 'read-only': 'default', 'workspace-write': 'accept-edits', 'danger-full-access': 'auto', auto: 'auto' },
 };
 /** The CLI mode matching a DSH permission, when the CLI and its catalog offer one. */
 export function presetMode(provider, modes, permission) {

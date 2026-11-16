@@ -37,7 +37,13 @@ export declare function claudeTitle(records: string): string | undefined;
  */
 export declare function codexTitle(records: string): string | undefined;
 /**
- * Conversations whose main view is the interactive Claude Code or Codex instead of DSH's chat. Each stays a real DSH
+ * A conversation's title from Antigravity's summary of it: its /rename or Antigravity's own title, then its preview, which
+ * holds the first prompt while there is no title (a short greeting often gets none).
+ * @param records - the title on the first line and the preview on the second, each on one line.
+ */
+export declare function antigravityTitle(records: string): string | undefined;
+/**
+ * Conversations whose main view is the interactive Claude Code, Codex or Antigravity instead of DSH's chat. Each stays a real DSH
  * session, so it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one
  * records an empty turn. The conversation itself lives in the remote CLI; see the launchers in terminal.ts.
  */
@@ -65,6 +71,10 @@ export declare class TuiSessions {
         codexThread(sessionId: string, signal: AbortSignal): Promise<string>;
         /** The title records of a Codex thread on the conversation's machine. */
         codexTitleRecords(sessionId: string, thread: string, signal: AbortSignal): Promise<string>;
+        /** Starts an Antigravity conversation on the conversation's machine, and returns its ID. */
+        antigravityConversation(sessionId: string, signal: AbortSignal): Promise<string>;
+        /** The title and preview Antigravity keeps for a conversation on the conversation's machine. */
+        antigravityTitleRecords(sessionId: string, conversation: string, signal: AbortSignal): Promise<string>;
         /** Ends a terminal's holder on the conversation's machine. */
         endHolder?(sessionId: string, holder: string, signal: AbortSignal): Promise<void>;
     });
@@ -80,6 +90,9 @@ export declare class TuiSessions {
     setLocalScroll(local: boolean): Promise<void>;
     /** Those of `list` that run Codex. */
     codex(): string[];
+    /** Those of `list` that run Antigravity. */
+    antigravity(): string[];
+    private running;
     /**
      * Tell DSH the conversation's model, once. A session shows its model in the workspace list only if a selection or a
      * request recorded it: a TUI conversation sends no requests, and the composer may only be showing a remembered default.

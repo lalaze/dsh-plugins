@@ -55,6 +55,13 @@ export declare function dialogOnScreen(rows: readonly string[]): 'approval' | 'q
  */
 export declare function compactingOnScreen(rows: readonly string[]): boolean;
 /**
+ * What Antigravity's screen says, the only signal it gives: measured on 1.5.9, it sets no terminal title and sends no
+ * status report. A turn shows its spinner; a permission it asks for replaces the spinner with numbered choices, the one
+ * highlighted marked `>`, below `Requesting permission for:`. Its footer reads `esc to cancel` in a turn but also while
+ * its command menu is open, so that does not tell.
+ */
+export declare function antigravityActivity(rows: readonly string[]): TuiActivity;
+/**
  * Watches TUI conversations' CLIs, so that they show as running, waiting and finished like every other conversation. DSH
  * runs no turn for these: their work happens in a terminal it knows nothing about, and it would list them as idle for good.
  */
@@ -76,7 +83,7 @@ export declare class TuiActivityWatcher {
     waiting(): Record<string, 'approval' | 'question'>;
     check(): void;
     close(): void;
-    /** The conversation's running terminal started from its CLI's launcher, as it may have others open. */
+    /** The conversation's running terminal started from its CLI's launcher, as it may have others open, and that CLI. */
     private cliTerminal;
     private start;
     private stop;

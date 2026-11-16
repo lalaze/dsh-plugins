@@ -4,7 +4,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { quote } from './core/ssh.js';
 import { dshHome } from './core/access.js';
-import { CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from './core/workspace.js';
+import { ANTIGRAVITY_LAUNCHER, CLAUDE_LAUNCHER, CODEX_LAUNCHER, TERMINAL_LAUNCHER } from './core/workspace.js';
 import { tabHolder, TERMINAL_ID_ENV } from './holder-protocol.js';
 /** Replaces a property, usually a method of the object's class. The returned function restores it, unless it has been replaced again since. */
 function override(target, key, value) {
@@ -93,7 +93,7 @@ export function endClosedTerminals(controller, end) {
 /**
  * Native terminal keeps its PTY, resizing and keyboard handling; the selected shell runs SSH.
  * DSH remembers one shell for every conversation, so outside a remote workspace the launcher opens the local shell.
- * The Remote Claude and Remote Codex launchers run the interactive CLI there first, a session DSH neither drives nor
+ * The Remote Claude, Remote Codex and Remote Antigravity launchers run the interactive CLI there first, a session DSH neither drives nor
  * records. In a TUI conversation of that CLI (see tui.ts) it runs the same session every time, found through DSH_SESSION_ID,
  * which DSH sets in its terminals, so that reopening the conversation resumes it.
  * On the host the shell or CLI runs in a holder (see terminal-hold.ts), so it outlives DSH and the connection; a host that
@@ -108,7 +108,7 @@ export async function installWorkspaceTerminal(controller, directory, state, mod
         return { dispose: () => { } };
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const script = join(directory, 'remote-workspace.mjs'), launcherPath = (name) => join(directory, process.platform === 'win32' ? `${name}.cmd` : name);
-    const launcher = launcherPath(TERMINAL_LAUNCHER), claudeLauncher = launcherPath(CLAUDE_LAUNCHER), codexLauncher = launcherPath(CODEX_LAUNCHER);
+    const launcher = launcherPath(TERMINAL_LAUNCHER), claudeLauncher = launcherPath(CLAUDE_LAUNCHER), codexLauncher = launcherPath(CODEX_LAUNCHER), antigravityLauncher = launcherPath(ANTIGRAVITY_LAUNCHER);
     // The build writes it next to lib/server. Only the holder needs it, and a host then gets a plain connection without it.
     const holderPath = fileURLToPath(new URL('../terminal-holder.mjs', modules));
     const holderVersion = await readFile(holderPath).then(data => createHash('sha256').update(data).digest('hex').slice(0, 16), () => undefined);
@@ -167,7 +167,12 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   // The thread is saved when the conversation starts, but Codex opens it with the configured model until it has a turn.
   // From then on it keeps whatever /model chose. A thread that is gone, say removed by hand, leaves a new one to start.
   const codex = own && details.thread ? 'dsh_file=$(find "\${CODEX_HOME:-\$HOME/.codex}/sessions" -maxdepth 4 -name "rollout-*-' + details.thread + '.jsonl" 2>/dev/null | head -n 1); if [ -z "\$dsh_file" ]; then codex' + codexFlags + codexChoice + '; elif grep -q task_started "\$dsh_file"; then codex resume' + codexFlags + ' ' + details.thread + '; else codex resume' + codexFlags + codexChoice + ' ' + details.thread + '; fi' : 'codex' + codexFlags;
-  const interactive = cli === 'claude' ? claude : cli === 'codex' ? codex : undefined;
+  // Antigravity keeps no model with a conversation: it opens every one with its own default, so the conversation's model
+  // and effort go with every launch, and a /model inside lasts until the CLI starts again. The conversation is made when
+  // the TUI conversation starts; one that is gone leaves Antigravity to start another.
+  const antigravityChoice = (details.model ? ' --model "' + details.model + '"' : '') + (details.effort ? ' --effort "' + details.effort + '"' : '');
+  const antigravity = own && details.conversation ? 'agy --conversation ' + details.conversation + antigravityChoice : 'agy';
+  const interactive = cli === 'claude' ? claude : cli === 'codex' ? codex : cli === 'antigravity' ? antigravity : undefined;
   // The same process stays in charge of the terminal throughout; a shell run beside it could be left without the TTY.
   const start = interactive ? shell + " -lic '" + interactive + "; exec " + shell + " -l'" : shell + ' -l';
   // Claude Code's classic renderer, so that the terminal scrolls the conversation itself; see TuiSessions.localScroll.
@@ -190,7 +195,8 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
     await installLauncher(launcher, '');
     await installLauncher(claudeLauncher, 'claude');
     await installLauncher(codexLauncher, 'codex');
-    const launchers = [launcher, claudeLauncher, codexLauncher];
+    await installLauncher(antigravityLauncher, 'antigravity');
+    const launchers = [launcher, claudeLauncher, codexLauncher, antigravityLauncher];
     for (const path of launchers)
         if (!candidates.includes(path))
             candidates.push(path);

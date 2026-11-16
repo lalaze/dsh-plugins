@@ -1,9 +1,9 @@
 /** The launcher's file name, which DSH's terminal shell menu shows as the item label. */
 export declare const TERMINAL_LAUNCHER = "Remote workspace";
-/** Beside it in the same directory: the same terminal, starting Claude Code or Codex. */
-export declare const CLAUDE_LAUNCHER = "Remote Claude", CODEX_LAUNCHER = "Remote Codex";
+/** Beside it in the same directory: the same terminal, starting Claude Code, Codex or Antigravity. */
+export declare const CLAUDE_LAUNCHER = "Remote Claude", CODEX_LAUNCHER = "Remote Codex", ANTIGRAVITY_LAUNCHER = "Remote Antigravity";
 /** The CLIs a TUI conversation can run. */
-export type TuiCli = 'claude' | 'codex';
+export type TuiCli = 'claude' | 'codex' | 'antigravity';
 export declare const TUI_LAUNCHERS: Record<TuiCli, string>;
 export interface WorkspaceTarget {
     hostId: string;

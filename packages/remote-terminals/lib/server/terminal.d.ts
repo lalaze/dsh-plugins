@@ -39,7 +39,7 @@ export declare function endClosedTerminals(controller: ClosableTerminals, end: (
 /**
  * Native terminal keeps its PTY, resizing and keyboard handling; the selected shell runs SSH.
  * DSH remembers one shell for every conversation, so outside a remote workspace the launcher opens the local shell.
- * The Remote Claude and Remote Codex launchers run the interactive CLI there first, a session DSH neither drives nor
+ * The Remote Claude, Remote Codex and Remote Antigravity launchers run the interactive CLI there first, a session DSH neither drives nor
  * records. In a TUI conversation of that CLI (see tui.ts) it runs the same session every time, found through DSH_SESSION_ID,
  * which DSH sets in its terminals, so that reopening the conversation resumes it.
  * On the host the shell or CLI runs in a holder (see terminal-hold.ts), so it outlives DSH and the connection; a host that

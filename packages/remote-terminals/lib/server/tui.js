@@ -3,7 +3,7 @@ import { RemoteError } from './core/domain.js';
 import { tuiKey } from './tui-state.js';
 import { tuiHolder } from './holder-protocol.js';
 /** What a conversation shows until its CLI has titled it. */
-export const FIRST_TITLES = { claude: 'Claude Code', codex: 'Codex' };
+export const FIRST_TITLES = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' };
 export const MAX_TITLE = 120;
 const MAX_PROMPT_TITLE = 80;
 /** The title 0.2.81 gave every TUI conversation, which is replaced like the plugin's own. */
@@ -11,7 +11,7 @@ export const OLD_TITLE = /^Claude TUI \d\d:\d\d$/;
 /** Model and effort reach the remote command line inside double quotes. */
 export const COMMAND_VALUE = /^[\w.:[\]-]+$/;
 /** The chat provider of each remote CLI. */
-const PROVIDERS = { claude: 'remote-cli-claude', codex: 'remote-cli-codex' };
+const PROVIDERS = { claude: 'remote-cli-claude', codex: 'remote-cli-codex', antigravity: 'remote-cli-antigravity' };
 /**
  * Codex saves a new thread only once it has a message or a name, and `codex resume` needs it saved, so a TUI conversation's
  * thread starts with this name. It keeps Codex from titling the thread by itself, so `/rename` is the only title it can have.
@@ -76,6 +76,18 @@ export function codexTitle(records) {
     }
     return typeof name === 'string' && name.trim() && name !== CODEX_THREAD_NAME ? name.trim().slice(0, MAX_TITLE) : prompt;
 }
+/**
+ * A conversation's title from Antigravity's summary of it: its /rename or Antigravity's own title, then its preview, which
+ * holds the first prompt while there is no title (a short greeting often gets none).
+ * @param records - the title on the first line and the preview on the second, each on one line.
+ */
+export function antigravityTitle(records) {
+    const [title = '', preview = ''] = records.split('\n').map(line => line.replace(/\s+/g, ' ').trim());
+    if (title)
+        return title.slice(0, MAX_TITLE);
+    // A slash command says nothing about the conversation.
+    return preview && !preview.startsWith('/') ? promptTitle(preview) : undefined;
+}
 /** The model of a chat model route, `<project>/<cli>/<model>`, if it is this CLI's. */
 function routeModel(route, expected) {
     if (typeof route !== 'string')
@@ -89,7 +101,7 @@ function routeModel(route, expected) {
     }
 }
 /**
- * Conversations whose main view is the interactive Claude Code or Codex instead of DSH's chat. Each stays a real DSH
+ * Conversations whose main view is the interactive Claude Code, Codex or Antigravity instead of DSH's chat. Each stays a real DSH
  * session, so it is a row in the workspace list. DSH shows no views in a session until its log has a turn, so starting one
  * records an empty turn. The conversation itself lives in the remote CLI; see the launchers in terminal.ts.
  */
@@ -111,9 +123,12 @@ export class TuiSessions {
     localScroll() { return this.store.snapshot().tuiLocalScroll !== false; }
     async setLocalScroll(local) { await this.store.update(state => { state.tuiLocalScroll = local; }); }
     /** Those of `list` that run Codex. */
-    codex() {
+    codex() { return this.running('codex'); }
+    /** Those of `list` that run Antigravity. */
+    antigravity() { return this.running('antigravity'); }
+    running(cli) {
         const { tuiSessions = [], tuiDetails } = this.store.snapshot();
-        return tuiSessions.filter(id => tuiDetails?.[id]?.cli === 'codex');
+        return tuiSessions.filter(id => tuiDetails?.[id]?.cli === cli);
     }
     /**
      * Tell DSH the conversation's model, once. A session shows its model in the workspace list only if a selection or a
@@ -132,7 +147,7 @@ export class TuiSessions {
     }
     /** @param selection - the CLI, and the composer's model route and effort, which its first launch uses. */
     async start(sessionId, selection, signal) {
-        const cli = selection.cli === 'codex' ? 'codex' : 'claude';
+        const cli = selection.cli === 'codex' || selection.cli === 'antigravity' ? selection.cli : 'claude';
         const target = await this.dsh.verify(sessionId, signal);
         if (this.list().includes(sessionId))
             return;
@@ -144,11 +159,13 @@ export class TuiSessions {
             throw new RemoteError('Only a new conversation can start in the TUI', 409);
         signal.throwIfAborted();
         const thread = cli === 'codex' ? await this.dsh.codexThread(sessionId, signal) : undefined;
+        const conversation = cli === 'antigravity' ? await this.dsh.antigravityConversation(sessionId, signal) : undefined;
         signal.throwIfAborted();
         const model = routeModel(selection.model, cli), effort = selection.effort;
         await this.store.update(state => {
             state.tuiSessions = [...state.tuiSessions ?? [], sessionId];
             state.tuiDetails = { ...state.tuiDetails, [sessionId]: { title: FIRST_TITLES[cli], ...(thread ? { cli: 'codex', thread } : {}),
+                    ...(conversation ? { cli: 'antigravity', conversation } : {}),
                     ...(model && COMMAND_VALUE.test(model) ? { model } : {}), ...(typeof effort === 'string' && COMMAND_VALUE.test(effort) ? { effort } : {}) } };
         });
         await this.recordModel(sessionId, target.hostId, model ? selection.model : undefined).catch(() => { });
@@ -186,7 +203,9 @@ export class TuiSessions {
         await this.recordModel(sessionId, target.hostId).catch(() => { });
         if (renamed)
             return;
-        const title = saved?.thread ? codexTitle(await this.dsh.codexTitleRecords(sessionId, saved.thread, signal)) : claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(tuiKey(sessionId, saved)), signal));
+        const title = saved?.cli === 'antigravity' ? (saved.conversation ? antigravityTitle(await this.dsh.antigravityTitleRecords(sessionId, saved.conversation, signal)) : undefined)
+            : saved?.thread ? codexTitle(await this.dsh.codexTitleRecords(sessionId, saved.thread, signal))
+                : claudeTitle(await this.dsh.titleRecords(sessionId, tuiClaudeSession(tuiKey(sessionId, saved)), signal));
         if (!title || title === shown)
             return;
         await this.dsh.rename(sessionId, title);

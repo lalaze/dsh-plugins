@@ -16,25 +16,45 @@ export function permissionOf(ctx, session) {
     }
 }
 const SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'];
+function knobsOf(ctx, session) {
+    try {
+        return ctx.get('sessionProjections')?.stateOf?.(session, 'permissions');
+    }
+    catch {
+        return undefined;
+    }
+}
+/** DSH's approval policy for a conversation. Under `never` DSH refuses every approval request without showing it. */
+function neverAsks(ctx, session, knobs) {
+    const approval = ctx.get('approval');
+    let policy;
+    if (session)
+        try {
+            policy = approval?.effectivePolicy?.(session);
+        }
+        catch {
+            policy = undefined;
+        }
+    return (policy ?? knobs?.approval ?? approval?.config?.policy) === 'never';
+}
 /**
  * How a remote CLI may act for a conversation. A subagent DSH delegated with the `never` approval policy is
  * unattended: nobody answers its prompts, and its knobs (workspace sandbox, never ask) match no preset, so its
  * sandbox sets the CLI's limits. Other conversations keep {@link permissionOf}, where `custom` keeps the CLI's mode.
+ * `never`: DSH refuses this conversation's approval requests without showing them.
  */
 export function accessOf(ctx, session) {
-    const permission = permissionOf(ctx, session);
+    const permission = permissionOf(ctx, session), knobs = session && knobsOf(ctx, session), never = neverAsks(ctx, session, knobs);
     if (!session?.header.parentSession || permission === 'auto')
-        return { permission, unattended: false };
-    let knobs;
-    try {
-        knobs = ctx.get('sessionProjections')?.stateOf?.(session, 'permissions');
-    }
-    catch {
-        knobs = undefined;
-    }
+        return { permission, unattended: false, never };
     const approval = knobs?.approval ?? ctx.get('approval')?.config?.policy ?? 'ask';
     if (approval !== 'never')
-        return { permission, unattended: false };
+        return { permission, unattended: false, never };
     const sandbox = knobs?.sandbox ?? ctx.get('shell')?.sandboxMode;
-    return { permission: permission ?? (SANDBOXES.includes(String(sandbox)) ? sandbox : undefined), unattended: true };
+    return { permission: permission ?? (SANDBOXES.includes(String(sandbox)) ? sandbox : undefined), unattended: true, never: true };
 }
+/**
+ * Full access: the conversation lets its agent act without asking, and DSH would refuse unseen whatever a CLI still asks.
+ * A preset with a full-access sandbox that does ask keeps its prompts.
+ */
+export const fullAccess = (access) => access.never && access.permission === 'danger-full-access';

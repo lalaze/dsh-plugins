@@ -31,8 +31,8 @@ export interface Terminals {
     tui: TuiSessions;
 }
 /**
- * Terminals that open in a conversation's remote workspace and outlive DSH, conversations whose view is Claude Code or
- * Codex in such a terminal, and workspaces made from a project's Git worktrees. They reach the saved machines only
+ * Terminals that open in a conversation's remote workspace and outlive DSH, conversations whose view is Claude Code,
+ * Codex or Antigravity in such a terminal, and workspaces made from a project's Git worktrees. They reach the saved machines only
  * through `machines`, which Remote Agents provides.
  * @param tuiFile - the file `store` saves to, which a terminal's launcher reads.
  */

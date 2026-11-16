@@ -1,5 +1,7 @@
 import { type SshTransport } from './core/ssh.js';
 import { type TuiUsageEntry } from './tui-usage.js';
+/** What Antigravity's `Authentication required` means over SSH; Remote Agents says the same for its chats. */
+export declare const ANTIGRAVITY_SIGN_IN = "Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then try again.";
 /** A listed TUI conversation's file, named as its terminal holder is; how many are read, and how large one may be. */
 /** What terminals and TUI conversations run on a machine, over its SSH connection. */
 export declare class TuiRemote {
@@ -11,6 +13,12 @@ export declare class TuiRemote {
     claudeTitleRecords(claudeSession: string): Promise<string>;
     /** The records that can title a Codex thread: its newest line of Codex's name index and its first user messages. */
     codexTitleRecords(thread: string): Promise<string>;
+    /**
+     * The title and preview Antigravity keeps for a conversation, each on a line of its own; nothing for a conversation it
+     * has not summarized yet, which it does after the first prompt. They are in its summary database: through `sqlite3`,
+     * which macOS always has, or else Python's, as many Linux machines have Python without the `sqlite3` command.
+     */
+    antigravityTitleRecords(conversation: string): Promise<string>;
     /**
      * What TUI conversations' CLIs logged since the last read, for their token usage: each file's new whole lines that can
      * hold usage, under a header `@ <entry> <from> <end> <capped> <file>` giving the bytes read. Claude Code's lines lose the
@@ -24,4 +32,11 @@ export declare class TuiRemote {
      * @returns the thread's ID.
      */
     codexThread(cwd: string, name: string, signal: AbortSignal): Promise<string>;
+    /**
+     * Starts an Antigravity conversation for `agy --conversation` to open, as Antigravity cannot be told the ID of one it
+     * starts: it ignores an ID it does not know and starts another. Its ACP server makes one that the interactive CLI opens,
+     * and closing it there first is what lets that CLI run turns in it.
+     * @returns the conversation's ID.
+     */
+    antigravityConversation(cwd: string, signal: AbortSignal): Promise<string>;
 }

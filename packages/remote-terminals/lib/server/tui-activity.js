@@ -60,6 +60,24 @@ export function compactingOnScreen(rows) {
     const prompt = rows.findLastIndex(row => /^\s*❯/.test(row));
     return prompt >= 0 && rows.slice(Math.max(0, prompt - 6), prompt).some(row => /^\S\s+Compacting conversation…/.test(row));
 }
+/** Antigravity's spinner, braille dots ahead of what it is at (`⣾  Working...`, `⣷  Generating...`), right above its prompt. */
+const ANTIGRAVITY_SPINNER = /^\s*[\u2801-\u28FF]\s{1,3}\S.*(?:\.\.\.|…)/;
+/** How far up from the bottom of what Antigravity drew its spinner can stand: a long prompt being typed pushes it up. */
+const ANTIGRAVITY_BOTTOM = 16;
+/**
+ * What Antigravity's screen says, the only signal it gives: measured on 1.5.9, it sets no terminal title and sends no
+ * status report. A turn shows its spinner; a permission it asks for replaces the spinner with numbered choices, the one
+ * highlighted marked `>`, below `Requesting permission for:`. Its footer reads `esc to cancel` in a turn but also while
+ * its command menu is open, so that does not tell.
+ */
+export function antigravityActivity(rows) {
+    const drawn = rows.filter(row => row.trim()), bottom = drawn.slice(-ANTIGRAVITY_BOTTOM);
+    const choice = bottom.findLastIndex(row => /^\s*> \d+\. /.test(row));
+    if (choice >= 0 && bottom.slice(choice + 1).some(row => /↑\/↓ Navigate/.test(row))) {
+        return bottom.slice(0, choice).some(row => /\bRequesting permission\b/i.test(row)) ? 'approval' : 'question';
+    }
+    return bottom.some(row => ANTIGRAVITY_SPINNER.test(row)) ? 'running' : 'idle';
+}
 const screenRows = ({ rows, buffer: { active } }) => Array.from({ length: rows }, (_, row) => active.getLine(active.viewportY + row)?.translateToString(true) ?? '');
 /**
  * Watches TUI conversations' CLIs, so that they show as running, waiting and finished like every other conversation. DSH
@@ -90,31 +108,32 @@ export class TuiActivityWatcher {
             if (!sessions.has(sessionId))
                 this.stop(sessionId);
         for (const sessionId of sessions) {
-            const terminal = this.cliTerminal(sessionId);
+            const found = this.cliTerminal(sessionId), terminal = found?.terminal;
             let watch = this.watches.get(sessionId);
             if (watch && watch.terminal !== terminal) {
                 this.stop(sessionId);
                 watch = undefined;
             }
-            if (!terminal)
+            if (!found)
                 continue;
-            watch ??= this.start(sessionId, terminal);
+            watch ??= this.start(sessionId, found.terminal, found.cli);
             this.update(sessionId, watch);
         }
     }
     close() { for (const sessionId of [...this.watches.keys()])
         this.stop(sessionId); }
-    /** The conversation's running terminal started from its CLI's launcher, as it may have others open. */
+    /** The conversation's running terminal started from its CLI's launcher, as it may have others open, and that CLI. */
     cliTerminal(sessionId) {
-        const launchers = Object.values(TUI_LAUNCHERS);
+        const launchers = Object.entries(TUI_LAUNCHERS);
         for (const terminal of this.deps.terminals(sessionId)) {
-            if (terminal.info.state === 'running' && launchers.includes(terminal.info.shell?.name?.replace(/\.cmd$/i, '') ?? ''))
-                return terminal;
+            const name = terminal.info.shell?.name?.replace(/\.cmd$/i, '') ?? '', cli = launchers.find(([, launcher]) => launcher === name)?.[0];
+            if (terminal.info.state === 'running' && cli)
+                return { terminal, cli };
         }
         return undefined;
     }
-    start(sessionId, terminal) {
-        const watch = { terminal, dispose: () => { }, title: '', shown: 'idle', started: this.deps.now?.() ?? Date.now() };
+    start(sessionId, terminal, cli) {
+        const watch = { terminal, cli, dispose: () => { }, title: '', shown: 'idle', started: this.deps.now?.() ?? Date.now() };
         const title = terminal.screen.onTitleChange((text) => { watch.title = text; });
         // Only reads it: xterm passes it on to any other handler, and the terminal behaves as before.
         const report = terminal.screen.parser.registerOscHandler(STATUS_REPORT, (data) => {
@@ -138,9 +157,14 @@ export class TuiActivityWatcher {
     }
     update(sessionId, watch) {
         const now = this.deps.now?.() ?? Date.now();
-        let next = watch.report ?? titleActivity(watch.title);
-        if (next === 'idle' && watch.report === undefined)
-            next = dialogOnScreen(screenRows(watch.terminal.screen)) ?? 'idle';
+        let next;
+        if (watch.cli === 'antigravity')
+            next = antigravityActivity(screenRows(watch.terminal.screen));
+        else {
+            next = watch.report ?? titleActivity(watch.title);
+            if (next === 'idle' && watch.report === undefined)
+                next = dialogOnScreen(screenRows(watch.terminal.screen)) ?? 'idle';
+        }
         if (next === 'running' && watch.shown === 'idle' && now - watch.started < START_MS)
             return;
         // A compaction nobody asked for is no run, or it would end as a finished task. Only a run's start is judged: a turn goes

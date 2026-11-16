@@ -1,7 +1,7 @@
 {
   "name": "dsh-remote-terminals",
-  "version": "0.1.11",
-  "description": "Terminals that outlive DSH, Claude Code and Codex TUI conversations, and worktree workspaces on the machines saved in Remote Agents",
+  "version": "0.1.12",
+  "description": "Terminals that outlive DSH, Claude Code, Codex and Antigravity TUI conversations, and worktree workspaces on the machines saved in Remote Agents",
   "type": "module",
   "main": "lib/server/index.js",
   "types": "lib/server/index.d.ts",

@@ -10,8 +10,8 @@ import { TuiUsage } from './tui-usage.js';
 import { CODEX_THREAD_NAME, TuiSessions } from './tui.js';
 import { WorktreeService } from './worktrees.js';
 /**
- * Terminals that open in a conversation's remote workspace and outlive DSH, conversations whose view is Claude Code or
- * Codex in such a terminal, and workspaces made from a project's Git worktrees. They reach the saved machines only
+ * Terminals that open in a conversation's remote workspace and outlive DSH, conversations whose view is Claude Code,
+ * Codex or Antigravity in such a terminal, and workspaces made from a project's Git worktrees. They reach the saved machines only
  * through `machines`, which Remote Agents provides.
  * @param tuiFile - the file `store` saves to, which a terminal's launcher reads.
  */
@@ -81,6 +81,8 @@ export function installTerminals(ctx, machines, store, tuiFile) {
         titleRecords: (id, claudeSession, signal) => remote(id, signal, tui => tui.claudeTitleRecords(claudeSession)),
         codexThread: (id, signal) => remote(id, signal, (tui, target) => tui.codexThread(target.cwd, CODEX_THREAD_NAME, signal)),
         codexTitleRecords: (id, thread, signal) => remote(id, signal, tui => tui.codexTitleRecords(thread)),
+        antigravityConversation: (id, signal) => remote(id, signal, (tui, target) => tui.antigravityConversation(target.cwd, signal)),
+        antigravityTitleRecords: (id, conversation, signal) => remote(id, signal, tui => tui.antigravityTitleRecords(conversation)),
         endHolder,
     });
     const files = new TuiFiles({
@@ -131,7 +133,7 @@ export async function worktreeAction(worktrees, action, input, signal) {
 /** The requests about TUI conversations. */
 export async function tuiAction(tui, action, input, signal) {
     if (action === 'tuiSessions')
-        return { sessions: tui.list(), codex: tui.codex(), localScroll: tui.localScroll() };
+        return { sessions: tui.list(), codex: tui.codex(), antigravity: tui.antigravity(), localScroll: tui.localScroll() };
     if (action === 'tuiScroll') {
         if (typeof input.local !== 'boolean')
             throw new RemoteError('Invalid scrolling choice');
