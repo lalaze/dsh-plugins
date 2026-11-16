@@ -29,6 +29,13 @@ export const CLI_PROVIDERS = [
 export function signInHint(definition, message) {
     return definition.signIn && /^authentication required\.?$/i.test(message.trim()) ? definition.signIn : message;
 }
+/** Why a probed CLI cannot start a session: its own error when the probe got one, otherwise that it is not installed there. */
+export function notReadyReason(provider) {
+    if (provider.error)
+        return `The selected CLI is not ready in this remote project: ${provider.error}`;
+    const command = CLI_PROVIDERS.find(p => p.id === provider.id)?.command ?? provider.id;
+    return `${command} was not found on this machine. Install it there, or put its directory on the PATH your login shell sets, then try again.`;
+}
 export const OLD_ANTIGRAVITY = 'This Antigravity session was started by Remote Agents 0.2.129 or earlier and cannot be continued. Start a new conversation.';
 const SESSION_LIMIT = 8;
 const DIRECTORY_LIMIT = 2000;
@@ -400,7 +407,11 @@ done`}`, 15_000, { login: false });
         const { canonical, installed } = await this.canonicalize(cwd, [definition]);
         const result = await this.probeDefinition(definition, canonical, installed.get(providerId));
         this.assertOpen();
-        this.targets.set(key, { at: Date.now(), provider: result.provider, profile: result.profile });
+        // Only a ready CLI is kept: `open` needs nothing from a failed probe, and once the user fixes the CLI the next message should probe again.
+        if (result.provider.status === 'ready')
+            this.targets.set(key, { at: Date.now(), provider: result.provider, profile: result.profile });
+        else
+            this.targets.delete(key);
         return result;
     }
     /** The one CLI a session targets, probed in its own cwd, for `create` to validate the model, mode and speed. */
@@ -656,7 +667,7 @@ done`}`, 15_000, { login: false });
             // Reuses the probe `create` just ran for this task, so starting a session launches only the one CLI it needs.
             const resolved = await this.resolveTarget(task.cwd, task.provider);
             if (!resolved.profile)
-                throw new Error('The selected CLI is not ready on this SSH host');
+                throw new Error(notReadyReason(resolved.provider));
             profile = resolved.profile;
         }
         let argv = [...profile.argv];

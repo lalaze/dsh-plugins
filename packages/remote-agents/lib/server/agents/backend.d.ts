@@ -107,6 +107,8 @@ export declare const CLI_PROVIDERS: ({
 })[];
 /** ACP's `auth_required` error, replaced by how to sign in when the CLI says how. */
 export declare function signInHint(definition: Pick<typeof CLI_PROVIDERS[number], 'signIn'>, message: string): string;
+/** Why a probed CLI cannot start a session: its own error when the probe got one, otherwise that it is not installed there. */
+export declare function notReadyReason(provider: Provider): string;
 export declare const OLD_ANTIGRAVITY = "This Antigravity session was started by Remote Agents 0.2.129 or earlier and cannot be continued. Start a new conversation.";
 /** Claude's `list_models` control response: `supportedEffortLevels` holds per-model reasoning choices. */
 export declare function claudeModels(result: unknown): Model[];

@@ -1,4 +1,4 @@
-import { SshBackend } from './backend.js';
+import { notReadyReason, SshBackend } from './backend.js';
 import { HostConnections } from './host-connections.js';
 import { SharedSync } from './shared-sync.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
@@ -323,7 +323,7 @@ export class RemoteAgentsService {
                 // Probe only the target CLI here; launching the other enabled CLIs to list their models is what made starting slow.
                 const provider = await backend.target(request.cwd, request.provider);
                 if (provider.status !== 'ready')
-                    throw new RemoteError('The selected CLI is not ready in this remote project', 409);
+                    throw new RemoteError(notReadyReason(provider), 409);
                 const model = provider.models.find(m => m.id === request.model);
                 if (!model)
                     throw new RemoteError('The selected model is unavailable on this host', 409);
