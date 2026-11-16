@@ -13,7 +13,7 @@
       "name": "dsh-remote-agents",
       "title": "DSH Remote Agents",
       "description": {
-        "en": "Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok and CodeBuddy on remote machines, steer them, and let DSH delegate tasks to them",
+        "en": "Native DSH chat and task delegation over SSH: run Claude Code, Codex, DSH, Grok, CodeBuddy and Antigravity on remote machines, steer them, and let DSH delegate tasks to them",
         "zh": "DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务"
       },
       "author": "lalaze",
@@ -27,12 +27,12 @@
       },
       "versions": [
         {
-          "version": "0.2.133",
-          "publishTimestamp": 1794757073,
+          "version": "0.2.134",
+          "publishTimestamp": 1794798935,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "19bc809360199c5246809dcc9f43c7cfc471cdaa",
+            "commit": "5825bbd0a47fd3ed3043239ad8254b7b477e7bcc",
             "path": "packages/remote-agents"
           },
           "engines": {
