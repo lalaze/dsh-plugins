@@ -28,8 +28,12 @@ export declare class MachineBook {
     list(): MachineInfo[];
     get(id: string): MachineInfo | undefined;
     onChange(listener: () => void): () => void;
-    /** Probe every candidate and replace the list with what answered (and what is remembered). */
-    refresh(candidates: Candidate[], probe?: (url: string) => Promise<Hello>): Promise<void>;
+    /**
+     * Probe every candidate and replace the list with what answered (and what is remembered). A machine Tailscale calls
+     * offline is still asked, briefly, when this book knew it: Tailscale's flag is the coordination server's view, and a
+     * machine whose Tailscale lost that server (seen with the MacBook Air on a relay) stays reachable over the tailnet.
+     */
+    refresh(candidates: Candidate[], probe?: (url: string, timeoutMs?: number) => Promise<Hello>): Promise<void>;
     private save;
 }
 export {};
