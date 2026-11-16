@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | `dsh-remote-agents` | [packages/remote-agents](packages/remote-agents/README.zh-CN.md) | DSH 原生对话与 SSH 远程任务分派：在远程机器上运行 Claude Code、Codex 等 CLI，随时干预，并让 DSH 直接分派任务 |
 | `dsh-remote-terminals` | [packages/remote-terminals](packages/remote-terminals/README.zh-CN.md) | 不随 DSH 结束的远程终端、Claude Code 与 Codex 的 TUI 对话、基于 worktree 的工作区，使用远程智能体里保存的机器 |
-| `dsh-machines` | [packages/machines](packages/machines/README.zh-CN.md) | 在侧栏打开同一 Tailscale 账号下其他电脑的完整 DSH，查看那边等你处理的事项，并远程重启 |
+| `dsh-link` | [packages/link](packages/link/README.zh-CN.md) | 在侧栏打开同一 Tailscale 账号下其他电脑的完整 DSH，查看那边等你处理的事项，并远程重启 |
 | `dsh-session-models` | [packages/session-models](packages/session-models/README.zh-CN.md) | 在侧栏会话前显示模型图标和状态徽标，悬停卡片显示具体模型 |
 | `dsh-model-groups` | [packages/model-groups](packages/model-groups/README.zh-CN.md) | DSH 模型选择器中的提供方分组可折叠，并在各浏览器中记住选择 |
 | `dsh-model-flow` | [packages/model-flow](packages/model-flow/README.zh-CN.md) | 一条命令：一个模型计划，一个实现，一个审核，不通过就打回 |
