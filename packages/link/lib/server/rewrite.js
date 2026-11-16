@@ -50,9 +50,12 @@ const DESKTOP_BRIDGE = 'dshDesktopBoot';
  * `dsh-app://app`; DSH's web entry would apply this computer's boot rows and stream URL on top of the machine's own.
  * The guard takes the handshake itself, rebases the stream URL under the mount, holds the boot gate until then and
  * refuses the entry's own transport. Outside the desktop window (a browser, the phone) it does nothing.
+ *
+ * A machine's page kept in a frame of the desktop window (see client/shell.ts) has no bridge of its own: the shell
+ * already booted, so the guard takes the stream URL the window's page got and rebases it the same way.
  */
 export function guardDesktopBoot(html, prefix) {
-    const script = `<script>(()=>{const d=globalThis.${DESKTOP_BRIDGE};if(typeof d!=="object"||d===null||typeof d.ready!=="function")return;const m=${literal(`${prefix}/`)},b=Promise.withResolvers();let t=globalThis.${TRANSPORT};Object.defineProperty(globalThis,"${TRANSPORT}",{configurable:true,enumerable:true,get:()=>t,set(n){if(n!==t&&typeof n==="object"&&n!==null&&"streamBaseUrl" in n)throw new Error("dsh-link: a machine's page keeps its own boot");t=n}});globalThis.${BOOT_GATE}={promise:b.promise,resolve(){},reject(){}};d.ready().then(r=>{t={...t,ownsHost:true,streamBaseUrl:new URL(m,r.streamBaseUrl).href};b.resolve()},b.reject)})()</script>`;
+    const script = `<script>(()=>{const d=globalThis.${DESKTOP_BRIDGE},own=typeof d==="object"&&d!==null&&typeof d.ready==="function";let w;if(!own){try{const p=globalThis.parent;if(p!==globalThis&&typeof p.${DESKTOP_BRIDGE}==="object"&&p.${DESKTOP_BRIDGE}!==null)w=p.${TRANSPORT}?.streamBaseUrl}catch{}if(typeof w!=="string")return}const m=${literal(`${prefix}/`)},b=Promise.withResolvers();let t=globalThis.${TRANSPORT};Object.defineProperty(globalThis,"${TRANSPORT}",{configurable:true,enumerable:true,get:()=>t,set(n){if(n!==t&&typeof n==="object"&&n!==null&&"streamBaseUrl" in n)throw new Error("dsh-link: a machine's page keeps its own boot");t=n}});globalThis.${BOOT_GATE}={promise:b.promise,resolve(){},reject(){}};const go=u=>{t={...t,ownsHost:true,streamBaseUrl:new URL(m,u).href};b.resolve()};if(own)d.ready().then(r=>go(r.streamBaseUrl),b.reject);else go(w)})()</script>`;
     const misses = html.includes(BOOT_GATE_TAIL) ? [] : [{ point: 'desktop-boot', reason: html.includes(BOOT_GATE) ? `${BOOT_GATE} is not settled by the 0.2.2 tail script` : `the page has no ${BOOT_GATE}` }];
     return { html: injectHead(html, script), misses };
 }

@@ -64,6 +64,10 @@ export interface OptionalServices {
             readonly title: string;
         } | undefined;
     };
+    /** Loaded Sessions by id; `sessionTitle` needs the real Session, not just its id. */
+    sessions: {
+        get?(id: string): SessionLike | undefined;
+    };
     agents: {
         list(): readonly AgentLike[];
     };
@@ -78,6 +82,8 @@ export interface OptionalServices {
 export interface HostEvents {
     'session/event': (session: SessionLike, event: SessionEvent) => void;
     'session/disposed': (session: SessionLike) => void;
+    /** A conversation started or stopped running: DSH's own agents, and remote-terminals' TUI conversations. */
+    'api-session/status': (sessionId: string, running: boolean) => void;
 }
 export interface HostContext {
     readonly logger?: OptionalServices['logger'];

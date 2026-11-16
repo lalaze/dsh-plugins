@@ -5,7 +5,8 @@
 Open the complete DSH of your other computers from the one in front of you. Install the plugin in the DSH of every computer on the same Tailscale account; each finds the others, and a switcher in the sidebar foot opens any of them in place: its conversations, approvals, models, settings, files and terminals, as if you sat at it.
 
 - **One switcher.** The sidebar foot shows which machine this page is, with a dot: green ready, amber something waits for you, spinning a turn runs, red unreachable, grey offline. The menu lists every machine with what waits, runs or finished there.
-- **What waits elsewhere.** Approvals and questions waiting on another machine show as a badge on the switcher, and as system notifications (also for finished and failed turns; choose in Settings → DSH Link).
+- **Instant switching.** A machine's page stays open in the window once you went there, so going back and forth is instant and keeps where you were. On a wide screen the other machines' pages also open in the background a few seconds after start, so the first switch is instant too. Turn it off in Settings → DSH Link.
+- **What happens elsewhere.** A turn that finished or failed, an approval or a question on another machine shows as a notice in the page (click it to go there) and as a badge on the switcher; a system notification follows while the page is not in front. This includes TUI conversations (Claude Code or Codex in a terminal, from remote-terminals). Choose what to be told about in Settings → DSH Link.
 - **Safe restart.** Restart DSH on the machine you are looking at, even through another machine: **Restart now**, or **Restart when idle** once running conversations and jobs finish. DSH quits cleanly, a helper starts it again, and the page reconnects by itself. Supported for a launchd job (the Mac mini hub), the macOS desktop app, and `dsh web` started from a shell.
 
 ## How it works
@@ -41,6 +42,9 @@ Settings (Plugins → DSH Link):
 - In the desktop app, files dropped, pasted or picked on another machine's page are uploaded to that machine (DSH would otherwise name their path on this computer). Folders cannot be sent that way and are refused with a note.
 - Plugins on another machine's page talk to that machine: their requests by absolute path (`fetch('/api/…')`, XMLHttpRequest, EventSource, beacons) are sent through its mount. Plugin WebSockets other than DSH's own stream, and images or scripts a plugin loads by absolute path, still come from this computer.
 - Phones get no notifications while the page is closed.
+- Every machine kept open uses memory like another browser tab; closing the window or turning off **Keep machines' pages open** frees it.
+- A TUI conversation's turn is known only from its terminal: a stopped or failed one shows as finished, and its approvals do not show as waiting on the board.
+- Both computers need this version: the page you switch from keeps the others, and the page of the machine you switch to does its own switching. An older version on the other machine still works, with a reload whenever you switch away from it.
 - Windows and systemd services cannot be restarted from the page.
 
 Restart logs: `$DSH_HOME/storages/dsh-link/restart/restart.log`.

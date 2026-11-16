@@ -37,6 +37,9 @@ export declare function credentialedManifest(html: string): Rewritten;
  * `dsh-app://app`; DSH's web entry would apply this computer's boot rows and stream URL on top of the machine's own.
  * The guard takes the handshake itself, rebases the stream URL under the mount, holds the boot gate until then and
  * refuses the entry's own transport. Outside the desktop window (a browser, the phone) it does nothing.
+ *
+ * A machine's page kept in a frame of the desktop window (see client/shell.ts) has no bridge of its own: the shell
+ * already booted, so the guard takes the stream URL the window's page got and rebases it the same way.
  */
 export declare function guardDesktopBoot(html: string, prefix: string): Rewritten;
 /** Where the namespace script leaves the page's real localStorage, for the switcher to pick another machine's Session. */
