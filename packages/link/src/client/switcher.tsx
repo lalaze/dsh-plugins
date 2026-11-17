@@ -43,6 +43,7 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
       })),
       ...(machines.length === 0 ? [{ id: 'none', disabled: true, label: <span className="dl-row-meta">{answer ? ui('No other machine found yet') : ui('Loading…')}</span> }] : []),
       { type: 'separator', id: 'separator' },
+      { id: 'reload', label: ui('Reload {name}', { name: currentName }) },
       { id: 'restart', label: ui('Restart DSH on {name}…', { name: currentName }) },
     ];
   }, [answer, attention, machines, selfName, currentName]);
@@ -50,6 +51,8 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
   const select = (id: string) => {
     setOpen(false);
     if (id === 'restart') setRestarting(true);
+    // This page, which shows `current`: in the desktop window's frame only that machine's page loads again.
+    else if (id === 'reload') location.reload();
     else if (id !== 'none') openMachine(id);
   };
   const title = waitingElsewhere ? ui('{name} · {count} waiting on other machines', { name: currentName, count: waitingElsewhere })

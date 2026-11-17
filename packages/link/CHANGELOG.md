@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.6 — ⌘R reloads the machine you are looking at
+
+Update the computer whose desktop window shows the other machines; reload the window once. Update the other machines too for the menu item.
+
+- In the desktop app, ⌘R did nothing in another machine's page: the app gives ⌘R to DSH's right sidebar and never reloads its window, and a machine's page in the window is a web page, where nothing handles it. Now ⌘R in another machine's page loads that page again. The window and the other machines' pages stay as they are. Ctrl+R still reaches the page, as terminals use it to search history.
+- The machine menu has **Reload {name}**, which loads the page you are on again: in the desktop window only that machine's page. It shows on a machine's page once that machine has this version.
+
 ## 0.1.5 — The wallpaper shows behind the desktop title strip
 
 Update the computer whose desktop window shows the other machines; reload the window once. The other machines need nothing.

@@ -21,6 +21,13 @@ export function report(event: string, detail: Record<string, unknown> = {}): voi
   } catch { /* diagnostics only */ }
 }
 
+/**
+ * ⌘R, which reloads the page in a browser. The desktop app gives it to DSH's right sidebar and never reloads its window,
+ * and a machine's page in a frame is a web page there, where nothing handles it: so the shell reloads that page.
+ */
+export const isReloadKey = (event: Pick<KeyboardEvent, 'metaKey' | 'ctrlKey' | 'altKey' | 'code' | 'key'>) =>
+  event.metaKey && !event.ctrlKey && !event.altKey && (event.code === 'KeyR' || event.key.toLowerCase() === 'r');
+
 /** What a framed page offers the shell. */
 export interface FrameHandle { openSession(sessionId: string): void }
 
@@ -215,6 +222,25 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
     if (wasShown) { current = now; reveal(); changed(); }
   };
 
+  /** Load a machine's page again, in its frame: the window and the other machines' pages stay as they are. */
+  const reloadFrame = (frame: Frame) => {
+    report('frame-reload', { machine: frame.machine });
+    clearHint(frame);
+    frame.handle = undefined; frame.doc = undefined; frame.since = Date.now();
+    frame.hint = setTimeout(() => offerDirect(frame), HINT_MS);
+    try { frame.iframe.contentWindow!.location.reload(); } catch { frame.iframe.src = urlOf(frame.machine); }
+  };
+  /** ⌘R in a machine's page reloads that page; see isReloadKey. Each document the frame loads is a new window to listen on. */
+  const watchKeys = (frame: Frame) => {
+    let win: Window | null;
+    try { win = frame.iframe.contentWindow; if (!win?.document) return; } catch { return; }
+    win.addEventListener('keydown', event => {
+      if (event.defaultPrevented || !isReloadKey(event)) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      reloadFrame(frame);
+    }, true);
+  };
+
   const create = (machine: string, sessionId?: string): Frame => {
     if (sessionId) { try { selectSession(rawStorage(), machine === 'self' ? '' : machine, sessionId); } catch { /* opens where it was */ } }
     const iframe = document.createElement('iframe');
@@ -225,6 +251,7 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
     iframe.src = urlOf(machine);
     const frame: Frame = { machine, iframe, since: Date.now() };
     iframe.addEventListener('load', () => {
+      watchKeys(frame);
       followed(frame);
       if (!live(frame) && frames.get(frame.machine) === frame) {
         clearTimeout(frame.hint);

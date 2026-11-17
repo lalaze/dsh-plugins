@@ -35,6 +35,7 @@ export const zh: Readonly<Record<string, string>> = {
   'Restart': '重启',
   'Restart DSH on {name}?': '重启 {name} 的 DSH？',
   'Restart DSH on {name}…': '重启 {name} 的 DSH…',
+  'Reload {name}': '重新加载 {name} 的页面',
   'Restart DSH…': '重启 DSH…',
   'Restart now': '立即重启',
   'Restart when idle': '空闲时重启',
