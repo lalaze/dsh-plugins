@@ -4,9 +4,9 @@
  * Every machine's page is served by this host (its mount), so the frames are same-origin: a framed page finds the
  * shell on its parent and goes through it to switch, and the shell asks a framed page to open a conversation.
  */
-import { currentSession, mountedId, mountPrefix, rawStorage, selectSession, SHELL_KEYS, storagePrefix } from '../rewrite.js';
+import { currentSession, mountedId, mountPrefix, rawStorage, selectSession, SHELL_GLOBAL, SHELL_KEYS, storagePrefix } from '../rewrite.js';
 
-const KEY = '__dshLinkShell';
+const KEY = SHELL_GLOBAL;
 const SHOWN = SHELL_KEYS.shown;
 const MODE = SHELL_KEYS.keepPages;
 /** After this long without its page coming up, a frame offers to open the machine directly. */
@@ -127,8 +127,9 @@ export function installShell(deps: ShellDeps): { shell: Shell; restore(): void; 
   const layer = document.createElement('div');
   layer.className = 'dl-frames';
   layer.hidden = true;
-  // In the desktop window: a title strip over the frames holds the window buttons, moves the window, and names the
-  // machine shown; the frames' pages are not desktop pages and would draw under the buttons (styles.ts).
+  // In the desktop window: a see-through title strip over the frames holds the window buttons, moves the window, and
+  // names the machine shown. The frames' pages are not desktop pages; each fills the window and starts below the strip
+  // (injectFrameTop), so its wallpaper shows behind the strip (styles.ts).
   const bar = document.createElement('div');
   bar.className = 'dl-frames-bar';
   bar.setAttribute('aria-hidden', 'true');

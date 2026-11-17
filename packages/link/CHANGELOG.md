@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## Unreleased — The wallpaper shows behind the desktop title strip
+
+Update the computer whose desktop window shows the other machines; reload the window once. The other machines need nothing.
+
+- In the desktop app, the title strip over another machine's page is see-through. That page now fills the window and starts below the strip, so a Gallery wallpaper (or the page's own background) reaches behind the window buttons and the machine name, as on this computer's own page. Its menus and dialogs keep clear of the strip, and full screen still hides it.
+
 ## 0.1.4 — Desktop window fixes, and no stalls over HTTP/1.1
 
 Update every computer; no restart needed, reload the window once.

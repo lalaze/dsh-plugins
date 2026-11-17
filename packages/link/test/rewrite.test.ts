@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import vm from 'node:vm';
-import { credentialedManifest, guardDesktopBoot, injectOwnsHost, injectRequestBase, injectShellReturn, injectStorageNamespace, mountedId, mountedIndex, RAW_STORAGE, selectSession } from '../src/rewrite.js';
+import { BAR_HEIGHT, credentialedManifest, guardDesktopBoot, injectFrameTop, injectOwnsHost, injectRequestBase, injectShellReturn, injectStorageNamespace, mountedId, mountedIndex, RAW_STORAGE, SHELL_GLOBAL, selectSession } from '../src/rewrite.js';
 
 const INDEX = readFileSync(new URL('./fixtures/dsh-0.2.2-rc.3-index.html', import.meta.url), 'utf8');
 const scripts = (html: string) => [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map(match => match[1]!);
@@ -205,4 +205,62 @@ test('in the desktop window the requests stay on the app origin, under the mount
 test('the request base cannot be closed by its prefix', () => {
   const html = injectRequestBase(INDEX, '/x</script><script>alert(1)//');
   assert.equal(html.match(/<\/script>/g)!.length, INDEX.match(/<\/script>/g)!.length + 1);
+});
+
+/** A framed page under a parent window whose strip height is `bar` ('' when the parent declares none). */
+function framedPage(options: { shell?: boolean; framed?: boolean; bar: string }) {
+  let bar = options.bar;
+  const attributes = new Map<string, string>();
+  const style = new Map<string, string>();
+  const observers: Array<() => void> = [];
+  const parentRoot = {};
+  const parent: Record<string, unknown> = {
+    document: { documentElement: parentRoot },
+    getComputedStyle: (element: unknown) => ({ getPropertyValue: (name: string) => element === parentRoot && name === BAR_HEIGHT ? bar : '' }),
+  };
+  if (options.shell !== false) parent[SHELL_GLOBAL] = { version: 1 };
+  const window: Record<string, unknown> = {};
+  window.parent = options.framed === false ? window : parent;
+  const document = { documentElement: {
+    setAttribute: (name: string, value: string) => { attributes.set(name, value); },
+    style: { setProperty: (name: string, value: string) => { style.set(name, value); }, removeProperty: (name: string) => { style.delete(name); } },
+  } };
+  class MutationObserver {
+    constructor(private readonly callback: () => void) {}
+    observe(target: unknown, init: { attributes?: boolean }) { if (target === parentRoot && init.attributes) observers.push(this.callback); }
+  }
+  vm.runInContext(scripts(injectFrameTop(INDEX))[0]!, vm.createContext({ window, document, MutationObserver, parseFloat }));
+  return { attributes, style, change(next: string) { bar = next; for (const callback of observers) callback(); } };
+}
+
+test('a machine\'s page in a desktop window\'s frame starts below the title strip and follows it', () => {
+  const page = framedPage({ bar: ' 28px' });
+  assert.equal(page.attributes.get('data-dl-framed'), '');
+  assert.equal(page.style.get('--dl-top'), '28px');
+  // Full screen: no strip.
+  page.change('');
+  assert.equal(page.style.has('--dl-top'), false);
+  page.change('0px');
+  assert.equal(page.style.has('--dl-top'), false);
+  page.change('32px');
+  assert.equal(page.style.get('--dl-top'), '32px');
+  // The page and its overlays are moved by the injected style, keyed on the mark.
+  const html = injectFrameTop(INDEX);
+  assert.match(html, /html\[data-dl-framed\] body\{box-sizing:border-box;padding-top:var\(--dl-top,0px\)\}/);
+  assert.match(html, /--dsh-frame-overlay-top:calc\(var\(--dl-top,0px\) \+ 12px\)/);
+});
+
+test('a page that is not in a frame of this plugin\'s shell is left as it is', () => {
+  for (const options of [{ framed: false, bar: '28px' }, { shell: false, bar: '28px' }]) {
+    const page = framedPage(options);
+    assert.equal(page.attributes.size, 0);
+    assert.equal(page.style.size, 0);
+  }
+});
+
+test('the frame offset comes before DSH\'s own scripts in the mounted index', () => {
+  const head = mountedIndex(INDEX, 'mabc').html;
+  assert.ok(head.indexOf('data-dl-framed') > 0);
+  assert.ok(head.indexOf('data-dl-framed') < head.indexOf('./assets/index-'));
+  assert.ok(head.indexOf('location.replace("/")') < head.indexOf('data-dl-framed'));
 });

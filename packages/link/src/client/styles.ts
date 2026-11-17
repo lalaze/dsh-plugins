@@ -46,11 +46,11 @@ export const CSS = `
 .dl-badge[data-tone=done]{background:var(--dsw-alias-state-success-primary,#2f9e5b)}
 .dl-frames{position:fixed;inset:0;z-index:2147482000;background:var(--dsw-alias-bg-layer-1,Canvas);-webkit-app-region:no-drag}
 .dl-frames[hidden]{display:none}
-.dl-frame{position:absolute;top:var(--dl-bar-height,0px);left:0;right:0;bottom:0;width:100%;height:calc(100% - var(--dl-bar-height,0px));border:0;visibility:hidden;pointer-events:none;background:var(--dsw-alias-bg-layer-1,Canvas)}
+.dl-frame{position:absolute;inset:0;width:100%;height:100%;border:0;visibility:hidden;pointer-events:none;background:var(--dsw-alias-bg-layer-1,Canvas)}
 html[data-platform=darwin]:not([data-fullscreen]){--dl-bar-height:28px}
 html[data-windows-titlebar]:not([data-fullscreen]){--dl-bar-height:var(--dsh-windows-titlebar-height,32px)}
 .dl-frames-bar{display:none}
-html[data-platform=darwin]:not([data-fullscreen]) .dl-frames-bar,html[data-windows-titlebar]:not([data-fullscreen]) .dl-frames-bar{position:absolute;top:0;left:0;right:0;height:var(--dl-bar-height);display:flex;align-items:center;justify-content:center;padding:0 140px;box-sizing:border-box;border-bottom:.5px solid ${border};background:var(--dsw-specific-sidebar-fill,var(--dsw-alias-bg-layer-1,Canvas));color:${secondary};font-size:12px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:none;-webkit-user-select:none;-webkit-app-region:drag;cursor:default}
+html[data-platform=darwin]:not([data-fullscreen]) .dl-frames-bar,html[data-windows-titlebar]:not([data-fullscreen]) .dl-frames-bar{position:absolute;top:0;left:0;right:0;z-index:1;height:var(--dl-bar-height);display:flex;align-items:center;justify-content:center;padding:0 140px;box-sizing:border-box;background:transparent;color:${secondary};font-size:12px;line-height:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;user-select:none;-webkit-user-select:none;-webkit-app-region:drag;cursor:default}
 .dl-frame.dl-frame-shown{visibility:visible;pointer-events:auto}
 .dl-frame-note{position:absolute;left:50%;bottom:16px;transform:translateX(-50%);z-index:1;display:flex;align-items:center;gap:10px;max-width:calc(100vw - 32px);padding:8px 8px 8px 14px;border:.5px solid ${border};border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-layer-2,Canvas);box-shadow:0 6px 24px rgba(0,0,0,.14);font-size:13px;line-height:20px}
 .dl-frame-note[hidden]{display:none}
