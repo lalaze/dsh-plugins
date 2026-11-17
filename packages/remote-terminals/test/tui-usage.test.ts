@@ -10,6 +10,7 @@ import type { RemoteUsageRecord } from '@dsh-plugins/remote-core/usage.js';
 import { tuiClaudeSession } from '../src/tui.js';
 import { QUIET_MS, readClaudeUsage, readCodexUsage, TuiUsage, tuiUsageChunks, type TuiUsageChunk, type TuiUsageEntry } from '../src/tui-usage.js';
 import { TuiRemote } from '../src/tui-remote.js';
+import { callLine, PROMPT, RESPONSE, stateLine, stepLine } from './antigravity-fixture.js';
 type Machine = { transport: SshTransport };
 /** A machine's TUI commands, over its connection. */
 const tui = (files: Machine) => new TuiRemote(files.transport);
@@ -272,17 +273,23 @@ test('a Codex thread\'s subagent threads are found by their parent, all at first
 });
 
 test('TUI usage is saved before it is sent, per machine, once, and only for TUI conversations', async () => {
-  const claudeId = 'tui-claude', codexId = 'tui-codex', agyId = 'tui-agy', claudeSession = tuiClaudeSession(claudeId);
-  // Antigravity's turns are in a database of its own, which is not read.
-  let state = { version: 1, hosts: [], tasks: [], tuiSessions: [claudeId, codexId, agyId, 'gone'], tuiDetails: { [codexId]: { cli: 'codex', thread: THREAD, model: 'gpt-x' }, [agyId]: { cli: 'antigravity', conversation: THREAD } } } as unknown as State;
+  const claudeId = 'tui-claude', codexId = 'tui-codex', agyId = 'tui-agy', claudeSession = tuiClaudeSession(claudeId), AGY = '4353aa3e-2919-42f9-82bf-36cf61f370fc';
+  let state = { version: 1, hosts: [], tasks: [], tuiSessions: [claudeId, codexId, agyId, 'gone'], tuiDetails: { [codexId]: { cli: 'codex', thread: THREAD, model: 'gpt-x' }, [agyId]: { cli: 'antigravity', conversation: AGY, model: 'gemini-4-carbon' } } } as unknown as State;
   const store = { snapshot: () => structuredClone(state), update: async (change: (draft: State) => void) => { const draft = structuredClone(state); change(draft); state = draft; saved.push(structuredClone(state)); } };
   const saved: State[] = [], records: RemoteUsageRecord[] = [], reads: { hostId: string; sessions: string[]; entries: TuiUsageEntry[] }[] = [], warnings: string[] = [];
   const outputs: Record<string, string[]> = {
     [claudeSession]: [`@ 0 0 300 0 main\n${reply('msg_1', '2026-11-10T16:00:01.000Z', { out: 5, read: 10 })}\n${turnEnd('2026-11-10T16:00:03.000Z', 2500)}\n`, '@ 0 300 300 0 main\n'],
     [THREAD]: [`@ 0 0 90 0 main\n${codex('task_started', '2026-11-05T07:11:21.000Z')}\n${codex('token_count', '2026-11-05T07:12:27.000Z', tokens(10, 4, 3))}\n${codex('task_complete', '2026-11-05T07:12:28.000Z')}\n`, '@ 0 90 90 0 main\n'],
+    [AGY]: [
+      `@ 0 0 0 0 state\n${stateLine(false)}\n@ 0 0 1 0 calls\n${callLine(0, { step: 0, model: 'gemini-4-carbon', input: 10, output: 2, cached: 30, writeMs: 4000 })}\n@ 0 0 0 0 steps\n${stepLine(0, PROMPT, '2026-11-17T11:45:01.000Z')}\n${stepLine(1, RESPONSE, '2026-11-17T11:45:02.000Z')}\n`,
+      `@ 0 0 0 0 state\n${stateLine(false)}\n@ 0 1 1 0 calls\n@ 0 2 2 0 steps\n`,
+    ],
   };
   const usage = new TuiUsage(store, {
-    target: async id => { if (id === 'gone') throw new Error('not a remote workspace'); return id === claudeId ? { hostId: 'h1', label: 'mac-mini', cwd: '/srv/app' } : { hostId: 'h2', label: 'code', cwd: '/root/web' }; },
+    target: async id => {
+      if (id === 'gone') throw new Error('not a remote workspace');
+      return id === claudeId ? { hostId: 'h1', label: 'mac-mini', cwd: '/srv/app' } : id === agyId ? { hostId: 'h3', label: 'air', cwd: '/Users/me/web' } : { hostId: 'h2', label: 'code', cwd: '/root/web' };
+    },
     read: async (hostId, sessions, entries) => {
       reads.push({ hostId, sessions: sessions.map(s => s.sessionId), entries: structuredClone(entries) as TuiUsageEntry[] });
       return outputs[entries[0].id].shift() ?? '';
@@ -291,16 +298,17 @@ test('TUI usage is saved before it is sent, per machine, once, and only for TUI 
     warn: message => warnings.push(message),
   });
   await usage.sweep();
-  assert.deepEqual(reads.map(r => [r.hostId, r.sessions, r.entries.map(e => [e.cli, e.id])]), [['h1', [claudeId], [['claude', claudeSession]]], ['h2', [codexId], [['codex', THREAD]]]]);
+  assert.deepEqual(reads.map(r => [r.hostId, r.sessions, r.entries.map(e => [e.cli, e.id])]), [['h1', [claudeId], [['claude', claudeSession]]], ['h2', [codexId], [['codex', THREAD]]], ['h3', [agyId], [['antigravity', AGY]]]]);
   assert.deepEqual(records.map(({ id, ...record }) => record), [
     { startedAt: '2026-11-10T16:00:01.000Z', provider: 'remote-cli-claude', model: 'claude-fable-5-2', sessionId: claudeId, purpose: 'conversation', status: 'completed', durationMs: 2500, usage: { inputTokens: 1, outputTokens: 5, cacheReadTokens: 10 }, host: 'mac-mini', workspace: '/srv/app' },
     { startedAt: '2026-11-05T07:11:21.000Z', provider: 'remote-cli-codex', model: 'gpt-x', sessionId: codexId, purpose: 'conversation', status: 'completed', durationMs: 67_000, usage: { inputTokens: 6, outputTokens: 3, cacheReadTokens: 4, totalTokens: 13 }, host: 'code', workspace: '/root/web' },
+    { startedAt: '2026-11-17T11:45:01.000Z', provider: 'remote-cli-antigravity', model: 'gemini-4-carbon', sessionId: agyId, purpose: 'conversation', status: 'completed', durationMs: 5000, usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 30, totalTokens: 42 }, host: 'air', workspace: '/Users/me/web' },
   ]);
   assert.deepEqual(state.tuiDetails?.[claudeId]?.usage?.read, { main: 300 });
   assert.equal(state.tuiDetails?.[codexId]?.thread, THREAD, 'the rest of a conversation\'s details stay');
   await usage.sweep([claudeId, agyId, 'not-a-tui']);
-  assert.deepEqual(reads.slice(2).map(r => r.entries.map(e => e.read)), [[{ main: 300 }]], 'only the given TUI conversations are read, from where they were left');
-  assert.equal(records.length, 2, 'nothing is counted twice');
+  assert.deepEqual(reads.slice(3).map(r => r.entries.map(e => e.read)), [[{ main: 300 }], [{ calls: 1, steps: 2 }]], 'only the given TUI conversations are read, from where they were left');
+  assert.equal(records.length, 3, 'nothing is counted twice');
   assert.deepEqual(warnings, []);
   usage.close();
 });

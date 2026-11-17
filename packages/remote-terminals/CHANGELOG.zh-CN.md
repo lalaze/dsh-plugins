@@ -4,6 +4,14 @@
 
 按版本从新到旧列出变化及升级后需要做的事。
 
+## 0.1.16 — 统计 Antigravity TUI 对话的 Token 用量
+
+- Antigravity TUI 对话的 Token 用量现在也计入 `dsh-usage-stats`，和 Claude Code、Codex 一样每轮每个模型一条。以前完全不计，用量面板里只有 Antigravity 聊天的轮次。
+- Antigravity 不写用量日志，所以插件在它运行的机器上读这个对话自己的数据库（`~/.gemini/antigravity-cli/conversations/`），用 `sqlite3`，没有这个命令时用 Python 自带的。只取每次模型调用的用量和每一步的开始时间，不取对话内容。读出的数和 Antigravity 在聊天里为同样的轮次上报的用量逐个 Token 一致。
+- 一轮在 Antigravity 把对话标为空闲时计入：终端开着时一轮结束几秒后，否则在下一次每 10 分钟的读取时。第一次读取会把这个对话以前的轮次一并补记，时间按它们实际运行的时间。
+- 这个数据库的结构是 Antigravity 自己的、没有公开。以后的 Antigravity 版本可能改掉它，那时 TUI 的用量会暂时计不到，要等本插件更新。
+- 可以单独升级，不需要重启。
+
 ## 0.1.15 — TUI 启动失败时说明原因；本机 Antigravity 的登录提示
 
 - 在 TUI 里开始新对话的按钮启动失败时，以前只多了一圈红框，原因藏在悬停提示里，看起来像点了没反应。现在原因也会显示在按钮上方的卡片里。按 Esc 或点别处关闭，再点按钮就重试。

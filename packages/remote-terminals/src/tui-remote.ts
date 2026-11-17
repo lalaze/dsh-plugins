@@ -3,13 +3,18 @@ import { initializeCodex } from '@dsh-plugins/remote-core/codex.js';
 import { JsonlPeer, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { endHolderScript } from './holder-protocol.js';
 import { TUI_CODEX_CHILD, TUI_SUBAGENT_FILE, TUI_USAGE_CAP, type TuiUsageEntry } from './tui-usage.js';
+import { ANTIGRAVITY_CALLS_PER_READ, ANTIGRAVITY_STEPS_PER_READ } from './tui-usage-antigravity.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** What Antigravity's `Authentication required` means over SSH, and on this computer; Remote Agents says the same for its chats. */
 export const ANTIGRAVITY_SIGN_IN = 'Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then try again.';
 /** Run here, Antigravity keeps its sign-in in the keychain, apart from the file it signs in to over SSH. */
 export const ANTIGRAVITY_SIGN_IN_HERE = 'Antigravity says it is not signed in on this computer. Run `agy acp --login` in a terminal on this computer, not over SSH (a sign-in made over SSH is kept apart), then try again.';
-/** A listed TUI conversation's file, named as its terminal holder is; how many are read, and how large one may be. */
+/**
+ * `sqlite3` for a machine without the command: the database, `1` to read it as it stands (see `dsh_sql`), then queries;
+ * each query's rows, one column each, a line apiece.
+ */
+export const ANTIGRAVITY_SQL_PYTHON = "import sqlite3, sys; db = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro' + ('&immutable=1' if sys.argv[2] else ''), uri=True, timeout=2); [print(row[0]) for query in sys.argv[3:] for row in db.execute(query)]";
 
 /** What terminals and TUI conversations run on a machine, over its SSH connection. */
 export class TuiRemote {
@@ -52,14 +57,34 @@ true`, 20_000);
    * What TUI conversations' CLIs logged since the last read, for their token usage: each file's new whole lines that can
    * hold usage, under a header `@ <entry> <from> <end> <capped> <file>` giving the bytes read. Claude Code's lines lose the
    * message text and its copy of tool inputs, as only the usage is wanted; a long session's log runs to megabytes.
-   * See tui-usage.ts.
+   * Antigravity keeps no log: from its conversation's database come `state`, whether a turn runs, then `calls`, its
+   * model calls since the last read (counted, not in bytes), then `steps`, the first bytes of each step since, each row
+   * a JSON line. See tui-usage.ts and tui-usage-antigravity.ts.
    */
   tuiUsageLines(entries: readonly TuiUsageEntry[], signal?: AbortSignal, cap = TUI_USAGE_CAP): Promise<Buffer> {
     if (!Number.isSafeInteger(cap) || cap < 1) throw new RemoteError('Invalid read size');
     if (!this.transport.transfer) throw new RemoteError('File transfers are unavailable on this host', 501);
     const offset = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 0;
+    const calls = Math.max(1, Math.min(ANTIGRAVITY_CALLS_PER_READ, Math.floor(cap / 4096)));
     const reads = entries.map((entry, index) => {
       if (!UUID.test(entry.id)) return '';
+      if (entry.cli === 'antigravity') {
+        const from = offset(entry.read.calls), step = offset(entry.read.steps);
+        // Rows as JSON lines built by SQLite itself; blobs as hex. A call's row is about 1.3 KB.
+        const head = `select '@ ${index} ${from} ' || coalesce((select max(idx) + 1 from (select idx from gen_metadata where idx >= ${from} order by idx limit ${calls})), ${from}) || ' ' || (select count(*) > ${calls} from (select 1 from gen_metadata where idx >= ${from} limit ${calls + 1})) || ' calls'`;
+        const rows = `select '{"g":' || idx || ',"d":"' || hex(data) || '"}' from gen_metadata where idx >= ${from} order by idx limit ${calls}`;
+        const steps = `select '{"s":' || idx || ',"t":' || step_type || ',"m":"' || hex(substr(metadata, 1, 32)) || '"}' from steps where idx >= ${step} order by idx limit ${ANTIGRAVITY_STEPS_PER_READ}`;
+        const state = `select '{"status":"' || replace(status, '"', '') || '","busy":' || (case when not_fully_idle then 1 else 0 end) || '}' from conversation_summaries where conversation_id = '${entry.id}'`;
+        // The state comes first: once it says a turn has ended, every call of that turn is already written.
+        return `dsh_db="$dsh_agy/conversations/${entry.id}.db"
+if [ -f "$dsh_db" ]; then
+  printf '@ %s 0 0 0 state\\n' ${index}
+  dsh_sql "$dsh_agy/conversation_summaries.db" ${quote(state)}
+  dsh_sql "$dsh_db" ${quote(head)} ${quote(rows)}
+  printf '@ %s %s %s 0 steps\\n' ${index} ${step} ${step}
+  dsh_sql "$dsh_db" ${quote(steps)}
+fi`;
+      }
       if (entry.cli === 'codex') {
         const children = Object.entries(entry.read).flatMap(([name, read]) => { const id = TUI_CODEX_CHILD.exec(name)?.[1]; return id ? [[id, offset(read)] as const] : []; });
         const known = children.map(([id, read]) => `${quote(id)}) dsh_start=${read} ;; `).join('');
@@ -99,6 +124,21 @@ fi`;
     });
     return this.transport.transfer(`dsh_claude="\${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects"
 dsh_codex="\${CODEX_HOME:-$HOME/.codex}/sessions"
+dsh_agy="$HOME/.gemini/antigravity-cli"
+# $1 database, then queries, each row's one column on a line: through \`sqlite3\`, which macOS always has, or else
+# Python's, as many Linux machines have Python without the \`sqlite3\` command. Read only, ignoring ~/.sqliterc.
+# Antigravity keeps its databases in WAL mode and closes them between turns, and a read-only connection cannot open
+# such a database without its -shm file: with none, nothing has it open, and it is read as it stands.
+dsh_sql() {
+  dsh_db_=$1; shift; dsh_still=
+  [ -e "$dsh_db_-shm" ] || case "$dsh_db_" in *[?#%]*) ;; *) dsh_still=1 ;; esac
+  if command -v sqlite3 >/dev/null 2>&1; then
+    dsh_open=$dsh_db_; [ -z "$dsh_still" ] || dsh_open="file:$dsh_db_?immutable=1"
+    for dsh_query in "$@"; do sqlite3 -readonly -batch -list -noheader -init /dev/null -cmd '.timeout 2000' "$dsh_open" "$dsh_query" 2>/dev/null; done
+  elif command -v python3 >/dev/null 2>&1; then python3 -c ${quote(ANTIGRAVITY_SQL_PYTHON)} "$dsh_db_" "$dsh_still" "$@" 2>/dev/null
+  fi
+  return 0
+}
 # $1 entry, $2 file name, $3 path, $4 bytes already read, $5 CLI
 dsh_read() {
   dsh_end=$(wc -c 2>/dev/null < "$3") || return 0

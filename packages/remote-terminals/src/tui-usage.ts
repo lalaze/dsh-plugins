@@ -4,6 +4,7 @@ import { tuiKey, type TuiDetails, type TuiStore } from './tui-state.js';
 import { claudeTurnUsage, codexTurnUsage, type RemoteUsageRecord } from '@dsh-plugins/remote-core/usage.js';
 import type { TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { tuiClaudeSession } from './tui.js';
+import { readAntigravityUsage } from './tui-usage-antigravity.js';
 
 /**
  * Usage of TUI conversations. Their CLI runs in a terminal, so no turn passes through the relay that counts a chat's
@@ -14,8 +15,9 @@ import { tuiClaudeSession } from './tui.js';
  * subagents log to `<session>/subagents/agent-*.jsonl`. Codex reports its running totals in `token_count` events and
  * ends a turn with `task_complete` or `turn_aborted`; its subagents, such as the reviewer of approval requests, run in
  * threads of their own that name their parent in their first line, each with its own totals and turns. Subagents' usage
- * counts toward the conversation's turn running at the time, under their own model. Each finished turn becomes one
- * record per model, as a chat's does.
+ * counts toward the conversation's turn running at the time, under their own model. Antigravity logs no usage; its
+ * conversation's database is read instead (see tui-usage-antigravity.ts). Each finished turn becomes one record per
+ * model, as a chat's does.
  */
 
 /** Bytes of one file read in one go; the rest follows straight after. */
@@ -25,8 +27,9 @@ export const TUI_SUBAGENT_FILE = /^agent-[\w-]+\.jsonl$/;
 /** A Codex subagent's thread, by its ID, as the cursor and the reads name it. */
 export const TUI_CODEX_CHILD = /^thread-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 /**
- * A CLI's log to read: its Claude session or Codex thread, and the bytes of each file already read. A Codex thread's
- * subagent threads are looked for among the files changed in the last `since` minutes, or among all when it is absent.
+ * A CLI's log to read: its Claude session, Codex thread or Antigravity conversation, and the bytes of each file already
+ * read (for Antigravity, the calls and steps). A Codex thread's subagent threads are looked for among the files changed
+ * in the last `since` minutes, or among all when it is absent.
  */
 export interface TuiUsageEntry { cli: TuiCli; id: string; read: Record<string, number>; since?: number }
 /**
@@ -48,7 +51,10 @@ const SCAN_STEP_MS = 60 * 60_000, SCAN_MARGIN_MINUTES = 10;
 
 /** Where reading a conversation's log got to, so that every turn is counted once. Kept in `TuiDetails.usage`. */
 export interface TuiUsageCursor {
-  /** Bytes read of each file: `main` and, for Claude Code, its subagents' files by name. */
+  /**
+   * Bytes read of each file: `main` and, for Claude Code, its subagents' files by name. For Antigravity, the first
+   * model call (`calls`) and step (`steps`) not yet read.
+   */
   read: Record<string, number>;
   /** Claude Code: the request last read in each file and what of it is counted, as its lines may come in two reads. */
   requests?: Record<string, { id: string; usage: TurnUsage }>;
@@ -88,6 +94,8 @@ function most(a: TurnUsage, b: TurnUsage): TurnUsage {
 }
 const time = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : undefined;
 
+/** What a read of an Antigravity conversation's database returns. */
+const ANTIGRAVITY_PARTS = new Set(['state', 'calls', 'steps']);
 /** Splits a read into its files, per entry; `more` says a file has more than one read gave. */
 export function tuiUsageChunks(output: string): { entries: Map<number, TuiUsageChunk[]>; more: boolean } {
   const entries = new Map<number, TuiUsageChunk[]>();
@@ -98,7 +106,7 @@ export function tuiUsageChunks(output: string): { entries: Map<number, TuiUsageC
       const [, entry, from, end, capped, file] = header;
       current = { file, from: Number(from), end: Number(end), capped: capped === '1', lines: [] };
       if (current.capped) more = true;
-      if (file !== 'main' && !TUI_SUBAGENT_FILE.test(file) && !TUI_CODEX_CHILD.test(file)) { current = undefined; continue; }
+      if (file !== 'main' && !TUI_SUBAGENT_FILE.test(file) && !TUI_CODEX_CHILD.test(file) && !ANTIGRAVITY_PARTS.has(file)) { current = undefined; continue; }
       entries.set(Number(entry), [...entries.get(Number(entry)) ?? [], current]);
     } else if (current && line.startsWith('{')) current.lines.push(line);
   }
@@ -303,8 +311,7 @@ export class TuiUsage {
   private async read(only?: readonly string[]): Promise<void> {
     if (this.closed) return;
     const signal = this.abort.signal, { tuiSessions: listed = [], tuiDetails } = this.store.snapshot();
-    // Antigravity keeps its turns in a database of its own rather than a log, and that is not read: its usage is not counted.
-    const ids = (only ? listed.filter(id => only.includes(id)) : listed).filter(id => tuiDetails?.[id]?.cli !== 'antigravity');
+    const ids = only ? listed.filter(id => only.includes(id)) : listed;
     const machines = new Map<string, { sessionId: string; target: Target }[]>();
     for (const sessionId of ids) {
       // A conversation that is gone, or whose workspace is no longer a verified remote one, is passed over.
@@ -329,6 +336,7 @@ export class TuiUsage {
     const details = this.store.snapshot().tuiDetails ?? {}, started = this.deps.now?.() ?? Date.now();
     const entries: TuiUsageEntry[] = sessions.map(({ sessionId }) => {
       const saved = details[sessionId], read = saved?.usage?.read ?? {};
+      if (saved?.cli === 'antigravity') return { cli: 'antigravity', id: saved.conversation ?? '', read };
       if (saved?.cli !== 'codex') return { cli: 'claude', id: tuiClaudeSession(tuiKey(sessionId, saved)), read };
       const scanned = Date.parse(saved.usage?.scannedAt ?? '');
       return { cli: 'codex', id: saved.thread ?? '', read, ...(Number.isFinite(scanned) ? { since: Math.max(0, Math.ceil((started - scanned) / 60_000)) + SCAN_MARGIN_MINUTES } : {}) };
@@ -341,7 +349,9 @@ export class TuiUsage {
       const chunks = files.get(index);
       const saved: TuiDetails | undefined = details[sessionId], entry = entries[index];
       if (!chunks?.length && !saved?.usage?.open) return;
-      const { cursor, turns } = entry.cli === 'codex' ? readCodexUsage(saved?.usage, chunks ?? [], saved?.model ?? 'default', now) : readClaudeUsage(saved?.usage, chunks ?? [], now);
+      const { cursor, turns } = entry.cli === 'codex' ? readCodexUsage(saved?.usage, chunks ?? [], saved?.model ?? 'default', now)
+        : entry.cli === 'antigravity' ? readAntigravityUsage(saved?.usage, chunks ?? [], saved?.model ?? 'default', now)
+        : readClaudeUsage(saved?.usage, chunks ?? [], now);
       if (entry.cli === 'codex' && chunks?.some(chunk => chunk.file === 'main')) {
         // Subagent threads found just now are looked for again with them as parents, for subagents of their own;
         // otherwise the search is done up to the time this read began.
