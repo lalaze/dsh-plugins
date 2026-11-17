@@ -29,10 +29,18 @@ export interface RemoteAgentsMachines {
     browse(hostId: string, path?: string, options?: {
         entries?: boolean;
     }): Promise<DirectoryListing>;
-    /** Run `action` on the machine's connection once `verify` confirms the caller's claim to it still holds. */
+    /**
+     * Run `action` on the machine's connection once `verify` confirms the caller's claim to it still holds. The local
+     * machine ({@link localMachine}) is accepted too: its commands run on this computer, without SSH.
+     */
     withWorkspace<T>(hostId: string, verify: () => Promise<void>, action: (files: MachineFiles) => Promise<T>): Promise<T>;
     /** A conversation's verified machine and directory. With `expected`, a conversation that has moved is refused. */
     target(sessionId: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget>;
+    /**
+     * Where a conversation's CLIs run: as {@link target}, and a conversation in a folder on this computer is on the local
+     * machine. Absent in older Remote Agents.
+     */
+    cliTarget?(sessionId: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget>;
     /** Which saved machines and remote directory a local workspace path stands for. */
     resolve(path: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement>;
     /**

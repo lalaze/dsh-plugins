@@ -44,6 +44,8 @@ export declare function endClosedTerminals(controller: ClosableTerminals, end: (
  * which DSH sets in its terminals, so that reopening the conversation resumes it.
  * On the host the shell or CLI runs in a holder (see terminal-hold.ts), so it outlives DSH and the connection; a host that
  * cannot run one gets a plain connection.
+ * In a folder on this computer a CLI's launcher runs that CLI here, in a holder as well, so it outlives DSH; only the
+ * Remote workspace launcher opens the local shell there.
  * DSH does not pass DSH_HOME to its terminals, so the launcher carries the home it was installed from.
  * `state` names the files it reads the saved machines and the TUI conversations from; `modules` is the compiled server
  * root it imports the SSH and workspace modules from.

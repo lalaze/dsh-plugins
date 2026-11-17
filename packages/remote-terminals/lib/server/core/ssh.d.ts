@@ -70,6 +70,21 @@ export declare class OpenSshTransport implements SshTransport {
     upload(cwd: string, relativePath: string, data: AsyncIterable<Uint8Array>, bytes: number, sha256: string, signal?: AbortSignal): Promise<string>;
     start(cwd: string, argv: string[], options?: StartOptions): Child;
 }
+/**
+ * The variables an SSH login starts from: who the user is, the system PATH, the locale and the temporary directory.
+ * DSH's own environment (Electron's Node mode, its home and settings, proxies given to DSH) stays out of the CLIs; the
+ * login shell then supplies the user's own, as it does over SSH. The SSH agent socket is kept so Git can still sign in.
+ */
+export declare function loginEnvironment(source?: NodeJS.ProcessEnv, user?: import("os").UserInfo<string>): NodeJS.ProcessEnv;
+/**
+ * This computer: the commands {@link OpenSshTransport} sends, run by a local shell instead of over SSH, in the user's
+ * home directory with a fresh login environment ({@link loginEnvironment}). Relays detach from DSH as from sshd, so a
+ * CLI keeps running while DSH restarts.
+ */
+export declare class LocalShellTransport extends OpenSshTransport {
+    constructor();
+    protected spawnRemote(command: string): ChildProcessWithoutNullStreams;
+}
 export type WireMessage = Record<string, any>;
 /** Byte range of one output line in the CLI's output stream. */
 export interface Frame {

@@ -51,7 +51,7 @@ export declare class TuiSessions {
     private readonly store;
     private readonly dsh;
     constructor(store: TuiStore, dsh: {
-        /** Rejects a conversation that is not a verified remote workspace. */
+        /** Rejects a conversation that is neither in a verified remote workspace nor in a folder on this computer. */
         verify(sessionId: string, signal: AbortSignal): Promise<{
             hostId: string;
         }>;

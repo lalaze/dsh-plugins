@@ -22,18 +22,32 @@ const dim = (text) => `\r\n\x1b[2m${text}\x1b[0m\r\n`;
 /** Into `sh -c`: the login shell of the account, which runs what ssh is given, need not be a POSIX one. */
 const posix = (script) => `exec /bin/sh -c ${quote(script)}`;
 const remoteScript = (version) => `"$HOME/${HOLDER_FOLDER}/terminal-${version}.mjs"`;
-export const attachCommand = ({ holder, command, script }) => posix(`${REMOTE_PATH}
+const base64 = (text) => Buffer.from(text).toString('base64');
+export const attachCommand = ({ holder, command, history, script }) => posix(`${REMOTE_PATH}
 [ -f ${remoteScript(script.version)} ] || exit ${ATTACH_EXIT.noScript}
 [ -n "$dsh_best_node" ] || exit ${ATTACH_EXIT.noRuntime}
-exec "$dsh_best_node" ${remoteScript(script.version)} attach "$HOME/${HOLDERS_FOLDER}" ${holder} ${Buffer.from(command).toString('base64')}`);
+exec "$dsh_best_node" ${remoteScript(script.version)} attach "$HOME/${HOLDERS_FOLDER}" ${holder} ${base64(command)}${history ? ` ${base64(history)}` : ''}`);
 const installCommand = (version) => posix(`umask 077
 mkdir -p "$HOME/${HOLDER_FOLDER}" "$HOME/${HOLDERS_FOLDER}" || exit 1
 dsh_file="$(mktemp "$HOME/${HOLDER_FOLDER}/.terminal.XXXXXXXXXX")" || exit 1
 cat > "$dsh_file" && mv -f "$dsh_file" ${remoteScript(version)}`);
+/** Runs a command on the host: over ssh, which allocates the terminal when `tty`, or in a shell on this computer. */
+function launch({ ssh, local }, command, tty) {
+    const stdio = tty ? 'inherit' : ['pipe', 'ignore', 'inherit'];
+    if (local)
+        return spawn('/bin/sh', ['-c', command], { stdio, env: local, cwd: local.HOME });
+    if (!ssh)
+        throw new Error('A terminal needs ssh arguments or a local environment');
+    return spawn('ssh', [...(tty ? ssh : ssh.map(arg => (arg === '-tt' ? '-T' : arg))), command], { stdio });
+}
 /** The script travels over stdin: Linux limits one argument to 128 KB. */
-function install({ ssh, script }) {
+function install(options) {
     return new Promise(resolve => {
-        const child = spawn('ssh', [...ssh.map(arg => (arg === '-tt' ? '-T' : arg)), installCommand(script.version)], { stdio: ['pipe', 'ignore', 'inherit'] });
+        const { script } = options, child = launch(options, installCommand(script.version), false);
+        if (!child.stdin) {
+            resolve(false);
+            return;
+        }
         child.stdin.on('error', () => { });
         createReadStream(script.path).on('error', () => child.kill()).pipe(child.stdin);
         child.on('error', () => resolve(false));
@@ -41,9 +55,9 @@ function install({ ssh, script }) {
     });
 }
 /** One connection to the holder, which ends with the terminal or the connection. */
-function connection({ ssh }, command) {
+function connection(options, command) {
     return new Promise(resolve => {
-        const child = spawn('ssh', [...ssh, command], { stdio: 'inherit' });
+        const child = launch(options, command, true);
         let last = Date.now();
         // ssh would wait out its keepalive with a screen that does not respond. Starting over costs a redraw.
         const watch = setInterval(() => { const now = Date.now(); if (now - last > WAKE_MS)

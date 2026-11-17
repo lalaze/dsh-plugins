@@ -16,19 +16,24 @@ import { WorktreeService } from './worktrees.js';
  * @param tuiFile - the file `store` saves to, which a terminal's launcher reads.
  */
 export function installTerminals(ctx, machines, store, tuiFile) {
+    /**
+     * Where a conversation's CLIs run, which is where its TUI runs: its remote workspace, or a folder on this computer.
+     * An older Remote Agents knows remote workspaces only.
+     */
+    const cliTarget = (sessionId, signal, expected) => machines.cliTarget ? machines.cliTarget(sessionId, signal, expected) : machines.target(sessionId, signal, expected);
     /** Runs `action` on a conversation's machine, checked to be its machine still once the connection is ready. */
     const onMachine = async (sessionId, signal, action) => {
-        const target = await machines.target(sessionId, signal);
-        return machines.withWorkspace(target.hostId, async () => { await machines.target(sessionId, signal, target); }, files => action(files, target));
+        const target = await cliTarget(sessionId, signal);
+        return machines.withWorkspace(target.hostId, async () => { await cliTarget(sessionId, signal, target); }, files => action(files, target));
     };
     const remote = (sessionId, signal, action) => onMachine(sessionId, signal, (files, target) => action(new TuiRemote(files.transport), target));
     const endHolder = (sessionId, holder, signal) => remote(sessionId, signal, tui => tui.endHolder(holder));
     // TUI conversations' usage, read from their CLIs' logs, as no relay sees their turns.
     const tuiUsage = new TuiUsage(store, {
-        target: (id, signal) => machines.target(id, signal),
+        target: (id, signal) => cliTarget(id, signal),
         // Every conversation is verified to be on the machine again before its log is read.
         read: (hostId, sessions, entries, signal) => machines.withWorkspace(hostId, async () => { for (const { sessionId, target } of sessions)
-            await machines.target(sessionId, signal, target); }, files => new TuiRemote(files.transport).tuiUsageLines(entries, signal)),
+            await cliTarget(sessionId, signal, target); }, files => new TuiRemote(files.transport).tuiUsageLines(entries, signal)),
         emit: record => ctx.emit('remote-agents/usage', record),
         warn: message => ctx.get('logger')?.warn?.(message),
     });
@@ -67,7 +72,7 @@ export function installTerminals(ctx, machines, store, tuiFile) {
     });
     const sessionController = () => ctx.get('sessionController');
     const tui = new TuiSessions(store, {
-        verify: (id, signal) => machines.target(id, signal),
+        verify: (id, signal) => cliTarget(id, signal),
         session: id => ctx.get('sessions')?.get?.(id),
         agent: id => ctx.get('agents')?.get?.(id),
         list: async () => (await sessionController()?.list({}))?.items ?? [],

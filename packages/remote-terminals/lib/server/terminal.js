@@ -98,6 +98,8 @@ export function endClosedTerminals(controller, end) {
  * which DSH sets in its terminals, so that reopening the conversation resumes it.
  * On the host the shell or CLI runs in a holder (see terminal-hold.ts), so it outlives DSH and the connection; a host that
  * cannot run one gets a plain connection.
+ * In a folder on this computer a CLI's launcher runs that CLI here, in a holder as well, so it outlives DSH; only the
+ * Remote workspace launcher opens the local shell there.
  * DSH does not pass DSH_HOME to its terminals, so the launcher carries the home it was installed from.
  * `state` names the files it reads the saved machines and the TUI conversations from; `modules` is the compiled server
  * root it imports the SSH and workspace modules from.
@@ -114,10 +116,11 @@ export async function installWorkspaceTerminal(controller, directory, state, mod
     const holderVersion = await readFile(holderPath).then(data => createHash('sha256').update(data).digest('hex').slice(0, 16), () => undefined);
     const source = `import { spawn } from 'node:child_process';
 import { readFile, realpath } from 'node:fs/promises';
+import { userInfo } from 'node:os';
 import { resolve } from 'node:path';
 import { savedHosts } from ${JSON.stringify(new URL('core/saved-hosts.js', modules).href)};
 import { WorkspaceAccess, omcStateDir, under } from ${JSON.stringify(new URL('core/access.js', modules).href)};
-import { connectionInput, quote } from ${JSON.stringify(new URL('core/ssh.js', modules).href)};
+import { connectionInput, loginEnvironment, quote } from ${JSON.stringify(new URL('core/ssh.js', modules).href)};
 import { tuiClaudeSession } from ${JSON.stringify(new URL('tui.js', modules).href)};
 import { holdTerminal, TERMINAL_KEEPALIVE, TERMINAL_TYPING } from ${JSON.stringify(new URL('terminal-hold.js', modules).href)};
 import { tabHolder, tuiHolder, TERMINAL_ID_ENV } from ${JSON.stringify(new URL('holder-protocol.js', modules).href)};
@@ -128,9 +131,13 @@ const run = (file, args, env) => {
 };
 const hosts = await savedHosts(${JSON.stringify(state.hosts)});
 const cwd = process.cwd();
-const placement = await new WorkspaceAccess(() => hosts, { home: await realpath(process.env.DSH_HOME?.trim() || ${JSON.stringify(dshHome())}) }).resolve(cwd);
+const access = new WorkspaceAccess(() => hosts, { home: await realpath(process.env.DSH_HOME?.trim() || ${JSON.stringify(dshHome())}) });
+const placement = await access.resolve(cwd);
+const cli = process.argv[2];
+// A CLI's launcher in a folder on this computer runs that CLI here, in a holder as on a machine, without SSH.
+const here = !placement.cwd && cli ? (await access.resolveForCli(cwd)).cwd : undefined;
 // A removed oh-my-claude placeholder keeps refusing: its empty folder is not the project.
-if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolve(cwd))) {
+if (!placement.cwd && !here && !under(resolve(omcStateDir(), 'remote-workspaces'), resolve(cwd))) {
   process.stderr.write('Not a remote workspace; starting the local shell.\\n');
   // Electron's Node mode must not leak into the user's shell, where it would break Electron apps it starts.
   const { ELECTRON_RUN_AS_NODE, ...env } = process.env;
@@ -142,11 +149,14 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   }
 } else {
   const host = hosts.find(h => placement.hostIds.includes(h.id));
-  if (!host || !placement.cwd) throw new Error('Select a verified remote workspace before using this shell.');
-  const url = new URL(connectionInput(host.connection));
-  const target = (url.username ? decodeURIComponent(url.username) + '@' : '') + url.hostname;
+  if (!here && (!host || !placement.cwd)) throw new Error('Select a verified remote workspace before using this shell.');
+  const dir = placement.cwd ?? here;
+  // On this computer the commands start from a login environment, as over SSH, with the terminal's type, which ssh
+  // carries. Home and shell are the terminal's own, the account's unless DSH was started otherwise.
+  const me = userInfo(), local = here ? { ...loginEnvironment(process.env, { ...me, homedir: process.env.HOME || me.homedir, shell: process.env.SHELL || me.shell }),
+    TERM: process.env.TERM || 'xterm-256color' } : undefined;
+  const url = here ? undefined : new URL(connectionInput(host.connection));
   const shell = '"\${SHELL:-/bin/sh}"';
-  const cli = process.argv[2];
   const dshSession = process.env.DSH_SESSION_ID;
   // What is saved about TUI conversations; see TuiState.
   const saved = JSON.parse(await readFile(${JSON.stringify(state.tui)}, 'utf8').catch(error => { if (error.code === 'ENOENT') return '{}'; throw error; }));
@@ -178,14 +188,19 @@ if (!placement.cwd && !under(resolve(omcStateDir(), 'remote-workspaces'), resolv
   // Claude Code's classic renderer, so that the terminal scrolls the conversation itself; see TuiSessions.localScroll.
   const localScroll = cli === 'claude' && saved.tuiLocalScroll !== false;
   // SSH does not carry COLORTERM. Without it Claude Code falls back to 256 colors, which turns its orange pink.
-  const command = 'cd ' + quote(placement.cwd) + (interactive ? ' && export COLORTERM=truecolor' + (localScroll ? ' CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' : '') : '') + ' && exec ' + start;
-  const ssh = ['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', ...TERMINAL_KEEPALIVE, ...TERMINAL_TYPING, ...(url.port ? ['-p', url.port] : []), '--', target];
+  const command = 'cd ' + quote(dir) + (interactive ? ' && export COLORTERM=truecolor' + (localScroll ? ' CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1' : '') : '') + ' && exec ' + start;
+  // That renderer leaves the scrollback at the width it was printed at, so the holder rebuilds it from a copy that prints
+  // the conversation again (see holder-reflow.ts): a fork, which saves nothing, with no hooks, MCP servers or update.
+  const history = claudeSession && localScroll ? 'cd ' + quote(dir) + ' && export COLORTERM=truecolor CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 DISABLE_AUTOUPDATER=1 && exec ' + shell + " -lic '" + 'find "\${CLAUDE_CONFIG_DIR:-\$HOME/.claude}/projects" -maxdepth 2 -name ' + claudeSession + '.jsonl 2>/dev/null | grep -q . && exec claude --resume ' + claudeSession + ' --fork-session --strict-mcp-config --settings "{\\\\"disableAllHooks\\\\":true}"' + "'" : undefined;
+  const ssh = url && ['-tt', '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-o', 'LogLevel=ERROR', ...TERMINAL_KEEPALIVE, ...TERMINAL_TYPING, ...(url.port ? ['-p', url.port] : []),
+    '--', (url.username ? decodeURIComponent(url.username) + '@' : '') + url.hostname];
   const terminalId = process.env[TERMINAL_ID_ENV];
   const holder = own ? tuiHolder(key) : dshSession && terminalId ? tabHolder(dshSession, terminalId) : undefined;
   const version = ${JSON.stringify(holderVersion ?? null)};
-  const kept = holder && version ? await holdTerminal({ ssh, holder, command, script: { path: ${JSON.stringify(holderPath)}, version } }) : 'direct';
-  if (kept === 'direct') run('ssh', [...ssh, command], process.env);
-  else process.exitCode = kept;
+  const kept = holder && version ? await holdTerminal({ ssh, local, holder, command, history, script: { path: ${JSON.stringify(holderPath)}, version } }) : 'direct';
+  if (kept !== 'direct') process.exitCode = kept;
+  else if (local) run('/bin/sh', ['-c', command], local);
+  else run('ssh', [...ssh, command], process.env);
 }
 `;
     await writeFile(script, source, { mode: 0o600 });

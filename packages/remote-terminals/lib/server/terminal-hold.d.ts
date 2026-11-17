@@ -10,12 +10,19 @@ export declare const TERMINAL_KEEPALIVE: string[];
  */
 export declare const TERMINAL_TYPING: string[];
 export interface HoldOptions {
-    /** Arguments to ssh up to the host, whatever the command. */
-    ssh: string[];
+    /** Arguments to ssh up to the host, whatever the command. Absent for this computer: see `local`. */
+    ssh?: string[];
+    /**
+     * For a terminal on this computer: the environment its commands start from, as an SSH login's would, since they run in
+     * a local shell instead. The holder then outlives DSH as it outlives a connection.
+     */
+    local?: NodeJS.ProcessEnv;
     /** This terminal's holder on the host. See holder-protocol.ts. */
     holder: string;
     /** Run by a new holder. Unused if it is already running. */
     command: string;
+    /** Prints the conversation again at the terminal's width, for a new holder to rebuild the scrollback with; see holder-reflow.ts. */
+    history?: string;
     /** The holder's script on this machine and its version, which names it on the host. */
     script: {
         path: string;
@@ -24,7 +31,7 @@ export interface HoldOptions {
     output?: NodeJS.WritableStream;
     input?: NodeJS.ReadStream;
 }
-export declare const attachCommand: ({ holder, command, script }: Pick<HoldOptions, "holder" | "command" | "script">) => string;
+export declare const attachCommand: ({ holder, command, history, script }: Pick<HoldOptions, "holder" | "command" | "history" | "script">) => string;
 /**
  * Keep this terminal connected to its holder on the host until it ends, reconnecting whenever the connection is lost.
  * @returns the terminal's exit code, or `direct` if the host cannot hold a terminal.

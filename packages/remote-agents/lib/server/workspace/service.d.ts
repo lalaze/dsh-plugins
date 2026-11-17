@@ -19,7 +19,7 @@ export declare class WorkspaceService {
     constructor(machines: WorkspaceHosts, placement: SessionPlacement, localCwd: (id: string) => Promise<string | undefined>, cliPlacement?: SessionPlacement);
     target(sessionId: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget>;
     /** Where the conversation's CLI works: its remote workspace, or a folder on this computer. */
-    private cliTarget;
+    cliTarget(sessionId: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget>;
     private targetOf;
     operate(sessionId: string, raw: unknown, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown>;
     download(sessionId: string, path: string, rev: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<Buffer>;
