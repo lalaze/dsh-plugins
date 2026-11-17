@@ -41,3 +41,28 @@ export interface Hello {
     os: string;
     version: string;
 }
+/**
+ * `dshLink`, the service other plugins on this DSH use to reach the other machines (dsh-usage-stats adds up their
+ * usage with it). Bump `version` on an incompatible change.
+ */
+export interface LinkService {
+    version: 1;
+    /** This machine: its id among machines and the name the others show for it. */
+    self(): {
+        id: string;
+        name: string;
+    };
+    /** The other machines, as the switcher lists them. */
+    machines(): MachineInfo[];
+    /**
+     * A GET into an online machine's DSH through its listener, signed in there by that machine's own login, as its
+     * mount is. `path` is absolute (`/api/…`). Rejects when the machine is unknown or not online, or does not answer.
+     */
+    get(id: string, path: string, options?: {
+        timeoutMs?: number;
+        maxBytes?: number;
+    }): Promise<{
+        status: number;
+        text: string;
+    }>;
+}

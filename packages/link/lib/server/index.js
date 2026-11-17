@@ -21,6 +21,7 @@ import { candidatesOf, MachineBook } from './machines.js';
 import { forwardHttp, forwardUpgrade, HOP_HEADER, locationUnder, readJson, requestHeaders, sendJson, sendText } from './proxy.js';
 import { MOUNT_ROOT, mountedIndex, mountPrefix } from './rewrite.js';
 import { RestartService } from './restart/service.js';
+import { createLinkService } from './service.js';
 import { inspectBusy, processFacts, readVersions, restartTarget } from './restart/target.js';
 import { readStatus, whois } from './tailscale.js';
 export const name = 'dsh-link';
@@ -101,6 +102,8 @@ export function apply(ctx, config) {
     ctx.effect(() => () => restart.dispose(), 'dsh-link: restart');
     const book = new MachineBook(join(dir, 'machines.json'), () => selfId);
     book.load();
+    // Other plugins reach the machines through this (dsh-usage-stats adds up every machine's usage).
+    ctx.provide('dshLink', createLinkService(() => ({ id: selfId, name: self.name }), book));
     const hello = (_req, res) => sendJson(res, 200, { dshLink: 1, id: selfId, name: self.name, os: self.os, version });
     // ---- Routes on this host's own webServer, behind DSH's connection fence.
     const fenced = (handler) => async (req, res) => {

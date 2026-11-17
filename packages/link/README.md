@@ -9,6 +9,7 @@ Open the complete DSH of your other computers from the one in front of you. Inst
 - **What happens elsewhere.** A turn that finished or failed, an approval or a question on another machine shows as a notice in the page (click it to go there) and as a badge on the switcher; a system notification follows while the page is not in front. This includes TUI conversations (Claude Code or Codex in a terminal, from remote-terminals). Choose what to be told about in Settings → DSH Link.
 - **Safe restart.** Restart DSH on the machine you are looking at, even through another machine: **Restart now**, or **Restart when idle** once running conversations and jobs finish. DSH quits cleanly, a helper starts it again, and the page reconnects by itself. Supported for a launchd job (the Mac mini hub), the macOS desktop app, and `dsh web` started from a shell.
 
+- **Usage of every machine.** With Usage statistics 0.1.20 or later, today's token total in the conversation header and the statistics window add up every machine (see that plugin's README).
 ## How it works
 
 Every DSH with the plugin opens a port (7390 by default) on its own Tailscale address. That listener admits a request only when `tailscale whois` says it comes from the same Tailscale user as the machine itself, and only under the machine's own name (no other site's page can drive it). It then forwards into that machine's DSH with a login made inside the process; no token or password is stored or sent anywhere.
@@ -16,6 +17,8 @@ Every DSH with the plugin opens a port (7390 by default) on its own Tailscale ad
 The DSH you are using shows another machine at `/dsh-link/peer/<id>/` on its own address, behind its own sign-in, by forwarding to that machine's listener. Each machine's page keeps its own browser storage. A machine opened through another cannot open a third one.
 
 Nothing goes through a server outside your tailnet.
+
+Other plugins on this DSH can reach the machines through the `dshLink` service (version 1): the machine list, and a GET into a machine's DSH through its listener, signed in by that machine's own login. Usage statistics uses it.
 
 ## Setup
 

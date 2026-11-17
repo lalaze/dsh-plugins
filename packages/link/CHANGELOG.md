@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.7 — Usage statistics can add up every machine
+
+Update every computer whose page you look at; restart DSH there for the service to load. Other machines need nothing new.
+
+- Other plugins on this DSH can now reach the machines: a `dshLink` service lists them and sends a GET into a machine's DSH through its listener, signed in by that machine's own login, as its page is. Usage statistics 0.1.20 uses it to count every machine's usage in the header and the statistics window.
+
 ## 0.1.6 — ⌘R reloads the machine you are looking at
 
 Update the computer whose desktop window shows the other machines; reload the window once. Update the other machines too for the menu item.

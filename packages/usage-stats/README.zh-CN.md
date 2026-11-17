@@ -10,6 +10,10 @@
 
 月度热度图按周一到周日显示整月每日用量，支持上一月、下一月、回到本月，以及 Token/调用次数切换；悬停、聚焦或点击日期可查看精确值。色阶相对于所选月份的每日最大值计算，无调用日期为零，未来日期以禁用的虚线格区分。热度图跟随服务商、模型和会话筛选，但独立于上方时间范围；CSV 仍导出上方所选时间范围和分类。切换时间范围或刷新时保留上次报告并显示更新状态，失败时保留结果并提示重试；弹窗隐藏滚动条，仍可正常滚动。
 
+## 全部机器（配合互联）
+
+本机运行 [互联 / DSH Link](../link/README.zh-CN.md) 0.1.7 或更新版本时，标题栏标签和统计窗口统计互联能连到的全部机器：每台机器的 DSH 各自保存自己的记录，本机经互联（在你的 Tailscale 网络内，用那台机器自己的登录）向每台机器要它自己的统计，再相加。每一轮只由运行它的 DSH 记录，不会重复计入；其他机器只需装有互联和本插件，版本不限。标签的悬停提示列出每台机器的用量。统计窗口里，“更多筛选 → 机器”可只看一台机器；“数据来源”列出每台机器及是否计入；“按主机”把一台机器自己的 DSH 模型调用归到它的名字下；工作区行标出所在机器。机器睡眠或未响应时，若本机之前问到过同一查询，就沿用那次的结果并标出时间；否则不计入，标签标注 `*`。API 支持 `machines=all`、`machines=self` 或某台机器的 ID，返回的 `machines` 列出各机器；不带该参数时只答本机自己的记录，其他机器来问的就是这个。
+
 ## 构建与安装
 
 需要 Node.js ≥ 22.15.0，DSH `>=0.2.1-rc.2 <0.3.0`。
@@ -18,7 +22,7 @@
 corepack pnpm install --frozen-lockfile
 corepack pnpm --filter dsh-usage-stats check
 corepack pnpm --filter dsh-usage-stats pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.19.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-usage-stats-0.1.20.tgz"
 ```
 
 以上命令在仓库根目录执行。桌面端改用 `--profile desktop`，安装前完全退出 DSH，安装后重新打开；Web 端重启对应 profile 并刷新页面。远程智能体来源需安装 `dsh-remote-agents` 0.2.22 或更新版本。

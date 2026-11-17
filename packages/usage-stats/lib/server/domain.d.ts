@@ -48,6 +48,8 @@ export interface UsageGroup {
     key: string;
     label: string;
     totals: Totals;
+    /** All-machines reports: the machine whose DSH holds this workspace. */
+    machine?: string;
 }
 /** The dashboard's usage breakdowns: CLI or provider, workspace, model, model vendor and machine. */
 export type Dimension = 'provider' | 'workspace' | 'model' | 'vendor' | 'host';
@@ -70,6 +72,22 @@ export interface UsageReport {
     recordedSince?: string;
     failedWrites: number;
     generatedAt: string;
+    /** Reports over several machines (`machines=`): every machine DSH Link knows, and whether its usage is in the totals. */
+    machines?: MachineUsage[];
+}
+/**
+ * One machine of an all-machines report. `counted`: its usage is in the totals (`stale` when its last answer stood in
+ * for one that failed); `skipped`: not selected; `offline`: DSH Link cannot reach it; `failed`: it did not answer.
+ */
+export interface MachineUsage {
+    id: string;
+    name: string;
+    self?: true;
+    state: 'counted' | 'skipped' | 'offline' | 'failed';
+    error?: string;
+    stale?: true;
+    asOf?: string;
+    totals?: Totals;
 }
 /** Remote turns are named by their CLI, which merges a CLI's turns across machines; DSH providers keep their ID. */
 export declare function providerLabel(provider: string): string;
@@ -84,5 +102,22 @@ export type WorkspaceNames = (r: UsageRecord) => {
 export declare function validUsage(value: unknown): value is TokenUsage;
 export declare function validRecord(value: unknown): value is UsageRecord;
 export declare function parseQuery(url: URL): Query;
+/** A machine's own report (or why there is none) for {@link combine}. */
+export interface MachinePart {
+    id: string;
+    name: string;
+    self?: true;
+    state: MachineUsage['state'];
+    error?: string;
+    stale?: true;
+    asOf?: string;
+    report?: UsageReport;
+}
+/**
+ * Several machines' reports as one, each machine's DSH counting its own calls (a turn is recorded only by the DSH that
+ * ran it, so nothing is counted twice). By host, a machine's own DSH model calls ("This computer") go under its name;
+ * its workspaces stay apart from another machine's same folder and carry the machine's name.
+ */
+export declare function combine(parts: readonly MachinePart[], query: Query): UsageReport;
 export declare function report(records: readonly UsageRecord[], query: Query, failedWrites?: number, workspaces?: WorkspaceNames): UsageReport;
 export declare function toCsv(data: UsageReport): string;

@@ -129,6 +129,72 @@ export function parseQuery(url) {
     }
     return { from, to, groupBy: groupBy, source, provider: filter('provider'), model: filter('model'), sessionId: filter('sessionId'), ...(tzOffset ? { tzOffset } : {}) };
 }
+const largest = (map) => [...map.values()].sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || b.totals.requests - a.totals.requests || a.label.localeCompare(b.label));
+const byKey = (map) => [...map.values()].sort((a, b) => a.key.localeCompare(b.key));
+/** Detail rows of a non-category grouping: days newest first, sessions and sources largest first. */
+const detailOrder = (map, by) => [...map.values()].sort((a, b) => by === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label));
+function sum(into, from) { for (const key of Object.keys(into))
+    into[key] += Number.isFinite(from[key]) ? from[key] : 0; }
+/**
+ * Several machines' reports as one, each machine's DSH counting its own calls (a turn is recorded only by the DSH that
+ * ran it, so nothing is counted twice). By host, a machine's own DSH model calls ("This computer") go under its name;
+ * its workspaces stay apart from another machine's same folder and carry the machine's name.
+ */
+export function combine(parts, query) {
+    const totals = emptyTotals();
+    const merge = (map, group, key = group.key, label = group.label, machine) => {
+        let into = map.get(key);
+        if (!into) {
+            into = { key, label, totals: emptyTotals(), ...(machine ? { machine } : {}) };
+            map.set(key, into);
+        }
+        sum(into.totals, group.totals);
+    };
+    const breakdowns = Object.fromEntries(DIMENSIONS.map(by => [by, new Map()]));
+    const groups = new Map(), series = new Map(), sources = new Map();
+    const providers = new Set(), models = new Set(), sessions = new Set();
+    let recordedSince, failedWrites = 0;
+    const machines = [];
+    /** A group's key and label in the combined report, as {@link combine} describes. */
+    const place = (by, group, part) => {
+        if (by === 'host' && group.key === '')
+            return [part.name, part.name];
+        if (by !== 'workspace' || group.key === '')
+            return [group.key, group.label];
+        return [group.key.startsWith('workspace:') ? `workspace:${part.id}:${group.key.slice(10)}` : `${part.id}:${group.key}`, group.label, part.name];
+    };
+    for (const part of parts) {
+        const data = part.report;
+        machines.push({ id: part.id, name: part.name, ...(part.self ? { self: true } : {}), state: part.state, ...(part.error ? { error: part.error } : {}), ...(part.stale ? { stale: true } : {}), ...(part.asOf ? { asOf: part.asOf } : {}), ...(data ? { totals: data.totals } : {}) });
+        if (!data)
+            continue;
+        sum(totals, data.totals);
+        for (const by of DIMENSIONS)
+            for (const group of data.breakdowns?.[by] ?? [])
+                merge(breakdowns[by], group, ...place(by, group, part));
+        if (!isDimension(query.groupBy))
+            for (const group of data.groups ?? [])
+                merge(groups, group);
+        for (const group of data.series ?? [])
+            merge(series, group);
+        for (const group of data.sources ?? [])
+            merge(sources, group);
+        for (const value of data.filters?.providers ?? [])
+            providers.add(value);
+        for (const value of data.filters?.models ?? [])
+            models.add(value);
+        for (const value of data.filters?.sessions ?? [])
+            sessions.add(value);
+        if (data.recordedSince && (!recordedSince || data.recordedSince < recordedSince))
+            recordedSince = data.recordedSince;
+        failedWrites += data.failedWrites || 0;
+    }
+    const by = query.groupBy;
+    return { totals, groups: isDimension(by) ? largest(breakdowns[by]) : detailOrder(groups, by), series: byKey(series), sources: byKey(sources),
+        breakdowns: Object.fromEntries(DIMENSIONS.map(by => [by, largest(breakdowns[by])])),
+        filters: { providers: [...providers].sort(), models: [...models].sort(), sessions: [...sessions].sort() },
+        query, ...(recordedSince ? { recordedSince } : {}), failedWrites, generatedAt: new Date().toISOString(), machines };
+}
 export function report(records, query, failedWrites = 0, workspaces) {
     const totals = emptyTotals();
     const groups = new Map();
@@ -158,11 +224,10 @@ export function report(records, query, failedWrites = 0, workspaces) {
         for (const by of DIMENSIONS)
             accumulate(breakdowns[by], ...dimension(r, by, workspaces), r);
     }
-    const largest = (map) => [...map.values()].sort((a, b) => b.totals.totalTokens - a.totals.totalTokens || b.totals.requests - a.totals.requests || a.label.localeCompare(b.label));
     const by = query.groupBy;
-    return { totals, groups: isDimension(by) ? largest(breakdowns[by]) : [...groups.values()].sort((a, b) => by === 'day' ? b.key.localeCompare(a.key) : b.totals.totalTokens - a.totals.totalTokens || a.label.localeCompare(b.label)),
-        series: [...series.values()].sort((a, b) => a.key.localeCompare(b.key)),
-        sources: [...sources.values()].sort((a, b) => a.key.localeCompare(b.key)),
+    return { totals, groups: isDimension(by) ? largest(breakdowns[by]) : detailOrder(groups, by),
+        series: byKey(series),
+        sources: byKey(sources),
         breakdowns: Object.fromEntries(DIMENSIONS.map(by => [by, largest(breakdowns[by])])),
         filters: { providers: [...new Set(records.map(r => r.provider))].sort(), models: [...new Set(records.map(modelOf))].sort(), sessions: [...new Set(records.flatMap(r => r.sessionId ? [r.sessionId] : []))].sort() },
         query, recordedSince: records.reduce((first, r) => !first || r.startedAt < first ? r.startedAt : first, undefined), failedWrites, generatedAt: new Date().toISOString() };
