@@ -6,7 +6,7 @@ import { test, type TestContext } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { Context } from '@deepseek-ai/cordis';
 import { apply, type ModelFlowService } from '../src/index.js';
-import { attachmentNote, implementPrompt, planPrompt, reviewPrompt } from '../src/prompts.js';
+import { attachmentNote, implementPrompt, planPrompt, retryNote, reviewPrompt } from '../src/prompts.js';
 import { parseRow, type LiveCard } from '../src/shared.js';
 
 const attachments = [
@@ -33,9 +33,12 @@ async function until(predicate: () => boolean | Promise<boolean>): Promise<void>
 async function setup(t: TestContext, settings: {
   verdicts?: string[];
   info?: (model: string) => Promise<{ inputModalities?: readonly string[] }>;
-  pending?: boolean;
+  /** Steps that never end until stopped: all of them, or those whose label this picks at the time they start. */
+  pending?: boolean | ((label: string) => boolean);
   /** Boot again in an earlier setup's home, as DSH does after a restart. */
   home?: string;
+  /** Steps that end in an error, with this reason, picked by label when they start. */
+  fails?: (label: string) => string | undefined;
   /** Other plugins' services, by name. */
   services?: Record<string, unknown>;
   /** More of the saved settings. */
@@ -83,10 +86,12 @@ async function setup(t: TestContext, settings: {
       getProvider: (name: string) => (name === 'spawn' ? {} : undefined),
       async startActivation(spec: ActivationSpec) {
         calls.push(spec);
+        const failure = settings.fails?.(spec.label);
+        if (failure) return { childId: `child-${calls.length}`, result: Promise.resolve({ output: [], stopReason: 'error', diagnostic: failure }), async dispose() { disposed++; } };
         const text = spec.label.startsWith('flow · review') ? (settings.verdicts ?? ['FLOW_VERDICT: pass'])[reviews++] : `${spec.request.agentOptions.model} output`;
         return {
           childId: `child-${calls.length}`,
-          result: settings.pending ? new Promise<never>(() => {}) : Promise.resolve({ output: [{ type: 'text', text }], stopReason: 'completed' }),
+          result: (typeof settings.pending === 'function' ? settings.pending(spec.label) : settings.pending) ? new Promise<never>(() => {}) : Promise.resolve({ output: [{ type: 'text', text }], stopReason: 'completed' }),
           async dispose() { disposed++; },
         };
       },
@@ -365,4 +370,114 @@ test('the service refuses what /flow refuses, and its stop ends the flow', async
   run.stop();
   assert.equal((await run.done).end.kind, 'stopped');
   assert.equal(host.disposed(), 1);
+});
+
+/** The conversation's agent, as DSH hands it to a plugin that asks for it by id. */
+const conversations = { sessionController: { async resolveAgent(sessionId: string) { return sessionId === agent.id ? { agent } : { error: { message: 'gone' } }; } } };
+const cardOf = (text: string) => parseRow(text).card!;
+const stepsLine = (text: string) => cardOf(text).steps.map(step => `${step.role}${step.round} ${step.status}`);
+
+test('a stopped flow goes on from the step it stopped at, in a new card that carries the earlier steps', async t => {
+  let hang = true;
+  const host = await setup(t, { pending: label => hang && label === 'flow · implement 1', services: conversations });
+  await host.run(`${options} do it`);
+  await until(() => host.calls.length === 2);
+  assert.deepEqual(await host.post({ action: 'resumable', commandId: 'command-1' }), { resumable: false }, 'not while it runs');
+  assert.deepEqual(await host.post({ action: 'stop', commandId: 'command-1' }), { stopped: true });
+  await until(() => host.notes.length === 1);
+  assert.equal(cardOf(host.notes[0]).end?.kind, 'stopped');
+  assert.deepEqual(await host.post({ action: 'resumable', commandId: 'command-1' }), { resumable: true });
+
+  hang = false;
+  assert.deepEqual(await host.post({ action: 'resume', commandId: 'command-1' }), { ok: true });
+  await host.finished();
+  assert.deepEqual(host.calls.map(call => call.label), ['flow · plan', 'flow · implement 1', 'flow · implement 1', 'flow · review 1'], 'no second plan');
+  const again = host.calls[2].request.prompt[0].text!;
+  assert.ok(again.includes(retryNote), 'the implementer hears that an attempt was cut off');
+  assert.match(again, /planner output/);
+  assert.ok(!host.calls[1].request.prompt[0].text!.includes(retryNote));
+  assertAttachments(host.calls);
+  assert.deepEqual(stepsLine(host.notes[1]), ['plan0 done', 'implement1 stopped', 'implement1 done', 'review1 passed']);
+  assert.equal(cardOf(host.notes[1]).steps[0].childId, host.calls[0].childId, 'the plan still opens its own conversation');
+  assert.ok(cardOf(host.notes[1]).end!.ms >= cardOf(host.notes[0]).end!.ms, 'the time before counts in');
+
+  assert.deepEqual(await host.post({ action: 'resumable', commandId: 'command-1' }), { resumable: false, continued: true });
+  assert.deepEqual(await host.post({ action: 'resumable', commandId: 'command-2' }), { resumable: false }, 'a passed flow has nothing to go on with');
+  assert.match((await host.post({ action: 'resume', commandId: 'command-1' }) as { error: string }).error, /no longer go on/);
+});
+
+test('a flow cut off by DSH closing goes on after the restart with the plan it had', async t => {
+  const first = await setup(t, { pending: label => label === 'flow · implement 1' });
+  await first.run(`${options} do it`, []);
+  await until(() => first.calls.length === 2);
+  const flows = join(first.home, 'storages', 'dsh-model-flow', 'flows.json');
+  await until(async () => {
+    try {
+      const record = (JSON.parse(await readFile(flows, 'utf8')) as Record<string, { point?: { stage: string }; steps?: { childId?: string }[] }>)['command-1'];
+      return record?.point?.stage === 'implement' && record.steps?.[1]?.childId === first.calls[1].childId;
+    } catch { return false; }
+  });
+  // The first DSH is never told to stop, as when it is killed.
+  const again = await setup(t, { home: first.home, services: conversations });
+  assert.deepEqual(await again.post({ action: 'resumable', commandId: 'command-1' }), { resumable: true });
+  assert.deepEqual(await again.post({ action: 'resume', commandId: 'command-1' }), { ok: true });
+  await again.finished();
+  assert.deepEqual(again.calls.map(call => call.label), ['flow · implement 1', 'flow · review 1']);
+  assert.match(again.calls[0].request.prompt[0].text!, /planner output/);
+  assert.ok(again.calls[0].request.prompt[0].text!.includes(retryNote));
+  assert.deepEqual(stepsLine(again.notes[0]), ['plan0 done', 'implement1 stopped', 'implement1 done', 'review1 passed'], 'the step cut off by the restart reads as stopped');
+});
+
+test('a failed flow goes on from the step that failed', async t => {
+  let failing = true;
+  const host = await setup(t, { fails: label => failing && label === 'flow · review 1' ? 'quota' : undefined, services: conversations });
+  await host.run(`${options} do it`, []);
+  await until(() => host.notes.length === 1);
+  assert.equal(cardOf(host.notes[0]).end?.kind, 'failed');
+  assert.deepEqual(await host.post({ action: 'resumable', commandId: 'command-1' }), { resumable: true });
+  failing = false;
+  assert.deepEqual(await host.post({ action: 'resume', commandId: 'command-1' }), { ok: true });
+  await host.finished();
+  assert.deepEqual(host.calls.map(call => call.label), ['flow · plan', 'flow · implement 1', 'flow · review 1', 'flow · review 1']);
+  assert.match(host.calls[3].request.prompt[0].text!, /coder output/, 'the review reads what the implementer said');
+  assert.deepEqual(stepsLine(host.notes[1]), ['plan0 done', 'implement1 done', 'review1 failed', 'review1 passed']);
+});
+
+test('a newer flow in the conversation ends the chance to go on with an older one', async t => {
+  let hang = true;
+  const host = await setup(t, { pending: label => hang && label === 'flow · implement 1', services: conversations });
+  await host.run(`${options} do it`, []);
+  await until(() => host.calls.length === 2);
+  await host.post({ action: 'stop', commandId: 'command-1' });
+  await until(() => host.notes.length === 1);
+  assert.deepEqual(await host.post({ action: 'resumable', commandId: 'command-1' }), { resumable: true });
+  hang = false;
+  await host.run(`${options} something else`, []);
+  await host.finished();
+  assert.deepEqual(await host.post({ action: 'resumable', commandId: 'command-1' }), { resumable: false });
+  assert.match((await host.post({ action: 'resume', commandId: 'command-1' }) as { error: string }).error, /no longer go on/);
+});
+
+test('two clicks at once go on with a stopped flow once', async t => {
+  let hang = true;
+  const host = await setup(t, { pending: label => hang && label === 'flow · implement 1', services: conversations });
+  await host.run(`${options} do it`, []);
+  await until(() => host.calls.length === 2);
+  await host.post({ action: 'stop', commandId: 'command-1' });
+  await until(() => host.notes.length === 1);
+  hang = false;
+  const replies = await Promise.all([host.post({ action: 'resume', commandId: 'command-1' }), host.post({ action: 'resume', commandId: 'command-1' })]) as { ok?: true; error?: string }[];
+  assert.equal(replies.filter(reply => reply.ok).length, 1);
+  assert.match(replies.find(reply => reply.error)!.error!, /already going on|no longer go on/);
+  await host.finished();
+  assert.equal(host.calls.filter(call => call.label === 'flow · implement 1').length, 2);
+});
+
+test('a flow another plugin tagged is not offered to go on here', async t => {
+  const host = await setup(t, { pending: label => label === 'flow · implement 1', services: conversations });
+  const run = await host.service.start(host.agent, { goal: 'fix the bug', tag: 'autofix:1:manual:7' });
+  await until(() => host.calls.length === 2);
+  run.stop();
+  await run.done;
+  assert.deepEqual(await host.post({ action: 'resumable', commandId: 'command-1' }), { resumable: false });
 });

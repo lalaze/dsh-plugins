@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { Activity, lastLine } from '../src/activity.js';
-import { flowText, runFlow, type ChildRequest, type ChildResult, type FlowEnd } from '../src/engine.js';
+import { flowText, runFlow, type ChildRequest, type ChildResult, type FlowEnd, type FlowPoint } from '../src/engine.js';
 import { parseLine } from '../src/line.js';
-import { parseVerdict } from '../src/prompts.js';
+import { parseVerdict, retryNote } from '../src/prompts.js';
 import { relocate, resolveSpec, type CatalogModel, type Role, type Routes } from '../src/routes.js';
 import { cardWords, clock, parseRow, rowText, type CardState } from '../src/shared.js';
 import { ReportStore } from '../src/store.js';
@@ -16,12 +16,14 @@ const routes: Routes = { plan: route('planner'), implement: route('coder'), revi
 const done = (text: string): ChildResult => ({ text, stopReason: 'completed' });
 
 /** Runs the flow against scripted model replies and records the order of the steps. */
-async function play(script: ((request: ChildRequest) => ChildResult | Promise<ChildResult>), input: Partial<Parameters<typeof runFlow>[0]> = {}) {
-  const calls: ChildRequest[] = [], ends: FlowEnd[] = [], reports: string[] = [], rows: { role: Role; round: number; model: string; closed?: { status: string; body?: string } }[] = [];
+async function play(script: ((request: ChildRequest) => ChildResult | Promise<ChildResult>), input: Partial<Parameters<typeof runFlow>[0]> = {}, now?: () => number) {
+  const calls: ChildRequest[] = [], ends: FlowEnd[] = [], reports: string[] = [], points: FlowPoint[] = [], rows: { role: Role; round: number; model: string; closed?: { status: string; body?: string } }[] = [];
   const outcome = await runFlow({ goal: 'add csv', routes, rounds: 3, signal: new AbortController().signal, ...input }, {
     run: async request => { calls.push(request); return script(request); },
     finish: async end => { ends.push(end); },
     report: text => { reports.push(text); },
+    reached: point => { points.push(point); },
+    ...(now ? { now } : {}),
     openRow: ({ role, round, route }) => {
       const row: (typeof rows)[number] = { role, round, model: route.label };
       rows.push(row);
@@ -29,7 +31,7 @@ async function play(script: ((request: ChildRequest) => ChildResult | Promise<Ch
     },
   });
   assert.equal(ends.length, 1, 'a flow ends exactly once');
-  return { outcome, calls, ends, end: ends[0], rows, reports, order: calls.map(call => `${call.role}${call.round || ''}`) };
+  return { outcome, calls, ends, end: ends[0], rows, reports, points, order: calls.map(call => `${call.role}${call.round || ''}`) };
 }
 const reviewing = (verdicts: string[]) => {
   let index = 0;
@@ -336,4 +338,44 @@ test('a flow result waits for the next message across restarts, and is told once
     assert.equal(again.take('s1'), undefined, 'told once, even after another restart');
     await again.flush();
   } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
+test('before each step the flow says where it would go on from, with what that step builds on', async t => {
+  const { points } = await play(reviewing(['no header\nFLOW_VERDICT: needs_revision', 'FLOW_VERDICT: pass']));
+  assert.deepEqual(points.map(point => `${point.stage}${point.round}`), ['plan0', 'implement1', 'review1', 'implement2', 'review2']);
+  assert.deepEqual(points[0], { stage: 'plan', round: 0 });
+  assert.deepEqual(points[1], { stage: 'implement', round: 1, plan: 'plan output' });
+  assert.deepEqual(points[2], { stage: 'review', round: 1, plan: 'plan output', summary: 'implement output', built: 'implement output' });
+  assert.deepEqual(points[3], { stage: 'implement', round: 2, plan: 'plan output', summary: 'implement output', findings: 'no header', built: 'implement output', reviewed: 'no header' });
+  t.diagnostic('a review asked again for its verdict goes on from the same review');
+  const again = await play(reviewing(['looks fine', 'FLOW_VERDICT: pass']));
+  assert.deepEqual(again.points.map(point => `${point.stage}${point.round}`), ['plan0', 'implement1', 'review1']);
+});
+
+test('a flow goes on from an implementation with the plan and findings it had, and is told about the cut-off attempt', async () => {
+  const from = { stage: 'implement' as const, round: 2, plan: 'the plan', summary: 'round one work', findings: 'no header', built: 'round one work', reviewed: 'no header', retry: true };
+  const { outcome, order, calls } = await play(reviewing(['still no header\nFLOW_VERDICT: needs_revision', 'FLOW_VERDICT: pass']), { from });
+  assert.deepEqual(outcome, { status: 'passed', round: 3 });
+  assert.deepEqual(order, ['implement2', 'review2', 'implement3', 'review3'], 'no plan again, and the round goes on where it was');
+  assert.ok(calls[0].prompt.includes(retryNote));
+  assert.match(calls[0].prompt, /the plan[\s\S]*no header[\s\S]*round one work/);
+  assert.match(calls[1].prompt, /This is a re-review/);
+  assert.ok(!calls[2].prompt.includes(retryNote), 'only the step that was cut off hears about it');
+  assert.match(calls[2].prompt, /still no header/);
+});
+
+test('a flow goes on from a review without implementing that round again', async () => {
+  const from = { stage: 'review' as const, round: 1, plan: 'the plan', summary: 'csv added', built: 'csv added', retry: true };
+  const { outcome, order, calls, end } = await play(reviewing(['ok\nFLOW_VERDICT: pass']), { from });
+  assert.deepEqual(outcome, { status: 'passed', round: 1 });
+  assert.deepEqual(order, ['review1']);
+  assert.match(calls[0].prompt, /csv added/);
+  assert.match((end as { report?: string }).report!, /csv added/);
+});
+
+test('a flow that stopped in its plan plans again, and the time it took before counts in', async () => {
+  let clock = 1000;
+  const { order, end } = await play(request => { clock += 10; return reviewing(['FLOW_VERDICT: pass'])(request); }, { from: { stage: 'plan', round: 0 }, spent: 5000 }, () => clock);
+  assert.deepEqual(order, ['plan', 'implement1', 'review1']);
+  assert.equal(end.ms, 5030);
 });

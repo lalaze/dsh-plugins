@@ -18,6 +18,13 @@ export interface FlowView {
   /** Ends the flow; absent when it cannot be ended from this card. */
   stop?(): void;
   stopping?: boolean;
+  /** Goes on with a flow that stopped, from the step it stopped at, in a new card; absent when it cannot. */
+  resume?(): void;
+  resuming?: boolean;
+  /** Why going on did not work. */
+  resumeError?: string;
+  /** The flow already went on, in a later card. */
+  continued?: boolean;
   /** A finished step's full result, for a card that does not carry it. */
   stepBody?(index: number): Promise<string | null>;
   /** False where the steps' own conversations cannot be opened, as for a flow another DSH runs. */

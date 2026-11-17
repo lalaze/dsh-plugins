@@ -20,6 +20,10 @@ export interface SettingsHost {
   stepBody(commandId: string, index: number): string | undefined;
   /** Stop the flow a running card belongs to. False when that card is not running in this DSH. */
   stop(commandId: string): boolean;
+  /** Whether a card's flow can go on from where it stopped, or already has in a later card. */
+  resumable(commandId: string): { resumable: boolean; continued?: true };
+  /** Go on with that flow in its conversation, in a new card. */
+  resume(commandId: string): Promise<{ ok: true } | { error: string }>;
 }
 export function createHandler(store: FlowStore, host: SettingsHost) {
   return async (request: Request): Promise<Response> => {
@@ -33,6 +37,8 @@ export function createHandler(store: FlowStore, host: SettingsHost) {
       if (input.action === 'card' && typeof input.commandId === 'string') return Response.json(host.card(input.commandId), { headers });
       if (input.action === 'stepBody' && typeof input.commandId === 'string' && Number.isSafeInteger(input.index)) return Response.json({ body: host.stepBody(input.commandId, input.index as number) ?? null }, { headers });
       if (input.action === 'stop' && typeof input.commandId === 'string') return Response.json({ stopped: host.stop(input.commandId) }, { headers });
+      if (input.action === 'resumable' && typeof input.commandId === 'string') return Response.json(host.resumable(input.commandId), { headers });
+      if (input.action === 'resume' && typeof input.commandId === 'string') return Response.json(await host.resume(input.commandId), { headers });
       if (input.action === 'locale') { host.setLocale(input.locale === 'zh' ? 'zh' : 'en'); return Response.json({}, { headers }); }
       if (input.action === 'save') {
         await store.save(configFrom(input.config));
