@@ -12,12 +12,9 @@ export const CSS = `
 .dl-trigger-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-badge{flex:none;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-state-warning-primary,#b7791f);color:#fff;font-size:10.5px;line-height:16px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums}
 .dl-trigger:not([data-wide]) .dl-badge{position:absolute;top:-2px;right:-4px}
-.dl-row{display:flex;flex-direction:column;min-width:0;max-width:260px}
+.dl-row{display:flex;flex-direction:column;gap:2px;min-width:0;max-width:260px}
 .dl-row-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dl-row-meta{color:${tertiary};font-size:11.5px;line-height:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dl-actions{display:flex;gap:2px;padding:2px 4px 0}
-.dl-action{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:${secondary};cursor:pointer}
-.dl-action:hover,.dl-action:focus-visible{background:${hover};color:var(--dsw-alias-label-primary,inherit);outline:none}
+.dl-row-meta{color:var(--dsw-alias-label-caption,${tertiary});font-size:12px;line-height:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-muted{color:${tertiary};font-size:12px;line-height:18px}
 .dl-error{color:${error};font-size:12px;line-height:18px;overflow-wrap:anywhere}
 .dl-nowrap{white-space:nowrap;flex:none}
