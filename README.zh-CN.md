@@ -17,7 +17,7 @@
 | `dsh-file-editor` | [packages/file-editor](packages/file-editor/README.zh-CN.md) | 用 VS Code 的编辑器（Monaco）编辑本地工作区的代码和文本文件，并预览 Markdown 与 SVG |
 | `dsh-git-view` | [packages/git-view](packages/git-view/README.zh-CN.md) | 移植自 dsh-git-panel 的 IDE 风格 Git 面板（分支树与提交图总览、提交与 Amend、文件浏览、AI 生成提交信息、输入框标记），适用于本地与远程工作区，并提供 Monaco 差异与冲突处理；远程功能需搭配 Remote Agents 0.2.62 或更新版本 |
 | `dsh-workspace-tags` | [packages/workspace-tags](packages/workspace-tags/README.zh-CN.md) | 为工作区添加彩色标签，侧栏可按标签或运行状态分组 |
-| `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出 |
+| `dsh-usage-stats` | [packages/usage-stats](packages/usage-stats/README.zh-CN.md) | 统计 DSH 模型与远程 CLI 的 Token 用量，可合计互联的全部机器，支持筛选、分组和 CSV 导出 |
 | `dsh-gallery` | [packages/gallery](packages/gallery/README.zh-CN.md) | 图库与 DSH 背景：Bing 每日壁纸、本地上传、固定壁纸、大图预览和背景效果调节 |
 | `dsh-game-assets` | [packages/game-assets](packages/game-assets/README.zh-CN.md) | 游戏项目的素材标签页：浏览工作区里的 2D 素材，查看哪些图片代码还在用、每组素材哪个版本在生效，并可退役、打标签、用 Codex 或自选的生图接口（OpenAI 兼容或 Gemini）重绘并保留历史版本可回退，项目里的 agent 也能调用，或交给智能体处理 |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Chrome 风格元素、控制台和网络调试器，在 Chrome/Edge 独立窗口中打开 |
