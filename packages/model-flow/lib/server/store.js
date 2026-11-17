@@ -94,3 +94,18 @@ export class ReportStore extends JsonMap {
 export class CardStore extends JsonMap {
     constructor(file) { super(file, 50); }
 }
+/** Kept only while a flow runs or can still go on: one that passed, or was taken further, leaves little or nothing. */
+export class FlowRecords extends JsonMap {
+    constructor(file) { super(file, 30); }
+    /** Every flow of a conversation but `keep`: a newer flow there makes going on with an older one pointless. */
+    dropConversation(parentId, keep) {
+        let changed = false;
+        for (const [key, record] of this.entries)
+            if (record.parentId === parentId && key !== keep && !record.continued) {
+                this.entries.delete(key);
+                changed = true;
+            }
+        if (changed)
+            this.persist();
+    }
+}

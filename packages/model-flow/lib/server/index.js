@@ -8,7 +8,7 @@ import { DEFAULT_ROUNDS, MAX_ROUNDS, parseLine, USAGE } from './line.js';
 import { attachmentNote } from './prompts.js';
 import { machineOf, machinesFor, misplaced, nameParts, OFF, resolveSpec, settle } from './routes.js';
 import { cut, MARK, MAX_STEP_BODY, rowText } from './shared.js';
-import { CardStore, FlowStore, ReportStore } from './store.js';
+import { CardStore, FlowRecords, FlowStore, ReportStore } from './store.js';
 export const name = 'dsh-model-flow';
 export const inject = ['connection', 'commands', 'subagents', 'llm'];
 const COMMAND = 'flow';
@@ -39,6 +39,10 @@ export async function apply(ctx) {
     const failures = new Map();
     const saved = new CardStore(join(stateDir(), 'cards.json'));
     await saved.open();
+    const records = new FlowRecords(join(stateDir(), 'flows.json'));
+    await records.open();
+    /** Cards whose flow is being taken further right now, so a second click does not start it twice. */
+    const resuming = new Set();
     // Rows in the chat are command results: the one way to add to a conversation without a model turn. Only this process knows the mark.
     const cardMark = `${MARK}${randomUUID()}`;
     const cards = new Map(), cardByCommand = new Map(), stepByChild = new Map();
@@ -110,6 +114,14 @@ export async function apply(ctx) {
                 card.controller.abort();
                 return true;
             },
+            resumable: commandId => {
+                const record = records.get(commandId);
+                if (record?.continued)
+                    return { resumable: false, continued: true };
+                const live = cardByCommand.get(commandId);
+                return { resumable: !!record?.point && !(live && !live.state.end) };
+            },
+            resume,
         }) });
     // Runs before the child's first turn and is durable in its log, so a child reopened later stays read-only.
     ctx.on('agent/created', ({ agent }) => {
@@ -231,13 +243,39 @@ export async function apply(ctx) {
             throw new Error(refusal);
         return routes;
     }
-    function start(agent, goal, routes, rounds, attachments, tag) {
-        const controller = new AbortController(), startedAt = Date.now();
+    function start(agent, goal, routes, rounds, attachments, tag, carry) {
+        const controller = new AbortController(), startedAt = Date.now() - (carry?.ms ?? 0);
         let resolveDone = () => undefined;
         const done = new Promise(resolve => { resolveDone = resolve; });
         running.set(agent.id, { controller, routes, goal, startedAt });
+        // Going on with an older flow of this conversation after this one would build on work this one may change.
+        records.dropConversation(agent.id, carry?.from);
+        if (carry)
+            records.put(carry.from, { parentId: agent.id, continued: true });
         let settle = () => undefined;
-        const card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, planned: !!routes.plan, steps: [], ...(tag ? { tag } : {}) }, done: new Promise(resolve => { settle = resolve; }) };
+        // The steps an earlier card got through stay in this one, so the card tells the whole story; a step cut off there reads as stopped.
+        const carried = (carry?.steps ?? []).map((step) => ({ ...step, status: step.status === 'running' ? 'stopped' : step.status, startedAt: 0, activity: new Activity() }));
+        let point;
+        const remember = () => {
+            const commandId = card.commandId;
+            if (!commandId || tag)
+                return;
+            const end = card.state.end;
+            // A flow that reached its end, passed or not, has nothing to go on with.
+            if (end && (end.kind === 'passed' || end.kind === 'rejected')) {
+                records.delete(commandId);
+                return;
+            }
+            if (records.get(commandId)?.continued)
+                return;
+            const record = {
+                parentId: agent.id, goal, routes, rounds, attachments: [...attachments], ...(point ? { point } : {}),
+                steps: stepsOf(card, MAX_STEP_BODY).map(step => step.status === 'running' ? { ...step, ms: undefined } : step),
+                ms: end ? end.ms : Date.now() - startedAt, ...(end ? { end } : {}),
+            };
+            records.put(commandId, record);
+        };
+        const card = { id: randomUUID(), startedAt, controller, state: { parentId: agent.id, zh: hasCjk(goal), rounds, planned: !!routes.plan, steps: carried, ...(tag ? { tag } : {}) }, done: new Promise(resolve => { settle = resolve; }), remember };
         cards.set(card.id, card);
         const persist = () => { if (card.commandId && !card.state.end)
             saved.put(card.commandId, snapshot(card)); };
@@ -246,8 +284,9 @@ export async function apply(ctx) {
             const step = { role, round, model: names.name, ...(names.machine ? { machine: names.machine } : {}), status: 'running', startedAt: Date.now(), activity: new Activity() };
             card.state.steps.push(step);
             persist();
+            remember();
             return {
-                attach(childId) { step.childId = childId; stepByChild.set(childId, step); persist(); },
+                attach(childId) { step.childId = childId; stepByChild.set(childId, step); persist(); remember(); },
                 async close({ status, body }) {
                     step.status = status;
                     step.ms = Date.now() - step.startedAt;
@@ -260,6 +299,7 @@ export async function apply(ctx) {
                     if (step.childId)
                         stepByChild.delete(step.childId);
                     persist();
+                    remember();
                 },
             };
         };
@@ -269,6 +309,7 @@ export async function apply(ctx) {
                 return;
             ended = true;
             card.state.end = end;
+            remember();
             const { parentId, zh, planned } = card.state;
             settle({ kind: end.kind === 'failed' || end.kind === 'noVerdict' ? 'error' : 'success', text: rowText({ title: flowText(goal).ended(end), ...(report ? { body: report } : {}), card: { parentId, zh, rounds, planned, ...(tag ? { tag } : {}), steps: stepsOf(card, MAX_STEP_BODY), end } }) });
             resolveDone({ end, ...(report ? { report } : {}), steps: stepsOf(card, MAX_STEP_BODY) });
@@ -289,7 +330,11 @@ export async function apply(ctx) {
         setTimeout(() => {
             executed = host.commands.execute(agent, `/${COMMAND} ${cardMark}${card.id}`, [], new AbortController().signal)
                 .catch(error => { ctx.logger?.warn?.(`model flow: could not add the card: ${String(error)}`); });
-            void runFlow({ goal, routes, rounds, signal: controller.signal }, { run: runChild(agent, attachments), openRow, finish, report: text => reports.put(agent.id, text) })
+            void runFlow({ goal, routes, rounds, signal: controller.signal, ...(carry ? { from: carry.point, spent: carry.ms } : {}) }, {
+                run: runChild(agent, attachments), openRow, finish, report: text => reports.put(agent.id, text),
+                // Saved with the step that follows, which opens right after this.
+                reached: next => { point = next; },
+            })
                 .catch(error => finish({ kind: 'failed', role: card.state.steps.at(-1)?.role ?? 'plan', reason: error instanceof Error ? error.message : String(error), ms: Date.now() - startedAt }))
                 // Whatever happened, the card must not stay running.
                 .finally(() => { running.delete(agent.id); void finish({ kind: 'stopped', ms: Date.now() - startedAt }); });
@@ -297,6 +342,7 @@ export async function apply(ctx) {
         return { done, stop: () => controller.abort(), progress: () => view(card), stepBody: index => card.state.steps[index]?.body };
     }
     /** The checks and choices a flow starts with, whoever asks for it. Throws what the chat should say. */
+    /** `routes` and `carry` take a flow further with the models it ran with, from where it stopped. */
     async function begin(agent, input) {
         const { attachments } = input;
         if (running.has(agent.id))
@@ -311,7 +357,7 @@ export async function apply(ctx) {
         catch { /* A custom permission has no preset to read; the implementer reports what it could not do. */ }
         if (readOnlyParent)
             throw new Error(say('This conversation is read-only, so the implementing model could not change files. Switch it to Workspace Write first.', '这个对话是只读权限，实现模型改不了文件。请先切换到 Workspace Write。', input.goal));
-        const routes = await chooseRoutes(agent, input.overrides, input.goal), rounds = input.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
+        const routes = input.routes ?? await chooseRoutes(agent, input.overrides, input.goal), rounds = input.rounds ?? store.config.rounds ?? DEFAULT_ROUNDS;
         const goal = input.goal || say('Do what the attached images and files ask.', '按附件里的图片和文件的要求来做。');
         if (attachments.some(block => block.type === 'image')) {
             for (const role of ['plan', 'implement', 'review']) {
@@ -332,7 +378,40 @@ export async function apply(ctx) {
         // Another flow may have started here while the models were being looked up.
         if (running.has(agent.id))
             throw new Error(say(`A flow is already running here. /${COMMAND} stop ends it.`, `这个对话里已有流程在运行。/${COMMAND} stop 可以结束它。`, goal));
-        return { run: start(agent, goal, routes, rounds, attachments, input.tag), goal, routes, rounds };
+        return { run: start(agent, goal, routes, rounds, attachments, input.tag, input.carry), goal, routes, rounds };
+    }
+    /** Goes on with a flow that stopped, failed or was cut off by DSH closing, from the step where that happened. */
+    async function resume(commandId) {
+        const record = records.get(commandId), live = cardByCommand.get(commandId);
+        const text = record?.goal ?? '';
+        if (!record || record.continued || !record.point || !record.goal || !record.routes || !record.rounds || (live && !live.state.end)) {
+            return { error: say('This flow can no longer go on from here.', '这个流程已经不能从这里继续了。', text) };
+        }
+        if (resuming.has(commandId))
+            return { error: say('It is already going on.', '已经在继续了。', text) };
+        resuming.add(commandId);
+        try {
+            const controller = ctx.get('sessionController');
+            if (typeof controller?.resolveAgent !== 'function')
+                return { error: say('This DSH cannot reopen the conversation.', '这个 DSH 无法重新打开这个对话。', text) };
+            const resolved = await controller.resolveAgent(record.parentId);
+            if ('error' in resolved)
+                return { error: say(`The conversation could not be opened: ${resolved.error.message ?? resolved.error.code ?? 'unknown reason'}`, `无法打开这个对话：${resolved.error.message ?? resolved.error.code ?? '原因不明'}`, text) };
+            const steps = record.steps ?? [], last = steps.at(-1);
+            // An implementer cut off part way may have left half its work in the tree; the one doing it again should know.
+            const retry = record.point.stage === 'implement' && last?.role === 'implement' && last.round === record.point.round && last.status !== 'done';
+            await begin(resolved.agent, {
+                goal: record.goal, rounds: record.rounds, overrides: {}, attachments: (record.attachments ?? []), routes: record.routes,
+                carry: { from: commandId, point: { ...record.point, ...(retry ? { retry } : {}) }, steps, ms: record.ms ?? 0 },
+            });
+            return { ok: true };
+        }
+        catch (error) {
+            return { error: error instanceof Error ? error.message : String(error) };
+        }
+        finally {
+            resuming.delete(commandId);
+        }
     }
     const titleFor = async (agent, goal) => {
         if (agent.session.deriveMessages?.().length)
@@ -355,6 +434,7 @@ export async function apply(ctx) {
                 card.commandId = commandId;
                 cardByCommand.set(commandId, card);
                 saved.put(commandId, snapshot(card));
+                card.remember();
                 return card.done;
             }
             if (commandId)

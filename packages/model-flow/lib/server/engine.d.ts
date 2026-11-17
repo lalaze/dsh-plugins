@@ -40,13 +40,37 @@ export interface FlowHost {
     finish?(end: FlowEnd): Promise<void>;
     /** What happened, for the conversation's own model: it took no part, and the next message may well be about it. */
     report?(text: string): void;
+    /** Before each step: where to go on from if the flow stops during it. */
+    reached?(point: FlowPoint): void;
     now?(): number;
 }
+/**
+ * Where a flow stands before one of its steps: enough for a new run to go on from there. `summary` is the implementer's
+ * reply the step builds on (the round before for an implementation, this round's for a review), `findings` the last
+ * review's; `built` and `reviewed` are what the report would say so far.
+ */
+export interface FlowPoint {
+    stage: Role;
+    round: number;
+    plan?: string;
+    summary?: string;
+    findings?: string;
+    built?: string;
+    reviewed?: string;
+}
+/**
+ * `from` goes on from a point another run reached, skipping what was done; `retry` says the step there was cut off, so
+ * the implementer may find half its work in the tree. `spent` is how long the earlier runs took, which the end counts in.
+ */
 export interface FlowInput {
     goal: string;
     routes: Routes;
     rounds: number;
     signal: AbortSignal;
+    from?: FlowPoint & {
+        retry?: boolean;
+    };
+    spent?: number;
 }
 export type FlowOutcome = {
     status: 'passed';

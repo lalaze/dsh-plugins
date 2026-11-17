@@ -21,5 +21,16 @@ export interface SettingsHost {
     stepBody(commandId: string, index: number): string | undefined;
     /** Stop the flow a running card belongs to. False when that card is not running in this DSH. */
     stop(commandId: string): boolean;
+    /** Whether a card's flow can go on from where it stopped, or already has in a later card. */
+    resumable(commandId: string): {
+        resumable: boolean;
+        continued?: true;
+    };
+    /** Go on with that flow in its conversation, in a new card. */
+    resume(commandId: string): Promise<{
+        ok: true;
+    } | {
+        error: string;
+    }>;
 }
 export declare function createHandler(store: FlowStore, host: SettingsHost): (request: Request) => Promise<Response>;

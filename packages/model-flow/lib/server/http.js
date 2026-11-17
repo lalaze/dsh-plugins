@@ -21,6 +21,10 @@ export function createHandler(store, host) {
                 return Response.json({ body: host.stepBody(input.commandId, input.index) ?? null }, { headers });
             if (input.action === 'stop' && typeof input.commandId === 'string')
                 return Response.json({ stopped: host.stop(input.commandId) }, { headers });
+            if (input.action === 'resumable' && typeof input.commandId === 'string')
+                return Response.json(host.resumable(input.commandId), { headers });
+            if (input.action === 'resume' && typeof input.commandId === 'string')
+                return Response.json(await host.resume(input.commandId), { headers });
             if (input.action === 'locale') {
                 host.setLocale(input.locale === 'zh' ? 'zh' : 'en');
                 return Response.json({}, { headers });

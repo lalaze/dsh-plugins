@@ -2,12 +2,16 @@
 export declare const VERDICT_MARK = "FLOW_VERDICT";
 export declare const attachmentNote = "The images and files attached to this message are part of the goal; use them in this step.";
 export declare const planPrompt: (goal: string) => string;
+/** Told to an implementer whose step was stopped once, by a person or a failure, and is now done again. */
+export declare const retryNote = "An earlier attempt at this step was stopped before it finished, so the working tree may already hold part of its changes. Look at them first (git status, git diff), keep what is right, and finish the work from there: do not start over.";
+/** `retry`: an earlier attempt at this same step was cut off, and may have left part of its work in the tree. */
 export declare const implementPrompt: (input: {
     goal: string;
     plan?: string;
     round: number;
     findings?: string;
     lastSummary?: string;
+    retry?: boolean;
 }) => string;
 export declare const reviewPrompt: (input: {
     goal: string;

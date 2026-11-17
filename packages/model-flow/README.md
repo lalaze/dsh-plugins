@@ -32,6 +32,12 @@ Or change the models for one run:
 
 A flow is one card in the conversation. While it runs, the card says what is happening, how long it has taken, and has **Stop**; a progress bar covers every step the flow can still take (the plan, then each round's implementation and review); and a timeline lists the steps with their model and time, the latest thing the running step is doing, and the first line of what a review sent back. When it ends, the card shows the outcome (passed in which round, sent back how often, or why it stopped), the steps fold away, and the report is part of the card: what was built and what the review found. Show the steps again from the card, click a step for its whole result, and **Open** to read that step's conversation beside the chat. Passed is green, sent back orange, failed red.
 
+## Continuing a flow that stopped
+
+A card that was stopped, whose step failed, whose review gave no verdict, or that DSH closing cut off has **Continue from here**. It goes on in the same conversation, in a new card that keeps the earlier steps: the plan is not made again, and the round goes on from the step it stopped at, with the same models, rounds and attachments and the review findings it had. An implementation done again is told that the earlier attempt was stopped and may have left part of its changes in the working tree, so it builds on them instead of starting over. The earlier card then says **Continued below**, and the new card's time counts in the time before.
+
+Only the newest flow of a conversation can go on: starting another flow there takes the button away from the older ones. Flows another plugin starts, such as Autofix tasks, go on as that plugin decides. To go on with other models, start a new `/flow` instead.
+
 Attach images and files to `/flow`, with or without a written goal. Every step receives the attachments, including later rounds and a review asked again for its missing verdict. If any selected model declares that it does not support images, a flow with images will not start.
 
 ## In a worktree of its own
@@ -65,7 +71,7 @@ A review with no verdict is asked once more. If there is still none the flow sto
 
 - Each implementation and review round is a new session. It picks up from the prompt and the changes in the working tree, not the previous round's conversation.
 - The flow does not run inside the conversation's model. That model hears how the flow ended with your next message, so "release it" means something to it.
-- A flow does not continue after DSH restarts. Its card then says so, with the steps it got through.
+- A flow does not go on by itself after DSH restarts. Its card says so, with the steps it got through, and **Continue from here** takes it further.
 - Read-only is enforced by DSH's sandbox. A Codex reviewer can run tests; a Claude Code reviewer can read code and git state, but its test commands are refused.
 - With remote Claude Code or Codex, planning and review can search the web, and Claude Code can read pages too, so a model may send workspace content out in a search query or URL.
 - Stopping interrupts the step's model at once, and the commands it started in that step end too. The exception is Codex 0.164's workspace sandbox on Linux, where a command runs on to its end.
