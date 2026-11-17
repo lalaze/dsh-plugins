@@ -1,6 +1,6 @@
 {
   "name": "dsh-link",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "Open the full DSH of your other machines on the tailnet from the sidebar, see their waiting approvals and finished turns, and restart them remotely",
   "type": "module",
   "icon": "icon.svg",

@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.10 — A shorter machine menu, one line per machine
+
+Update every computer; no restart needed, reload the page once.
+
+- The machine menu is shorter: one line per machine, with a short note at the end only when there is something to say (This computer, 1 running, Unreachable, Offline); "Ready" is no longer written under every machine, the green dot says it. The heading over Reload page / Restart DSH… is gone; they act on the checked machine.
+
 ## 0.1.9 — The machine menu looks like DSH's own menus
 
 Update every computer; no restart needed, reload the page once.
