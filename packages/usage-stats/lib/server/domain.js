@@ -136,11 +136,28 @@ const detailOrder = (map, by) => [...map.values()].sort((a, b) => by === 'day' ?
 function sum(into, from) { for (const key of Object.keys(into))
     into[key] += Number.isFinite(from[key]) ? from[key] : 0; }
 /**
+ * Takes out records another machine also has. Machines go by name, so every machine keeps the same copy: the first
+ * machine by name that has a record keeps it. A machine whose records are not known (`shares` missing) keeps all.
+ */
+export function withoutCopies(parts, query) {
+    const order = [...parts].filter(part => part.report && part.shares).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const seen = new Set(), removed = new Map();
+    for (const part of order) {
+        const copies = part.shares.filter(share => seen.has(share.f));
+        for (const share of part.shares)
+            seen.add(share.f);
+        if (copies.length)
+            removed.set(part, copies);
+    }
+    return parts.map(part => removed.has(part) ? { ...part, report: subtract(part.report, removed.get(part), query), copies: removed.get(part).length } : part);
+}
+/**
  * Several machines' reports as one, each machine's DSH counting its own calls (a turn is recorded only by the DSH that
  * ran it, so nothing is counted twice). By host, a machine's own DSH model calls ("This computer") go under its name;
  * its workspaces stay apart from another machine's same folder and carry the machine's name.
  */
-export function combine(parts, query) {
+export function combine(all, query) {
+    const parts = withoutCopies(all, query);
     const totals = emptyTotals();
     const merge = (map, group, key = group.key, label = group.label, machine) => {
         let into = map.get(key);
@@ -165,7 +182,7 @@ export function combine(parts, query) {
     };
     for (const part of parts) {
         const data = part.report;
-        machines.push({ id: part.id, name: part.name, ...(part.self ? { self: true } : {}), state: part.state, ...(part.error ? { error: part.error } : {}), ...(part.stale ? { stale: true } : {}), ...(part.asOf ? { asOf: part.asOf } : {}), ...(data ? { totals: data.totals } : {}) });
+        machines.push({ id: part.id, name: part.name, ...(part.self ? { self: true } : {}), state: part.state, ...(part.error ? { error: part.error } : {}), ...(part.stale ? { stale: true } : {}), ...(part.asOf ? { asOf: part.asOf } : {}), ...(part.copies ? { copies: part.copies } : {}), ...(data ? { totals: data.totals } : {}) });
         if (!data)
             continue;
         sum(totals, data.totals);
@@ -195,6 +212,54 @@ export function combine(parts, query) {
         filters: { providers: [...providers].sort(), models: [...models].sort(), sessions: [...sessions].sort() },
         query, ...(recordedSince ? { recordedSince } : {}), failedWrites, generatedAt: new Date().toISOString(), machines };
 }
+/** A record's date in the query's time zone. */
+const dayOf = (r, query) => query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
+const matches = (r, query, day = dayOf(r, query)) => !((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source));
+/** What makes two machines' records the same turn. */
+export const fingerprint = (r) => [r.sessionId ?? '', r.startedAt, r.provider, r.model, r.status, ...counters.map(key => r.usage?.[key] ?? '')].join('|');
+/** The query's records of the given conversations. */
+export function shares(records, query, sessions, workspaces) {
+    const out = [];
+    for (const r of records) {
+        if (!r.sessionId || !sessions.has(r.sessionId))
+            continue;
+        const day = dayOf(r, query);
+        if (!matches(r, query, day))
+            continue;
+        const totals = emptyTotals();
+        add(totals, r);
+        out.push({ f: fingerprint(r), day, source: sourceOf(r.provider), session: r.sessionId, keys: Object.fromEntries(DIMENSIONS.map(by => [by, dimension(r, by, workspaces)[0]])), totals });
+    }
+    return out;
+}
+/** A machine's report without the given records. */
+export function subtract(data, removed, query) {
+    const out = JSON.parse(JSON.stringify(data));
+    const take = (list, key, share) => {
+        const group = list?.find(g => g.key === key);
+        if (group)
+            for (const name of Object.keys(group.totals))
+                group.totals[name] -= share.totals[name] ?? 0;
+    };
+    for (const share of removed) {
+        for (const name of Object.keys(out.totals))
+            out.totals[name] -= share.totals[name] ?? 0;
+        for (const by of DIMENSIONS)
+            take(out.breakdowns?.[by], share.keys[by], share);
+        take(out.series, share.day, share);
+        take(out.sources, share.source, share);
+        if (!isDimension(query.groupBy))
+            take(out.groups, query.groupBy === 'day' ? share.day : query.groupBy === 'source' ? share.source : share.session, share);
+    }
+    const kept = (list = []) => list.filter(g => g.totals.requests > 0);
+    for (const by of DIMENSIONS)
+        if (out.breakdowns?.[by])
+            out.breakdowns[by] = kept(out.breakdowns[by]);
+    out.series = kept(out.series);
+    out.sources = kept(out.sources);
+    out.groups = isDimension(query.groupBy) ? out.breakdowns?.[query.groupBy] ?? [] : kept(out.groups);
+    return out;
+}
 export function report(records, query, failedWrites = 0, workspaces) {
     const totals = emptyTotals();
     const groups = new Map();
@@ -210,8 +275,8 @@ export function report(records, query, failedWrites = 0, workspaces) {
         add(group.totals, r);
     };
     for (const r of records) {
-        const day = query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
-        if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source))
+        const day = dayOf(r, query);
+        if (!matches(r, query, day))
             continue;
         add(totals, r);
         if (!isDimension(query.groupBy)) {

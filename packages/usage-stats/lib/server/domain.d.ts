@@ -88,6 +88,8 @@ export interface MachineUsage {
     stale?: true;
     asOf?: string;
     totals?: Totals;
+    /** Records left out because another machine has the same ones (copies from shared conversations). */
+    copies?: number;
 }
 /** Remote turns are named by their CLI, which merges a CLI's turns across machines; DSH providers keep their ID. */
 export declare function providerLabel(provider: string): string;
@@ -112,12 +114,38 @@ export interface MachinePart {
     stale?: true;
     asOf?: string;
     report?: UsageReport;
+    shares?: RecordShare[];
+    copies?: number;
 }
+/**
+ * Takes out records another machine also has. Machines go by name, so every machine keeps the same copy: the first
+ * machine by name that has a record keeps it. A machine whose records are not known (`shares` missing) keeps all.
+ */
+export declare function withoutCopies(parts: readonly MachinePart[], query: Query): MachinePart[];
 /**
  * Several machines' reports as one, each machine's DSH counting its own calls (a turn is recorded only by the DSH that
  * ran it, so nothing is counted twice). By host, a machine's own DSH model calls ("This computer") go under its name;
  * its workspaces stay apart from another machine's same folder and carry the machine's name.
  */
-export declare function combine(parts: readonly MachinePart[], query: Query): UsageReport;
+export declare function combine(all: readonly MachinePart[], query: Query): UsageReport;
+/**
+ * One record of a conversation another machine's DSH also has, with where it counts in this machine's report, so that a
+ * copy can be taken out again. While DSHes shared conversations, both recorded their turns; such copies match in
+ * every field but the random id.
+ */
+export interface RecordShare {
+    f: string;
+    day: string;
+    source: Source;
+    session: string;
+    keys: Record<Dimension, string>;
+    totals: Totals;
+}
+/** What makes two machines' records the same turn. */
+export declare const fingerprint: (r: UsageRecord) => string;
+/** The query's records of the given conversations. */
+export declare function shares(records: readonly UsageRecord[], query: Query, sessions: ReadonlySet<string>, workspaces?: WorkspaceNames): RecordShare[];
+/** A machine's report without the given records. */
+export declare function subtract(data: UsageReport, removed: readonly RecordShare[], query: Query): UsageReport;
 export declare function report(records: readonly UsageRecord[], query: Query, failedWrites?: number, workspaces?: WorkspaceNames): UsageReport;
 export declare function toCsv(data: UsageReport): string;

@@ -11,6 +11,11 @@ const RETAIN_MS = 14 * 24 * 60 * 60 * 1000;
 const DESKTOP_OS = new Set(['macOS', 'linux', 'windows']);
 /** A machine Tailscale calls offline gets this long to answer anyway. */
 const OFFLINE_PROBE_MS = 3_000;
+/**
+ * A tailnet machine that is up but has had nothing of this plugin answering on its port (DSH or the plugin removed
+ * there) is forgotten after this long; it shows up again by itself once the plugin answers. A DSH restart is shorter.
+ */
+const FORGET_REFUSED_MS = 10 * 60 * 1000;
 /** A stable mount id for one listener URL. */
 export const machineIdOf = (url) => `m${createHash('sha256').update(url).digest('hex').slice(0, 10)}`;
 /** `http://host:port` with no path: what every candidate and the book are keyed by. */
@@ -127,7 +132,12 @@ export class MachineBook {
                 // A tailnet computer that never answered is not a machine; a configured one is listed either way.
                 if (candidate.source === 'tailnet' && !known)
                     return;
-                next.set(id, { ...base, name: known?.name || candidate.name || new URL(candidate.url).host, os: known?.os || candidate.os || '', state: 'unreachable', reason: probeReason(error), ...(known ? { lastSeen: known.lastSeen } : {}) });
+                const reason = probeReason(error);
+                if (candidate.source === 'tailnet' && (reason === 'no-listener' || reason === 'not-plugin') && now - known.lastSeen > FORGET_REFUSED_MS) {
+                    this.remembered.delete(candidate.url);
+                    return;
+                }
+                next.set(id, { ...base, name: known?.name || candidate.name || new URL(candidate.url).host, os: known?.os || candidate.os || '', state: 'unreachable', reason, ...(known ? { lastSeen: known.lastSeen } : {}) });
             }
         }));
         const shape = (map) => JSON.stringify([...map.values()].map(({ id, url, name, os, state, reason }) => [id, url, name, os, state, reason]).sort());

@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.8 — Removed machines leave the list; the menu's actions are icons
+
+Update every computer; no restart needed, reload the page once.
+
+- A computer of your Tailscale account where DSH or this plugin was removed (shown as "Not running this plugin") leaves the machine list once nothing has answered on its port for ten minutes. It comes back by itself if it runs the plugin again. A computer that is asleep or switched off stays, as before.
+- The machine menu's **Reload** and **Restart DSH** rows are now two icon buttons in one row under the machines; their tooltips name the machine.
+
 ## 0.1.7 — Usage statistics can add up every machine
 
 Update every computer whose page you look at; restart DSH there for the service to load. Other machines need nothing new.

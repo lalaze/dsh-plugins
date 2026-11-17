@@ -1,4 +1,4 @@
-import type { MachinePart, UsageReport } from './domain.js';
+import type { MachinePart, RecordShare, UsageReport } from './domain.js';
 /** dsh-link's `dshLink` service (version 1), as far as this plugin uses it. */
 export interface LinkService {
     version: number;
@@ -34,6 +34,13 @@ export declare class MachineReports {
      * DSH Link does not know.
      */
     parts(link: LinkService | undefined, scope: string, search: string, local: () => UsageReport): Promise<MachinePart[]>;
+    /**
+     * Fills in `shares` for the conversations more than one counted machine has (copies kept from when DSHes shared
+     * conversations), so that `combine` counts each such record once. `own` answers for this computer. A machine that
+     * cannot say (an older version, or no answer and nothing kept) keeps all its records.
+     */
+    addShares(parts: MachinePart[], link: LinkService | undefined, search: string, own: (sessions: ReadonlySet<string>) => RecordShare[]): Promise<void>;
+    private keep;
     private ask;
 }
 /** The query a machine answers for its own report: this one without the machine scope and the export format. */

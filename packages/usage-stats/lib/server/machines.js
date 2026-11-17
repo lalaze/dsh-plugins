@@ -3,6 +3,8 @@ import { hostname } from 'node:os';
 const SHARED_MS = 3_000;
 /** Last answers kept per machine and query, to stand in while a machine sleeps or does not answer. */
 const KEPT = 200;
+/** Conversations asked about in one request, to keep its address short. */
+const SESSIONS_PER_REQUEST = 60;
 const usable = (value) => {
     const totals = value?.totals;
     return !!totals && typeof totals === 'object' && Number.isFinite(totals.totalTokens) && Number.isFinite(totals.requests);
@@ -38,11 +40,8 @@ export class MachineReports {
             try {
                 if (machine.state !== 'online')
                     throw new Error(machine.state);
-                const report = await this.ask(link, machine.id, search);
-                this.kept.delete(key);
-                this.kept.set(key, { at: Date.now(), report });
-                if (this.kept.size > KEPT)
-                    this.kept.delete(this.kept.keys().next().value);
+                const report = await this.ask(link, machine.id, `/api/usage-stats?${search}`, usable);
+                this.keep(key, report);
                 return { ...base, state: 'counted', report };
             }
             catch (error) {
@@ -55,8 +54,56 @@ export class MachineReports {
         }));
         return [own, ...others];
     }
-    ask(link, id, search) {
-        const key = `${id}?${search}`, now = Date.now();
+    /**
+     * Fills in `shares` for the conversations more than one counted machine has (copies kept from when DSHes shared
+     * conversations), so that `combine` counts each such record once. `own` answers for this computer. A machine that
+     * cannot say (an older version, or no answer and nothing kept) keeps all its records.
+     */
+    async addShares(parts, link, search, own) {
+        const holders = new Map();
+        for (const part of parts)
+            for (const id of new Set(part.report?.filters?.sessions ?? []))
+                holders.set(id, (holders.get(id) ?? 0) + 1);
+        const shared = new Set([...holders].filter(([, count]) => count > 1).map(([id]) => id));
+        if (!shared.size)
+            return;
+        await Promise.all(parts.map(async (part) => {
+            const mine = [...new Set(part.report?.filters?.sessions ?? [])].filter(id => shared.has(id)).sort();
+            if (!mine.length)
+                return;
+            if (part.self) {
+                part.shares = own(new Set(mine));
+                return;
+            }
+            if (!link)
+                return;
+            const found = [];
+            for (let i = 0; i < mine.length; i += SESSIONS_PER_REQUEST) {
+                const path = `/api/usage-stats?${search ? `${search}&` : ''}${new URLSearchParams({ shares: mine.slice(i, i + SESSIONS_PER_REQUEST).join(',') })}`;
+                const key = `${part.id}?${path}`;
+                try {
+                    const answer = await this.ask(link, part.id, path, (value) => Array.isArray(value?.shares));
+                    this.keep(key, answer);
+                    found.push(...answer.shares);
+                }
+                catch {
+                    const last = this.kept.get(key)?.report;
+                    if (!last?.shares)
+                        return;
+                    found.push(...last.shares);
+                }
+            }
+            part.shares = found;
+        }));
+    }
+    keep(key, value) {
+        this.kept.delete(key);
+        this.kept.set(key, { at: Date.now(), report: value });
+        if (this.kept.size > KEPT)
+            this.kept.delete(this.kept.keys().next().value);
+    }
+    ask(link, id, path, check) {
+        const key = `${id}?${path}`, now = Date.now();
         const hit = this.shared.get(key);
         if (hit && now - hit.at < SHARED_MS)
             return hit.answer;
@@ -64,7 +111,7 @@ export class MachineReports {
             if (now - entry.at >= SHARED_MS)
                 this.shared.delete(old);
         const answer = (async () => {
-            const response = await link.get(id, `/api/usage-stats?${search}`, { timeoutMs: this.timeoutMs });
+            const response = await link.get(id, path, { timeoutMs: this.timeoutMs });
             let body;
             try {
                 body = JSON.parse(response.text);
@@ -74,7 +121,7 @@ export class MachineReports {
             }
             if (response.status !== 200)
                 throw new Error(body?.error ? String(body.error) : `It answered ${response.status}`);
-            if (!usable(body))
+            if (!check(body))
                 throw new Error('Unexpected answer');
             return body;
         })();
@@ -87,5 +134,6 @@ export function ownQuery(url) {
     const params = new URLSearchParams(url.searchParams);
     params.delete('machines');
     params.delete('format');
+    params.delete('shares');
     return params.toString();
 }
