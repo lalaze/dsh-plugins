@@ -40,16 +40,26 @@ export class WorkspaceService {
     machines;
     placement;
     localCwd;
+    cliPlacement;
     syncing = new Set();
     /** Only this session's active request can cancel its pinned target, even after the session changes workspace. */
     gitJobs = new Map();
-    constructor(machines, placement, localCwd) {
+    /** `cliPlacement` also places a local folder on this computer's machine; only what a CLI model reads uses it. */
+    constructor(machines, placement, localCwd, cliPlacement = placement) {
         this.machines = machines;
         this.placement = placement;
         this.localCwd = localCwd;
+        this.cliPlacement = cliPlacement;
     }
-    async target(sessionId, signal = new AbortController().signal, expected) {
-        const value = await this.placement(sessionId, signal);
+    target(sessionId, signal = new AbortController().signal, expected) {
+        return this.targetOf(this.placement, sessionId, signal, expected);
+    }
+    /** Where the conversation's CLI works: its remote workspace, or a folder on this computer. */
+    cliTarget(sessionId, signal, expected) {
+        return this.targetOf(this.cliPlacement, sessionId, signal, expected);
+    }
+    async targetOf(placement, sessionId, signal, expected) {
+        const value = await placement(sessionId, signal);
         const host = this.machines.hosts().find(h => value.hostIds.includes(h.id) && (!expected || h.id === expected.hostId));
         if (!host || !value.cwd)
             throw new RemoteError('Select a verified remote workspace first.', 409);
@@ -71,8 +81,16 @@ export class WorkspaceService {
      * conversation's verified machine. It may be outside the workspace: the CLI there already read it.
      */
     async readViewed(sessionId, path, limit, signal) {
-        const target = await this.target(sessionId, signal);
-        return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
+        const target = await this.cliTarget(sessionId, signal);
+        return this.machines.withWorkspace(target.hostId, async () => { await this.cliTarget(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
+    }
+    /** An image a CLI of this conversation showed by its path in the workspace; none when it is larger than `limit`. */
+    async readImage(sessionId, path, limit, signal) {
+        const target = await this.cliTarget(sessionId, signal);
+        return this.machines.withWorkspace(target.hostId, async () => { await this.cliTarget(sessionId, signal, target); }, async (files) => {
+            const file = await files.operate(target.cwd, fileOperation({ op: 'stat', path }), signal);
+            return file.size <= limit ? files.download(target.cwd, path, file.revision, signal) : undefined;
+        });
     }
     async upload(sessionId, path, rev, size, input, signal, expected) {
         revision(rev);

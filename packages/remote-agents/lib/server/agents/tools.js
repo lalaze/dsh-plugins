@@ -210,7 +210,7 @@ export function delegationTools(host, service, accessOf = () => ({ unattended: f
     return [
         {
             name: 'remote_agent_list',
-            description: 'List saved remote SSH hosts, recently used remote project directories, and remote coding agents (Claude Code, Codex, DSH, Grok, CodeBuddy or Antigravity CLIs running on those hosts) with their status. Use it to find a host name, project path or agent ID.',
+            description: 'List saved remote SSH hosts, recently used remote project directories, and remote coding agents (Claude Code, Codex, DSH, Grok, CodeBuddy or Antigravity CLIs running on those hosts) with their status. The host with connection `local` is this computer, where DSH itself runs. Use it to find a host name, project path or agent ID.',
             parameters: params({ includeArchived: { type: 'boolean', description: 'Include archived agents (default false).' } }, []),
             output: { schema: {}, render: (_args, value) => {
                     const v = value;
@@ -234,7 +234,7 @@ export function delegationTools(host, service, accessOf = () => ({ unattended: f
         {
             name: 'remote_agent_providers',
             description: 'Check which coding CLIs are installed and signed in on a remote host for a project directory, with their models, permission modes, thinking levels and speeds. Call this before remote_agent_create when unsure which provider or model to use.',
-            parameters: params({ host: string('Saved host name, SSH alias or host ID.'), cwd: string('Absolute project directory on that host.'), refresh: { type: 'boolean', description: 'Ignore the 30-second discovery cache.' } }, ['host', 'cwd']),
+            parameters: params({ host: string('Saved host name, SSH alias or host ID; `local` is this computer.'), cwd: string('Absolute project directory on that host.'), refresh: { type: 'boolean', description: 'Ignore the 30-second discovery cache.' } }, ['host', 'cwd']),
             output: { schema: {}, render: (_args, value) => text(value.providers.map(p => p.status !== 'ready'
                     ? `${p.id} (${p.label}): ${p.status}${p.error ? ` — ${p.error}` : ''}`
                     : [`${p.id} (${p.label}): ready`, `  models: ${p.models.map(m => `${m.id}${m.thinking.length ? ` [thinking: ${m.thinking.join('/')}]` : ''}${m.speeds?.length ? ` [speed: ${m.speeds.join('/')}]` : ''}`).join(', ')}`, `  modes: ${p.modes.map(m => `${m.id}${m.id === p.defaultMode ? ' (default)' : ''}`).join(', ') || 'CLI settings'}`].join('\n')).join('\n')) },
@@ -254,7 +254,7 @@ export function delegationTools(host, service, accessOf = () => ({ unattended: f
             name: 'remote_agent_create',
             description: 'Start a coding CLI agent on a remote SSH host, in an absolute project directory on that machine, with an initial task. The agent works with its own tools, credentials and configuration and cannot see this conversation, so `prompt` must be self-contained: the goal, relevant context and file paths, constraints, and exactly what to report back. By default this waits for the agent to finish its turn and returns its reply. Use remote_agent_list to inspect agents and remote_agent_send to steer them.',
             parameters: params({
-                host: string('Saved host name, SSH alias or host ID.'), cwd: string('Absolute project directory on the remote host.'),
+                host: string('Saved host name, SSH alias or host ID; `local` is this computer.'), cwd: string('Absolute project directory on that host.'),
                 provider: string('CLI provider ID: claude, codex, dsh, grok, codebuddy or antigravity.'), prompt: string('Complete, self-contained task for the agent.'),
                 model: string('Model ID or name. Defaults to the CLI default model.'), mode: string('Permission mode ID. Defaults to the remote CLI\'s own permission settings.'),
                 thinking: string('Thinking level ID, when the model supports it.'), speed: string('Speed tier, such as Fast for Codex, when the model offers one. Faster tiers use more of the remote account\'s quota. Defaults to the CLI setting.'),

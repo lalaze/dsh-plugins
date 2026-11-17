@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { chmodSync } from 'node:fs';
+import { readdir, readFile, stat, unlink } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BRIDGE_SCRIPT, BRIDGE_VERSION } from './bridge-script.js';
-import { RemoteError } from '../core/domain.js';
+import { isLocalHost, RemoteError } from '../core/domain.js';
 import { connectionInput, quote } from '../core/ssh.js';
 import { CLAUDE_GOAL_SERVER, CLAUDE_GOAL_MCP } from '../chat/claude-goal.js';
 import { TEAM_MCP_NAME, TEAM_MEMBER_TOOLS, TEAM_SERVER } from '../chat/agent-teams.js';
@@ -146,6 +147,15 @@ function remoteSkills(text) {
     catch {
         return { skills: {} };
     }
+}
+/** End a forward for good. */
+function endForward(forward) {
+    forward.stopped = true;
+    forward.child?.kill();
+    const server = forward.server;
+    forward.server = undefined;
+    if (server)
+        server.close(() => { void unlink(forward.socket).catch(() => { }); });
 }
 class HostBridge {
     host;
@@ -609,16 +619,12 @@ node "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs" manifest "$HOME/${BASE}
             // Stopped while DSH's port was opening.
             if (forward.stopped)
                 throw new Error('Sharing has stopped');
-            const child = forward.child = this.launch(bridgeForwardArguments(bridge.host.connection, socket, port));
-            let stderr = '', state = 'starting';
+            let state = 'starting';
             const fail = (error) => { if (state === 'up' || state === 'failed')
-                return; state = 'failed'; clearTimeout(timer); reject(error); child.kill(); };
+                return; state = 'failed'; clearTimeout(timer); reject(error); forward.child?.kill(); forward.server?.close(); };
             const timer = setTimeout(() => fail(new Error('The reverse forward did not start')), 20_000);
-            child.stderr?.setEncoding('utf8');
-            child.stderr?.on('data', (chunk) => {
-                stderr = (stderr + chunk).slice(-4000);
-                // Only the server's reply confirms the socket is bound; OpenSSH logs it at debug level, hence `-v`.
-                if (state !== 'starting' || !/remote forward success/i.test(stderr))
+            const confirmed = () => {
+                if (state !== 'starting')
                     return;
                 state = 'confirmed';
                 clearTimeout(timer);
@@ -630,6 +636,34 @@ if [ -e ${quote(legacy)} ]; then printf '%s' ${quote(socket)} > ${quote(`${legac
 find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} + 2>/dev/null || true`, 20_000, { login: false })
                     .then(() => { if (state !== 'confirmed')
                     return; state = 'up'; forward.up = true; bridge.error = undefined; resolve(); }, fail);
+            };
+            if (isLocalHost(bridge.host)) {
+                // This computer: the proxies reach DSH on a socket DSH binds itself, private to this user like sshd's.
+                const server = forward.server = createServer(connection => this.accept(connection));
+                server.on('error', error => { if (state === 'up')
+                    this.ended(bridge, forward, error, started);
+                else
+                    fail(error); });
+                server.listen(socket, () => {
+                    try {
+                        chmodSync(socket, 0o600);
+                    }
+                    catch (error) {
+                        fail(error);
+                        return;
+                    }
+                    confirmed();
+                });
+                return;
+            }
+            const child = forward.child = this.launch(bridgeForwardArguments(bridge.host.connection, socket, port));
+            let stderr = '';
+            child.stderr?.setEncoding('utf8');
+            child.stderr?.on('data', (chunk) => {
+                stderr = (stderr + chunk).slice(-4000);
+                // Only the server's reply confirms the socket is bound; OpenSSH logs it at debug level, hence `-v`.
+                if (/remote forward success/i.test(stderr))
+                    confirmed();
             });
             child.on('error', fail);
             child.on('close', code => {
@@ -663,8 +697,7 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
     replace(bridge, forward) {
         bridge.forward = undefined;
         bridge.error = 'The shared socket was removed from the SSH host';
-        forward.stopped = true;
-        forward.child?.kill();
+        endForward(forward);
         this.keep(bridge);
     }
     /** Bring a host's forward up, retrying with backoff until it is. */
@@ -684,10 +717,8 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
         bridge.retry = undefined;
         const forward = bridge.forward;
         bridge.forward = undefined;
-        if (forward) {
-            forward.stopped = true;
-            forward.child?.kill();
-        }
+        if (forward)
+            endForward(forward);
     }
     async prepare(host, transport, task, protocol, signal) {
         const servers = [], launch = { servers };

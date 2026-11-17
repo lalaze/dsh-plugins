@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { isLocalHost, RemoteError } from '../core/domain.js';
 import { accessOf } from '../core/dsh-host.js';
 import { dshHome, under, WorkspaceAccess } from '../core/access.js';
 import { editorHandler } from './editor-route.js';
@@ -24,11 +25,16 @@ export async function installWorkspaces(ctx, store, machines) {
         const activated = live();
         return activated ? activated.header.cwd : stored?.cwd;
     };
-    const placement = async (id, signal) => {
-        const cwd = await sessionCwd(id), value = await access.resolve(cwd, signal);
+    const placed = (resolve) => async (id, signal) => {
+        const cwd = await sessionCwd(id), value = await resolve(cwd, signal);
         return cwd === await sessionCwd(id) ? value : { hostIds: [] };
     };
-    const files = new WorkspaceService(machines, placement, sessionCwd);
+    const placement = placed((cwd, signal) => access.resolve(cwd, signal)), cliPlacement = placed((cwd, signal) => access.resolveForCli(cwd, signal));
+    const files = new WorkspaceService(machines, placement, sessionCwd, cliPlacement);
+    // Other plugins work on remote machines only: this computer's folders are DSH's own.
+    const local = (hostId) => isLocalHost(store.hosts().find(host => host.id === hostId));
+    const remoteOnly = (hostId) => { if (local(hostId))
+        throw new RemoteError('This computer is not a remote machine', 400); };
     const unbounded = () => new AbortController().signal;
     ctx.provide('remoteAgentsWorkspaces', {
         gitWorkspaceVersion: 1,
@@ -65,13 +71,16 @@ export async function installWorkspaces(ctx, store, machines) {
     // dsh-remote-terminals runs terminals, TUI conversations and worktrees on the machines through this service alone.
     const remote = {
         version: 1, stateFile: join(store.directory, 'state.json'),
-        hosts: () => machines.hosts(), browse: (hostId, path, options) => machines.browse(hostId, path, options),
-        withWorkspace: (hostId, verify, action) => machines.withWorkspace(hostId, verify, action),
+        hosts: () => machines.hosts().filter(host => !local(host.id)),
+        browse: async (hostId, path, options) => { remoteOnly(hostId); return machines.browse(hostId, path, options); },
+        withWorkspace: async (hostId, verify, action) => { remoteOnly(hostId); return machines.withWorkspace(hostId, verify, action); },
         target: (sessionId, signal = unbounded(), expected) => files.target(sessionId, signal, expected),
         resolve: (path, signal) => access.resolve(path, signal),
+        resolveForCli: (path, signal) => access.resolveForCli(path, signal),
+        localMachine: () => { const host = store.hosts().find(h => isLocalHost(h)); return host && { id: host.id, label: host.label }; },
         createWorkspace: (hostId, path, signal) => workspaces.create(hostId, path, signal),
-        archiveSessionsIn: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
+        archiveSessionsIn: (hostId, folder) => local(hostId) ? Promise.resolve() : machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
     };
     ctx.provide('remoteAgentsMachines', remote);
-    return { access, placement, workspaces, features: { files } };
+    return { access, placement, cliPlacement, workspaces, features: { files } };
 }

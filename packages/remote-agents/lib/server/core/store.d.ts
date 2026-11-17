@@ -45,8 +45,11 @@ export interface State {
     tuiDetails?: Record<string, unknown>;
     tuiLocalScroll?: boolean;
 }
+/** This computer's name as the local machine's label, `lalaze-mini.local` shown as `lalaze-mini`. */
+export declare function localMachineLabel(name?: string): string;
 export declare class Store {
     private readonly path;
+    private readonly options;
     private state;
     private writes;
     /** The file content this instance last read or wrote; undefined when the file did not exist. */
@@ -58,9 +61,13 @@ export declare class Store {
     readonly changeListeners: Set<() => void>;
     /** Machines whose saved model catalog lost Antigravity models from 0.2.129 or earlier on opening; see {@link oldAntigravity}. */
     readonly staleCatalogs: Set<string>;
-    constructor(path: string);
+    /** `localMachine` adds this computer's machine ({@link LOCAL_HOST_ID}) when the saved state has none. */
+    constructor(path: string, options?: {
+        localMachine?: boolean;
+    });
     get directory(): string;
     open(): Promise<void>;
+    private load;
     snapshot(): State;
     /** Copies of the saved hosts, without cloning agent records. Lookups run on every dashboard poll. */
     hosts(): HostConfig[];

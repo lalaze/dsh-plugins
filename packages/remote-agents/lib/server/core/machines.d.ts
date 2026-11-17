@@ -35,6 +35,13 @@ export interface RemoteAgentsMachines {
     target(sessionId: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget>;
     /** Which saved machines and remote directory a local workspace path stands for. */
     resolve(path: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement>;
+    /**
+     * Where CLI models of a workspace path run: as {@link resolve}, and a folder on this computer is placed on
+     * {@link localMachine}. Absent in older Remote Agents.
+     */
+    resolveForCli?(path: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement>;
+    /** This computer as a machine: its CLIs run where DSH runs. It is never in {@link hosts}. Absent in older Remote Agents. */
+    localMachine?(): Pick<Host, 'id' | 'label'> | undefined;
     /** Makes a remote directory a DSH workspace path on this computer. */
     createWorkspace(hostId: string, path: string, signal?: AbortSignal): Promise<{
         path: string;

@@ -11,11 +11,16 @@ export declare class WorkspaceService {
     readonly machines: WorkspaceHosts;
     readonly placement: SessionPlacement;
     private readonly localCwd;
+    private readonly cliPlacement;
     private readonly syncing;
     /** Only this session's active request can cancel its pinned target, even after the session changes workspace. */
     private readonly gitJobs;
-    constructor(machines: WorkspaceHosts, placement: SessionPlacement, localCwd: (id: string) => Promise<string | undefined>);
+    /** `cliPlacement` also places a local folder on this computer's machine; only what a CLI model reads uses it. */
+    constructor(machines: WorkspaceHosts, placement: SessionPlacement, localCwd: (id: string) => Promise<string | undefined>, cliPlacement?: SessionPlacement);
     target(sessionId: string, signal?: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget>;
+    /** Where the conversation's CLI works: its remote workspace, or a folder on this computer. */
+    private cliTarget;
+    private targetOf;
     operate(sessionId: string, raw: unknown, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown>;
     download(sessionId: string, path: string, rev: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<Buffer>;
     /**
@@ -23,6 +28,8 @@ export declare class WorkspaceService {
      * conversation's verified machine. It may be outside the workspace: the CLI there already read it.
      */
     readViewed(sessionId: string, path: string, limit: number, signal: AbortSignal): Promise<Buffer | undefined>;
+    /** An image a CLI of this conversation showed by its path in the workspace; none when it is larger than `limit`. */
+    readImage(sessionId: string, path: string, limit: number, signal: AbortSignal): Promise<Buffer | undefined>;
     upload(sessionId: string, path: string, rev: string | null, size: number, input: AsyncIterable<Uint8Array>, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown>;
     /** A file kept for this conversation on its verified machine; see WorkspaceFiles.attach. */
     attach(sessionId: string, path: string, input: AsyncIterable<Uint8Array>, size: number, sha256: string, signal: AbortSignal): Promise<string>;

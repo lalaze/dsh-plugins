@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { enabledProvidersOf, list, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError } from '../core/domain.js';
-import { connectionInput, JsonlPeer, OpenSshTransport, quote } from '../core/ssh.js';
+import { enabledProvidersOf, isLocalHost, list, LOCAL_SERVER_ID, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError } from '../core/domain.js';
+import { connectionInput, JsonlPeer, LocalShellTransport, OpenSshTransport, quote } from '../core/ssh.js';
 import { MACHINE_IDENTITY, REMOTE_HOME, serverIdOf } from '../core/remote-host.js';
 import { CliSession, initializeAcp } from './runtime.js';
 import { initializeCodex } from '../core/codex.js';
@@ -142,7 +142,9 @@ export class SshBackend {
         this.store = store;
         this.sharing = sharing;
         // Commands to the host share one SSH connection; its sockets live in this plugin's private state directory.
-        this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') });
+        // The local machine runs the same commands in a local shell.
+        this.transport = transport ?? (isLocalHost(host) ? new LocalShellTransport()
+            : new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') }));
         this.workspaceFiles = new WorkspaceFiles(this.transport);
     }
     onOwnTurn(listener) {
@@ -180,6 +182,9 @@ done`}`, 15_000, { login: false });
     }
     async connect() {
         this.assertOpen();
+        // This computer stays itself when it is renamed; there is no connection to check either.
+        if (isLocalHost(this.host))
+            return LOCAL_SERVER_ID;
         if (this.identity && Date.now() - this.identity.at < 15_000)
             return this.identity.id;
         // The identity is cat/uname/id only; skip the login shell, which `use()` would otherwise pay on every recheck.

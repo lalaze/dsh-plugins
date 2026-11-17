@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { RemoteError, remotePath } from '../core/domain.js';
+import { isLocalHost, RemoteError, remotePath } from '../core/domain.js';
 import { dshHome, sameEndpoint, sshEndpoint } from '../core/access.js';
 /** dsh-remote's anchor format: either plugin finds and reuses the other's workspace folders. */
 const META = '.dsh-remote-meta.json';
@@ -128,6 +128,9 @@ export class RemoteWorkspaces {
     }
     /** Canonicalize the directory on the verified host, then create or reuse its anchor. */
     async create(hostId, path, signal) {
+        // A folder on this computer is opened as itself; it needs no anchor.
+        if (isLocalHost(this.machines.store.hosts().find(h => h.id === hostId)))
+            throw new RemoteError('Open folders on this computer with This computer', 400);
         const { path: remote } = await this.machines.browse(hostId, path, { entries: false });
         signal?.throwIfAborted();
         const host = this.machines.store.hosts().find(h => h.id === hostId);

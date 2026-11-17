@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { identifier, record, remotePath, field, taskInput, providerSelection, PROVIDER_LABELS, RemoteError } from './domain.js';
+import { hostname } from 'node:os';
+import { identifier, isLocalHost, LOCAL_CONNECTION, LOCAL_HOST_ID, record, remotePath, field, taskInput, providerSelection, PROVIDER_LABELS, RemoteError } from './domain.js';
 /**
  * Antigravity as 0.2.129 and earlier discovered it, through `agy models`: model IDs such as `gemini-3.8-flash-high` that
  * `agy acp` does not take. Only that integration gave a provider a `notice`. Hidden while Antigravity was missing, the
@@ -29,8 +30,13 @@ function withoutSharing(saved, hosts, pending) {
     }
     return { tasks, ...(Object.keys(withdrawals).length ? { withdrawals } : {}) };
 }
+/** This computer's name as the local machine's label, `lalaze-mini.local` shown as `lalaze-mini`. */
+export function localMachineLabel(name = hostname()) {
+    return name.replace(/\.local\.?$/i, '').trim().slice(0, 100) || 'This computer';
+}
 export class Store {
     path;
+    options;
     state = { version: 1, hosts: [], tasks: [] };
     writes = Promise.resolve();
     /** The file content this instance last read or wrote; undefined when the file did not exist. */
@@ -42,11 +48,20 @@ export class Store {
     changeListeners = new Set();
     /** Machines whose saved model catalog lost Antigravity models from 0.2.129 or earlier on opening; see {@link oldAntigravity}. */
     staleCatalogs = new Set();
-    constructor(path) {
+    /** `localMachine` adds this computer's machine ({@link LOCAL_HOST_ID}) when the saved state has none. */
+    constructor(path, options = {}) {
         this.path = path;
+        this.options = options;
     }
     get directory() { return dirname(this.path); }
     async open() {
+        await this.load();
+        // Kept in memory until the next saved change writes it: opening never writes the registry.
+        if (this.options.localMachine && process.platform !== 'win32' && !this.state.hosts.some(isLocalHost)) {
+            this.state.hosts.unshift({ id: LOCAL_HOST_ID, label: localMachineLabel(), connection: LOCAL_CONNECTION });
+        }
+    }
+    async load() {
         let text;
         try {
             text = await readFile(this.path, 'utf8');

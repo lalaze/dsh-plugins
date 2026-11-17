@@ -1,3 +1,13 @@
+/**
+ * The computer DSH itself runs on, saved next to the SSH machines so its CLI selection and model catalog work the same
+ * way. Its CLIs run without SSH, in the folders DSH opens on this computer. It is never removed or offered as a remote
+ * machine to work on.
+ */
+export const LOCAL_HOST_ID = 'local-machine';
+export const LOCAL_CONNECTION = 'local';
+/** The local machine's identity: it is this computer whatever its name, so nothing pins its host name. */
+export const LOCAL_SERVER_ID = 'local';
+export const isLocalHost = (host) => host?.connection === LOCAL_CONNECTION;
 /** Keep new Claude modes selectable in catalogs and sessions saved before an upgrade. */
 export function permissionModes(provider, modes) {
     // Codex's inherit mode leaves approval policy and sandbox to the remote config.toml.

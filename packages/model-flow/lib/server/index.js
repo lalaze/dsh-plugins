@@ -201,7 +201,9 @@ export async function apply(ctx) {
             folder ||= agent.session.header.cwd;
             if (!folder)
                 return undefined;
-            const placement = await machines.resolve(folder, AbortSignal.timeout(10_000)), saved = machines.hosts();
+            const signal = AbortSignal.timeout(10_000), local = machines.localMachine?.();
+            const placement = await (machines.resolveForCli ? machines.resolveForCli(folder, signal) : machines.resolve(folder, signal));
+            const saved = [...machines.hosts(), ...local ? [local] : []];
             const here = placement.cwd ? placement.hostIds : [], name = saved.find(host => host.id === here[0])?.label;
             return { machines: here, saved: saved.map(host => host.id), local: !placement.cwd, ...(name ? { name } : {}) };
         }

@@ -52,5 +52,13 @@ export declare class WorkspaceAccess {
     });
     private binding;
     resolve(cwd: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement>;
+    /**
+     * Where the CLIs of a conversation working in `cwd` run: as {@link resolve}, and a folder on DSH's own computer is
+     * placed on the local machine ({@link isLocalHost}). Only CLI models use this; Git, files and terminals of a local
+     * folder stay DSH's own.
+     */
+    resolveForCli(cwd: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement>;
+    /** `here` is the canonical path of a folder on DSH's own computer, which no SSH machine stands for. */
+    private locate;
     private fromRuntime;
 }

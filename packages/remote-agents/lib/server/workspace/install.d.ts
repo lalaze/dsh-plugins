@@ -44,6 +44,8 @@ export interface Workspaces {
     access: WorkspaceAccess;
     /** The verified placement of a DSH conversation, rechecked so a workspace switch during verification yields none. */
     placement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
+    /** As {@link placement}, and a local folder is placed on this computer's machine, whose CLIs run here. For CLI models only. */
+    cliPlacement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
     workspaces: RemoteWorkspaces;
     features: WorkspaceFeatures;
 }

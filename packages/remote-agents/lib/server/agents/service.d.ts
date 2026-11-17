@@ -69,6 +69,13 @@ export declare class RemoteAgentsService {
     onCatalogChange(listener: () => void): () => void;
     /** Discover once more, in the background, the machines whose saved catalog lost an outdated entry on opening. */
     refreshStaleCatalogs(): Promise<void>;
+    /**
+     * Detect this computer's CLIs, once while DSH runs, when a conversation works in one of its folders and none is ready:
+     * the first time, or after none was installed. A CLI installed here later shows up after Refresh models or a restart.
+     * Starting DSH detects nothing, as it connects to no machine.
+     */
+    discoverLocalMachine(): Promise<void>;
+    private localDiscovery?;
     discoverHost(hostId: string): Promise<Dashboard>;
     setHostProviders(hostId: string, value: unknown): Promise<Dashboard>;
     snapshot(): Promise<Dashboard>;

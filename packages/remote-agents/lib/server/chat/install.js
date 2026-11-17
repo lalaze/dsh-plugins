@@ -40,12 +40,9 @@ export function installChat(ctx, service, projects, workspace, claudeGoals) {
                     yield* storage.readFileStream(ref, signal);
                 },
             },
-            image: async (id, path, signal) => {
-                const file = await files.operate(id, { op: 'stat', path }, signal);
-                return file.size <= CHAT_IMAGE_LIMIT ? files.download(id, path, file.revision, signal) : undefined;
-            },
+            image: (id, path, signal) => files.readImage(id, path, CHAT_IMAGE_LIMIT, signal),
             viewedImage: (id, path, signal) => files.readViewed(id, path, CHAT_IMAGE_LIMIT, signal),
-            workspace: (cwd, signal) => access.resolve(cwd, signal) });
+            workspace: (cwd, signal) => access.resolveForCli(cwd, signal) });
         const registration = scoped.llm.registerAdapter(CHAT_PROVIDERS, adapter);
         scoped.effect(() => projects.onChange(() => registration.replace(CHAT_PROVIDERS)));
         // A model's remembered reasoning effort is its advertised default; DSH reloads the catalog on replace.
