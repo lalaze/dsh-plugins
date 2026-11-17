@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OpenSshTransport, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { antigravityTitle, codexTitle, CODEX_THREAD_NAME } from '../src/tui.js';
-import { ANTIGRAVITY_SIGN_IN, TuiRemote } from '../src/tui-remote.js';
+import { ANTIGRAVITY_SIGN_IN, ANTIGRAVITY_SIGN_IN_HERE, TuiRemote } from '../src/tui-remote.js';
 
 /** A machine's TUI commands, over its connection. */
 const tui = (files: { transport: SshTransport }) => new TuiRemote(files.transport);
@@ -134,6 +134,9 @@ test('making an Antigravity conversation reports a missing CLI, a missing sign-i
   const out = acpServer({ initialize: { protocolVersion: 1 } }, { 'session/new': 'Authentication required' });
   await assert.rejects(tui(out.files).antigravityConversation('/srv/app', signal), (error: Error) => error.message === ANTIGRAVITY_SIGN_IN);
   assert.equal(out.state.stopped, 1);
+  // On this computer Antigravity reads the keychain, so the sign-in to repeat is a local one, not the SSH one.
+  const here = acpServer({ initialize: { protocolVersion: 1 } }, { 'session/new': 'Authentication required' });
+  await assert.rejects(tui(here.files).antigravityConversation('/srv/app', signal, true), (error: Error) => error.message === ANTIGRAVITY_SIGN_IN_HERE && !/Over SSH/.test(error.message));
   const odd = acpServer({ initialize: { protocolVersion: 1 }, 'session/new': { sessionId: '$(touch x)' } });
   await assert.rejects(tui(odd.files).antigravityConversation('/srv/app', signal), /did not start a conversation/);
   assert.equal(odd.sent.some(message => message.method === 'session/close'), false, 'an odd ID goes no further');

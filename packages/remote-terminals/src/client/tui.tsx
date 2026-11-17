@@ -58,7 +58,10 @@ const startStyles = `.ra-tui-start{display:inline-flex;flex:none;align-items:cen
 .ra-tui-start:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
 .ra-tui-start:focus-visible{box-shadow:0 0 0 2px var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,#4d6bfe))}
 .ra-tui-start:disabled{cursor:default;opacity:.5}
-.ra-tui-start[data-failed]{box-shadow:0 0 0 1px var(--dsw-alias-state-danger,#d64545)}`;
+.ra-tui-start[data-failed]{box-shadow:0 0 0 1px var(--dsw-alias-state-danger,#d64545)}
+.ra-tui-start-error{position:fixed;z-index:2147483000;box-sizing:border-box;width:320px;max-width:calc(100vw - 24px);padding:12px 14px;border-radius:12px;background:var(--dsw-alias-bg-layer-3,#26272b);color:var(--dsw-alias-label-primary,#eee);box-shadow:var(--dsw-elevation-prominent,0 0 0 1px rgba(127,127,127,.25),0 8px 24px rgba(0,0,0,.3));font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.ra-tui-start-error strong{display:block;margin-bottom:4px;color:var(--dsw-alias-state-danger,#d64545);font-weight:600}
+.ra-tui-start-error p{margin:0}`;
 
 interface SlotEntry { component: unknown; options: { id?: string; key?: string } }
 interface Slots {
@@ -326,20 +329,47 @@ function StartButton({ sessionId, sessions, store }: { sessionId?: string; sessi
   useLocale();
   const session = useSyncExternalStore(sessions.subscribe, () => (sessionId === undefined ? undefined : sessions.getSnapshot()?.byId?.[sessionId]));
   const selection = useCurrentModel(sessionId);
-  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const [busy, setBusy] = useState(false), [error, setError] = useState(''), [shown, setShown] = useState(false);
+  const [position, setPosition] = useState<{ left: number; bottom: number }>();
+  const button = useRef<HTMLButtonElement>(null), card = useRef<HTMLDivElement>(null), cardId = useId();
   const cli = selection ? PROVIDER_CLIS[selection.provider] : undefined;
   // The model picker offers this computer's CLIs only in its folders, so such a model says the folder is here.
   const here = selection?.model.startsWith(`${LOCAL_HOST_ID}/`) === true;
+  // A failure is shown above the button until dismissed: in the tooltip alone, a click seemed to do nothing.
+  useLayoutEffect(() => {
+    if (!shown || !button.current) return;
+    const place = () => {
+      const rect = button.current!.getBoundingClientRect(), width = Math.min(320, window.innerWidth - 24);
+      setPosition({ left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)), bottom: window.innerHeight - rect.top + 8 });
+    };
+    place(); window.addEventListener('resize', place); window.addEventListener('scroll', place, true);
+    return () => { window.removeEventListener('resize', place); window.removeEventListener('scroll', place, true); };
+  }, [shown]);
+  useEffect(() => {
+    if (!shown) return;
+    const dismiss = (event: Event) => {
+      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !button.current?.contains(event.target as Node) && !card.current?.contains(event.target as Node)) setShown(false);
+    };
+    document.addEventListener('keydown', dismiss, true); document.addEventListener('pointerdown', dismiss, true);
+    return () => { document.removeEventListener('keydown', dismiss, true); document.removeEventListener('pointerdown', dismiss, true); };
+  }, [shown]);
   if (sessionId === undefined || !session?.blank || !session.cwd || !(REMOTE_ANCHOR.test(session.cwd) || here) || store.has(sessionId) || !selection || !cli) return null;
   const start = () => {
-    setBusy(true); setError('');
-    api('tuiStart', { sessionId, cli, model: selection.model, effort: selection.reasoningEffort }).then(() => store.add(sessionId, cli), cause => setError(localizeError(cause instanceof Error ? cause.message : String(cause)))).finally(() => setBusy(false));
+    setBusy(true); setError(''); setShown(false);
+    api('tuiStart', { sessionId, cli, model: selection.model, effort: selection.reasoningEffort }).then(() => store.add(sessionId, cli), cause => {
+      setError(localizeError(cause instanceof Error ? cause.message : String(cause))); setShown(true);
+    }).finally(() => setBusy(false));
   };
   return <><style>{startStyles}</style>
-    <button type="button" className="ra-tui-start" data-remote-agents-tui-start="" data-failed={error ? '' : undefined} disabled={busy} onClick={start}
-      aria-label={ui('Start in TUI')} title={error ? `${ui('Could not start the TUI')}: ${error}` : ui('Start this conversation in the {cli} terminal interface', { cli: CLI_NAMES[cli] })}>
+    <button ref={button} type="button" className="ra-tui-start" data-remote-agents-tui-start="" data-failed={error ? '' : undefined} disabled={busy} onClick={start}
+      aria-label={ui('Start in TUI')} aria-describedby={shown && error ? cardId : undefined}
+      title={error ? `${ui('Could not start the TUI')}: ${error}` : ui('Start this conversation in the {cli} terminal interface', { cli: CLI_NAMES[cli] })}>
       <CliMark cli={cli} />
-    </button></>;
+    </button>
+    {shown && error && position && createPortal(<div ref={card} id={cardId} className="ra-tui-start-error" role="alert" style={{ left: position.left, bottom: position.bottom }}>
+      <strong>{ui('Could not start the TUI')}</strong><p>{error}</p>
+    </div>, document.body)}
+  </>;
 }
 
 /**

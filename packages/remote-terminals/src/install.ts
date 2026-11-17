@@ -1,7 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-client-connection';
 import { join } from 'node:path';
-import { field, identifier, RemoteError } from '@dsh-plugins/remote-core/domain.js';
+import { field, identifier, LOCAL_HOST_ID, RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import type { MachineFiles, RemoteAgentsMachines } from '@dsh-plugins/remote-core/machines.js';
 import { requireClient, transferBody, transferFailure, transferSize } from '@dsh-plugins/remote-core/transfer.js';
 import { workspacePath, type WorkspaceTarget } from '@dsh-plugins/remote-core/workspace.js';
@@ -118,7 +118,7 @@ export function installTerminals(ctx: Context, machines: RemoteAgentsMachines, s
     titleRecords: (id, claudeSession, signal) => remote(id, signal, tui => tui.claudeTitleRecords(claudeSession)),
     codexThread: (id, signal) => remote(id, signal, (tui, target) => tui.codexThread(target.cwd, CODEX_THREAD_NAME, signal)),
     codexTitleRecords: (id, thread, signal) => remote(id, signal, tui => tui.codexTitleRecords(thread)),
-    antigravityConversation: (id, signal) => remote(id, signal, (tui, target) => tui.antigravityConversation(target.cwd, signal)),
+    antigravityConversation: (id, signal) => remote(id, signal, (tui, target) => tui.antigravityConversation(target.cwd, signal, target.hostId === LOCAL_HOST_ID)),
     antigravityTitleRecords: (id, conversation, signal) => remote(id, signal, tui => tui.antigravityTitleRecords(conversation)),
     endHolder,
   });

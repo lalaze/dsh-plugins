@@ -273,6 +273,7 @@ export const zh: Record<string, string> = {
   "Enabled CLIs": "启用的 CLI",
   "This Antigravity session was started by Remote Agents 0.2.129 or earlier and cannot be continued. Start a new conversation.": "这个 Antigravity 会话由 Remote Agents 0.2.129 或更早版本创建，无法继续。请新开一个对话。",
   "Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then refresh.": "这台机器上的 Antigravity 说它没有登录。通过 SSH 使用需要 Antigravity CLI 1.5.9 或更高版本（`agy update`），并且要单独登录一次（`agy acp --login`）。在那台机器的终端里运行这两条命令，然后刷新。",
+  "Antigravity says it is not signed in on this computer. Run `agy acp --login` in a terminal on this computer, not over SSH (a sign-in made over SSH is kept apart), then refresh.": "这台电脑上的 Antigravity 说它没有登录。在这台电脑本机的终端里运行 `agy acp --login`（不要通过 SSH：SSH 里登录的是另外一份），然后刷新。",
   "Only selected CLIs are detected and shown in the model picker.": "只检测并显示勾选的 CLI。",
   "Share with remote CLIs": "共享给远程 CLI",
   "Remote CLIs started afterwards receive what is selected here.": "之后启动的远程 CLI 会收到这里勾选的内容。",

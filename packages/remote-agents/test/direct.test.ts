@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdtemp, readdir, rm, readFile, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SshBackend, CLI_PROVIDERS, CLAUDE_ROOT_ENV, confinesCommands, unattendedClaude } from '../src/agents/backend.js';
+import { SshBackend, CLI_PROVIDERS, CLAUDE_ROOT_ENV, confinesCommands, signInHint, unattendedClaude } from '../src/agents/backend.js';
 import { JsonlPeer, quote, type Child, type SshTransport, type StartOptions, type WireMessage } from '@dsh-plugins/remote-core/ssh.js';
 import { Store } from '../src/core/store.js';
 import type { FinishedTurn } from '@dsh-plugins/remote-core/domain.js';
@@ -683,6 +683,14 @@ test('Antigravity without a login for SSH sessions says how to sign in; other AC
     error: 'Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then refresh.' });
   assert.equal(providers.find(p => p.id === 'grok')!.error, 'Authentication required');
   assert.equal(ssh.admissions.length, 0); assert.ok(ssh.children.every(c => c.stopped));
+});
+
+test('on this computer Antigravity is told to sign in here, not over SSH', () => {
+  const antigravity = CLI_PROVIDERS.find(p => p.id === 'antigravity')!, grok = CLI_PROVIDERS.find(p => p.id === 'grok')!;
+  assert.match(signInHint(antigravity, 'Authentication required', true), /not signed in on this computer\. Run `agy acp --login` in a terminal on this computer, not over SSH/);
+  assert.match(signInHint(antigravity, 'Authentication required'), /Over SSH it needs/);
+  assert.equal(signInHint(antigravity, 'Workspace is not trusted', true), 'Workspace is not trusted');
+  assert.equal(signInHint(grok, 'Authentication required', true), 'Authentication required');
 });
 
 test('a message to a CLI that cannot start says why, and is probed again as soon as the CLI is fixed', async t => {

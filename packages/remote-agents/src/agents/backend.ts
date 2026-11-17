@@ -62,12 +62,14 @@ export const CLI_PROVIDERS = [
   { id: 'grok', label: PROVIDER_LABELS.grok, command: 'grok', protocol: 'acp' as const, args: ['agent', '--no-leader', 'stdio'] },
   { id: 'codebuddy', label: PROVIDER_LABELS.codebuddy, command: 'codebuddy', protocol: 'acp' as const, args: ['--acp'] },
   // `agy acp` (Antigravity CLI 1.5.0 and later). Over SSH it keeps its own login file, apart from the desktop's keychain, and
-  // 1.5.8 and earlier answer every session with `Authentication required` even with that file in place.
-  { id: 'antigravity', label: PROVIDER_LABELS.antigravity, command: 'agy', protocol: 'acp' as const, args: ['acp'], signIn: 'Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then refresh.' },
+  // 1.5.8 and earlier answer every session with `Authentication required` even with that file in place. On this computer it
+  // reads the keychain instead, so the sign-in to repeat is a local one.
+  { id: 'antigravity', label: PROVIDER_LABELS.antigravity, command: 'agy', protocol: 'acp' as const, args: ['acp'], signIn: 'Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then refresh.', signInHere: 'Antigravity says it is not signed in on this computer. Run `agy acp --login` in a terminal on this computer, not over SSH (a sign-in made over SSH is kept apart), then refresh.' },
 ];
-/** ACP's `auth_required` error, replaced by how to sign in when the CLI says how. */
-export function signInHint(definition: Pick<typeof CLI_PROVIDERS[number], 'signIn'>, message: string): string {
-  return definition.signIn && /^authentication required\.?$/i.test(message.trim()) ? definition.signIn : message;
+/** ACP's `auth_required` error, replaced by how to sign in when the CLI says how; `here` is this computer rather than an SSH host. */
+export function signInHint(definition: Pick<typeof CLI_PROVIDERS[number], 'signIn' | 'signInHere'>, message: string, here = false): string {
+  const hint = here ? definition.signInHere ?? definition.signIn : definition.signIn;
+  return hint && /^authentication required\.?$/i.test(message.trim()) ? hint : message;
 }
 /** Why a probed CLI cannot start a session: its own error when the probe got one, otherwise that it is not installed there. */
 export function notReadyReason(provider: Provider): string {
@@ -299,7 +301,7 @@ done`}`, 15_000, { login: false });
       if (!models.length) throw new Error('The remote CLI returned no models. Check its login and version.');
       const provider: Provider = { ...unavailable, status: 'ready', models, modes, defaultModeId };
       return { provider, profile: { argv, protocol: definition.protocol, cwd: canonical, provider } };
-    } catch (error) { return { provider: { ...unavailable, status: 'error' as const, error: signInHint(definition, error instanceof Error ? error.message : String(error)) } }; }
+    } catch (error) { return { provider: { ...unavailable, status: 'error' as const, error: signInHint(definition, error instanceof Error ? error.message : String(error), isLocalHost(this.host)) } }; }
     finally { if (peer) { this.probes.delete(peer); peer.close(); } }
   }
   async providers(cwd: string, refresh: boolean): Promise<Provider[]> {
@@ -676,7 +678,7 @@ done`}`, 15_000, { login: false });
     const output = await this.transport.exec(antigravityUsage(definition.command), 45_000);
     this.assertOpen();
     try { return antigravityAccountUsage(output); }
-    catch (error) { throw new Error(signInHint(definition, error instanceof Error ? error.message : String(error))); }
+    catch (error) { throw new Error(signInHint(definition, error instanceof Error ? error.message : String(error), isLocalHost(this.host))); }
   }
   /** Shutdown releases persistent sessions, which keep running and are restored on the next start. */
   async close(): Promise<void> {

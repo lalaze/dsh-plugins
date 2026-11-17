@@ -25,6 +25,7 @@ export const zh: Record<string, string> = {
   "Antigravity is not installed on this SSH host": "这台 SSH 主机上没有安装 Antigravity",
   "Antigravity did not start a conversation": "Antigravity 没能新建会话",
   "Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then try again.": "这台机器上的 Antigravity 说它没有登录。通过 SSH 使用需要 Antigravity CLI 1.5.9 或更高版本（`agy update`），并且要单独登录一次（`agy acp --login`）。在那台机器的终端里运行这两条命令，然后再试。",
+  "Antigravity says it is not signed in on this computer. Run `agy acp --login` in a terminal on this computer, not over SSH (a sign-in made over SSH is kept apart), then try again.": "这台电脑上的 Antigravity 说它没有登录。在这台电脑本机的终端里运行 `agy acp --login`（不要通过 SSH：SSH 里登录的是另外一份），然后再试。",
   "Drop files here to add them to {cli}": "拖到这里，添加给 {cli}",
   "They are uploaded to the remote machine and their paths go into the prompt. Up to 50 MB each.": "文件会上传到远程机器，路径填入输入框。每个不超过 50 MB。",
   "Uploading {name}…": "正在上传 {name}…",

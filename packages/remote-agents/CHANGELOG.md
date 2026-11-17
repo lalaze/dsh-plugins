@@ -4,6 +4,11 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.145 — Antigravity's sign-in on this computer
+
+- When Antigravity is not signed in for a folder on this computer, the model list and the plan limits now say to run `agy acp --login` in a terminal on this computer, not over SSH. Run on this computer, Antigravity reads its sign-in from the keychain, and a sign-in made over SSH is a separate one. Before, the message only explained the SSH case. Saved machines keep the SSH message.
+- Upgrade together with Remote Terminals 0.1.15, which says the same when a TUI conversation cannot start.
+
 ## 0.2.144 — Antigravity plan limits in the usage ring
 
 - Hovering over or clicking the usage ring in an Antigravity conversation now shows the account's plan limits, as for Claude and Codex: one group for the Gemini models and one for the Claude and GPT models, each with its 5-hour (**Session**) and **Weekly** window, the share left and when it resets. They are read with `agy -p /usage` on the machine, which Antigravity answers itself: no model is called and no conversation is created. Reading takes about 5 to 10 seconds, then the result is kept for five minutes like the others.

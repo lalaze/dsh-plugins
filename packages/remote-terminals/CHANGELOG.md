@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.15 — A TUI that cannot start says why; Antigravity's sign-in on this computer
+
+- When the button that starts a new conversation in the TUI could not start it, it only got a red outline, and the reason was in its tooltip, so the click seemed to do nothing. Now the reason also appears in a card above the button. Press Esc or click elsewhere to close it; clicking the button again tries again.
+- When Antigravity is not signed in for a folder on this computer, the message now says to run `agy acp --login` in a terminal on this computer, not over SSH. Run on this computer, Antigravity reads its sign-in from the keychain, and a sign-in made over SSH is a separate one. Before, the message only explained the SSH case.
+- Can be upgraded on its own, without a restart. Refresh the DSH page to get the new button.
+
 ## 0.1.14 — A TUI's text comes back whole after the GPU does; its history is rebuilt more often
 
 **Text missing from a TUI after coming back to it, mostly on a phone:**
