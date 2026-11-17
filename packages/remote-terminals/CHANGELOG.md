@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.17 — A file button in TUI conversations, for phones
+
+- A TUI conversation has a paperclip button in its bottom-right corner, beside the rendering button. It opens the device's own file picker; what you choose is uploaded and its path goes into the CLI's prompt, as a dropped or pasted file does (an image shows as `[Image #1]`). A phone can neither drag nor paste a file into a terminal, so until now it had no way to give the CLI a picture or a file.
+- On a touch screen both bottom-right buttons are larger (32 pixels) and easier to see.
+- Ordinary conversations need nothing new: since DSH 0.2.2-rc.3 the composer's **+** menu has **File**, which opens the same picker on a phone.
+- Can be upgraded on its own, without a restart; reload the page (on the phone too) to see the button.
+
 ## 0.1.16 — Antigravity's token usage in TUI conversations
 
 - Token usage of Antigravity TUI conversations now goes to `dsh-usage-stats`, one record per turn and model, as Claude Code's and Codex's do. Before, it was not counted at all, so the usage panel showed only Antigravity's chat turns.
