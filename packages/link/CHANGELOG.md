@@ -4,7 +4,7 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
-## Unreleased — The wallpaper shows behind the desktop title strip
+## 0.1.5 — The wallpaper shows behind the desktop title strip
 
 Update the computer whose desktop window shows the other machines; reload the window once. The other machines need nothing.
 
