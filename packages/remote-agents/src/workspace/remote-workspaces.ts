@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { RemoteError, remotePath, type RemoteWorkspace } from '@dsh-plugins/remote-core/domain.js';
+import { isLocalHost, RemoteError, remotePath, type RemoteWorkspace } from '@dsh-plugins/remote-core/domain.js';
 import type { WorkspaceHosts } from './hosts.js';
 import { dshHome, sameEndpoint, sshEndpoint, type Endpoint, type WorkspaceAccess } from '@dsh-plugins/remote-core/access.js';
 
@@ -93,6 +93,8 @@ export class RemoteWorkspaces {
   constructor(private readonly machines: WorkspaceHosts, private readonly access: WorkspaceAccess, private readonly options: { home?: string; endpoint?: typeof sshEndpoint } = {}) {}
   /** Canonicalize the directory on the verified host, then create or reuse its anchor. */
   async create(hostId: string, path: string, signal?: AbortSignal): Promise<RemoteWorkspace> {
+    // A folder on this computer is opened as itself; it needs no anchor.
+    if (isLocalHost(this.machines.store.hosts().find(h => h.id === hostId))) throw new RemoteError('Open folders on this computer with This computer', 400);
     const { path: remote } = await this.machines.browse(hostId, path, { entries: false });
     signal?.throwIfAborted();
     const host = this.machines.store.hosts().find(h => h.id === hostId);

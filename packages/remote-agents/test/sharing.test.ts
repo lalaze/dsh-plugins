@@ -66,8 +66,9 @@ async function until(check: () => Promise<boolean> | boolean, ms = 10_000) {
 }
 const exists = (path: string) => access(path).then(() => true, () => false);
 
-async function setup(t: TestContext) {
-  const root = await mkdtemp(join(tmpdir(), 'ra-share-')), home = join(root, 'h'), skillsDir = join(root, 'skills');
+/** `base` holds the private HOME; a Unix socket path in it must stay within 104 bytes on macOS. */
+async function setup(t: TestContext, base = tmpdir()) {
+  const root = await mkdtemp(join(base, 'ra-share-')), home = join(root, 'h'), skillsDir = join(root, 'skills');
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(home); await mkdir(join(skillsDir, 'review', 'scripts'), { recursive: true });
   await writeFile(join(skillsDir, 'review', 'SKILL.md'), '---\nname: review\ndescription: Review a change\n---\nRun scripts/check.sh first.\n');
@@ -163,6 +164,25 @@ test('skills are copied once and shared natively with Claude and as load_skill e
 });
 
 const pointers = async (home: string) => (await readdir(join(home, '.dsh-remote-agents', 'bridge')).catch(() => [])).filter(name => name.startsWith('current'));
+
+test('on this computer DSH binds the shared socket itself, private to the user, and unbinds it when sharing stops', async t => {
+  const { home, sharing, transport, host, task, calls, launched, agent } = await setup(t, '/tmp');
+  const local: HostConfig = { ...host, connection: 'local' };
+  await sharing.set('mcp', 'github', true);
+  const launch = await sharing.prepare(local, transport, task('chat-task'), 'acp');
+  const proxy = launch.servers.find(s => s.name === 'dsh-github')!;
+  assert.equal(launched.length, 0, 'no ssh -R for this computer');
+  const [pointer] = await pointers(home);
+  const socket = (await readFile(join(home, '.dsh-remote-agents', 'bridge', pointer), 'utf8')).trim();
+  assert.equal((await stat(socket)).mode & 0o777, 0o600);
+  const client = mcp(t, proxy.command, proxy.args, home);
+  await client.request('initialize', { protocolVersion: '2025-11-25' });
+  assert.deepEqual((await client.request('tools/list')).result.tools.map((tool: { name: string }) => tool.name), ['create_issue', 'search']);
+  await client.request('tools/call', { name: 'create_issue', arguments: { title: 'Bug' } });
+  assert.deepEqual(calls, [{ name: 'mcp__github__create_issue', arguments: { title: 'Bug' }, agent }]);
+  sharing.forget(local.id);
+  await until(() => exists(socket).then(found => !found));
+});
 
 test('a shared MCP server runs in DSH with the owning conversation, through one reverse forward per host', async t => {
   const { home, sharing, transport, host, task, calls, launched, agent, scripts } = await setup(t);

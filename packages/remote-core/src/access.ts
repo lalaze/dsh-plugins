@@ -3,7 +3,7 @@ import { readFile, realpath, stat } from 'node:fs/promises';
 import { homedir, hostname, userInfo } from 'node:os';
 import { isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import type { Readable } from 'node:stream';
-import { remotePath, type HostConfig } from './domain.js';
+import { isLocalHost, remotePath, type HostConfig } from './domain.js';
 import { connectionInput } from './ssh.js';
 import { MACHINE_IDENTITY, serverIdOf } from './remote-host.js';
 
@@ -86,6 +86,20 @@ export class WorkspaceAccess {
     return { connection: row.host, cwd: posix.join(remotePath(row.remoteCwd), ...relative(row.path, local).split(sep)), revision: JSON.stringify(row) };
   }
   async resolve(cwd: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement> {
+    const { here: _, ...placement } = await this.locate(cwd, signal);
+    return placement;
+  }
+  /**
+   * Where the CLIs of a conversation working in `cwd` run: as {@link resolve}, and a folder on DSH's own computer is
+   * placed on the local machine ({@link isLocalHost}). Only CLI models use this; Git, files and terminals of a local
+   * folder stay DSH's own.
+   */
+  async resolveForCli(cwd: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement> {
+    const { here, ...placement } = await this.locate(cwd, signal);
+    return here ? { hostIds: this.hosts().filter(isLocalHost).map(host => host.id), cwd: here } : placement;
+  }
+  /** `here` is the canonical path of a folder on DSH's own computer, which no SSH machine stands for. */
+  private async locate(cwd: string | undefined, signal?: AbortSignal): Promise<WorkspacePlacement & { here?: string }> {
     signal?.throwIfAborted();
     if (!cwd) return { hostIds: [] };
     const binding = await this.binding(cwd);
@@ -101,6 +115,7 @@ export class WorkspaceAccess {
       catch { signal?.throwIfAborted(); }
     }
     const matches = await Promise.all(this.hosts().map(async host => {
+      if (isLocalHost(host)) return undefined;
       try { const candidate = await endpointFor(host.connection, signal); return endpoints.some(endpoint => sameEndpoint(endpoint, candidate)) ? host.id : undefined; }
       catch (error) { signal?.throwIfAborted(); return undefined; }
     }));
@@ -108,9 +123,10 @@ export class WorkspaceAccess {
     if ((await this.binding(cwd))?.revision !== binding.revision) throw new Error('Remote workspace binding changed during verification');
     return { hostIds: matches.filter((id): id is string => !!id), cwd: binding.cwd };
   }
-  private async fromRuntime(cwd: string, signal?: AbortSignal): Promise<WorkspacePlacement> {
+  private async fromRuntime(cwd: string, signal?: AbortSignal): Promise<WorkspacePlacement & { here?: string }> {
     const runtime = this.options.runtime?.();
-    if (!runtime) return { hostIds: [] };
+    // Without DSH's process service nothing can run elsewhere: the folder is on this computer, if it exists.
+    if (!runtime) { const here = await realpath(cwd).catch(() => undefined); return { hostIds: [], ...(here && isAbsolute(here) ? { here } : {}) }; }
     const deadline = AbortSignal.timeout(5000), combined = signal ? AbortSignal.any([signal, deadline]) : deadline;
     combined.throwIfAborted();
     const script = `${MACHINE_IDENTITY}; printf '%s\\0' "$(pwd -P)"`;
@@ -125,7 +141,7 @@ export class WorkspaceAccess {
       if (result.exitCode !== 0 || oversized) throw new Error('Could not verify the workspace machine');
       const [machine, user, unique, path] = output.split('\0');
       if (!machine || !user || !unique || !path) throw new Error('Invalid workspace machine identity');
-      if (machine === hostname() && user === userInfo().username) return { hostIds: [] };
+      if (machine === hostname() && user === userInfo().username) return { hostIds: [], here: remotePath(path) };
       const serverId = serverIdOf(machine, user, unique);
       return { hostIds: this.hosts().filter(host => host.serverId === serverId).map(host => host.id), cwd: remotePath(path) };
     } finally { combined.removeEventListener('abort', terminate); }

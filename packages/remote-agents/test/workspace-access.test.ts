@@ -106,7 +106,8 @@ test('the mounted workspace API uses live or persisted session placement and rej
   let live: { header: { cwd: string } } | undefined;
   let changeDuringCheck = false;
   const checked: (string | undefined)[] = [];
-  t.mock.method(WorkspaceAccess.prototype, 'resolve', async (cwd?: string) => {
+  // The model picker asks where the conversation's CLIs run.
+  t.mock.method(WorkspaceAccess.prototype, 'resolveForCli', async (cwd?: string) => {
     checked.push(cwd);
     if (changeDuringCheck) live = { header: { cwd: '/different-workspace' } };
     return { hostIds: [hostId], cwd: '/srv/remote' };

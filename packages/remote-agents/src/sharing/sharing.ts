@@ -1,11 +1,12 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { chmodSync } from 'node:fs';
+import { readdir, readFile, stat, unlink } from 'node:fs/promises';
 import { createServer, type AddressInfo, type Server, type Socket } from 'node:net';
 import { basename, dirname, join, relative, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { BRIDGE_SCRIPT, BRIDGE_VERSION } from './bridge-script.js';
-import { RemoteError, type HostConfig, type NativeProtocol, type Task } from '@dsh-plugins/remote-core/domain.js';
+import { isLocalHost, RemoteError, type HostConfig, type NativeProtocol, type Task } from '@dsh-plugins/remote-core/domain.js';
 import { connectionInput, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import type { Store } from '../core/store.js';
 import { CLAUDE_GOAL_SERVER, CLAUDE_GOAL_MCP, type ClaudeGoalBridge, type GoalIdentity } from '../chat/claude-goal.js';
@@ -210,7 +211,14 @@ function remoteSkills(text: string | undefined): RemoteSkills {
   } catch { return { skills: {} }; }
 }
 
-interface Forward { ready: Promise<void>; child?: ChildProcess; stopped: boolean; socket: string; pointer?: string; up?: boolean }
+/** `child` is the `ssh -R` of an SSH machine; on this computer DSH listens on the socket itself, as `server`. */
+interface Forward { ready: Promise<void>; child?: ChildProcess; server?: Server; stopped: boolean; socket: string; pointer?: string; up?: boolean }
+/** End a forward for good. */
+function endForward(forward: Forward): void {
+  forward.stopped = true; forward.child?.kill();
+  const server = forward.server; forward.server = undefined;
+  if (server) server.close(() => { void unlink(forward.socket).catch(() => {}); });
+}
 /** A host's paths: `shared` is this DSH's skill copy, a Claude Code plugin. */
 interface HostInfo { home: string; node: string; shared: string }
 class HostBridge {
@@ -561,15 +569,11 @@ node "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs" manifest "$HOME/${BASE}
     forward.ready = Promise.all([this.listen(), this.instance()]).then(([port, instance]) => new Promise<void>((resolve, reject) => {
       // Stopped while DSH's port was opening.
       if (forward.stopped) throw new Error('Sharing has stopped');
-      const child = forward.child = this.launch(bridgeForwardArguments(bridge.host.connection, socket, port));
-      let stderr = '', state: 'starting' | 'confirmed' | 'up' | 'failed' = 'starting';
-      const fail = (error: Error) => { if (state === 'up' || state === 'failed') return; state = 'failed'; clearTimeout(timer); reject(error); child.kill(); };
+      let state: 'starting' | 'confirmed' | 'up' | 'failed' = 'starting';
+      const fail = (error: Error) => { if (state === 'up' || state === 'failed') return; state = 'failed'; clearTimeout(timer); reject(error); forward.child?.kill(); forward.server?.close(); };
       const timer = setTimeout(() => fail(new Error('The reverse forward did not start')), 20_000);
-      child.stderr?.setEncoding('utf8');
-      child.stderr?.on('data', (chunk: string) => {
-        stderr = (stderr + chunk).slice(-4000);
-        // Only the server's reply confirms the socket is bound; OpenSSH logs it at debug level, hence `-v`.
-        if (state !== 'starting' || !/remote forward success/i.test(stderr)) return;
+      const confirmed = () => {
+        if (state !== 'starting') return;
         state = 'confirmed'; clearTimeout(timer);
         // Point this DSH's proxies, new and running, at the socket. Proxies started by an earlier version read the
         // shared `current`; it exists only where one ran, and is updated as that version did.
@@ -578,6 +582,24 @@ node "$HOME/${BASE}/bridge/bridge-${BRIDGE_VERSION}.mjs" manifest "$HOME/${BASE}
 if [ -e ${quote(legacy)} ]; then printf '%s' ${quote(socket)} > ${quote(`${legacy}.tmp`)} && mv -f ${quote(`${legacy}.tmp`)} ${quote(legacy)} || exit 1; fi
 find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} + 2>/dev/null || true`, 20_000, { login: false })
           .then(() => { if (state !== 'confirmed') return; state = 'up'; forward.up = true; bridge.error = undefined; resolve(); }, fail);
+      };
+      if (isLocalHost(bridge.host)) {
+        // This computer: the proxies reach DSH on a socket DSH binds itself, private to this user like sshd's.
+        const server = forward.server = createServer(connection => this.accept(connection));
+        server.on('error', error => { if (state === 'up') this.ended(bridge, forward, error, started); else fail(error); });
+        server.listen(socket, () => {
+          try { chmodSync(socket, 0o600); } catch (error) { fail(error as Error); return; }
+          confirmed();
+        });
+        return;
+      }
+      const child = forward.child = this.launch(bridgeForwardArguments(bridge.host.connection, socket, port));
+      let stderr = '';
+      child.stderr?.setEncoding('utf8');
+      child.stderr?.on('data', (chunk: string) => {
+        stderr = (stderr + chunk).slice(-4000);
+        // Only the server's reply confirms the socket is bound; OpenSSH logs it at debug level, hence `-v`.
+        if (/remote forward success/i.test(stderr)) confirmed();
       });
       child.on('error', fail);
       child.on('close', code => {
@@ -604,7 +626,7 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
   /** The host lost a live forward's socket or pointer: end it and bring up another. */
   private replace(bridge: HostBridge, forward: Forward): void {
     bridge.forward = undefined; bridge.error = 'The shared socket was removed from the SSH host';
-    forward.stopped = true; forward.child?.kill();
+    endForward(forward);
     this.keep(bridge);
   }
   /** Bring a host's forward up, retrying with backoff until it is. */
@@ -620,7 +642,7 @@ find ${quote(directory)} -maxdepth 1 -name 's-*.sock' -mtime +7 -exec rm -f {} +
   private stop(bridge: HostBridge): void {
     bridge.stopped = true; clearTimeout(bridge.retry); bridge.retry = undefined;
     const forward = bridge.forward; bridge.forward = undefined;
-    if (forward) { forward.stopped = true; forward.child?.kill(); }
+    if (forward) endForward(forward);
   }
 
   async prepare(host: HostConfig, transport: SshTransport, task: Task, protocol: NativeProtocol, signal?: AbortSignal): Promise<SharedLaunch> {

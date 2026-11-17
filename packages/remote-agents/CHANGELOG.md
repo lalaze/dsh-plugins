@@ -4,6 +4,14 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.141 — CLIs on this computer, without SSH
+
+- **This computer is a machine.** Every DSH now lists the computer it runs on in **Settings → Remote agents**, under its own name and marked **This computer**. In a folder on this computer, added with **Add workspace › This computer**, the model picker shows the CLIs installed and signed in here, and conversations run them directly, without SSH. Before, a folder on this computer showed no CLI models at all; you had to save the computer as an SSH machine (for example `127.0.0.1`) and add its folders as remote workspaces.
+- They are detected the first time a conversation opens in a folder on this computer. Starting DSH still connects to nothing. After installing or signing in to a CLI later, use **Refresh models**.
+- A CLI here starts from a fresh login environment, as over SSH: DSH's own variables do not reach it. It keeps running while DSH restarts, and the conversation continues where it was.
+- This computer cannot be removed; switch off its CLIs instead. It is not offered as a remote machine: its folders keep DSH's own files, Git and terminals, and other plugins (Remote Terminals, Git, Autofix) see the same machines as before. With Model flow 0.1.13, a flow in a folder on this computer runs on this computer's CLIs too.
+- Unchanged: SSH machines, remote workspaces and their conversations work as before. A computer saved as an SSH machine to itself keeps its remote workspaces.
+
 ## 0.2.140 — Full access no longer refuses what a remote CLI asks, without a word
 
 - **Antigravity follows the DSH permission.** Like Claude and Codex, an Antigravity conversation now takes its mode from the conversation's DSH permission (the composer or `/permission`): **Read Only** runs it in **Default** (it asks before edits and commands), **Workspace Write** in **Accept edits**, and **Full access** and **Auto review** in **Auto**. It used to stay in Default whatever the permission. A change applies from the next message.

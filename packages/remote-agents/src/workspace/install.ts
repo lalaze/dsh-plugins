@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session } from '@deepseek-ai/dsh-session';
 import { join } from 'node:path';
+import { isLocalHost, RemoteError } from '@dsh-plugins/remote-core/domain.js';
 import { accessOf, type ToolDefinition, type ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
 import type { Store } from '../core/store.js';
 import { dshHome, under, WorkspaceAccess, type WorkspacePlacement, type WorkspaceRuntime } from '@dsh-plugins/remote-core/access.js';
@@ -39,6 +40,8 @@ export interface Workspaces {
   access: WorkspaceAccess;
   /** The verified placement of a DSH conversation, rechecked so a workspace switch during verification yields none. */
   placement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
+  /** As {@link placement}, and a local folder is placed on this computer's machine, whose CLIs run here. For CLI models only. */
+  cliPlacement(sessionId: string, signal: AbortSignal): Promise<WorkspacePlacement>;
   workspaces: RemoteWorkspaces;
   features: WorkspaceFeatures;
 }
@@ -60,11 +63,15 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     const activated = live();
     return activated ? activated.header.cwd : stored?.cwd;
   };
-  const placement = async (id: string, signal: AbortSignal) => {
-    const cwd = await sessionCwd(id), value = await access.resolve(cwd, signal);
+  const placed = (resolve: (cwd: string | undefined, signal: AbortSignal) => Promise<WorkspacePlacement>) => async (id: string, signal: AbortSignal) => {
+    const cwd = await sessionCwd(id), value = await resolve(cwd, signal);
     return cwd === await sessionCwd(id) ? value : { hostIds: [] };
   };
-  const files = new WorkspaceService(machines, placement, sessionCwd);
+  const placement = placed((cwd, signal) => access.resolve(cwd, signal)), cliPlacement = placed((cwd, signal) => access.resolveForCli(cwd, signal));
+  const files = new WorkspaceService(machines, placement, sessionCwd, cliPlacement);
+  // Other plugins work on remote machines only: this computer's folders are DSH's own.
+  const local = (hostId: string) => isLocalHost(store.hosts().find(host => host.id === hostId));
+  const remoteOnly = (hostId: string) => { if (local(hostId)) throw new RemoteError('This computer is not a remote machine', 400); };
   const unbounded = () => new AbortController().signal;
   ctx.provide('remoteAgentsWorkspaces', {
     gitWorkspaceVersion: 1,
@@ -101,13 +108,16 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
   // dsh-remote-terminals runs terminals, TUI conversations and worktrees on the machines through this service alone.
   const remote: RemoteAgentsMachines = {
     version: 1, stateFile: join(store.directory, 'state.json'),
-    hosts: () => machines.hosts(), browse: (hostId, path, options) => machines.browse(hostId, path, options),
-    withWorkspace: (hostId, verify, action) => machines.withWorkspace(hostId, verify, action),
+    hosts: () => machines.hosts().filter(host => !local(host.id)),
+    browse: async (hostId, path, options) => { remoteOnly(hostId); return machines.browse(hostId, path, options); },
+    withWorkspace: async (hostId, verify, action) => { remoteOnly(hostId); return machines.withWorkspace(hostId, verify, action); },
     target: (sessionId, signal = unbounded(), expected) => files.target(sessionId, signal, expected),
     resolve: (path, signal) => access.resolve(path, signal),
+    resolveForCli: (path, signal) => access.resolveForCli(path, signal),
+    localMachine: () => { const host = store.hosts().find(h => isLocalHost(h)); return host && { id: host.id, label: host.label }; },
     createWorkspace: (hostId, path, signal) => workspaces.create(hostId, path, signal),
-    archiveSessionsIn: (hostId, folder) => machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
+    archiveSessionsIn: (hostId, folder) => local(hostId) ? Promise.resolve() : machines.archiveSessionsIn?.(hostId, folder) ?? Promise.resolve(),
   };
   ctx.provide('remoteAgentsMachines', remote);
-  return { access, placement, workspaces, features: { files } };
+  return { access, placement, cliPlacement, workspaces, features: { files } };
 }

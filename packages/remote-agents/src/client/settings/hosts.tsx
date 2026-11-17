@@ -1,5 +1,5 @@
 import React, { useId, useState } from 'react';
-import { enabledProvidersOf, PROVIDER_LABELS, type Dashboard, type Host } from '@dsh-plugins/remote-core/domain.js';
+import { enabledProvidersOf, isLocalHost, PROVIDER_LABELS, type Dashboard, type Host } from '@dsh-plugins/remote-core/domain.js';
 import { api } from '../api.js';
 import { localizeError, ui } from '../i18n.js';
 import { ActionsMenu, Chevron } from './menu.js';
@@ -30,13 +30,13 @@ function HostRow({ host, agents, busy, run, update, removing, setRemoving, remov
 }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const enabled = enabledProvidersOf(host);
+  const enabled = enabledProvidersOf(host), local = isLocalHost(host);
   const cliList = enabled.map(id => PROVIDER_LABELS[id] ?? id).join(', ');
   return <li className="ra-host-row ra-host-with-clis">
     <div className="ra-host-top">
       <button type="button" className="ra-host-expand" aria-expanded={open} aria-controls={bodyId} aria-label={ui(open ? 'Hide machine settings' : 'Show machine settings')} onClick={() => setOpen(value => !value)}><Chevron open={open} /></button>
       <div className="ra-host-name">
-        <div className="ra-host-title"><strong>{host.label}</strong><span className="ra-mono ra-muted">{host.connection}</span><span className="ra-badge" data-status={host.status}>{ui(host.status)}</span></div>
+        <div className="ra-host-title"><strong>{host.label}</strong>{local ? <span className="ra-muted">{ui('This computer')}</span> : <span className="ra-mono ra-muted">{host.connection}</span>}<span className="ra-badge" data-status={host.status}>{ui(host.status)}</span></div>
         <span className="ra-muted">{host.modelCount === undefined ? ui('Models have not been detected yet.') : ui('{count} models in the DSH picker', { count: host.modelCount })}{!open && ` · ${enabled.length ? ui('CLIs: {list}', { list: cliList }) : ui('No CLIs enabled')}`}</span>
         {host.modelCount === 0 && <span className="ra-muted">{ui(enabled.length ? 'Install and sign in to a CLI on this machine, then refresh models.' : 'No CLIs enabled. Select the ones you want to use.')}</span>}
         {(host.modelError || host.error) && <span className="ra-host-error">{localizeError(host.modelError ?? host.error ?? '')}</span>}
@@ -45,7 +45,7 @@ function HostRow({ host, agents, busy, run, update, removing, setRemoving, remov
       <ActionsMenu label={ui('Machine actions')}>{close => <>
         <button type="button" role="menuitem" disabled={!!busy} onClick={() => { close(); void run(`connect:${host.id}`, async () => update(await api<Dashboard>('connect', { hostId: host.id }))); }}>{ui('Test connection')}</button>
         <button type="button" role="menuitem" disabled={!!busy || !enabled.length} onClick={() => { close(); void run(`discover:${host.id}`, async () => update(await api<Dashboard>('discoverHost', { hostId: host.id }))); }}>{ui(busy === `discover:${host.id}` ? 'Detecting models…' : 'Refresh models')}</button>
-        <button type="button" role="menuitem" className="ra-danger" disabled={!!busy} onClick={() => { close(); agents ? setRemoving(host.id) : remove(host.id); }}>{ui('Remove')}</button>
+        {!local && <button type="button" role="menuitem" className="ra-danger" disabled={!!busy} onClick={() => { close(); agents ? setRemoving(host.id) : remove(host.id); }}>{ui('Remove')}</button>}
       </>}</ActionsMenu>
     </div>
     {removing === host.id && <div className="ra-banner ra-remove-confirm" role="alert">

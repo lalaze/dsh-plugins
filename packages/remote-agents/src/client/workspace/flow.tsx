@@ -7,7 +7,7 @@ import { HouseIcon } from '@phosphor-icons/react/dist/csr/House';
 import { XIcon } from '@phosphor-icons/react/dist/csr/X';
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Dashboard, DirectoryListing, Host, RemoteWorkspace } from '@dsh-plugins/remote-core/domain.js';
+import { isLocalHost, type Dashboard, type DirectoryListing, type Host, type RemoteWorkspace } from '@dsh-plugins/remote-core/domain.js';
 import { worktreeTab } from '@dsh-plugins/remote-core/client/worktree-tab.js';
 import { api } from '../api.js';
 import { localizeError, ui, useLocale } from '../i18n.js';
@@ -279,7 +279,8 @@ export function workspaceFlow(local: () => LocalDirectories | undefined): React.
         const offered = worktreeTab<ProjectTab>(), ProjectFlow = offered?.Flow;
         const listing: Promise<readonly unknown[]> = offered ? offered.projects().catch(() => []) : Promise.resolve([]);
         let hosts: Host[] = [];
-        try { hosts = (await api<Dashboard>()).hosts; } catch { /* without the settings API, behave as DSH's own picker */ }
+        // This computer's folders are opened with This computer, not as a remote machine.
+        try { hosts = (await api<Dashboard>()).hosts.filter(host => !isLocalHost(host)); } catch { /* without the settings API, behave as DSH's own picker */ }
         if (!live()) return;
         const saved = recall(TAB_KEY), tab: Tab = saved === 'remote' || saved === 'project' ? saved : 'local';
         if (hosts.length) {

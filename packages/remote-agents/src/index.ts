@@ -14,6 +14,7 @@ import { ChatProjects } from './chat/projects.js';
 import type { SyncAgent } from './chat/native-chat.js';
 import { accessOf, loggerOf, type ToolDefinition, type ToolHost } from '@dsh-plugins/remote-core/dsh-host.js';
 import { Store } from './core/store.js';
+import { LOCAL_HOST_ID } from '@dsh-plugins/remote-core/domain.js';
 import { createHandler } from './http.js';
 import { installSharingHost } from './sharing/install.js';
 import { Sharing } from './sharing/sharing.js';
@@ -38,11 +39,17 @@ export const Config: Schema<{ stateDir?: string; claudeGoalSessions?: string[] }
   claudeGoalSessions: Schema.array(Schema.string()).default([]).description('Explicit DSH session IDs opting into the Claude goal bridge. Each new turn in a listed session restarts the Claude process (resuming the same conversation) and terminates in-process background tasks. Unlisted sessions keep their persistent process.'),
 });
 export async function apply(ctx: Context, config: { stateDir?: string; claudeGoalSessions?: string[] } = {}): Promise<void> {
-  const store = new Store(join(config.stateDir ?? stateDir(), 'state.json'));
+  const store = new Store(join(config.stateDir ?? stateDir(), 'state.json'), { localMachine: true });
   await store.open();
   const service = new RemoteAgentsService(store);
   const projects = new ChatProjects(service);
   const workspace = await installWorkspaces(ctx, store, service);
+  const cliPlacement: typeof workspace.cliPlacement = async (sessionId, signal) => {
+    const placement = await workspace.cliPlacement(sessionId, signal);
+    // This computer's CLIs are detected when a conversation first works in one of its folders.
+    if (placement.hostIds.includes(LOCAL_HOST_ID)) void service.discoverLocalMachine();
+    return placement;
+  };
   const sharing = new Sharing(store, undefined, message => loggerOf(ctx)?.warn?.(message));
   const goalSessions = new Set(config.claudeGoalSessions ?? []);
   const claudeGoals = new ClaudeGoalBridge(name => ctx.get(name as never), id => store.task(t => t.id === id && t.provider === 'claude')?.chat?.sessionId, id => goalSessions.has(id));
@@ -57,7 +64,7 @@ export async function apply(ctx: Context, config: { stateDir?: string; claudeGoa
     if (task) for (const record of remoteUsageRecords(task, store.hosts(), usage, turn)) ctx.emit('remote-agents/usage', record);
   });
   ctx.connection.fetch.register({ path: '/api/remote-agents', methods: ['GET', 'POST'], requestBody: 'buffered',
-    fetch: createHandler(service, projects, workspace.placement, workspace.workspaces, workspace.features, sharing, adoptModel(name => ctx.get(name as never))) });
+    fetch: createHandler(service, projects, cliPlacement, workspace.workspaces, workspace.features, sharing, adoptModel(name => ctx.get(name as never))) });
   installChat(ctx, service, projects, { access: workspace.access, files: workspace.features.files }, claudeGoals);
   installSharingHost(ctx, sharing);
   void service.refreshStaleCatalogs();

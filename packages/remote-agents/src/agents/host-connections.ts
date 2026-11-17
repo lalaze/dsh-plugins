@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { connectionInput, type Backend, type BackendFactory } from './backend.js';
 import type { Store } from '../core/store.js';
-import { enabledProvidersOf, field, providerSelection, record, RemoteError, type Host, type HostConfig } from '@dsh-plugins/remote-core/domain.js';
+import { enabledProvidersOf, field, isLocalHost, providerSelection, record, RemoteError, type Host, type HostConfig } from '@dsh-plugins/remote-core/domain.js';
 
 interface Connection { backend: Backend; ready?: Promise<void>; status: Host['status']; error?: string }
 /** The facade supplies its single queue, shared by host configuration and task mutations. */
@@ -26,7 +26,9 @@ export class HostConnections {
   hosts(): Host[] {
     return this.store.hosts().map(({ password, catalog, ...host }) => {
       const enabled = enabledProvidersOf(host), providers = catalog?.providers.filter(p => enabled.includes(p.id)) ?? [];
-      return { ...host, enabledProviders: enabled, status: this.connections.get(host.id)?.status ?? 'disconnected', error: this.connections.get(host.id)?.error,
+      // This computer has no connection to make: it is reachable until something fails.
+      const status = this.connections.get(host.id)?.status ?? (isLocalHost(host) ? 'connected' : 'disconnected');
+      return { ...host, enabledProviders: enabled, status, error: this.connections.get(host.id)?.error,
         ...(!enabled.length ? { modelCount: 0 } : {}),
         ...(catalog ? { modelsCheckedAt: catalog.checkedAt, modelCount: providers.filter(p => p.status === 'ready').reduce((n, p) => n + p.models.length, 0),
           providerErrors: providers.filter(p => p.status === 'error').map(p => ({ label: p.label, error: p.error ?? '' })) } : {}) };

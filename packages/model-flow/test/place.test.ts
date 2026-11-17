@@ -14,6 +14,7 @@ const catalog: CatalogModel[] = [
   remote('mini-id', 'mac-mini', 'codex', 'gpt-sol', 'GPT Sol'),
   remote('code-id', 'code', 'codex', 'gpt-sol', 'GPT Sol'),
   { provider: 'workbuddy', providerName: 'WorkBuddy', id: 'deepseek-flash', name: 'Deepseek Flash' },
+  remote('local-id', 'lalaze-mini', 'codex', 'gpt-sol', 'GPT Sol'),
 ];
 const route = (model: CatalogModel) => ({ provider: model.provider, model: model.id, label: model.name });
 const [opusMini, solMini, solCode, flash] = catalog.map(route);
@@ -63,7 +64,8 @@ test('the refusal names the models, their machine, the workspace\'s machine and 
 });
 
 interface Spec { label: string; request: { agentOptions: { provider: string; model: string } } }
-async function setup(t: TestContext, config: Record<string, unknown>, placement: { hostIds: string[]; cwd?: string } | 'none' | 'broken') {
+/** `cli` is where Remote Agents places CLI models, when it knows this computer as a machine. */
+async function setup(t: TestContext, config: Record<string, unknown>, placement: { hostIds: string[]; cwd?: string } | 'none' | 'broken', cli?: { hostIds: string[]; cwd?: string }) {
   const home = await mkdtemp(join(tmpdir(), 'model-flow-place-'));
   const oldHome = process.env.DSH_HOME;
   process.env.DSH_HOME = home;
@@ -85,6 +87,7 @@ async function setup(t: TestContext, config: Record<string, unknown>, placement:
     ...(placement === 'none' ? {} : { remoteAgentsMachines: {
       hosts: () => [{ id: 'mini-id', label: 'mac-mini' }, { id: 'code-id', label: 'code' }],
       async resolve(path: string | undefined) { asked.push(path); if (placement === 'broken') throw new Error('Cannot read a valid remote workspace binding'); return placement; },
+      ...(cli ? { async resolveForCli(path: string | undefined) { asked.push(path); return cli; }, localMachine: () => ({ id: 'local-id', label: 'lalaze-mini' }) } : {}),
     } }),
   };
   const ctx = {
@@ -146,6 +149,16 @@ test('a remote CLI model is refused in a workspace on DSH\'s own computer', asyn
   const host = await setup(t, { implement: flash, review: solMini }, { hostIds: [] });
   await assert.rejects(host.service.start(host.agent, { goal: 'fix it' }), /The review model GPT Sol \(mac-mini\) cannot run in this workspace: the workspace is on the computer DSH runs on/u);
   assert.equal(host.calls.length, 0);
+});
+
+test('in a folder on this computer, the saved models run on its own CLIs, and one it lacks is refused', async t => {
+  const host = await setup(t, { implement: solMini, review: flash }, { hostIds: [] }, { hostIds: ['local-id'], cwd: '/Users/me/app' });
+  const result = await (await host.service.start(host.agent, { goal: 'fix it' })).done;
+  assert.equal(result.end.kind, 'passed');
+  assert.deepEqual(host.calls.map(call => call.request.agentOptions.model), ['local-id/codex/gpt-sol', 'deepseek-flash']);
+  assert.deepEqual(result.steps.map(step => step.machine), ['lalaze-mini', undefined]);
+  const lacking = await setup(t, { implement: flash, review: opusMini }, { hostIds: [] }, { hostIds: ['local-id'], cwd: '/Users/me/app' });
+  await assert.rejects(lacking.service.start(lacking.agent, { goal: 'fix it' }), /the workspace is on lalaze-mini, and lalaze-mini does not have this model/u);
 });
 
 test('without Remote Agents, or when it cannot tell where the workspace is, the saved models are used as they are', async t => {

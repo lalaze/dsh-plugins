@@ -36,9 +36,18 @@ export class WorkspaceService {
   private readonly syncing = new Set<string>();
   /** Only this session's active request can cancel its pinned target, even after the session changes workspace. */
   private readonly gitJobs = new Map<string, { target?: WorkspaceTarget; cancelled: boolean; started: boolean }>();
-  constructor(readonly machines: WorkspaceHosts, readonly placement: SessionPlacement, private readonly localCwd: (id: string) => Promise<string | undefined>) {}
-  async target(sessionId: string, signal = new AbortController().signal, expected?: WorkspaceTarget): Promise<WorkspaceTarget> {
-    const value = await this.placement(sessionId, signal);
+  /** `cliPlacement` also places a local folder on this computer's machine; only what a CLI model reads uses it. */
+  constructor(readonly machines: WorkspaceHosts, readonly placement: SessionPlacement, private readonly localCwd: (id: string) => Promise<string | undefined>,
+    private readonly cliPlacement: SessionPlacement = placement) {}
+  target(sessionId: string, signal = new AbortController().signal, expected?: WorkspaceTarget): Promise<WorkspaceTarget> {
+    return this.targetOf(this.placement, sessionId, signal, expected);
+  }
+  /** Where the conversation's CLI works: its remote workspace, or a folder on this computer. */
+  private cliTarget(sessionId: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget> {
+    return this.targetOf(this.cliPlacement, sessionId, signal, expected);
+  }
+  private async targetOf(placement: SessionPlacement, sessionId: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget> {
+    const value = await placement(sessionId, signal);
     const host = this.machines.hosts().find(h => value.hostIds.includes(h.id) && (!expected || h.id === expected.hostId));
     if (!host || !value.cwd) throw new RemoteError('Select a verified remote workspace first.', 409);
     if (expected && expected.cwd !== value.cwd) throw new RemoteError('The workspace changed during verification. Select the model again.', 409);
@@ -57,8 +66,16 @@ export class WorkspaceService {
    * conversation's verified machine. It may be outside the workspace: the CLI there already read it.
    */
   async readViewed(sessionId: string, path: string, limit: number, signal: AbortSignal): Promise<Buffer | undefined> {
-    const target = await this.target(sessionId, signal);
-    return this.machines.withWorkspace(target.hostId, async () => { await this.target(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
+    const target = await this.cliTarget(sessionId, signal);
+    return this.machines.withWorkspace(target.hostId, async () => { await this.cliTarget(sessionId, signal, target); }, files => files.readAbsolute(path, limit, signal));
+  }
+  /** An image a CLI of this conversation showed by its path in the workspace; none when it is larger than `limit`. */
+  async readImage(sessionId: string, path: string, limit: number, signal: AbortSignal): Promise<Buffer | undefined> {
+    const target = await this.cliTarget(sessionId, signal);
+    return this.machines.withWorkspace(target.hostId, async () => { await this.cliTarget(sessionId, signal, target); }, async files => {
+      const file = await files.operate(target.cwd, fileOperation({ op: 'stat', path }), signal) as { revision: string; size: number };
+      return file.size <= limit ? files.download(target.cwd, path, file.revision, signal) : undefined;
+    });
   }
   async upload(sessionId: string, path: string, rev: string | null, size: number, input: AsyncIterable<Uint8Array>, signal: AbortSignal, expected?: WorkspaceTarget): Promise<unknown> {
     revision(rev); const target = await this.target(sessionId, signal, expected);

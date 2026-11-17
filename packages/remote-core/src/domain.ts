@@ -14,6 +14,16 @@ export interface Host {
 }
 export interface HostCatalog { cwd: string; providers: Provider[]; checkedAt: string }
 export interface HostConfig { id: string; label: string; connection: string; password?: string; serverId?: string; catalog?: HostCatalog; modelError?: string; enabledProviders?: string[] }
+/**
+ * The computer DSH itself runs on, saved next to the SSH machines so its CLI selection and model catalog work the same
+ * way. Its CLIs run without SSH, in the folders DSH opens on this computer. It is never removed or offered as a remote
+ * machine to work on.
+ */
+export const LOCAL_HOST_ID = 'local-machine';
+export const LOCAL_CONNECTION = 'local';
+/** The local machine's identity: it is this computer whatever its name, so nothing pins its host name. */
+export const LOCAL_SERVER_ID = 'local';
+export const isLocalHost = (host: Pick<HostConfig, 'connection'> | undefined) => host?.connection === LOCAL_CONNECTION;
 export interface SshConfigHost { alias: string; connection: string }
 export interface SshConfigHosts { hosts: SshConfigHost[]; warnings: string[] }
 export interface Choice { id: string; label: string; isDefault?: boolean }

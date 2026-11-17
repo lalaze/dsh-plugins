@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { AccountUsage, Agent, Attachment, Choice, Cursor, DirectoryListing, HostConfig, MessageTimeline, Model, NativeProtocol, PermissionAnswer, Provider, RelayUnavailable, Task, TimelinePage } from '@dsh-plugins/remote-core/domain.js';
-import { enabledProvidersOf, list, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError } from '@dsh-plugins/remote-core/domain.js';
-import { connectionInput, JsonlPeer, OpenSshTransport, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
+import { enabledProvidersOf, isLocalHost, list, LOCAL_SERVER_ID, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError } from '@dsh-plugins/remote-core/domain.js';
+import { connectionInput, JsonlPeer, LocalShellTransport, OpenSshTransport, quote, type SshTransport } from '@dsh-plugins/remote-core/ssh.js';
 import { MACHINE_IDENTITY, REMOTE_HOME, serverIdOf } from '@dsh-plugins/remote-core/remote-host.js';
 import { CliSession, initializeAcp } from './runtime.js';
 import { initializeCodex } from '@dsh-plugins/remote-core/codex.js';
@@ -174,7 +174,9 @@ export class SshBackend implements Backend {
   private readonly ownTurnListeners = new Set<(taskId: string) => void>();
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport, private readonly sharing: () => LaunchSharing | undefined = () => undefined) {
     // Commands to the host share one SSH connection; its sockets live in this plugin's private state directory.
-    this.transport = transport ?? new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') });
+    // The local machine runs the same commands in a local shell.
+    this.transport = transport ?? (isLocalHost(host) ? new LocalShellTransport()
+      : new OpenSshTransport(connectionInput(host.connection), 'ssh', { controlDirectory: join(store.directory, 'ssh') }));
     this.workspaceFiles = new WorkspaceFiles(this.transport);
   }
   onOwnTurn(listener: (taskId: string) => void): () => void {
@@ -210,6 +212,8 @@ done`}`, 15_000, { login: false });
   }
   async connect(): Promise<string> {
     this.assertOpen();
+    // This computer stays itself when it is renamed; there is no connection to check either.
+    if (isLocalHost(this.host)) return LOCAL_SERVER_ID;
     if (this.identity && Date.now() - this.identity.at < 15_000) return this.identity.id;
     // The identity is cat/uname/id only; skip the login shell, which `use()` would otherwise pay on every recheck.
     const [machine, user, unique] = (await this.transport.exec(MACHINE_IDENTITY, 20_000, { login: false })).split('\0');

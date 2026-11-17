@@ -3,7 +3,7 @@ import { HostConnections } from './host-connections.js';
 import type { LaunchSharing } from '../sharing/sharing.js';
 import { Store } from '../core/store.js';
 import { readSshConfigHosts } from '@dsh-plugins/remote-core/ssh-config.js';
-import { attachmentInput, inputModalitiesOf } from '@dsh-plugins/remote-core/domain.js';
+import { attachmentInput, inputModalitiesOf, isLocalHost, LOCAL_HOST_ID } from '@dsh-plugins/remote-core/domain.js';
 import type { WorkspaceFiles } from '../workspace/files.js';
 import { browsePath, busy, enabledProvidersOf, permissionModes, field, identifier, questionsOf, record, RemoteError, taskInput, type Agent, type AgentDetail, type AgentState, type AgentStatus, type AgentSummary, type Cursor, type Dashboard, type DirectoryListing, type Host, type PermissionAnswer, type Task, type TimelinePage, type UsageReport } from '@dsh-plugins/remote-core/domain.js';
 
@@ -114,6 +114,17 @@ export class RemoteAgentsService {
     const ids = [...this.store.staleCatalogs].filter(id => this.store.hosts().some(h => h.id === id)); this.store.staleCatalogs.clear();
     return Promise.all(ids.map(id => this.hostConnections.discoverHost(id).catch(() => {}))).then(() => {});
   }
+  /**
+   * Detect this computer's CLIs, once while DSH runs, when a conversation works in one of its folders and none is ready:
+   * the first time, or after none was installed. A CLI installed here later shows up after Refresh models or a restart.
+   * Starting DSH detects nothing, as it connects to no machine.
+   */
+  discoverLocalMachine(): Promise<void> {
+    const local = this.store.hosts().find(host => host.id === LOCAL_HOST_ID && isLocalHost(host));
+    if (!local || this.stopped || local.catalog?.providers.some(p => p.status === 'ready' && p.models.length)) return Promise.resolve();
+    return this.localDiscovery ??= this.hostConnections.discoverHost(local.id).catch(() => {});
+  }
+  private localDiscovery?: Promise<void>;
   async discoverHost(hostId: string): Promise<Dashboard> {
     await this.hostConnections.discoverHost(hostId);
     return this.snapshot();
@@ -182,7 +193,7 @@ export class RemoteAgentsService {
   }
   async removeHost(id: string, options: { deleteAgents?: boolean } = {}): Promise<Dashboard> {
     return this.serial(`catalog:${id}`, async () => {
-      this.hostConnections.host(id);
+      if (isLocalHost(this.hostConnections.host(id))) throw new RemoteError('This computer cannot be removed. Switch its CLIs off instead.', 409);
       // Forget local sessions and output without probing an unreachable SSH host.
       if (options.deleteAgents) for (const task of this.store.snapshot().tasks.filter(t => t.hostId === id)) await this.delete(task.id);
       // Give queued relay removals a short chance; an offline host never blocks removing it.

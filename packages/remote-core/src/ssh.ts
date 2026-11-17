@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, lstatSync, mkdirSync } from 'node:fs';
+import { homedir, userInfo } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
@@ -291,6 +292,30 @@ printf '%s/%s' "$(pwd -P)" ${quote(relativePath)}
       onData(listener) { data.add(listener); },
       onExit(listener) { exits.add(listener); if (exited) listener(exited); },
     };
+  }
+}
+/**
+ * The variables an SSH login starts from: who the user is, the system PATH, the locale and the temporary directory.
+ * DSH's own environment (Electron's Node mode, its home and settings, proxies given to DSH) stays out of the CLIs; the
+ * login shell then supplies the user's own, as it does over SSH. The SSH agent socket is kept so Git can still sign in.
+ */
+export function loginEnvironment(source: NodeJS.ProcessEnv = process.env, user = userInfo()): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { HOME: user.homedir, USER: user.username, LOGNAME: user.username, SHELL: user.shell || source.SHELL || '/bin/sh', PATH: '/usr/bin:/bin:/usr/sbin:/sbin' };
+  for (const [key, value] of Object.entries(source)) {
+    if (value && (['TMPDIR', 'LANG', 'TZ', 'SSH_AUTH_SOCK', '__CF_USER_TEXT_ENCODING'].includes(key) || key.startsWith('LC_'))) env[key] = value;
+  }
+  return env;
+}
+/**
+ * This computer: the commands {@link OpenSshTransport} sends, run by a local shell instead of over SSH, in the user's
+ * home directory with a fresh login environment ({@link loginEnvironment}). Relays detach from DSH as from sshd, so a
+ * CLI keeps running while DSH restarts.
+ */
+export class LocalShellTransport extends OpenSshTransport {
+  // The SSH destination is never used: every command goes through `spawnRemote`.
+  constructor() { super('ssh://localhost'); }
+  protected override spawnRemote(command: string): ChildProcessWithoutNullStreams {
+    return spawn('/bin/sh', ['-c', command], { cwd: homedir(), env: loginEnvironment(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
   }
 }
 export type WireMessage = Record<string, any>;

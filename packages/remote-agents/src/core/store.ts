@@ -1,7 +1,8 @@
 import { mkdir, readFile, rename, writeFile, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { identifier, record, remotePath, field, taskInput, providerSelection, PROVIDER_LABELS, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from '@dsh-plugins/remote-core/domain.js';
+import { hostname } from 'node:os';
+import { identifier, isLocalHost, LOCAL_CONNECTION, LOCAL_HOST_ID, record, remotePath, field, taskInput, providerSelection, PROVIDER_LABELS, RemoteError, type ChatProject, type HostConfig, type FinishedTurn, type Task, type TurnUsage } from '@dsh-plugins/remote-core/domain.js';
 
 /** A relay to stop and delete on its SSH host once it is reachable. */
 export interface RelayCleanup { hostId: string; relayId: string }
@@ -51,6 +52,10 @@ function withoutSharing(saved: SavedTask[], hosts: HostConfig[], pending: Record
   }
   return { tasks, ...(Object.keys(withdrawals).length ? { withdrawals } : {}) };
 }
+/** This computer's name as the local machine's label, `lalaze-mini.local` shown as `lalaze-mini`. */
+export function localMachineLabel(name = hostname()): string {
+  return name.replace(/\.local\.?$/i, '').trim().slice(0, 100) || 'This computer';
+}
 export class Store {
   private state: State = { version: 1, hosts: [], tasks: [] };
   private writes = Promise.resolve();
@@ -63,9 +68,17 @@ export class Store {
   readonly changeListeners = new Set<() => void>();
   /** Machines whose saved model catalog lost Antigravity models from 0.2.129 or earlier on opening; see {@link oldAntigravity}. */
   readonly staleCatalogs = new Set<string>();
-  constructor(private readonly path: string) {}
+  /** `localMachine` adds this computer's machine ({@link LOCAL_HOST_ID}) when the saved state has none. */
+  constructor(private readonly path: string, private readonly options: { localMachine?: boolean } = {}) {}
   get directory(): string { return dirname(this.path); }
   async open(): Promise<void> {
+    await this.load();
+    // Kept in memory until the next saved change writes it: opening never writes the registry.
+    if (this.options.localMachine && process.platform !== 'win32' && !this.state.hosts.some(isLocalHost)) {
+      this.state.hosts.unshift({ id: LOCAL_HOST_ID, label: localMachineLabel(), connection: LOCAL_CONNECTION });
+    }
+  }
+  private async load(): Promise<void> {
     let text: string;
     try { text = await readFile(this.path, 'utf8'); }
     catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return; throw e; }
