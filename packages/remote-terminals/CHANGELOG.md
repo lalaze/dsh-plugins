@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.18 — TUI conversations fit above a phone's keyboard
+
+- On a phone, opening the keyboard in a TUI conversation pushed the whole page up: the conversation's header left the screen, the page jumped as the cursor moved, and once the keyboard closed the page could stay pushed up with a blank strip at the bottom. Since DSH Web Mobile was removed, nothing put the page back.
+- Now, while a TUI is shown on a touch screen, the page stays where it is and the TUI shrinks to what the keyboard leaves on screen. The terminal takes fewer rows, as a terminal app does, and the CLI's prompt and the two bottom-right buttons stay just above the keyboard. Closing the keyboard gives the rows back. Only the height changes, so Claude Code does not rebuild its history.
+- Computers are not affected. Can be upgraded on its own, without a restart; reload the page on the phone.
+
 ## 0.1.17 — A file button in TUI conversations, for phones
 
 - A TUI conversation has a paperclip button in its bottom-right corner, beside the rendering button. It opens the device's own file picker; what you choose is uploaded and its path goes into the CLI's prompt, as a dropped or pasted file does (an image shows as `[Image #1]`). A phone can neither drag nor paste a file into a terminal, so until now it had no way to give the CLI a picture or a file.

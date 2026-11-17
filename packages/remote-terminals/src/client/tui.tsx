@@ -12,6 +12,7 @@ import { fileStyles, sendTuiFile, TuiDropTarget, TuiFilePicker, TuiFileStatus, T
 import { TuiPrompts, usePromptText } from './tui-prompt.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { findXterm, TuiRenderChoices, TuiRenderMenu, useWebglRenderer, type TuiScrollControl } from './tui-render.js';
+import { useKeyboardFit } from './tui-keyboard.js';
 import { useScreenClaim } from './tui-screen.js';
 import { TuiScrollChoice, useConversationScrollback } from './tui-scroll.js';
 import { followNewSessions } from './tui-new-sessions.js';
@@ -221,6 +222,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   const generation = useSyncExternalStore(kept.subscribe, () => kept.generation(sessionId));
   const root = useRef<HTMLDivElement>(null), seat = useRef<HTMLDivElement>(null);
   useFilePaste(root, picked => services.uploads.add(sessionId, picked));
+  useKeyboardFit(root, useMemo(() => typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches, []));
   // The CLI's title comes after the first exchange, and may change later.
   useEffect(() => {
     const controller = new AbortController();
