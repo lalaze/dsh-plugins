@@ -104,12 +104,12 @@
       },
       "versions": [
         {
-          "version": "0.1.6",
-          "publishTimestamp": 1794887015,
+          "version": "0.1.7",
+          "publishTimestamp": 1794889184,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "181737e404592ed4417edfca4667aa88a43e63d7",
+            "commit": "4dd16fdc573aa5666f35882fd2d7c39dabf32607",
             "path": "packages/link"
           },
           "engines": {
@@ -427,8 +427,8 @@
         "zh": "DSH 使用量统计"
       },
       "description": {
-        "en": "Track DSH and Claude SSH token usage with filters, grouped reports and CSV export",
-        "zh": "统计 DSH 模型与 Claude SSH 远端调用的 Token 用量，支持筛选、分组和 CSV 导出"
+        "en": "Track DSH and remote CLI token usage, added up over every DSH Link machine, with filters, grouped reports and CSV export",
+        "zh": "统计 DSH 模型与远程 CLI 的 Token 用量，可合计互联的全部机器，支持筛选、分组和 CSV 导出"
       },
       "author": "lalaze",
       "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/usage-stats",
@@ -444,12 +444,12 @@
       },
       "versions": [
         {
-          "version": "0.1.19",
-          "publishTimestamp": 1794417412,
+          "version": "0.1.20",
+          "publishTimestamp": 1794889184,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "ab7a2f9bfd50ed667869fa1e63c982a86140a73d",
+            "commit": "4dd16fdc573aa5666f35882fd2d7c39dabf32607",
             "path": "packages/usage-stats"
           },
           "engines": {
