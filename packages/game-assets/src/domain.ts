@@ -168,6 +168,11 @@ export interface SourceInput { id?: string; name: string; kind: SourceKind; base
 export interface SourcesAnswer { sources: SourceView[]; defaultId: string | null }
 /** The shape asked of a generated picture; the API's nearest size is used. */
 export type Aspect = 'square' | 'wide' | 'tall';
+/** The API shape nearest an image's own. */
+export function aspectOf(width?: number, height?: number): Aspect {
+  if (!width || !height) return 'square';
+  return width / height > 1.2 ? 'wide' : height / width > 1.2 ? 'tall' : 'square';
+}
 /** What one generation answers: the picture as the API made it, in base64. */
 export interface GeneratedImage { data: string; mediaType: string; width?: number; height?: number; model: string; source: string; ms: number; text?: string }
 /** What saving a picture answers: where it went, where the image it replaced was retired to, and the workspace now. */
@@ -179,6 +184,37 @@ export const REFERENCE_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg'] as const;
 export const isReference = (path: string): boolean => (REFERENCE_EXTENSIONS as readonly string[]).includes(extensionOf(path));
 /** The longest prompt a generation takes. */
 export const PROMPT_LIMIT = 8000;
+
+/** Images one h3 batch redraw may take, and the smallest batch that pays off a VM boot without warning. */
+export const H3_BATCH_LIMIT = 20;
+export const H3_WORTH_IT = 4;
+export const H3_MADE = { source: 'h3', model: 'MiniMax-H3-Image' } as const;
+
+export type BatchPhase = 'booting' | 'drawing' | 'stopping' | 'done' | 'failed' | 'stopped';
+export type BatchItemState = 'waiting' | 'drawing' | 'done' | 'failed' | 'skipped';
+export interface BatchItemStatus {
+  path: string;
+  status: BatchItemState;
+  error?: string;
+  ms?: number;
+  width?: number;
+  height?: number;
+}
+export interface BatchStatus {
+  id: string;
+  sessionId: string;
+  phase: BatchPhase;
+  startedAt: number;
+  prompt: string;
+  items: BatchItemStatus[];
+  error?: string;
+  downError?: string;
+}
+export interface BatchStatusAnswer {
+  job: BatchStatus | null;
+  busy: boolean;
+}
+export const isBatchRunning = (phase: BatchPhase): boolean => phase === 'booting' || phase === 'drawing' || phase === 'stopping';
 
 /**
  * In the workspace: the image source agents working in the project generate with, and the script they run for it.

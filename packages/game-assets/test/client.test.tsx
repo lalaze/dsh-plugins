@@ -4,7 +4,12 @@ import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { offerTuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
-import type { Asset, MadeInfo, ProjectSource, ScanResult, SourceView } from '../src/domain.js';
+import { readdir, readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import type { Asset, BatchStatus, MadeInfo, ProjectSource, ScanResult, SourceView } from '../src/domain.js';
+import { SOURCE_KINDS } from '../src/domain.js';
+import { resetBatches } from '../src/client/batch.js';
+import { i18n, localizePictureError } from '../src/client/i18n.js';
 import { BUNDLE_KEY, VIEW_ID, apply, fileAddress } from '../src/client/index.js';
 import { resetProjects } from '../src/client/projects.js';
 import { resetSources } from '../src/client/sources.js';
@@ -25,7 +30,7 @@ const scan = (): ScanResult => ({
 
 let root: Root | undefined, container: HTMLElement, requests: Record<string, unknown>[], opened: unknown[][];
 /** What the simulated host has saved: where the tab appears, and the user's choice per conversation's workspace. */
-let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string; project: ProjectSource | null; extra: Asset[]; made: Record<string, MadeInfo> };
+let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string; project: ProjectSource | null; extra: Asset[]; made: Record<string, MadeInfo>; batchJobs: Record<string, BatchStatus>; failSave: Record<string, string>; h3Polls: Record<string, unknown>[] };
 /** A PNG of 1024 × 1024, as an image API answers. */
 const GENERATED = (() => { const data = Buffer.alloc(40); data.writeUInt32BE(0x89504e47, 0); data.writeUInt32BE(0x0d0a1a0a, 4); data.writeUInt32BE(13, 8); data.write('IHDR', 12, 'latin1'); data.writeUInt32BE(1024, 16); data.writeUInt32BE(1024, 20); return data; })();
 /** The workspace as the simulated host answers it: retired images sit in the retired folder, tags are attached. */
@@ -44,7 +49,7 @@ const project = (sessionId: string) => {
 };
 beforeEach(() => {
   const { window } = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true });
-  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [], project: null, extra: [], made: {} };
+  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [], project: null, extra: [], made: {}, batchJobs: {}, failSave: {}, h3Polls: [] };
   const fetch = async (url: string, init: { method?: string; body?: string; headers: Record<string, string> }) => {
     assert.equal(init.headers['X-DSH-Game-Assets'], '1');
     if (!init.body) { requests.push({ image: new URL(url, 'http://localhost/').searchParams.get('path') }); return new Response(new Uint8Array([1, 2, 3])); }
@@ -54,6 +59,13 @@ beforeEach(() => {
     if (saved.down) return Response.json({ error: 'The workspace could not be scanned' }, { status: 500 });
     if (body.action === 'mode') return Response.json({ mode: saved.mode });
     if (body.action === 'project') return Response.json(project(body.sessionId));
+    if (body.action === 'h3Status') {
+      saved.h3Polls.push(body);
+      const current = saved.batchJobs[body.sessionId] ?? null;
+      const job = current && (!body.id || current.id === body.id) ? current : null;
+      const busy = Object.values(saved.batchJobs).some(other => other.sessionId !== body.sessionId && (other.phase === 'booting' || other.phase === 'drawing' || other.phase === 'stopping'));
+      return Response.json({ job, busy });
+    }
     requests.push(body);
     if (body.action === 'setMode') { saved.mode = body.mode; return Response.json({ mode: saved.mode }); }
     if (body.action === 'setProject') { saved.overrides[body.sessionId] = body.game; return Response.json(project(body.sessionId)); }
@@ -90,10 +102,33 @@ beforeEach(() => {
       [saved.made[version.origin!], saved.made[`${version.path}.parked.png`]] = [saved.made[version.path], saved.made[version.origin!]];
       return Response.json({ path: version.origin, retired: `${version.path}.parked.png`, scan: library() });
     }
+    if (body.action === 'h3Start') {
+      const existing = saved.batchJobs[body.sessionId];
+      if (existing && (existing.phase === 'booting' || existing.phase === 'drawing' || existing.phase === 'stopping')) return Response.json(existing);
+      const job: BatchStatus = { id: `batch-${Object.keys(saved.batchJobs).length + 1}`, sessionId: body.sessionId, phase: 'booting', startedAt: Date.now(), prompt: body.prompt, items: body.paths.map((path: string) => ({ path, status: 'waiting' as const })) };
+      saved.batchJobs[body.sessionId] = job;
+      return Response.json(job);
+    }
+    if (body.action === 'h3Result') {
+      return Response.json({ data: GENERATED.toString('base64'), mediaType: 'image/png', width: 2048, height: 2048, model: 'MiniMax-H3-Image', source: 'h3', ms: 4200 });
+    }
+    if (body.action === 'h3Stop') {
+      const job = saved.batchJobs[body.sessionId]!;
+      const stopped: BatchStatus = { ...job, phase: 'stopped', items: job.items.map(item => item.status === 'done' ? item : { ...item, status: 'skipped' as const }) };
+      saved.batchJobs[body.sessionId] = stopped;
+      return Response.json(stopped);
+    }
+    if (body.action === 'h3Discard') {
+      delete saved.batchJobs[body.sessionId];
+      return Response.json({ ok: true });
+    }
     if (body.action === 'save') {
+      if (saved.failSave[body.path]) return Response.json({ error: saved.failSave[body.path] }, { status: 409 });
       saved.written.push(body.path);
+      const updated = asset(body.path, 'unused', { mtimeMs: 2 });
+      if (!scan().assets.some(a => a.path === body.path)) saved.extra = [...saved.extra.filter(a => a.path !== body.path), updated];
       const base = library();
-      return Response.json({ path: body.path, ...(body.replace ? { retired: `_retired/${body.path}` } : {}), scan: { ...base, assets: [...base.assets.filter(a => a.path !== body.path), asset(body.path, 'unused', { mtimeMs: 2 })].sort((a, b) => a.path < b.path ? -1 : 1) } });
+      return Response.json({ path: body.path, ...(body.replace ? { retired: `_retired/${body.path}` } : {}), scan: { ...base, assets: [...base.assets.filter(a => a.path !== body.path), updated].sort((a, b) => a.path < b.path ? -1 : 1) } });
     }
     if (body.action === 'detail') return Response.json({ path: body.path, refCount: 1, refs: [{ file: 'src/game.ts', line: 7, kind: 'path', text: "load.image('hero', 'cast-v2/hero.png')" }] });
     if (body.action === 'configure') return Response.json({ ...scan(), scannedAt: 2, assets: scan().assets.map(a => ({ ...a, usage: 'unused', refCount: 0 })), folders: scan().folders.map(f => ({ ...f, ...body.folders[f.name] })) });
@@ -107,7 +142,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await act(async () => root?.unmount()); root = undefined;
-  mock.timers.reset(); resetProjects(); resetSources();
+  mock.timers.reset(); resetProjects(); resetSources(); resetBatches();
   for (const name of globals) delete (globalThis as Record<string, unknown>)[name];
 });
 const settle = () => act(async () => { for (let i = 0; i < 10; i++) await new Promise(resolve => setImmediate(resolve)); });
@@ -717,4 +752,293 @@ test('an image lists its earlier versions with where each came from, and goes ba
   await settle();
   assert.deepEqual(sent().filter(request => request.action === 'revert').at(-1), { action: 'revert', sessionId: 'history', path: opened });
 });
+
+test('batch redraw with h3 warns and requires confirmation under 4 images, and skips the warning when 4 or more are selected', async () => {
+  assert.deepEqual(SOURCE_KINDS, ['codex', 'openai', 'gemini']);
+  saved.extra = [asset('public/art/slime.png', 'unused'), asset('public/art/coin.png', 'unused')];
+  await mount('batch-select');
+
+  // Selecting only a GIF does not offer h3 batch redraw; adding PNGs offers it.
+  await check('public/art/hero.gif');
+  assert.equal(button('.ga-selbar', 'Batch redraw with h3…'), undefined);
+  await check('assets/cast-v1/hero.png');
+  await check('public/art/npc.png');
+  assert.ok(button('.ga-selbar', 'Batch redraw with h3…'));
+
+  await click(button('.ga-selbar', 'Batch redraw with h3…'));
+  await settle();
+  // GIF is left out with an explanation; 2 PNGs (< 4) trigger the cost warning and require checking confirmation.
+  assert.deepEqual(texts('.ga-dialog .ga-refpic .ga-twin-path'), ['hero.png', 'npc.png']);
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /1 GIF or SVG images are left out/);
+  assert.match(container.querySelector('.ga-dialog [data-tone=warn]')!.textContent!, /Fewer than 4 images is not cost-effective/);
+  const startSmall = button('.ga-dialog', 'Still boot and redraw 2 images') as HTMLButtonElement;
+  assert.equal(startSmall.disabled, true);
+  await click(container.querySelector('.ga-dialog .ga-check-label input'));
+  assert.equal(startSmall.disabled, false);
+  await click(button('.ga-dialog', 'Cancel'));
+
+  // Selecting 4 PNGs shows no small-batch warning and enables starting directly.
+  await check('assets/cast-v2/hero.png');
+  await check('public/art/slime.png');
+  await click(button('.ga-selbar', 'Batch redraw with h3…'));
+  await settle();
+  assert.equal(container.querySelector('.ga-dialog [data-tone=warn]'), null);
+  assert.equal(container.querySelector('.ga-dialog .ga-check-label input'), null);
+  const startFour = button('.ga-dialog', 'Boot and redraw 4 images') as HTMLButtonElement;
+  assert.equal(startFour.disabled, false);
+  await typeInto(container.querySelector('.ga-dialog textarea'), 'repaint with warm lighting');
+  await click(startFour);
+  await settle();
+  assert.deepEqual(sent().find(request => request.action === 'h3Start'), {
+    action: 'h3Start',
+    sessionId: 'batch-select',
+    paths: ['assets/cast-v1/hero.png', 'assets/cast-v2/hero.png', 'public/art/npc.png', 'public/art/slime.png'],
+    prompt: 'repaint with warm lighting',
+  });
+});
+
+test('batch redraw replaces one image, saves as a free -redraw file, and handles per-row errors during Replace all', async () => {
+  // `npc-redraw.png` is already taken, so Save as new file on `npc.png` must pick `npc-redraw-2.png`.
+  saved.extra = [asset('public/art/npc-redraw.png', 'unused'), asset('public/art/slime.png', 'unused')];
+  saved.batchJobs['batch-save'] = {
+    id: 'job-save',
+    sessionId: 'batch-save',
+    phase: 'done',
+    startedAt: 1000,
+    prompt: 'crisp pixel redraw',
+    items: [
+      { path: 'assets/cast-v1/hero.png', status: 'done', width: 2048, height: 2048, ms: 3000 },
+      { path: 'public/art/npc.png', status: 'done', width: 2048, height: 2048, ms: 3200 },
+      { path: 'assets/cast-v2/hero.png', status: 'done', width: 2048, height: 2048, ms: 3100 },
+      { path: 'public/art/slime.png', status: 'done', width: 2048, height: 2048, ms: 2900 },
+    ],
+  };
+  await mount('batch-save');
+  assert.match(container.querySelector('.ga-batch-bar')!.textContent!, /h3 batch redraw: 4 pictures ready to review/);
+  await click(button('.ga-batch-bar', 'Open'));
+  await settle();
+
+  // 1. Single-image Replace sends replace: true and made = { source: 'h3', model: 'MiniMax-H3-Image', prompt }.
+  await click(button('.ga-batch-item[data-path="assets/cast-v1/hero.png"]', 'Replace'));
+  await settle();
+  const firstSave = sent().filter(request => request.action === 'save').at(-1)!;
+  assert.deepEqual([firstSave.path, firstSave.replace, firstSave.made], [
+    'assets/cast-v1/hero.png',
+    true,
+    { source: 'h3', model: 'MiniMax-H3-Image', prompt: 'crisp pixel redraw' },
+  ]);
+  assert.equal(container.querySelector('.ga-batch-item[data-path="assets/cast-v1/hero.png"] .ga-tag')!.textContent, 'Replaced');
+
+  // 2. Save as new file uses the next free `-redraw` path (`public/art/npc-redraw-2.png`).
+  await click(button('.ga-batch-item[data-path="public/art/npc.png"]', 'Save as new file'));
+  await settle();
+  const secondSave = sent().filter(request => request.action === 'save').at(-1)!;
+  assert.deepEqual([secondSave.path, secondSave.replace], ['public/art/npc-redraw-2.png', false]);
+  assert.equal(container.querySelector('.ga-batch-item[data-path="public/art/npc.png"] .ga-tag')!.textContent, 'Saved as public/art/npc-redraw-2.png');
+
+  // 3. Replace all saves the remaining items one by one; a failure on one row is shown on that row while the others succeed.
+  saved.failSave['assets/cast-v2/hero.png'] = 'Permission denied';
+  await click(button('.ga-dialog', 'Replace all'));
+  await settle();
+  assert.equal(container.querySelector('.ga-batch-item[data-path="assets/cast-v2/hero.png"] [role=alert]')!.textContent, 'Permission denied');
+  assert.equal(container.querySelector('.ga-batch-item[data-path="public/art/slime.png"] .ga-tag')!.textContent, 'Replaced');
+  assert.ok(container.querySelector('.ga-dialog'), 'dialog stays open while a failed row remains');
+
+  // Fixing the failure and clicking Replace all finishes the batch, cleans up on the host, and updates the panel scan.
+  delete saved.failSave['assets/cast-v2/hero.png'];
+  await click(button('.ga-dialog', 'Replace all'));
+  await settle();
+  assert.equal(container.querySelector('.ga-dialog'), null);
+  assert.equal(sent().some(request => request.action === 'h3Discard' && request.id === 'job-save'), true);
+  assert.ok(container.querySelector('.ga-cell[title="public/art/npc-redraw-2.png"]'), 'panel adopted the latest scan');
+});
+
+test('closing the batch dialog while running does not stop the job; the panel banner reconnects to the same job, and Stop and shut down sends h3Stop', async () => {
+  await mount('batch-bg');
+  await check('assets/cast-v1/hero.png');
+  await check('assets/cast-v2/hero.png');
+  await click(button('.ga-selbar', 'Batch redraw with h3…'));
+  await settle();
+  await click(container.querySelector('.ga-dialog .ga-check-label input'));
+  await click(button('.ga-dialog', 'Still boot and redraw 2 images'));
+  await settle();
+
+  const startedId = saved.batchJobs['batch-bg'].id;
+  saved.batchJobs['batch-bg'] = {
+    ...saved.batchJobs['batch-bg'],
+    phase: 'drawing',
+    items: [
+      { path: 'assets/cast-v1/hero.png', status: 'done', width: 2048, height: 2048, ms: 2000 },
+      { path: 'assets/cast-v2/hero.png', status: 'drawing' },
+    ],
+  };
+
+  // Closing the dialog while running never sends h3Stop or h3Discard.
+  await click(button('.ga-dialog', 'Close'));
+  await settle();
+  assert.equal(container.querySelector('.ga-dialog'), null);
+  assert.equal(sent().some(request => request.action === 'h3Stop' || request.action === 'h3Discard'), false);
+  assert.ok(container.querySelector('.ga-batch-bar'));
+
+  // Reopening from the banner connects back to the exact same job id, and Stop and shut down sends h3Stop.
+  await click(button('.ga-batch-bar', 'Open'));
+  await settle();
+  assert.equal(saved.h3Polls.at(-1)?.id, startedId);
+  assert.equal(sent().filter(request => request.action === 'h3Start').length, 1);
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /Drawing 2\/2/);
+
+  await click(button('.ga-dialog', 'Stop and shut down'));
+  await settle();
+  assert.deepEqual(sent().find(request => request.action === 'h3Stop'), { action: 'h3Stop', sessionId: 'batch-bg', id: startedId });
+});
+
+test('every ui() string in the client has a Chinese translation, and the batch dialog renders in Chinese without untranslated English copy', async () => {
+  const clientDir = fileURLToPath(new URL('../src/client/', import.meta.url));
+  const files = (await readdir(clientDir)).filter(name => /\.(ts|tsx)$/.test(name) && name !== 'i18n.ts');
+  const keys = new Set<string>();
+  for (const name of files) {
+    const source = await readFile(`${clientDir}/${name}`, 'utf8');
+    for (const match of source.matchAll(/\bui\(\s*'((?:\\'|[^'])+)'/g)) {
+      keys.add(match[1].replace(/\\'/g, "'"));
+    }
+  }
+  const dispose = i18n.installLocale({
+    get: () => ({ register: () => undefined, subscribe: () => () => {}, getSnapshot: () => ({ active: 'zh-CN', revision: 1 }) }),
+  });
+  try {
+    for (const key of keys) {
+      // Proper names that stay the same in Chinese (`Codex`, `Gemini`, `h3`) are allowed; every English phrase must translate.
+      if (key === 'Codex' || key === 'Gemini') continue;
+      assert.notEqual(i18n.ui(key), key, `missing Chinese translation for ui('${key}')`);
+    }
+    assert.equal(localizePictureError('h3 down failed; run h3 down yourself: colab disconnect timed out'), 'h3 down 失败，请手动运行 h3 down：colab disconnect timed out');
+    assert.equal(localizePictureError('h3 made no picture: ComfyUI failed'), 'h3 没有生成图片：ComfyUI failed');
+    assert.equal(localizePictureError('h3 made no picture: output file is missing'), 'h3 没有生成图片：找不到输出文件');
+    assert.equal(localizePictureError('h3 could not start the VM: no A100'), 'h3 无法启动虚拟机：no A100');
+  } finally {
+    dispose();
+  }
+
+  await mount('batch-zh', 'zh-CN');
+  await check('assets/cast-v1/hero.png');
+  await check('public/art/npc.png');
+  assert.ok(button('.ga-selbar', '用 h3 批量重绘…'));
+  await click(button('.ga-selbar', '用 h3 批量重绘…'));
+  await settle();
+
+  const beforeText = container.querySelector('.ga-dialog')!.textContent!;
+  assert.match(beforeText, /用 h3 批量重绘/);
+  assert.match(beforeText, /不到 4 张不划算/);
+  assert.match(beforeText, /仍然开机生成 2 张/);
+  await click(container.querySelector('.ga-dialog .ga-check-label input'));
+  await click(button('.ga-dialog', '仍然开机生成 2 张'));
+  await settle();
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /正在开机….*停止并关机/);
+
+  await click(button('.ga-dialog', '关闭'));
+  await settle();
+  assert.match(container.querySelector('.ga-batch-bar')!.textContent!, /h3 批量重绘：正在开机 · 共 2 张.*打开/);
+});
+
+test('when another workspace finishes its h3 batch, the selection bar button and open dialog re-enable automatically without switching tabs', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  saved.batchJobs['other-ws'] = {
+    id: 'job-other',
+    sessionId: 'other-ws',
+    phase: 'drawing',
+    startedAt: 1000,
+    prompt: 'other',
+    items: [{ path: 'a.png', status: 'drawing' }],
+  };
+  await mount('batch-wait');
+  await check('assets/cast-v1/hero.png');
+  await check('public/art/npc.png');
+
+  const selButton = () => button('.ga-selbar', 'Batch redraw with h3…') as HTMLButtonElement;
+  assert.equal(selButton().disabled, true);
+  assert.equal(selButton().title, 'h3 is already redrawing a batch for another workspace');
+
+  // The other workspace finishes; the 5-second background poll clears busyElsewhere without leaving the tab.
+  saved.batchJobs['other-ws'] = { ...saved.batchJobs['other-ws'], phase: 'done', items: [{ path: 'a.png', status: 'done' }] };
+  await act(async () => { mock.timers.tick(5000); });
+  await settle();
+  assert.equal(selButton().disabled, false);
+  assert.equal(selButton().title, '');
+
+  // If another workspace starts right before the dialog opens, opening the dialog refreshes busyElsewhere and recovers when it ends.
+  saved.batchJobs['other-ws'] = { ...saved.batchJobs['other-ws'], phase: 'booting' };
+  await click(selButton());
+  await settle();
+  await click(container.querySelector('.ga-dialog .ga-check-label input'));
+  const startBtn = () => button('.ga-dialog', 'Still boot and redraw 2 images') as HTMLButtonElement;
+  assert.equal(startBtn().disabled, true);
+  assert.match(container.querySelector('.ga-dialog [data-tone=warn][role=alert]')!.textContent!, /another workspace/);
+
+  saved.batchJobs['other-ws'] = { ...saved.batchJobs['other-ws'], phase: 'done' };
+  await act(async () => { mock.timers.tick(5000); });
+  await settle();
+  assert.equal(startBtn().disabled, false);
+});
+
+test('background batch shows an error banner when h3 down fails or when every item fails without new pictures', async () => {
+  mock.timers.enable({ apis: ['setInterval'] });
+  saved.batchJobs['batch-err-zh'] = {
+    id: 'job-down-err',
+    sessionId: 'batch-err-zh',
+    phase: 'drawing',
+    startedAt: 1000,
+    prompt: 'redraw',
+    items: [
+      { path: 'assets/cast-v1/hero.png', status: 'drawing' },
+      { path: 'public/art/npc.png', status: 'waiting' },
+    ],
+  };
+  await mount('batch-err-zh', 'zh-CN');
+  assert.match(container.querySelector('.ga-batch-bar')!.textContent!, /h3 批量重绘：第 1\/2 张/);
+
+  // Every item fails (`phase` is still `done`) AND `h3 down` fails while the dialog is closed.
+  saved.batchJobs['batch-err-zh'] = {
+    ...saved.batchJobs['batch-err-zh'],
+    phase: 'done',
+    downError: 'h3 down failed; run h3 down yourself: colab disconnect timed out',
+    items: [
+      { path: 'assets/cast-v1/hero.png', status: 'failed', error: 'h3 made no picture: workflow crashed' },
+      { path: 'public/art/npc.png', status: 'failed', error: 'h3 made no picture: workflow crashed' },
+    ],
+  };
+  await act(async () => { mock.timers.tick(5000); });
+  await settle();
+
+  const errorBanner = container.querySelector('.ga-batch-bar[data-tone=error][role=alert]')!;
+  assert.ok(errorBanner, 'panel displays an error banner when h3 down fails');
+  assert.equal(errorBanner.querySelector('span')!.textContent, 'h3 down 失败，请手动运行 h3 down');
+  await click(button('.ga-batch-bar', '打开'));
+  await settle();
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /h3 down 失败，请手动运行 h3 down：colab disconnect timed out/);
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /h3 没有生成图片：workflow crashed/);
+  await click(button('.ga-dialog', '关闭'));
+  await settle();
+  assert.equal(container.querySelector('.ga-batch-bar'), null);
+
+  // Even when `h3 down` succeeds, if every item fails (`phase: 'done'`, 0 ready pictures), the panel reports failure instead of disappearing silently.
+  await act(async () => root?.unmount());
+  root = undefined;
+  saved.batchJobs['batch-all-fail'] = {
+    id: 'job-all-fail',
+    sessionId: 'batch-all-fail',
+    phase: 'done',
+    startedAt: 2000,
+    prompt: 'redraw',
+    items: [
+      { path: 'assets/cast-v1/hero.png', status: 'failed', error: 'h3 made no picture: bad seed' },
+      { path: 'public/art/npc.png', status: 'failed', error: 'h3 made no picture: bad seed' },
+    ],
+  };
+  await mount('batch-all-fail', 'zh-CN');
+  const failBanner = container.querySelector('.ga-batch-bar[data-tone=error][role=alert]')!;
+  assert.ok(failBanner);
+  assert.equal(failBanner.querySelector('span')!.textContent, 'h3 批量重绘失败');
+  assert.ok(button('.ga-batch-bar', '打开'));
+});
+
 

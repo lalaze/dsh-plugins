@@ -29,6 +29,7 @@ export function apply(ctx: Context): void {
   const assets = new AssetService(id => workingDirectoryOf(get, id), join(stateDir(), 'workspaces.json'),
     { machines: () => ctx.get('remoteAgentsMachines') as RemoteMachines | undefined, remoteScript, projectScript });
   const log = (message: string) => (ctx.get('logger') as { warn?(text: string): void } | undefined)?.warn?.(message);
+  ctx.effect(() => () => assets.dispose());
   // The host connection supplies authentication and origin checks.
   ctx.connection.fetch.register({ path: ROUTE, methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(assets, log) });
 }

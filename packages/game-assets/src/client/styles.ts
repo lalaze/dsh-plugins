@@ -14,6 +14,8 @@ export const styles = `
 [data-usage=retired]>.ga-dot,[data-usage=retired] .ga-meta>.ga-dot{background:var(--ga-retired)}
 .ga-tag{flex:none;padding:0 5px;border-radius:8px;background:color-mix(in srgb,currentColor 13%,transparent);font-size:10px;font-weight:500;line-height:16px;white-space:nowrap}
 .ga-tag[data-tone=warn]{background:color-mix(in srgb,var(--ga-maybe) 28%,transparent)}
+.ga-tag[data-tone=ok]{background:color-mix(in srgb,var(--ga-used) 24%,transparent)}
+.ga-tag[data-tone=err]{background:color-mix(in srgb,var(--ga-unused) 24%,transparent)}
 .ga-tag[data-tone=tag]{overflow:hidden;text-overflow:ellipsis;background:color-mix(in srgb,var(--ga-accent) 20%,transparent)}
 .ga-tag button{margin-left:3px;padding:0;border:0;background:none;color:inherit;font-size:12px;line-height:1;cursor:pointer;opacity:.7}
 .ga-tag button:hover{opacity:1}
@@ -170,6 +172,16 @@ export const styles = `
 .ga-project .ga-link{font-family:inherit;font-size:12px}
 .ga-project .ga-link:disabled{opacity:.5}
 .ga-gen>.ga-actions.ga-end{position:sticky;bottom:-16px;z-index:1;margin:12px -16px -16px;padding:10px 16px;border-top:1px solid var(--ga-line);background:var(--ga-surface)}
+.ga-dialog.ga-batch{width:min(780px,100%)}
+.ga-batch-bar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ga-batch-bar:not([data-tone]){background:color-mix(in srgb,var(--ga-accent) 14%,transparent)}
+.ga-batch-list{display:flex;flex-direction:column;gap:10px;margin-top:10px}
+.ga-batch-item{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--ga-line);border-radius:8px}
+.ga-batch-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.ga-batch-head .ga-twin-path{flex:1;min-width:120px;font-size:12px}
+.ga-batch-item .ga-compare{margin:0}
+.ga-batch-item .ga-compare .ga-preview{height:clamp(120px,22vh,200px)}
+.ga-batch-item>.ga-banner{margin:0}
 .ga-sources{display:flex;flex-direction:column;gap:8px;margin:10px 0}
 .ga-sources>p{margin:0}
 .ga-srow{grid-template-columns:minmax(0,1fr) auto;min-height:44px}

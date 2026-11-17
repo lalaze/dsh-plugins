@@ -2,7 +2,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, extensionOf, isReference, usesApi, type Aspect, type AssetDetail, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
+import { H3Batches, type H3BatchOptions } from './batch.js';
+import { DEFAULT_RETIRE_DIR, H3_BATCH_LIMIT, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, aspectOf, extensionOf, isReference, usesApi, type Aspect, type AssetDetail, type BatchStatus, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
 import { rasterType } from './images.js';
 import { Library, cleanImagePath, cleanMade, cleanRetireDir, cleanTag, type Failure, type Making, type Moved, type Placed } from './manage.js';
 import { REMOTE_CHUNK, runRemote, type RemoteMachines } from './remote.js';
@@ -95,6 +96,8 @@ export interface ServiceOptions {
   projectScript?: () => Promise<string>;
   /** How Codex is started for a local workspace: through the login shell (the default), and which command; tests change both. */
   codex?: { loginShell?: boolean; command?: string };
+  /** How h3 is started on the DSH host for batch redraws; tests pass a stand-in script here. */
+  h3?: H3BatchOptions;
 }
 const ASPECTS: readonly Aspect[] = ['square', 'wide', 'tall'];
 /** The file type a saved picture's extension promises. */
@@ -104,6 +107,7 @@ export class AssetService {
   private readonly scanner = new Scanner();
   private readonly settings: Settings;
   private readonly sourceStore: SourceStore;
+  private readonly batches: H3Batches;
   private readonly results = new Map<string, FullScan>();
   private readonly running = new Map<string, Promise<FullScan>>();
   private readonly libraries = new Map<string, Library>();
@@ -114,6 +118,7 @@ export class AssetService {
   constructor(private readonly cwdOf: (sessionId: string) => Promise<string | undefined>, settingsFile: string, private readonly options: ServiceOptions = {}) {
     this.settings = new Settings(settingsFile);
     this.sourceStore = new SourceStore(join(dirname(settingsFile), 'image-sources.json'));
+    this.batches = new H3Batches(this.options.h3);
   }
 
   private library(root: string): Library {
@@ -384,5 +389,61 @@ export class AssetService {
     const bundle: ProjectBundle = { source: { id: source.id, name: source.name, kind: source.kind, model: source.model, baseUrl: source.baseUrl, retireDir: await this.settings.retireDir(workspace.key) }, script,
       ...(usesApi(source.kind) ? { key: source.apiKey } : {}) };
     return workspace.call({ op: 'setProjectSource', bundle });
+  }
+
+  /**
+   * Starts an h3 batch redraw on the DSH host for live PNG/WebP/JPEG images of the last scan, returning the job status at
+   * once while the Colab VM boots and generates in the background.
+   */
+  async startBatch(sessionId: string, input: { paths?: unknown; prompt?: unknown }): Promise<BatchStatus> {
+    const existing = this.batches.runningFor(sessionId);
+    if (existing) return existing;
+    if (this.batches.busyFor(sessionId)) throw new AssetError('h3 is already redrawing a batch for another workspace', 409);
+    const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
+    if (!prompt || prompt.length > PROMPT_LIMIT) throw new AssetError('Describe the picture in up to 8000 characters');
+    if (!Array.isArray(input.paths) || !input.paths.length || input.paths.some(path => typeof path !== 'string')) {
+      throw new AssetError('Invalid selection');
+    }
+    const unique = [...new Set(input.paths as string[])];
+    if (unique.length > H3_BATCH_LIMIT) throw new AssetError(`Up to ${H3_BATCH_LIMIT} images can be redrawn in one batch`);
+    const workspace = await this.workspace(sessionId);
+    const byPath = new Map((await this.last(workspace)).assets.map(asset => [asset.path, asset]));
+    const picked: ScannedAsset[] = [];
+    for (const path of unique) {
+      const asset = byPath.get(path);
+      if (!asset) throw new AssetError('Not an image of this workspace', 404);
+      if (asset.retired) throw new AssetError('Retired images cannot be redrawn in place');
+      if (!isReference(asset.path)) throw new AssetError('Only PNG, WebP and JPEG images can be sent to an image API');
+      picked.push(asset);
+    }
+    return this.batches.start(
+      sessionId,
+      prompt,
+      picked.map(asset => ({ path: asset.path, aspect: aspectOf(asset.width, asset.height), transparent: false })),
+      path => this.raw(sessionId, path),
+    );
+  }
+  batchStatus(sessionId: string, id?: unknown): BatchStatus | null {
+    if (id !== undefined && (typeof id !== 'string' || !id)) throw new AssetError('Invalid batch ID');
+    return this.batches.status(sessionId, id);
+  }
+  batchBusy(sessionId: string): boolean {
+    return this.batches.busyFor(sessionId);
+  }
+  batchResult(sessionId: string, id: unknown, index: unknown): Promise<GeneratedImage> {
+    if (typeof id !== 'string' || !id) throw new AssetError('Invalid batch ID');
+    if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) throw new AssetError('Invalid picture index');
+    return this.batches.result(sessionId, id, index);
+  }
+  stopBatch(sessionId: string, id?: unknown): Promise<BatchStatus> {
+    if (id !== undefined && (typeof id !== 'string' || !id)) throw new AssetError('Invalid batch ID');
+    return this.batches.stop(sessionId, id);
+  }
+  async discardBatch(sessionId: string, id?: unknown): Promise<void> {
+    if (id !== undefined && (typeof id !== 'string' || !id)) throw new AssetError('Invalid batch ID');
+    await this.batches.discard(sessionId, id);
+  }
+  dispose(): Promise<void> {
+    return this.batches.dispose();
   }
 }

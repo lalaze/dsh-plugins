@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from '@dsh-plugins/i18n/react';
-import { REFERENCE_LIMIT, ROOT_FOLDER, isReference, type Asset, type FolderRule, type SaveResult, type ScanResult } from '../domain.js';
-import { configureFolders, moveAssets, noteAsset, revertAsset, scanWorkspace, tagAssets } from './api.js';
+import { REFERENCE_LIMIT, ROOT_FOLDER, isBatchRunning, isReference, type Asset, type BatchStatus, type FolderRule, type SaveResult, type ScanResult } from '../domain.js';
+import { configureFolders, h3Status, moveAssets, noteAsset, revertAsset, scanWorkspace, tagAssets } from './api.js';
+import { BatchRedrawDialog, pendingBatchItems } from './batch.js';
 import { RetireDialog, SendDialog, TagDialog } from './dialogs.js';
 import { Detail } from './detail.js';
 import { GenerateDialog } from './generate.js';
@@ -63,7 +64,7 @@ export function AssetsPanel({ sessionId, openFile, sendToChat }: PanelProps) {
   return <Workspace key={sessionId} sessionId={sessionId} openFile={openFile} sendToChat={sendToChat} />;
 }
 
-type DialogKind = 'retire' | 'tag' | 'send' | 'generate';
+type DialogKind = 'retire' | 'tag' | 'send' | 'generate' | 'batch';
 
 /**
  * DSH lets a conversation's view grow with its content and scrolls the conversation instead. The Assets view keeps to
@@ -99,7 +100,8 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
   const [selected, setSelected] = useState<string>(), [settings, setSettings] = useState(false), [notice, setNotice] = useState('');
   const [narrow, setNarrow] = useState(false), [treeOpen, setTreeOpen] = useState<boolean>();
   /** Images picked for an action, and the dialog that acts on some images: the picked ones, a version's, or the one in the detail pane. */
-  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set()), [dialog, setDialog] = useState<{ kind: DialogKind; paths: string[]; target?: string }>();
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set()), [dialog, setDialog] = useState<{ kind: DialogKind; paths: string[]; target?: string; resume?: boolean }>();
+  const [batchJob, setBatchJob] = useState<BatchStatus | null>(null), [h3BusyElsewhere, setH3BusyElsewhere] = useState(false);
   const root = useRef<HTMLElement>(null), alive = useRef(true), lastChecked = useRef<string>();
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useFitToConversation(root);
@@ -120,6 +122,25 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
     catch (e) { if (alive.current) setError(localizeError(e)); return false; } finally { if (alive.current) setBusy(false); }
   }, [adopt]);
   useEffect(() => { if (!scans.has(sessionId)) void run(() => scanWorkspace(sessionId, false)); }, [sessionId, run]);
+  useEffect(() => {
+    let cancelled = false;
+    h3Status(sessionId).then(answer => {
+      if (!cancelled && alive.current) { setBatchJob(answer.job); setH3BusyElsewhere(answer.busy); }
+    }, () => {});
+    return () => { cancelled = true; };
+  }, [sessionId]);
+  useEffect(() => {
+    const ownRunning = !!batchJob && isBatchRunning(batchJob.phase) && dialog?.kind !== 'batch';
+    if (!ownRunning && !h3BusyElsewhere) return;
+    let cancelled = false;
+    const id = ownRunning ? batchJob.id : undefined;
+    const timer = setInterval(() => {
+      h3Status(sessionId, id).then(answer => {
+        if (!cancelled && alive.current) { setBatchJob(answer.job); setH3BusyElsewhere(answer.busy); }
+      }, () => {});
+    }, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [sessionId, batchJob?.id, batchJob?.phase, dialog?.kind, h3BusyElsewhere]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(''), 2500);
@@ -227,6 +248,24 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
     setNotice(replaced && answer.retired ? ui('Replaced {path}; the old one is under Earlier versions', { path: answer.path }) : ui('Saved {path}', { path: answer.path }));
   };
   const allShown = items.length > 0 && items.every(asset => checked.has(asset.path));
+  const batchBanner = useMemo((): { text: string; tone?: 'error' } | undefined => {
+    if (!batchJob || dialog?.kind === 'batch') return undefined;
+    if (batchJob.phase === 'booting') return { text: ui('h3 batch redraw: booting VM · {count} images', { count: batchJob.items.length }) };
+    if (batchJob.phase === 'drawing') {
+      const drawing = batchJob.items.findIndex(item => item.status === 'drawing');
+      const done = batchJob.items.filter(item => item.status !== 'waiting' && item.status !== 'drawing').length;
+      const current = drawing >= 0 ? drawing + 1 : Math.min(batchJob.items.length, done + 1);
+      return { text: ui('h3 batch redraw: {current}/{total}', { current, total: batchJob.items.length }) };
+    }
+    if (batchJob.phase === 'stopping') return { text: ui('h3 batch redraw: shutting down VM…') };
+    if (batchJob.downError) return { text: ui('h3 down failed; please run h3 down yourself'), tone: 'error' };
+    const pending = pendingBatchItems(batchJob);
+    if (pending > 0) return { text: ui('h3 batch redraw: {count} pictures ready to review', { count: pending }) };
+    if (batchJob.phase === 'failed' || (batchJob.phase === 'done' && batchJob.items.length > 0 && !batchJob.items.some(item => item.status === 'done'))) {
+      return { text: ui('h3 batch redraw failed'), tone: 'error' };
+    }
+    return undefined;
+  }, [batchJob, dialog?.kind]);
 
   return <section className="ga-root" ref={root} data-narrow={narrow || undefined} aria-label={ui('Assets')} aria-busy={busy}><style>{styles}</style>
     <header className="ga-bar">
@@ -266,6 +305,10 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
     </header>
     {error && <div className="ga-banner" data-tone="error" role="alert">{error}</div>}
     {result?.truncated && <div className="ga-banner" data-tone="warn" role="status">{ui('This workspace has more files than one scan reads. Switch off folders you do not need under “Folders to scan”.')}</div>}
+    {batchBanner && batchJob && <div className="ga-banner ga-batch-bar" data-tone={batchBanner.tone} role={batchBanner.tone === 'error' ? 'alert' : 'status'}>
+      <span>{batchBanner.text}</span>
+      <button type="button" className="ga-button" onClick={() => setDialog({ kind: 'batch', paths: batchJob.items.map(item => item.path), resume: true })}>{ui('Open')}</button>
+    </div>}
     {picked.length > 0 && view === 'browse' && <div className="ga-selbar" role="toolbar" aria-label={ui('Selection')}>
       <b>{ui('{count} selected', { count: picked.length })}</b>
       <button type="button" className="ga-button" onClick={clearChecked}>{ui('Clear')}</button>
@@ -274,6 +317,9 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
         {shelf ? <button type="button" className="ga-button" disabled={busy || !picked.some(asset => asset.origin)} onClick={() => move('restore', picked.filter(asset => asset.origin).map(asset => asset.path))}>{ui('Restore')}</button>
           : <button type="button" className="ga-button" disabled={busy} onClick={() => setDialog({ kind: 'retire', paths: pickedPaths() })}>{ui('Retire…')}</button>}
         {!shelf && <button type="button" className="ga-button" onClick={() => generateFrom(picked)}>{ui('Generate…')}</button>}
+        {!shelf && picked.some(asset => !asset.retired && isReference(asset.path)) && <button type="button" className="ga-button"
+          disabled={h3BusyElsewhere && !batchJob} title={h3BusyElsewhere && !batchJob ? ui('h3 is already redrawing a batch for another workspace') : undefined}
+          onClick={() => setDialog({ kind: 'batch', paths: pickedPaths() })}>{ui('Batch redraw with h3…')}</button>}
         <button type="button" className="ga-button" onClick={() => setDialog({ kind: 'send', paths: pickedPaths() })}>{ui('Ask the agent…')}</button>
       </span>
     </div>}
@@ -305,7 +351,12 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
       onHide={() => { void chooseProject(sessionId, false).catch(e => { if (alive.current) setError(localizeError(e)); }); setSettings(false); }} />}
     {dialog?.kind === 'generate' && result && <GenerateDialog sessionId={sessionId} references={subject} target={dialog.target ? assets.find(asset => asset.path === dialog.target) : undefined}
       assets={assets} folder={filter.folder || (chosen && !chosen.retired ? dirOf(chosen.path) : busiestFolder(assets))} retireDir={result.retireDir} onSaved={saved} onClose={() => setDialog(undefined)} />}
-    {dialog && dialog.kind !== 'generate' && result && subject.length > 0 && (dialog.kind === 'retire' ? <RetireDialog assets={subject} retireDir={result.retireDir} busy={busy} onConfirm={() => move('retire', subject.map(asset => asset.path))} onClose={() => setDialog(undefined)} />
+    {dialog?.kind === 'batch' && result && <BatchRedrawDialog sessionId={sessionId} selected={subject} assets={assets} retireDir={result.retireDir}
+      initialJob={dialog.resume || (batchJob && (isBatchRunning(batchJob.phase) || pendingBatchItems(batchJob) > 0)) ? batchJob : null}
+      busyElsewhere={h3BusyElsewhere} onBusyChange={setH3BusyElsewhere} onJobChange={next => { setBatchJob(next); if (next) setH3BusyElsewhere(false); }}
+      onSaved={answer => { adopt(answer.scan); if (!items.some(asset => asset.path === answer.path)) setFilter({ query: '', usage: 'all', folder: '', tag: '' }); setSelected(answer.path); }}
+      onCompleted={message => { setDialog(undefined); clearChecked(); setNotice(message); }} onClose={() => setDialog(undefined)} />}
+    {dialog && dialog.kind !== 'generate' && dialog.kind !== 'batch' && result && subject.length > 0 && (dialog.kind === 'retire' ? <RetireDialog assets={subject} retireDir={result.retireDir} busy={busy} onConfirm={() => move('retire', subject.map(asset => asset.path))} onClose={() => setDialog(undefined)} />
       : dialog.kind === 'tag' ? <TagDialog assets={subject} known={tagNames} busy={busy} onChange={(add, remove) => tag(subject.map(asset => asset.path), add, remove)} onClose={() => setDialog(undefined)} />
       : <SendDialog assets={subject} onSend={send} onClose={() => setDialog(undefined)} />)}
   </section>;
