@@ -180,6 +180,39 @@ export function claudeAccountUsage(account: any, usage: any, checkedAt = new Dat
     ...(typeof limits?.extra_usage?.is_enabled === 'boolean' ? { extraUsage: limits.extra_usage.is_enabled } : {}),
   };
 }
+/** In the order the other CLIs show them: the short window first. */
+const ANTIGRAVITY_WINDOWS: Record<string, string> = { '5h': 'Session', weekly: 'Weekly' };
+const antigravityOrder = (window: unknown) => { const at = Object.keys(ANTIGRAVITY_WINDOWS).indexOf(String(window)); return at < 0 ? 2 : at; };
+/** The structured answer of `agy -p <command> --output-format json`, or why there is none. */
+function antigravityCommand(output: string, name: string): any {
+  let reply: any;
+  try { reply = JSON.parse(output.trim().split('\n').filter(line => line.startsWith('{')).at(-1) ?? ''); } catch { /* reported below */ }
+  if (reply?.status === 'ERROR' && typeof reply.error === 'string') throw new Error(reply.error);
+  if (reply?.command?.name !== name) throw new Error(`Antigravity did not answer /${name}`);
+  return reply.command.data;
+}
+/**
+ * Antigravity's `/usage` in print mode. Models are grouped (Gemini; Claude and GPT), each group with its own 5-hour and
+ * weekly limit. AI credits (`/credits`) are left out: a second request took up to 16 s on the Mac mini, for a balance that
+ * only matters once a limit is used up.
+ */
+export function antigravityAccountUsage(output: string, checkedAt = new Date().toISOString()): AccountUsage {
+  const usage = antigravityCommand(output, 'usage');
+  const windows = list(usage?.groups).flatMap((group: any) => list(group?.buckets).map((bucket: any, index) => ({ bucket, index }))
+    .sort((a, b) => antigravityOrder(a.bucket?.window) - antigravityOrder(b.bucket?.window)).flatMap(({ bucket, index }): QuotaWindow[] => {
+    const remaining = typeof bucket?.remaining_fraction === 'number' && Number.isFinite(bucket.remaining_fraction) ? bucket.remaining_fraction : undefined;
+    if (remaining === undefined) return [];
+    const name = typeof group?.name === 'string' && group.name ? group.name : undefined;
+    return [{
+      id: typeof bucket.id === 'string' && bucket.id ? bucket.id : `${name ?? 'models'}:${index}`,
+      label: ANTIGRAVITY_WINDOWS[bucket.window] ?? (typeof bucket.name === 'string' && bucket.name ? bucket.name : 'Limit'),
+      usedPercent: percent((1 - remaining) * 100)!,
+      ...(typeof bucket.reset_time === 'string' ? { resetsAt: bucket.reset_time } : {}),
+      ...(name ? { group: name } : {}),
+    }];
+  }));
+  return { provider: 'antigravity', checkedAt, windows };
+}
 /** Read plan limits through the CLI itself, so credentials never leave the SSH host. */
 export async function readAccountUsage(peer: JsonlPeer, protocol: NativeProtocol, claudeAccount?: unknown, lastPlan?: string): Promise<AccountUsage> {
   if (protocol === 'codex') {

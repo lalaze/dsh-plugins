@@ -397,6 +397,30 @@ test('Claude plan limits come from its own /usage data on the SSH host', async t
   assert.equal(await read(), 'Max', 'an answer from the CLI\'s cached usage keeps the plan shown last');
 });
 
+test('Antigravity plan limits come from its print-mode /usage without a session or a model call', async t => {
+  const { service, ssh, hostId } = await fixture(t, 'antigravity');
+  const usage = { conversation_id: '', status: 'SUCCESS', num_turns: 0, command: { name: 'usage', data: { groups: [
+    { name: 'Gemini Models', buckets: [{ id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.9941, reset_time: '2026-11-22T16:32:29Z' }, { id: 'gemini-5h', window: '5h', remaining_fraction: 0.25, reset_time: '2026-11-17T09:00:35Z' }] },
+    { name: 'Claude and GPT models', buckets: [{ id: '3p-weekly', window: 'weekly', remaining_fraction: 1, reset_time: '2026-11-24T08:23:32Z' }] },
+  ] } } };
+  let version = '1.5.9\n';
+  const exec = ssh.exec.bind(ssh), prints: string[] = [];
+  ssh.exec = async (script, timeout, options) => {
+    if (script.includes(' --version')) return version;
+    if (script.includes(' -p /')) { prints.push(script); return JSON.stringify(usage) + '\n'; }
+    return exec(script, timeout, options);
+  };
+  const before = ssh.children.length;
+  const read = (refresh = false) => service.usage('chat-agy-limits', { route: `${hostId}/antigravity/acp-remote`, target: { hostId, provider: 'antigravity' }, account: true, refresh });
+  const report = await read();
+  assert.deepEqual(report?.account?.windows.map(w => [w.group, w.label, Math.round(100 - w.usedPercent)]), [['Gemini Models', 'Session', 25], ['Gemini Models', 'Weekly', 99], ['Claude and GPT models', 'Weekly', 100]]);
+  assert.equal(ssh.children.length, before, 'no ACP session is started for the check');
+  assert.deepEqual(prints.map(script => script.includes('/usage --output-format json --print-timeout')), [true], 'one structured, bounded request');
+  version = '1.1.10\n'; prints.length = 0;
+  assert.match((await read(true))?.account?.error ?? '', /1\.1\.11 or later/);
+  assert.equal(prints.length, 0, 'an Antigravity that would send /usage to the model is never asked');
+});
+
 test('Codex MCP tool approvals become permission prompts; other elicitations are declined', async t => {
   const { service, ssh, request } = await fixture(t);
   const agent = await service.create(request); await tick();

@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { acpTurnUsage, claudeAccountUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, remoteUsageRecord, remoteUsageRecords } from '@dsh-plugins/remote-core/usage.js';
+import { acpTurnUsage, antigravityAccountUsage, claudeAccountUsage, claudeMessageTokens, claudeModelUsage, claudeTokenUsage, claudeTurnUsage, codexAccountUsage, codexContext, codexTokenUsage, codexTotalBefore, codexTurnUsage, remoteUsageRecord, remoteUsageRecords } from '@dsh-plugins/remote-core/usage.js';
 import type { HostConfig, Task } from '@dsh-plugins/remote-core/domain.js';
-import { CacheSection, formatReset, formatTokens } from '../src/client/composer/usage.js';
+import { AccountSection, CacheSection, formatReset, formatTokens } from '../src/client/composer/usage.js';
 import { fixture } from './fakes.js';
 
 const checkedAt = '2026-10-26T00:00:00.000Z';
@@ -84,6 +84,30 @@ test('Claude usage reports keep the windows the account has and the extra usage 
   assert.equal(claudeAccountUsage({}, { subscription_type: 'pro', rate_limits: cachedLimits }, checkedAt, 'Max').plan, 'Max');
   assert.equal(claudeAccountUsage({}, { subscription_type: 'pro', rate_limits: cachedLimits }, checkedAt).plan, 'Pro');
   assert.equal(claudeAccountUsage({}, { subscription_type: 'pro', rate_limits: { ...cachedLimits, model_scoped: [] } }, checkedAt, 'Max').plan, 'Pro', 'an endpoint answer still decides');
+});
+
+test('Antigravity /usage groups become plan windows', () => {
+  const reply = (name: string, data: unknown, extra = {}) => JSON.stringify({ conversation_id: '', status: 'SUCCESS', num_turns: 0, ...extra, command: { name, data } });
+  const usage = reply('usage', { groups: [
+    { name: 'Gemini Models', buckets: [{ id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.9941070675849915, reset_time: '2026-11-22T16:32:29Z' }, { id: 'gemini-5h', window: '5h', remaining_fraction: 0.5 }] },
+    { name: 'Claude and GPT models', buckets: [{ id: '3p-daily', name: 'Daily Limit Remaining', window: 'daily', remaining_fraction: 1 }, { id: 'broken', window: '5h' }] },
+  ] });
+  // Notices the CLI writes before its reply do not hide it.
+  assert.deepEqual(antigravityAccountUsage(`[agy] update available\n${usage}\n`, checkedAt), {
+    provider: 'antigravity', checkedAt,
+    windows: [
+      { id: 'gemini-5h', label: 'Session', usedPercent: 50, group: 'Gemini Models' },
+      { id: 'gemini-weekly', label: 'Weekly', usedPercent: (1 - 0.9941070675849915) * 100, resetsAt: '2026-11-22T16:32:29Z', group: 'Gemini Models' },
+      { id: '3p-daily', label: 'Daily Limit Remaining', usedPercent: 0, group: 'Claude and GPT models' },
+    ],
+  });
+  assert.throws(() => antigravityAccountUsage(JSON.stringify({ status: 'ERROR', error: 'Authentication required' }), checkedAt), /Authentication required/);
+  assert.throws(() => antigravityAccountUsage(reply('model', {}), checkedAt), /did not answer \/usage/);
+  assert.throws(() => antigravityAccountUsage('', checkedAt), /did not answer \/usage/);
+  // Each group is named once, above its own windows.
+  const html = renderToStaticMarkup(createElement(AccountSection, { provider: 'antigravity', account: antigravityAccountUsage(usage, checkedAt), loading: false, refresh: () => {} }));
+  assert.deepEqual([...html.matchAll(/class="ra-usage-group">([^<]+)</g)].map(m => m[1]), ['Gemini Models', 'Claude and GPT models']);
+  assert.match(html, /Antigravity/);
 });
 
 test('ring labels use compact token counts and reset times', () => {

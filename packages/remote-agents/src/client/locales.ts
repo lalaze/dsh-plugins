@@ -338,6 +338,8 @@ export const zh: Record<string, string> = {
   "Unlimited": "无限制",
   "This CLI does not report plan limits": "此 CLI 不报告套餐限额。",
   "{label} is not installed on this SSH host": "此 SSH 主机未安装 {label}。",
+  "Plan limits need Antigravity CLI 1.1.11 or later. Run `agy update` on that machine.": "查看套餐限额需要 Antigravity CLI 1.1.11 或更高版本。请在那台机器上运行 `agy update`。",
+  "Antigravity did not answer /{command}": "Antigravity 没有回答 /{command}。",
   "Reconnecting": "正在重连",
   "The SSH connection was lost. The remote CLI keeps running; reconnecting to catch up on its output.": "SSH 连接已断开。远程 CLI 仍在运行，正在重连以补齐输出。",
   "Runs in a relay on the SSH host and keeps working when DSH closes or SSH disconnects.": "在 SSH 主机上的中继中运行，DSH 关闭或 SSH 断开后仍会继续工作。",

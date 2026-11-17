@@ -10,7 +10,7 @@ import type { Store } from '../core/store.js';
 import { discoverAcpCatalog } from './acp.js';
 import { attachmentPrompt, transferAttachments } from './attachments.js';
 import { RelayClient, RelayLink } from './relay.js';
-import { readAccountUsage } from '@dsh-plugins/remote-core/usage.js';
+import { antigravityAccountUsage, readAccountUsage } from '@dsh-plugins/remote-core/usage.js';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { WorkspaceFiles } from '../workspace/files.js';
@@ -112,6 +112,13 @@ export const unattendedClaude = (task: Pick<Task, 'unattended' | 'modeId'>, conf
   if (task.modeId === 'acceptEdits') return ['--settings', JSON.stringify({ sandbox: { enabled: true, autoAllowBashIfSandboxed: true, ...(confined ? { failIfUnavailable: true, allowUnsandboxedCommands: false, filesystem: { allowWrite: ['/tmp', '/private/tmp'] } } : {}) } })];
   return task.modeId === 'default' ? ['--allowedTools', 'WebSearch,WebFetch'] : [];
 };
+/** Whether a `--version` line names this release or a later one; an unreadable version is not. */
+export function versionAtLeast(version: string, floor: readonly number[]): boolean {
+  const parts = /(\d+)\.(\d+)\.(\d+)/.exec(version)?.slice(1).map(Number);
+  if (!parts) return false;
+  for (const [index, least] of floor.entries()) if (parts[index] !== least) return parts[index] > least;
+  return true;
+}
 /** The oldest Claude Code measured to keep every command in the sandbox with these settings. */
 const CONFINED_CLAUDE = [2, 1, 319] as const;
 /**
@@ -119,12 +126,15 @@ const CONFINED_CLAUDE = [2, 1, 319] as const;
  * on Linux it also needs bwrap and socat, and without them Claude Code runs commands unsandboxed.
  */
 export function confinesCommands(system: string, version: string): boolean {
-  if (system.trim() !== 'Darwin') return false;
-  const parts = /(\d+)\.(\d+)\.(\d+)/.exec(version)?.slice(1).map(Number);
-  if (!parts) return false;
-  for (const [index, floor] of CONFINED_CLAUDE.entries()) if (parts[index] !== floor) return parts[index] > floor;
-  return true;
+  return system.trim() === 'Darwin' && versionAtLeast(version, CONFINED_CLAUDE);
 }
+/**
+ * Antigravity answers `/usage` in print mode without starting a turn from 1.1.11 on. Earlier ones would send it to the
+ * model as a prompt, so they are not asked.
+ */
+const ANTIGRAVITY_USAGE = [1, 1, 11] as const;
+/** Print mode stops on its own if, against expectation, the command became a turn; its JSON reply carries any error. */
+const antigravityUsage = (command: string) => `cd "$HOME" 2>/dev/null; ${quote(command)} -p /usage --output-format json --print-timeout 30s 2>/dev/null; true`;
 /**
  * Claude Code refuses to skip permissions as root unless IS_SANDBOX says the machine is meant for it. Whoever connects as
  * root and picks Full access, or made it that account's default, has decided that, so these launches say so. The host is
@@ -629,7 +639,7 @@ done`}`, 15_000, { login: false });
   async account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null> {
     this.assertOpen();
     const definition = CLI_PROVIDERS.find(p => p.id === provider);
-    if (definition?.protocol !== 'codex' && definition?.protocol !== 'claude') return null;
+    if (definition?.protocol !== 'codex' && definition?.protocol !== 'claude' && definition?.id !== 'antigravity') return null;
     const cached = this.accounts.get(provider);
     if (cached && !refresh && Date.now() - cached.at < ACCOUNT_TTL) return cached.value;
     const value = this.readAccount(definition, cwd, this.plans.get(provider)).then(usage => {
@@ -642,6 +652,7 @@ done`}`, 15_000, { login: false });
   }
   /** Ask a running session of this CLI, or briefly start one without a prompt. */
   private async readAccount(definition: typeof CLI_PROVIDERS[number], cwd: string | undefined, lastPlan?: string): Promise<AccountUsage> {
+    if (definition.id === 'antigravity') return this.readAntigravity(definition);
     const live = [...this.sessions.values()].find(s => s.alive && s.task.provider === definition.id && s.agent.status !== 'initializing');
     if (live) return readAccountUsage(live.peer, definition.protocol, live.account, lastPlan);
     const path = await this.transport.exec(`printf '%s' "$(command -v ${quote(definition.command)} 2>/dev/null || true)"`);
@@ -655,6 +666,17 @@ done`}`, 15_000, { login: false });
       const init = await peer.control({ subtype: 'initialize' });
       return await readAccountUsage(peer, 'claude', init?.account, lastPlan);
     } finally { this.probes.delete(peer); peer.close(); }
+  }
+  /** Antigravity has no quota request over ACP; its print mode answers `/usage` without a model call or conversation. */
+  private async readAntigravity(definition: typeof CLI_PROVIDERS[number]): Promise<AccountUsage> {
+    const version = await this.transport.exec(`${quote(definition.command)} --version 2>/dev/null || true`);
+    this.assertOpen();
+    if (!version.trim()) throw new Error(`${definition.label} is not installed on this SSH host`);
+    if (!versionAtLeast(version, ANTIGRAVITY_USAGE)) throw new Error('Plan limits need Antigravity CLI 1.1.11 or later. Run `agy update` on that machine.');
+    const output = await this.transport.exec(antigravityUsage(definition.command), 45_000);
+    this.assertOpen();
+    try { return antigravityAccountUsage(output); }
+    catch (error) { throw new Error(signInHint(definition, error instanceof Error ? error.message : String(error))); }
   }
   /** Shutdown releases persistent sessions, which keep running and are restored on the next start. */
   async close(): Promise<void> {

@@ -133,8 +133,11 @@ export interface ContextUsage { used: number; max: number }
 export interface TokenUsageBreakdown { inputTokens?: number; cachedInputTokens?: number; cacheWriteInputTokens?: number; outputTokens?: number }
 /** Native model-request usage. Only Codex supplies a cumulative thread total. */
 export interface TokenUsage { last?: TokenUsageBreakdown; total?: TokenUsageBreakdown }
-/** One plan rate-limit window of a CLI account; `label` is English and localized by the client. */
-export interface QuotaWindow { id: string; label: string; usedPercent: number; resetsAt?: string }
+/**
+ * One plan rate-limit window of a CLI account; `label` is English and localized by the client. `group` names the models
+ * that share the window when the account has separate limits for different models (Antigravity), as the CLI words it.
+ */
+export interface QuotaWindow { id: string; label: string; usedPercent: number; resetsAt?: string; group?: string }
 /** Plan limits of the account a CLI is signed in with on an SSH host, as that CLI reports them. */
 export interface AccountUsage { provider: string; plan?: string; email?: string; windows: QuotaWindow[]; extraUsage?: boolean; credits?: string; checkedAt: string; error?: string }
 /** What the composer usage ring shows for a DSH conversation bound to a remote CLI. */

@@ -7,8 +7,10 @@ export { setModelDirectories, useCurrentModel, type ModelDirectories, type Selec
 import { localizeError, ui, useLocale } from '../i18n.js';
 
 const POLL_MS = 5000, CLOSE_DELAY_MS = 150;
-/** CLIs whose account reports plan limits through its own protocol. */
-const ACCOUNT_PROVIDERS = new Set(['codex', 'claude']);
+/** CLIs whose account reports plan limits; Antigravity through its print mode. */
+const ACCOUNT_PROVIDERS = new Set(['codex', 'claude', 'antigravity']);
+/** CLIs that report the token counts behind the prompt cache section. */
+const CACHE_PROVIDERS = new Set(['codex', 'claude']);
 const remote = (provider: string) => provider === 'remote-cli' || provider.startsWith('remote-cli-');
 
 /** Switch a conversation's model through DSH's own selector, as a pick in the model menu would. */
@@ -74,6 +76,8 @@ const styles = `
 .ra-usage-bar>span{display:block;height:100%;border-radius:inherit;background:var(--dsw-alias-state-success-primary,#4caf50)}
 .ra-usage-bar[data-level=warning]>span{background:var(--dsw-alias-state-warn-primary,#f5a524)}
 .ra-usage-bar[data-level=error]>span{background:var(--dsw-alias-state-error-primary,#e5484d)}
+.ra-usage-group{margin-bottom:-4px;color:var(--dsw-alias-label-secondary,#999);font-size:12px;font-weight:500}
+.ra-usage-group:not(:first-of-type){margin-top:4px}
 .ra-usage-error{color:var(--dsw-alias-state-error-primary,#e5484d)}
 .ra-usage-email{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 `;
@@ -145,7 +149,7 @@ export function CacheSection({ usage, expanded: initial = cacheExpanded }: { usa
     </>}
   </section>;
 }
-function AccountSection({ provider, account, loading, refresh }: { provider: string; account?: AccountUsage; loading: boolean; refresh: () => void }) {
+export function AccountSection({ provider, account, loading, refresh }: { provider: string; account?: AccountUsage; loading: boolean; refresh: () => void }) {
   return <section className="ra-usage-account" aria-label={ui('Plan usage')}>
     <div className="ra-usage-head">
       <span className="ra-usage-provider">{PROVIDER_LABELS[provider] ?? provider}</span>
@@ -155,13 +159,14 @@ function AccountSection({ provider, account, loading, refresh }: { provider: str
     {account?.error ? <p className="ra-usage-error" role="alert">{localizeError(account.error)}</p>
       : !account ? <p className="ra-usage-muted">{ui('Checking usage…')}</p>
       : !account.windows.length && <p className="ra-usage-muted">{ui('This account does not report plan limits.')}</p>}
-    {account?.windows.map(window => {
+    {account?.windows.map((window, index) => {
       const left = Math.round(100 - window.usedPercent), reset = window.resetsAt ? formatReset(window.resetsAt) : undefined;
-      return <div key={window.id}>
+      const group = window.group && window.group !== account.windows[index - 1]?.group ? window.group : undefined;
+      return <React.Fragment key={window.id}>{group && <p className="ra-usage-group">{group}</p>}<div>
         <div className="ra-usage-row"><span className="ra-usage-muted">{ui(window.label)}</span>
           <span><strong>{ui('{percent}% left', { percent: left })}</strong>{reset && <span className="ra-usage-muted"> · {ui('resets {time}', { time: reset })}</span>}</span></div>
-        <div className="ra-usage-bar" data-level={remainingLevel(left)} role="meter" aria-label={ui(window.label)} aria-valuemin={0} aria-valuemax={100} aria-valuenow={left}><span style={{ width: `${Math.max(0, Math.min(100, left))}%` }} /></div>
-      </div>;
+        <div className="ra-usage-bar" data-level={remainingLevel(left)} role="meter" aria-label={window.group ? `${window.group} · ${ui(window.label)}` : ui(window.label)} aria-valuemin={0} aria-valuemax={100} aria-valuenow={left}><span style={{ width: `${Math.max(0, Math.min(100, left))}%` }} /></div>
+      </div></React.Fragment>;
     })}
     {account?.extraUsage !== undefined && <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Extra usage')}</span><span>{ui(account.extraUsage ? 'Enabled' : 'Disabled')}</span></div>}
     {account?.credits && <div className="ra-usage-row"><span className="ra-usage-muted">{ui('Credits')}</span><span>{ui(account.credits)}</span></div>}
@@ -234,7 +239,7 @@ export function UsageRing({ sessionId }: { sessionId?: string }) {
           <p className="ra-usage-muted">{ui('{used} / {max} tokens', { used: formatTokens(context.used), max: formatTokens(context.max) })}</p>
         </> : <p className="ra-usage-muted">{ui('Shown after the remote CLI reports it.')}</p>}
       </section>
-      {reportsAccount && <CacheSection usage={report.tokenUsage} />}
+      {CACHE_PROVIDERS.has(report.provider) && <CacheSection usage={report.tokenUsage} />}
       {reportsAccount && <AccountSection provider={report.provider} account={value?.value} loading={value?.loading ?? true} refresh={() => loadAccount(true)} />}
     </div>, document.body)}
   </>;
