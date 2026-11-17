@@ -1,7 +1,9 @@
 import { type SshTransport } from './core/ssh.js';
 import { type TuiUsageEntry } from './tui-usage.js';
-/** What Antigravity's `Authentication required` means over SSH; Remote Agents says the same for its chats. */
+/** What Antigravity's `Authentication required` means over SSH, and on this computer; Remote Agents says the same for its chats. */
 export declare const ANTIGRAVITY_SIGN_IN = "Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then try again.";
+/** Run here, Antigravity keeps its sign-in in the keychain, apart from the file it signs in to over SSH. */
+export declare const ANTIGRAVITY_SIGN_IN_HERE = "Antigravity says it is not signed in on this computer. Run `agy acp --login` in a terminal on this computer, not over SSH (a sign-in made over SSH is kept apart), then try again.";
 /** A listed TUI conversation's file, named as its terminal holder is; how many are read, and how large one may be. */
 /** What terminals and TUI conversations run on a machine, over its SSH connection. */
 export declare class TuiRemote {
@@ -38,5 +40,6 @@ export declare class TuiRemote {
      * and closing it there first is what lets that CLI run turns in it.
      * @returns the conversation's ID.
      */
-    antigravityConversation(cwd: string, signal: AbortSignal): Promise<string>;
+    /** @param here - the conversation's folder is on this computer, whose Antigravity sign-in is not the SSH one. */
+    antigravityConversation(cwd: string, signal: AbortSignal, here?: boolean): Promise<string>;
 }

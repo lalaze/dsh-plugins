@@ -4,8 +4,10 @@ import { JsonlPeer, quote } from './core/ssh.js';
 import { endHolderScript } from './holder-protocol.js';
 import { TUI_CODEX_CHILD, TUI_SUBAGENT_FILE, TUI_USAGE_CAP } from './tui-usage.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-/** What Antigravity's `Authentication required` means over SSH; Remote Agents says the same for its chats. */
+/** What Antigravity's `Authentication required` means over SSH, and on this computer; Remote Agents says the same for its chats. */
 export const ANTIGRAVITY_SIGN_IN = 'Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then try again.';
+/** Run here, Antigravity keeps its sign-in in the keychain, apart from the file it signs in to over SSH. */
+export const ANTIGRAVITY_SIGN_IN_HERE = 'Antigravity says it is not signed in on this computer. Run `agy acp --login` in a terminal on this computer, not over SSH (a sign-in made over SSH is kept apart), then try again.';
 /** A listed TUI conversation's file, named as its terminal holder is; how many are read, and how large one may be. */
 /** What terminals and TUI conversations run on a machine, over its SSH connection. */
 export class TuiRemote {
@@ -163,7 +165,8 @@ true`, { maxBytes: 64 * 1024 * 1024, signal });
      * and closing it there first is what lets that CLI run turns in it.
      * @returns the conversation's ID.
      */
-    async antigravityConversation(cwd, signal) {
+    /** @param here - the conversation's folder is on this computer, whose Antigravity sign-in is not the SSH one. */
+    async antigravityConversation(cwd, signal, here = false) {
         const path = await this.transport.exec(`printf '%s' "$(command -v agy 2>/dev/null || true)"`, 20_000);
         signal.throwIfAborted();
         if (!path.startsWith('/'))
@@ -182,7 +185,7 @@ true`, { maxBytes: 64 * 1024 * 1024, signal });
             catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 if (/^authentication required\.?$/i.test(message.trim()))
-                    throw new RemoteError(ANTIGRAVITY_SIGN_IN, 409);
+                    throw new RemoteError(here ? ANTIGRAVITY_SIGN_IN_HERE : ANTIGRAVITY_SIGN_IN, 409);
                 throw error;
             }
             const id = result?.sessionId;

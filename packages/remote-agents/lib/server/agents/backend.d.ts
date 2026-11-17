@@ -51,6 +51,7 @@ export declare const CLI_PROVIDERS: ({
     protocol: "claude";
     args: never[];
     signIn?: undefined;
+    signInHere?: undefined;
 } | {
     id: string;
     label: string;
@@ -58,6 +59,7 @@ export declare const CLI_PROVIDERS: ({
     protocol: "codex";
     args: string[];
     signIn?: undefined;
+    signInHere?: undefined;
 } | {
     id: string;
     label: string;
@@ -65,6 +67,7 @@ export declare const CLI_PROVIDERS: ({
     protocol: "acp";
     args: string[];
     signIn?: undefined;
+    signInHere?: undefined;
 } | {
     id: string;
     label: string;
@@ -72,9 +75,10 @@ export declare const CLI_PROVIDERS: ({
     protocol: "acp";
     args: string[];
     signIn: string;
+    signInHere: string;
 })[];
-/** ACP's `auth_required` error, replaced by how to sign in when the CLI says how. */
-export declare function signInHint(definition: Pick<typeof CLI_PROVIDERS[number], 'signIn'>, message: string): string;
+/** ACP's `auth_required` error, replaced by how to sign in when the CLI says how; `here` is this computer rather than an SSH host. */
+export declare function signInHint(definition: Pick<typeof CLI_PROVIDERS[number], 'signIn' | 'signInHere'>, message: string, here?: boolean): string;
 /** Why a probed CLI cannot start a session: its own error when the probe got one, otherwise that it is not installed there. */
 export declare function notReadyReason(provider: Provider): string;
 export declare const OLD_ANTIGRAVITY = "This Antigravity session was started by Remote Agents 0.2.129 or earlier and cannot be continued. Start a new conversation.";

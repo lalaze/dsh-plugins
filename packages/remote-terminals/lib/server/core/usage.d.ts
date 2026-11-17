@@ -54,5 +54,11 @@ export declare function claudeTokenUsage(usage: any): TokenUsage | undefined;
 export declare function codexAccountUsage(account: any, limits: any, checkedAt?: string): AccountUsage;
 /** Claude `initialize` account details and the `get_usage` control response behind `/usage`. */
 export declare function claudeAccountUsage(account: any, usage: any, checkedAt?: string, lastPlan?: string): AccountUsage;
+/**
+ * Antigravity's `/usage` in print mode. Models are grouped (Gemini; Claude and GPT), each group with its own 5-hour and
+ * weekly limit. AI credits (`/credits`) are left out: a second request took up to 16 s on the Mac mini, for a balance that
+ * only matters once a limit is used up.
+ */
+export declare function antigravityAccountUsage(output: string, checkedAt?: string): AccountUsage;
 /** Read plan limits through the CLI itself, so credentials never leave the SSH host. */
 export declare function readAccountUsage(peer: JsonlPeer, protocol: NativeProtocol, claudeAccount?: unknown, lastPlan?: string): Promise<AccountUsage>;

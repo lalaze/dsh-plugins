@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { field, identifier, RemoteError } from './core/domain.js';
+import { field, identifier, LOCAL_HOST_ID, RemoteError } from './core/domain.js';
 import { requireClient, transferBody, transferFailure, transferSize } from './core/transfer.js';
 import { workspacePath } from './core/workspace.js';
 import { endClosedTerminals, installWorkspaceTerminal } from './terminal.js';
@@ -86,7 +86,7 @@ export function installTerminals(ctx, machines, store, tuiFile) {
         titleRecords: (id, claudeSession, signal) => remote(id, signal, tui => tui.claudeTitleRecords(claudeSession)),
         codexThread: (id, signal) => remote(id, signal, (tui, target) => tui.codexThread(target.cwd, CODEX_THREAD_NAME, signal)),
         codexTitleRecords: (id, thread, signal) => remote(id, signal, tui => tui.codexTitleRecords(thread)),
-        antigravityConversation: (id, signal) => remote(id, signal, (tui, target) => tui.antigravityConversation(target.cwd, signal)),
+        antigravityConversation: (id, signal) => remote(id, signal, (tui, target) => tui.antigravityConversation(target.cwd, signal, target.hostId === LOCAL_HOST_ID)),
         antigravityTitleRecords: (id, conversation, signal) => remote(id, signal, tui => tui.antigravityTitleRecords(conversation)),
         endHolder,
     });
