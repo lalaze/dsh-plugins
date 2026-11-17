@@ -104,12 +104,12 @@
       },
       "versions": [
         {
-          "version": "0.1.7",
-          "publishTimestamp": 1794889184,
+          "version": "0.1.8",
+          "publishTimestamp": 1794891786,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "4dd16fdc573aa5666f35882fd2d7c39dabf32607",
+            "commit": "b8bb9ebb47ed600f99c34a9bcd995cd42884aed4",
             "path": "packages/link"
           },
           "engines": {
@@ -444,12 +444,12 @@
       },
       "versions": [
         {
-          "version": "0.1.20",
-          "publishTimestamp": 1794889184,
+          "version": "0.1.21",
+          "publishTimestamp": 1794891786,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "4dd16fdc573aa5666f35882fd2d7c39dabf32607",
+            "commit": "b8bb9ebb47ed600f99c34a9bcd995cd42884aed4",
             "path": "packages/usage-stats"
           },
           "engines": {
