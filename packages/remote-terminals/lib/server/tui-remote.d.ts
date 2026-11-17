@@ -4,7 +4,11 @@ import { type TuiUsageEntry } from './tui-usage.js';
 export declare const ANTIGRAVITY_SIGN_IN = "Antigravity says it is not signed in on this machine. Over SSH it needs Antigravity CLI 1.5.9 or later (`agy update`) and a sign-in of its own (`agy acp --login`). Run them in a terminal on that machine, then try again.";
 /** Run here, Antigravity keeps its sign-in in the keychain, apart from the file it signs in to over SSH. */
 export declare const ANTIGRAVITY_SIGN_IN_HERE = "Antigravity says it is not signed in on this computer. Run `agy acp --login` in a terminal on this computer, not over SSH (a sign-in made over SSH is kept apart), then try again.";
-/** A listed TUI conversation's file, named as its terminal holder is; how many are read, and how large one may be. */
+/**
+ * `sqlite3` for a machine without the command: the database, `1` to read it as it stands (see `dsh_sql`), then queries;
+ * each query's rows, one column each, a line apiece.
+ */
+export declare const ANTIGRAVITY_SQL_PYTHON = "import sqlite3, sys; db = sqlite3.connect('file:' + sys.argv[1] + '?mode=ro' + ('&immutable=1' if sys.argv[2] else ''), uri=True, timeout=2); [print(row[0]) for query in sys.argv[3:] for row in db.execute(query)]";
 /** What terminals and TUI conversations run on a machine, over its SSH connection. */
 export declare class TuiRemote {
     private readonly transport;
@@ -25,7 +29,9 @@ export declare class TuiRemote {
      * What TUI conversations' CLIs logged since the last read, for their token usage: each file's new whole lines that can
      * hold usage, under a header `@ <entry> <from> <end> <capped> <file>` giving the bytes read. Claude Code's lines lose the
      * message text and its copy of tool inputs, as only the usage is wanted; a long session's log runs to megabytes.
-     * See tui-usage.ts.
+     * Antigravity keeps no log: from its conversation's database come `state`, whether a turn runs, then `calls`, its
+     * model calls since the last read (counted, not in bytes), then `steps`, the first bytes of each step since, each row
+     * a JSON line. See tui-usage.ts and tui-usage-antigravity.ts.
      */
     tuiUsageLines(entries: readonly TuiUsageEntry[], signal?: AbortSignal, cap?: number): Promise<Buffer>;
     /**

@@ -11,8 +11,9 @@ import type { TuiCli } from './core/workspace.js';
  * subagents log to `<session>/subagents/agent-*.jsonl`. Codex reports its running totals in `token_count` events and
  * ends a turn with `task_complete` or `turn_aborted`; its subagents, such as the reviewer of approval requests, run in
  * threads of their own that name their parent in their first line, each with its own totals and turns. Subagents' usage
- * counts toward the conversation's turn running at the time, under their own model. Each finished turn becomes one
- * record per model, as a chat's does.
+ * counts toward the conversation's turn running at the time, under their own model. Antigravity logs no usage; its
+ * conversation's database is read instead (see tui-usage-antigravity.ts). Each finished turn becomes one record per
+ * model, as a chat's does.
  */
 /** Bytes of one file read in one go; the rest follows straight after. */
 export declare const TUI_USAGE_CAP: number;
@@ -21,8 +22,9 @@ export declare const TUI_SUBAGENT_FILE: RegExp;
 /** A Codex subagent's thread, by its ID, as the cursor and the reads name it. */
 export declare const TUI_CODEX_CHILD: RegExp;
 /**
- * A CLI's log to read: its Claude session or Codex thread, and the bytes of each file already read. A Codex thread's
- * subagent threads are looked for among the files changed in the last `since` minutes, or among all when it is absent.
+ * A CLI's log to read: its Claude session, Codex thread or Antigravity conversation, and the bytes of each file already
+ * read (for Antigravity, the calls and steps). A Codex thread's subagent threads are looked for among the files changed
+ * in the last `since` minutes, or among all when it is absent.
  */
 export interface TuiUsageEntry {
     cli: TuiCli;
@@ -37,7 +39,10 @@ export interface TuiUsageEntry {
 export declare const QUIET_MS: number;
 /** Where reading a conversation's log got to, so that every turn is counted once. Kept in `TuiDetails.usage`. */
 export interface TuiUsageCursor {
-    /** Bytes read of each file: `main` and, for Claude Code, its subagents' files by name. */
+    /**
+     * Bytes read of each file: `main` and, for Claude Code, its subagents' files by name. For Antigravity, the first
+     * model call (`calls`) and step (`steps`) not yet read.
+     */
     read: Record<string, number>;
     /** Claude Code: the request last read in each file and what of it is counted, as its lines may come in two reads. */
     requests?: Record<string, {

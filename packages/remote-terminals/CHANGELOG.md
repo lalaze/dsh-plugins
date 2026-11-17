@@ -4,6 +4,14 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.16 — Antigravity's token usage in TUI conversations
+
+- Token usage of Antigravity TUI conversations now goes to `dsh-usage-stats`, one record per turn and model, as Claude Code's and Codex's do. Before, it was not counted at all, so the usage panel showed only Antigravity's chat turns.
+- Antigravity logs no usage, so the plugin reads the conversation's own database on the machine it runs on (`~/.gemini/antigravity-cli/conversations/`), with `sqlite3`, or with Python's where that command is missing. It fetches only each model call's usage and when each step began, not what was said. The figures match, token for token, what Antigravity reports for the same turns in a chat.
+- A turn counts once Antigravity marks the conversation idle: a few seconds after it ends while its terminal is open, otherwise at the next 10-minute read. The first read of a conversation also counts its earlier turns, at the times they ran.
+- The layout of that database is Antigravity's own and not published. A later version of Antigravity may change it, and then its TUI usage stops being counted until this plugin is updated.
+- Can be upgraded on its own, without a restart.
+
 ## 0.1.15 — A TUI that cannot start says why; Antigravity's sign-in on this computer
 
 - When the button that starts a new conversation in the TUI could not start it, it only got a red outline, and the reason was in its tooltip, so the click seemed to do nothing. Now the reason also appears in a card above the button. Press Esc or click elsewhere to close it; clicking the button again tries again.
