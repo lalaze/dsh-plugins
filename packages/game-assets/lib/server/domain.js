@@ -55,6 +55,12 @@ export const SOURCE_DEFAULTS = {
     // Codex draws with its own image tool; the model only drives it, and Codex's default is used when it is empty.
     codex: { baseUrl: '', model: '', models: [] },
 };
+/** The API shape nearest an image's own. */
+export function aspectOf(width, height) {
+    if (!width || !height)
+        return 'square';
+    return width / height > 1.2 ? 'wide' : height / width > 1.2 ? 'tall' : 'square';
+}
 /** Images one generation may be given as references. */
 export const REFERENCE_LIMIT = 4;
 /** Formats the image APIs take as references, and the ones a saved picture may have. */
@@ -62,6 +68,11 @@ export const REFERENCE_EXTENSIONS = ['png', 'webp', 'jpg', 'jpeg'];
 export const isReference = (path) => REFERENCE_EXTENSIONS.includes(extensionOf(path));
 /** The longest prompt a generation takes. */
 export const PROMPT_LIMIT = 8000;
+/** Images one h3 batch redraw may take, and the smallest batch that pays off a VM boot without warning. */
+export const H3_BATCH_LIMIT = 20;
+export const H3_WORTH_IT = 4;
+export const H3_MADE = { source: 'h3', model: 'MiniMax-H3-Image' };
+export const isBatchRunning = (phase) => phase === 'booting' || phase === 'drawing' || phase === 'stopping';
 /**
  * In the workspace: the image source agents working in the project generate with, and the script they run for it.
  * Committed with the project; it never holds a key.

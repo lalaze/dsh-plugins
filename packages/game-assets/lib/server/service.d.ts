@@ -1,4 +1,5 @@
-import { type AssetDetail, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
+import { type H3BatchOptions } from './batch.js';
+import { type AssetDetail, type BatchStatus, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
 import { type Failure, type Placed } from './manage.js';
 import { type RemoteMachines } from './remote.js';
 import { type Rules } from './scan.js';
@@ -26,6 +27,8 @@ export interface ServiceOptions {
         loginShell?: boolean;
         command?: string;
     };
+    /** How h3 is started on the DSH host for batch redraws; tests pass a stand-in script here. */
+    h3?: H3BatchOptions;
 }
 export declare class AssetService {
     private readonly cwdOf;
@@ -33,6 +36,7 @@ export declare class AssetService {
     private readonly scanner;
     private readonly settings;
     private readonly sourceStore;
+    private readonly batches;
     private readonly results;
     private readonly running;
     private readonly libraries;
@@ -120,4 +124,18 @@ export declare class AssetService {
      * without its key and the generate-image script; the key goes to the workspace machine's home folder.
      */
     setProjectSource(sessionId: string, sourceId: unknown): Promise<ProjectSourceStatus>;
+    /**
+     * Starts an h3 batch redraw on the DSH host for live PNG/WebP/JPEG images of the last scan, returning the job status at
+     * once while the Colab VM boots and generates in the background.
+     */
+    startBatch(sessionId: string, input: {
+        paths?: unknown;
+        prompt?: unknown;
+    }): Promise<BatchStatus>;
+    batchStatus(sessionId: string, id?: unknown): BatchStatus | null;
+    batchBusy(sessionId: string): boolean;
+    batchResult(sessionId: string, id: unknown, index: unknown): Promise<GeneratedImage>;
+    stopBatch(sessionId: string, id?: unknown): Promise<BatchStatus>;
+    discardBatch(sessionId: string, id?: unknown): Promise<void>;
+    dispose(): Promise<void>;
 }

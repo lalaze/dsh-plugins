@@ -219,6 +219,8 @@ export interface SourcesAnswer {
 }
 /** The shape asked of a generated picture; the API's nearest size is used. */
 export type Aspect = 'square' | 'wide' | 'tall';
+/** The API shape nearest an image's own. */
+export declare function aspectOf(width?: number, height?: number): Aspect;
 /** What one generation answers: the picture as the API made it, in base64. */
 export interface GeneratedImage {
     data: string;
@@ -243,6 +245,38 @@ export declare const REFERENCE_EXTENSIONS: readonly ["png", "webp", "jpg", "jpeg
 export declare const isReference: (path: string) => boolean;
 /** The longest prompt a generation takes. */
 export declare const PROMPT_LIMIT = 8000;
+/** Images one h3 batch redraw may take, and the smallest batch that pays off a VM boot without warning. */
+export declare const H3_BATCH_LIMIT = 20;
+export declare const H3_WORTH_IT = 4;
+export declare const H3_MADE: {
+    readonly source: "h3";
+    readonly model: "MiniMax-H3-Image";
+};
+export type BatchPhase = 'booting' | 'drawing' | 'stopping' | 'done' | 'failed' | 'stopped';
+export type BatchItemState = 'waiting' | 'drawing' | 'done' | 'failed' | 'skipped';
+export interface BatchItemStatus {
+    path: string;
+    status: BatchItemState;
+    error?: string;
+    ms?: number;
+    width?: number;
+    height?: number;
+}
+export interface BatchStatus {
+    id: string;
+    sessionId: string;
+    phase: BatchPhase;
+    startedAt: number;
+    prompt: string;
+    items: BatchItemStatus[];
+    error?: string;
+    downError?: string;
+}
+export interface BatchStatusAnswer {
+    job: BatchStatus | null;
+    busy: boolean;
+}
+export declare const isBatchRunning: (phase: BatchPhase) => boolean;
 /**
  * In the workspace: the image source agents working in the project generate with, and the script they run for it.
  * Committed with the project; it never holds a key.

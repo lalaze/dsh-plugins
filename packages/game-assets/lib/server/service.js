@@ -2,7 +2,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import { DEFAULT_RETIRE_DIR, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, extensionOf, isReference, usesApi } from './domain.js';
+import { H3Batches } from './batch.js';
+import { DEFAULT_RETIRE_DIR, H3_BATCH_LIMIT, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, aspectOf, extensionOf, isReference, usesApi } from './domain.js';
 import { rasterType } from './images.js';
 import { Library, cleanImagePath, cleanMade, cleanRetireDir, cleanTag } from './manage.js';
 import { REMOTE_CHUNK, runRemote } from './remote.js';
@@ -96,6 +97,7 @@ export class AssetService {
     scanner = new Scanner();
     settings;
     sourceStore;
+    batches;
     results = new Map();
     running = new Map();
     libraries = new Map();
@@ -108,6 +110,7 @@ export class AssetService {
         this.options = options;
         this.settings = new Settings(settingsFile);
         this.sourceStore = new SourceStore(join(dirname(settingsFile), 'image-sources.json'));
+        this.batches = new H3Batches(this.options.h3);
     }
     library(root) {
         let library = this.libraries.get(root);
@@ -428,5 +431,67 @@ export class AssetService {
         const bundle = { source: { id: source.id, name: source.name, kind: source.kind, model: source.model, baseUrl: source.baseUrl, retireDir: await this.settings.retireDir(workspace.key) }, script,
             ...(usesApi(source.kind) ? { key: source.apiKey } : {}) };
         return workspace.call({ op: 'setProjectSource', bundle });
+    }
+    /**
+     * Starts an h3 batch redraw on the DSH host for live PNG/WebP/JPEG images of the last scan, returning the job status at
+     * once while the Colab VM boots and generates in the background.
+     */
+    async startBatch(sessionId, input) {
+        const existing = this.batches.runningFor(sessionId);
+        if (existing)
+            return existing;
+        if (this.batches.busyFor(sessionId))
+            throw new AssetError('h3 is already redrawing a batch for another workspace', 409);
+        const prompt = typeof input.prompt === 'string' ? input.prompt.trim() : '';
+        if (!prompt || prompt.length > PROMPT_LIMIT)
+            throw new AssetError('Describe the picture in up to 8000 characters');
+        if (!Array.isArray(input.paths) || !input.paths.length || input.paths.some(path => typeof path !== 'string')) {
+            throw new AssetError('Invalid selection');
+        }
+        const unique = [...new Set(input.paths)];
+        if (unique.length > H3_BATCH_LIMIT)
+            throw new AssetError(`Up to ${H3_BATCH_LIMIT} images can be redrawn in one batch`);
+        const workspace = await this.workspace(sessionId);
+        const byPath = new Map((await this.last(workspace)).assets.map(asset => [asset.path, asset]));
+        const picked = [];
+        for (const path of unique) {
+            const asset = byPath.get(path);
+            if (!asset)
+                throw new AssetError('Not an image of this workspace', 404);
+            if (asset.retired)
+                throw new AssetError('Retired images cannot be redrawn in place');
+            if (!isReference(asset.path))
+                throw new AssetError('Only PNG, WebP and JPEG images can be sent to an image API');
+            picked.push(asset);
+        }
+        return this.batches.start(sessionId, prompt, picked.map(asset => ({ path: asset.path, aspect: aspectOf(asset.width, asset.height), transparent: false })), path => this.raw(sessionId, path));
+    }
+    batchStatus(sessionId, id) {
+        if (id !== undefined && (typeof id !== 'string' || !id))
+            throw new AssetError('Invalid batch ID');
+        return this.batches.status(sessionId, id);
+    }
+    batchBusy(sessionId) {
+        return this.batches.busyFor(sessionId);
+    }
+    batchResult(sessionId, id, index) {
+        if (typeof id !== 'string' || !id)
+            throw new AssetError('Invalid batch ID');
+        if (typeof index !== 'number' || !Number.isInteger(index) || index < 0)
+            throw new AssetError('Invalid picture index');
+        return this.batches.result(sessionId, id, index);
+    }
+    stopBatch(sessionId, id) {
+        if (id !== undefined && (typeof id !== 'string' || !id))
+            throw new AssetError('Invalid batch ID');
+        return this.batches.stop(sessionId, id);
+    }
+    async discardBatch(sessionId, id) {
+        if (id !== undefined && (typeof id !== 'string' || !id))
+            throw new AssetError('Invalid batch ID');
+        await this.batches.discard(sessionId, id);
+    }
+    dispose() {
+        return this.batches.dispose();
     }
 }

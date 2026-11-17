@@ -22,6 +22,7 @@ export function apply(ctx) {
     const projectScript = () => generator ??= readFile(new URL('../generate-image.cjs', import.meta.url), 'utf8').catch(error => { generator = undefined; throw error; });
     const assets = new AssetService(id => workingDirectoryOf(get, id), join(stateDir(), 'workspaces.json'), { machines: () => ctx.get('remoteAgentsMachines'), remoteScript, projectScript });
     const log = (message) => ctx.get('logger')?.warn?.(message);
+    ctx.effect(() => () => assets.dispose());
     // The host connection supplies authentication and origin checks.
     ctx.connection.fetch.register({ path: ROUTE, methods: ['GET', 'POST'], requestBody: 'buffered', fetch: createHandler(assets, log) });
 }

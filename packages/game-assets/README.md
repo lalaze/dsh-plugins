@@ -42,6 +42,7 @@ Tick the box in an image's corner to select it; Shift extends the selection, Ctr
 - **Retire…** moves the selection into the retired folder, each image under its present path, after a dialog that says how many of them the code still refers to. The **Retired** filter lists what is there; **Restore** puts images back where they came from. The Versions view retires a whole version from its row, and the detail pane retires or restores one image.
 - **Tag…** adds a tag to every selected image or removes one. The detail pane edits one image's tags and its note. A tag menu filters the grid, and the search looks in tags and notes too.
 - **Generate…** makes a picture with an [image source](#image-sources), the selected images going along as references (up to four). With one image selected, it is a redraw of that image; the detail pane has **Redraw…** for the same.
+- **Batch redraw with h3…** redraws up to 20 selected PNG, WebP or JPEG images in one Colab VM boot with [h3](#batch-redraw-with-h3), each image from itself as the reference.
 - **Ask the agent…** writes a request (check and remove, find where they are used, redraw, or your own words) followed by the selected paths into the conversation's chat input. Nothing is sent until you send it. In a TUI conversation of [Remote Terminals](../remote-terminals/README.md) 0.1.4 or newer, where a terminal stands in for the chat input, the request is typed at the CLI's prompt instead. Where the host cannot take the text, it is copied to the clipboard instead.
 
 ## Image sources
@@ -63,6 +64,16 @@ The dialog sends the prompt, the shape (square, wide or tall, the API's nearest 
 - **Replace the image** retires the image first (to the retired folder, numbered if an earlier copy is there) and writes the picture at its path, so the code keeps finding it and its tags stay. The old one is listed under the image's [earlier versions](#earlier-versions).
 
 Closing the dialog while a picture is being generated stops the request. A generation gives up after five minutes.
+
+### Batch redraw with h3
+
+When you select live PNG, WebP or JPEG images, the selection bar offers **Batch redraw with h3…** (`MiniMax-H3-Image` on Google Colab, up to 20 images per batch; GIF, SVG and retired images are left out). Unlike **Generate…**, `h3` is not an ordinary image source and does not combine several references into one picture: every selected image is redrawn on its own at 16 MP with itself as `<Picture 1>` and a shared prompt.
+
+- **Runs on the DSH host.** `h3` (and its Google Colab authorization) runs on the computer DSH runs on, started through your login shell so a DSH opened from the Dock still finds `~/.local/bin/h3`. Remote workspaces work the same way: reference images are read from the remote machine and saved pictures are uploaded back through Remote Agents.
+- **Cost and small-batch confirmation.** Booting the Colab A100 VM (`h3 up`) takes about 11 minutes and costs roughly 1.6 CU before the first image is drawn, so a boot only pays off from about 4–5 final 16 MP images upward. With fewer than 4 images selected, the dialog warns you and keeps the start button disabled until you tick confirmation to boot now anyway.
+- **One batch at a time.** All `h3` calls share the default `h3` Colab session. Only one batch job can run across DSH at a time; starting another from a different workspace, or when `h3 status` shows the VM is already running (for example, started by another agent), is refused with 409 without touching that VM. Closing the dialog leaves the job running in the background, and a banner at the top of the Assets tab reconnects to it.
+- **Automatic `h3 down`.** When the batch finishes, fails to boot, fails mid-run, is stopped with **Stop and shut down**, or the plugin is unloaded, the host runs `h3 down` automatically so CU billing stops. If DSH itself crashes or is force-quit while a batch is running, run `h3 down` manually in a terminal to shut down the Colab VM.
+- **Review before writing.** Nothing in the workspace is modified while the batch runs; generated pictures stay in a temporary folder on the host. Once ready, each row shows the current image beside the new one (fitted per image or with a batch-wide size choice) with **Replace**, **Save as new file** (using a free `-redraw` path) and **Discard**, plus **Replace all** and **Discard all**.
 
 ### Earlier versions
 
@@ -139,7 +150,7 @@ Settings of a remote workspace are kept by machine and folder. Retired images, t
 
 ```sh
 pnpm --filter dsh-game-assets pack:plugin
-dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.4.0.tgz"
+dsh plugin --profile web add "$PWD/dist/dsh-game-assets-0.5.0.tgz"
 ```
 
 Restart the profile and refresh the browser. For Desktop, quit DSH and use its bundled `dsh` with `--profile desktop`. Requires DSH `>=0.2.1-rc.2 <0.3.0`.
@@ -152,6 +163,6 @@ pnpm --filter dsh-game-assets preview:ui   # the tab outside DSH, over the curre
 node scripts/preview.mjs /path/to/game 4184
 ```
 
-The host half (`src/`) scans and serves images through `/api/game-assets`; `src/workspace.ts` is what it does in one folder, run in the host's process for a local workspace and inside `src/remote-agent.ts`, the script sent to the machine, for a remote one; the client half (`src/client/`) is the tab. `src/references.ts` holds the reference rules and is the place to teach it a new way code names a file; `src/manage.ts` is everything that changes a workspace; `src/sources.ts` keeps the image sources and calls their APIs, `src/codex.ts` runs Codex, `src/project.ts` records a source in a project and `src/generate-image.ts` is the script it gets, and `src/client/generate.tsx` is the dialog; `src/detect.ts` lists the engines that make a workspace a game project.
+The host half (`src/`) scans and serves images through `/api/game-assets`; `src/workspace.ts` is what it does in one folder, run in the host's process for a local workspace and inside `src/remote-agent.ts`, the script sent to the machine, for a remote one; the client half (`src/client/`) is the tab. `src/references.ts` holds the reference rules and is the place to teach it a new way code names a file; `src/manage.ts` is everything that changes a workspace; `src/sources.ts` keeps the image sources and calls their APIs, `src/codex.ts` runs Codex, `src/h3.ts` and `src/batch.ts` run host-side `h3` batch redraws (`src/client/batch.tsx` is their dialog), `src/project.ts` records a source in a project and `src/generate-image.ts` is the script it gets, and `src/client/generate.tsx` is the single-picture dialog; `src/detect.ts` lists the engines that make a workspace a game project.
 
 MIT.

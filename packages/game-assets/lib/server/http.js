@@ -14,7 +14,8 @@ const summary = (scan) => ({ ...scan, assets: scan.assets.map(({ refs: _refs, ..
  * `retire`, `restore`, `revert`, `tag`, `note` and `save` change it (see manage.ts);
  * `project`, `setProject`, `mode` and `setMode` decide where the tab appears;
  * `sources`, `saveSource`, `deleteSource` and `defaultSource` keep the image sources, `generate` asks one for a picture,
- * and `projectSource` and `setProjectSource` read and record the one the project's agents use. */
+ * `projectSource` and `setProjectSource` read and record the one the project's agents use,
+ * and `h3Start`, `h3Status`, `h3Result`, `h3Stop` and `h3Discard` run and inspect host-side h3 batch redraws. */
 export function createHandler(service, log) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
@@ -79,6 +80,14 @@ export function createHandler(service, log) {
                 case 'note': return Response.json(await service.note(sessionId, input.path, input.note), { headers });
                 // Closing the dialog drops the request, and with it the call to the image API.
                 case 'generate': return Response.json(await service.generate(sessionId, input, request.signal), { headers });
+                // Batch redraws outlive the HTTP request that started them, so `request.signal` is not bound here.
+                case 'h3Start': return Response.json(await service.startBatch(sessionId, input), { headers });
+                case 'h3Status': return Response.json({ job: service.batchStatus(sessionId, input.id), busy: service.batchBusy(sessionId) }, { headers });
+                case 'h3Result': return Response.json(await service.batchResult(sessionId, input.id, input.index), { headers });
+                case 'h3Stop': return Response.json(await service.stopBatch(sessionId, input.id), { headers });
+                case 'h3Discard':
+                    await service.discardBatch(sessionId, input.id);
+                    return Response.json({ ok: true }, { headers });
                 case 'projectSource': return Response.json(await service.projectSource(sessionId), { headers });
                 case 'setProjectSource':
                     if (input.sourceId !== null && typeof input.sourceId !== 'string')
