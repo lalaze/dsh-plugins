@@ -19,14 +19,21 @@ async function setup(t: TestContext) {
   const never = async () => { throw new Error('not used'); };
   const sources = new Sources(), manual = new ManualSource(join(home, 'manual'));
   const tasks = new Tasks({ store, source: id => sources.get(id), workplaces: { create: never, machine: never, remove: never }, conversations: { open: never, flow: never, picture: never } });
-  const service = new AutofixService({ store, tasks, sources, manual, workplaces: { projects: async () => [], inspect: never, machine: never }, folders: { add: never, repository: never }, now: () => 5000 });
+  // What Remote Terminals answers for a folder: `gone` ones are not a workspace of this DSH any more.
+  const places = { gone: new Set<string>(), down: new Set<string>() };
+  const machine = async (path: string) => {
+    if (places.gone.has(path)) throw Object.assign(new Error('This folder is not a DSH workspace'), { status: 409 });
+    if (places.down.has(path)) throw new Error('Worktree workspaces are not available');
+    return {} as never;
+  };
+  const service = new AutofixService({ store, tasks, sources, manual, workplaces: { projects: async () => [], inspect: never, machine }, folders: { add: never, repository: never }, now: () => 5000 });
   const handler = createHandler(service, tasks);
   const post = async (body: Record<string, unknown>, headers: Record<string, string> = { 'X-DSH-Autofix': '1' }) => {
     const response = await handler(new Request('http://dsh/api/autofix', { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body) }));
     return { status: response.status, body: await response.json() as Record<string, any> };
   };
   const settings = { routes: [{ name: 'Web', project: '/repo', defaultBranch: 'main', packageGlobs: ['packages/*', './apps/*/'] }], run: { denyLabels: ['Payment'] } };
-  return { home, store, service, post, settings, sources, manual };
+  return { home, store, service, post, settings, sources, manual, places };
 }
 /** A tracker that is asked for its open bugs. */
 function tracker(id: string, name: string) {
@@ -41,11 +48,23 @@ test('settings are checked before they are saved, and only this plugin\'s pages 
   const saved = await host.post({ action: 'saveSettings', settings: host.settings });
   assert.equal(saved.status, 200);
   assert.deepEqual(saved.body.state.settings.routes[0], { id: 'Web', name: 'Web', project: '/repo', defaultBranch: 'main', tests: [], packageGlobs: ['packages/*', 'apps/*'], sharedPaths: [], buildScripts: [], preview: '', pushRemote: 'origin', accept: 'merge' });
-  assert.deepEqual(saved.body.state.settings.run, { denyLabels: ['Payment'], permission: 'workspace-write', rounds: 3, flowModels: {}, checkRetries: 1, relay: false });
+  assert.deepEqual(saved.body.state.settings.run, { denyLabels: ['Payment'], permission: 'workspace-write', rounds: 3, flowModels: {}, checkRetries: 1 });
   assert.equal((await stat(join(host.home, 'settings.json'))).mode & 0o777, 0o600);
   const bad = await host.post({ action: 'saveSettings', settings: { routes: [{ name: 'A', project: '/a', sharedPaths: ['../etc'] }] } });
   assert.deepEqual([bad.status, bad.body.error], [400, 'A shared path must be a path inside the repository']);
   assert.equal(host.store.settings.routes[0].name, 'Web', 'a refused save changes nothing');
+});
+
+test('the settings page hears which repositories lead to a folder that is no longer a workspace', async t => {
+  const host = await setup(t);
+  const settings = { routes: [{ name: 'Web', project: '/old/web' }, { name: 'Admin', project: '/repo/admin' }, { name: 'Copy', project: '/old/web' }, { name: 'Far', project: '/far' }], run: {} };
+  assert.equal((await host.post({ action: 'saveSettings', settings })).status, 200);
+  host.places.gone.add('/old/web');
+  // A plugin that is not running cannot tell: that is not a folder gone.
+  host.places.down.add('/far');
+  assert.deepEqual((await host.post({ action: 'projects' })).body.missing, ['/old/web']);
+  host.places.gone.clear();
+  assert.deepEqual((await host.post({ action: 'projects' })).body.missing, []);
 });
 
 test('sources come and go; each is asked for its own bugs, and one failing does not stop the others', async t => {

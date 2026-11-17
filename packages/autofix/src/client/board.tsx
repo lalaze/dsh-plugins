@@ -39,18 +39,17 @@ const originLabel = (task: TaskView) => task.item.kind === 'feature' ? ui("From 
  * A task's newest flow as the flow's own card draws it, from what the task keeps of it. Undefined for a task that has
  * no flow yet, or whose flow ran before tasks kept what the card needs.
  */
-function flowOf(task: TaskView, far: boolean, act: (action: string) => Promise<boolean>): FlowView | undefined {
+function flowOf(task: TaskView, act: (action: string) => Promise<boolean>): FlowView | undefined {
   const flow = task.flow, live = task.progress;
   if (!flow || flow.rounds === undefined) return undefined;
   const active = task.running && task.status === 'working' && !flow.end;
-  // Another DSH's clock is not this one's: a flow followed from afar shows no running time.
-  const elapsed = live?.elapsed ?? (active && !far && flow.startedAt ? Math.max(0, Date.now() - flow.startedAt) : undefined);
+  const elapsed = live?.elapsed ?? (active && flow.startedAt ? Math.max(0, Date.now() - flow.startedAt) : undefined);
   return {
-    card: { parentId: far ? '' : task.sessionId ?? '', zh: flow.zh ?? false, rounds: flow.rounds, ...(flow.planned !== undefined ? { planned: flow.planned } : {}), steps: live?.steps ?? flow.steps, ...(flow.end ? { end: flow.end } : {}),
+    card: { parentId: task.sessionId ?? '', zh: flow.zh ?? false, rounds: flow.rounds, ...(flow.planned !== undefined ? { planned: flow.planned } : {}), steps: live?.steps ?? flow.steps, ...(flow.end ? { end: flow.end } : {}),
       ...(elapsed !== undefined ? { elapsed } : {}), ...(live?.activity ? { activity: live.activity } : {}) },
-    active, canOpen: !far && !!task.sessionId,
+    active, canOpen: !!task.sessionId,
     ...(active ? { stop: () => { void act('stop'); } } : {}),
-    ...(far ? {} : { stepBody: (index: number) => call<{ body: string | null }>('stepBody', { key: task.key, index }).then(reply => reply.body ?? null, () => null) }),
+    stepBody: (index: number) => call<{ body: string | null }>('stepBody', { key: task.key, index }).then(reply => reply.body ?? null, () => null),
   };
 }
 /** What follows the flow, at the end of its progress bar: the repository's checks, then the person. */
@@ -79,11 +78,11 @@ function headOf(task: TaskView): ViewExtras['head'] {
 }
 const seconds = (ms: number) => ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 
-function Diff({ taskKey, at }: { taskKey: string; at?: string }) {
+function Diff({ taskKey }: { taskKey: string }) {
   const [diff, setDiff] = useState<{ stat: string; patch: string; truncated: boolean }>(), [error, setError] = useState('');
   useEffect(() => {
     const controller = new AbortController();
-    call<{ stat: string; patch: string; truncated: boolean }>('diff', { key: taskKey, ...(at ? { at } : {}) }, controller.signal).then(setDiff, reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason)); });
+    call<{ stat: string; patch: string; truncated: boolean }>('diff', { key: taskKey }, controller.signal).then(setDiff, reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason)); });
     return () => controller.abort();
   }, [taskKey]);
   if (error) return <p className="tp-error">{error}</p>;
@@ -103,10 +102,10 @@ function Title({ item }: { item: Item }) {
 
 /**
  * A task with what can be done about it. `keep` leaves out removing it: a card in a conversation is not where a task is
- * thrown away. `at` is set for a task another DSH runs. `flow` is the card of the task's flow in its own conversation,
- * live as Model flow draws it; anywhere else the task is drawn from what it keeps of its flow.
+ * thrown away. `flow` is the card of the task's flow in its own conversation, live as Model flow draws it; anywhere
+ * else the task is drawn from what it keeps of its flow.
  */
-export function TaskCard({ task, routes, busy, act, open, keep, at, flow }: { task: TaskView; routes: readonly Pick<Route, 'id' | 'name' | 'accept'>[]; busy: boolean; act(action: string, body?: Record<string, unknown>): Promise<boolean>; open?(sessionId: string): void; keep?: boolean; at?: string; flow?: FlowView }) {
+export function TaskCard({ task, routes, busy, act, open, keep, flow }: { task: TaskView; routes: readonly Pick<Route, 'id' | 'name' | 'accept'>[]; busy: boolean; act(action: string, body?: Record<string, unknown>): Promise<boolean>; open?(sessionId: string): void; keep?: boolean; flow?: FlowView }) {
   const [mode, setMode] = useState<'idle' | 'back' | 'accept' | 'remove'>('idle'), [note, setNote] = useState(''), [showDiff, setShowDiff] = useState(false), added = usePictures();
   const route = routes.find(entry => entry.id === task.routeId), last = task.events.at(-1);
   const review = task.status === 'review', trouble = task.status === 'failed' || task.status === 'stopped', done = task.status === 'done';
@@ -117,7 +116,7 @@ export function TaskCard({ task, routes, busy, act, open, keep, at, flow }: { ta
   useEffect(() => { if (mode === 'remove' && !removable) setMode('idle'); }, [mode, removable]);
   const send = async () => { if (await act('sendBack', { feedback: note, images: added.payload() })) { setNote(''); added.clear(); setMode('idle'); } };
   // Drawn as the flow's own card when Model flow's page offers it: the same progress a /flow shows, then what a task adds.
-  const View = useFlowCard()?.View, view = View ? flow ?? flowOf(task, !!at, action => act(action)) : undefined;
+  const View = useFlowCard()?.View, view = View ? flow ?? flowOf(task, action => act(action)) : undefined;
   const meta = <p className="tp-meta">{[originLabel(task), route?.name ?? task.routeId, task.branch && `${task.branch} ← ${task.baseBranch}`, task.commit && task.commit.slice(0, 9), task.attempts > 1 && ui("round {0}", { 0: String(task.attempts) })].filter(Boolean).join(' · ')}</p>;
   // The flow says what it is doing itself; the task's own last word is for the time around it.
   const flowing = !!view && (view.active || (!!view.card.end && task.status === 'working'));
@@ -132,7 +131,7 @@ export function TaskCard({ task, routes, busy, act, open, keep, at, flow }: { ta
     {done && view && !task.worktree && <p className="tp-muted">{ui("workspace removed")}</p>}
     {task.reportPending && <p className="tp-error">{ui("{0} was not told that this was accepted.", { 0: sourceLabel(task.sourceName) })}</p>}
     {task.flow?.report && (review || trouble) && !(view && (flow || keep)) && <details className="tp-report"><summary>{ui("What the models reported")}</summary><div>{task.flow.report}</div></details>}
-    {review && <details className="tp-report" onToggle={event => setShowDiff((event.target as HTMLDetailsElement).open)}><summary>{ui("Changes")}{task.check ? ` · ${ui("{0} files", { 0: String(task.check.files.length) })}` : ''}</summary>{showDiff && <Diff taskKey={`${task.key}`} {...(at ? { at } : {})} />}</details>}
+    {review && <details className="tp-report" onToggle={event => setShowDiff((event.target as HTMLDetailsElement).open)}><summary>{ui("Changes")}{task.check ? ` · ${ui("{0} files", { 0: String(task.check.files.length) })}` : ''}</summary>{showDiff && <Diff taskKey={`${task.key}`} />}</details>}
     {mode === 'back' && <div className="tp-form tp-back" {...added.zone}><textarea autoFocus rows={3} value={note} placeholder={ui("What should change? Paste or drop screenshots here.")} onChange={event => setNote(event.target.value)} />
       {added.view()}
       <div className="tp-actions"><button type="button" className="tp-button" data-primary disabled={busy || (review && !note.trim() && !added.pictures.length)} onClick={() => void send()}>{ui("Send back")}</button>

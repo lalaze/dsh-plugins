@@ -102,7 +102,6 @@ test('the picker offers this computer’s CLIs in its folders, detecting them on
   const providers = t.mock.method(SshBackend.prototype, 'providers', async () => [ready]);
   t.mock.method(SshBackend.prototype, 'homeDirectory', async () => '/Users/me');
   t.mock.method(SshBackend.prototype, 'cleanup', async () => {});
-  t.mock.method(SshBackend.prototype, 'withdrawShared', async () => {});
   const ctx = new Context(); t.after(() => ctx.fiber.dispose());
   let handle: ((request: Request) => Promise<Response>) | undefined;
   ctx.provide('connection', { fetch: { register(route: { path: string; fetch(request: Request): Promise<Response> }) { if (route.path === '/api/remote-agents') handle = route.fetch; } } });

@@ -89,13 +89,11 @@ test('plugin startup leaves saved relay sessions and their SSH hosts dormant', a
   });
   await service.close();
   const restore = t.mock.method(SshBackend.prototype, 'restore', async () => null);
-  const withdraw = t.mock.method(SshBackend.prototype, 'withdrawShared', async () => {});
   const cleanup = t.mock.method(SshBackend.prototype, 'cleanup', async () => {});
   const ctx = new Context(); t.after(() => ctx.fiber.dispose());
   ctx.provide('connection', { fetch: { register() {} } });
   const mounted = ctx.plugin(plugin, { stateDir: directory }); await mounted.await();
   assert.equal(restore.mock.callCount(), 0, 'startup does not attach saved CLIs');
-  assert.equal(withdraw.mock.callCount(), 0, 'startup does not reach hosts to withdraw sessions an earlier version shared');
   assert.equal(cleanup.mock.callCount(), 0, 'startup does not probe hosts for relay cleanup');
 });
 

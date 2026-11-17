@@ -91,15 +91,13 @@ export interface RunSettings {
   flowModels: Partial<Record<FlowRole, string>>;
   /** How many times a failed check sends the work back to the models before the task fails. */
   checkRetries: number;
-  /** Whether other DSHes may hand bugs to this one, through the machines that hold its repositories. */
-  relay: boolean;
 }
 export interface Settings { routes: Route[]; run: RunSettings }
 
 export const SENSITIVE_LABELS = ['security', 'payment', 'auth', 'migration', 'prod-incident'];
 export const defaultSettings = (): Settings => ({
   routes: [],
-  run: { denyLabels: [...SENSITIVE_LABELS], permission: 'workspace-write', rounds: 3, flowModels: {}, checkRetries: 1, relay: false },
+  run: { denyLabels: [...SENSITIVE_LABELS], permission: 'workspace-write', rounds: 3, flowModels: {}, checkRetries: 1 },
 });
 
 export interface Assignment { routeId: string; branch: string; package?: string }
@@ -232,7 +230,6 @@ export function settingsFrom(raw: unknown): Settings {
       rounds: whole(run.rounds, 'Review rounds', 1, 5, base.run.rounds),
       flowModels: Object.fromEntries((['plan', 'implement', 'review'] as const).flatMap(role => typeof flowModels[role] === 'string' && (flowModels[role] as string).trim() ? [[role, str(flowModels[role], 'A flow model', 300)]] : [])),
       checkRetries: whole(run.checkRetries, 'Check retries', 0, 5, base.run.checkRetries),
-      relay: run.relay === true,
     },
   };
 }

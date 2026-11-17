@@ -53,8 +53,6 @@ export interface Backend {
    * when it ends. Returns the unsubscribe function.
    */
   onOwnTurn?(listener: (taskId: string) => void): () => void;
-  /** Withdraw the sessions an earlier version shared from this host's registry; see `Store.open`. */
-  withdrawShared?(): Promise<void>;
 }
 export type BackendFactory = (host: HostConfig) => Backend;
 export const CLI_PROVIDERS = [
@@ -170,7 +168,6 @@ export class SshBackend implements Backend {
   private ending = new Map<string, Promise<void>>();
   private restoring = new Map<string, Promise<Agent | null>>();
   private cleaning?: Promise<void>;
-  private withdrawing?: Promise<void>;
   private readonly ownTurnListeners = new Set<(taskId: string) => void>();
   constructor(private readonly host: HostConfig, private readonly store: Store, transport?: SshTransport, private readonly sharing: () => LaunchSharing | undefined = () => undefined) {
     // Commands to the host share one SSH connection; its sockets live in this plugin's private state directory.
@@ -378,35 +375,6 @@ done`}`, 15_000, { login: false });
     })().catch(() => {}).finally(() => { this.cleaning = undefined; });
     this.cleaning = cleaning;
     return cleaning;
-  }
-  /**
-   * 0.2.138 and earlier shared this host's sessions with the other DSH instances using its SSH account, through a registry
-   * on the host. The sessions this DSH started are marked there as withdrawn by it, as that version did when sharing was
-   * switched off: a DSH still on that version then forgets its copies rather than take over their CLIs once this one's
-   * leases expire. Nothing else in the registry is touched, and a host that cannot be reached is asked again later.
-   */
-  withdrawShared(): Promise<void> {
-    const ids = this.store.sharedWithdrawals(this.host.id);
-    if (this.withdrawing || this.closed || !ids.length) return this.withdrawing ?? Promise.resolve();
-    const withdrawing = (async () => {
-      // Without an identity this DSH never reached a registry.
-      const instance = this.store.savedInstance();
-      if (instance) for (let at = 0; at < ids.length; at += 200) {
-        const record = JSON.stringify({ by: instance.label, withdrawn: instance.id, at: new Date().toISOString() });
-        await this.transport.exec(`cd ${REMOTE_HOME}/shared-v1/sessions 2>/dev/null || exit 0
-for dsh_id in ${ids.slice(at, at + 200).map(quote).join(' ')}; do
-  [ -f "$dsh_id/manifest.json" ] && [ ! -f "$dsh_id/deleted.json" ] || continue
-  printf '%s' ${quote(record)} > "$dsh_id/deleted.json.$$" && mv -f "$dsh_id/deleted.json.$$" "$dsh_id/deleted.json"
-done`, 30_000, { login: false });
-        if (this.closed) return;
-      }
-      await this.store.update(state => {
-        delete state.sharedWithdrawals?.[this.host.id];
-        if (state.sharedWithdrawals && !Object.keys(state.sharedWithdrawals).length) delete state.sharedWithdrawals;
-      });
-    })().catch(() => {}).finally(() => { this.withdrawing = undefined; });
-    this.withdrawing = withdrawing;
-    return withdrawing;
   }
   /** A link to a relay, installing the current relay script on the host before attaching. */
   private link(id: string, offset: number, onState: (state: { connected: boolean }) => void): RelayLink {

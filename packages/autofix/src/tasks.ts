@@ -211,7 +211,7 @@ export class Tasks {
       const stop = () => flow.stop();
       signal.addEventListener('abort', stop, { once: true });
       if (signal.aborted) stop();
-      // A flow that can say how far it is has a card that shows it; the task keeps what the card shows, for the board and for other DSHes.
+      // A flow that can say how far it is has a card that shows it; the task keeps what the card shows, for the board.
       const startedAt = this.now();
       let shape: Pick<NonNullable<Task['flow']>, 'rounds' | 'planned' | 'zh' | 'startedAt' | 'carded'> = {}, seen = '';
       const look = () => {

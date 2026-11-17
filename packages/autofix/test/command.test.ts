@@ -114,7 +114,9 @@ test('the repository is the one named, a worktree of a fix, or another workspace
   const single = await setup(t, [route('Web', '/ws/web')]);
   assert.deepEqual((await single.run(agent('x'), 'bug')).meta?.said, { key: 'This conversation is not in {route}. Open a conversation there, or start the line with repo={route}.', values: { route: 'Web' } });
   const none = await setup(t, []);
-  assert.equal((await none.run(agent('x'), 'bug')).meta?.said?.key, 'Nothing can take this bug yet. Add the repository in Settings → Autofix here; or, if another DSH should run the fix, add it there and switch on taking bugs from other DSHes.');
+  // Each DSH fixes its own machine's repositories: one that has none points to the machine's own DSH, and files nothing.
+  assert.equal((await none.run(agent('x'), 'bug')).meta?.said?.key, 'Add the repository in Settings → Autofix of this DSH so bugs have somewhere to go. If it is on another machine with a DSH of its own, switch to that machine and type /fix there.');
+  assert.deepEqual([none.created, none.chosen], [[], []]);
 });
 
 test('in a task\'s own conversation /fix sends the fix back, and the task\'s cards are numbered', async t => {
@@ -134,22 +136,6 @@ test('in a task\'s own conversation /fix sends the fix back, and the task\'s car
   assert.deepEqual([card.kind, card.words, card.meta], ['success', 'M1 · 白屏', { key: 'manual:1', card: 2, home: true }]);
   assert.equal(host.sentBack.length, 1, 'a card is not feedback');
   assert.equal((await host.run(own, line.slice('/fix '.length).replace('manual:1', 'manual:404'))).kind, 'error');
-});
-
-test('a conversation in a repository another DSH fixes hands the bug over, and its card follows that DSH', async t => {
-  const host = await setup(t, []), handed: unknown[][] = [];
-  const command = new FixCommand({
-    store: host.store, folder: live => live.id === 'air-chat' ? '/air/web' : '/air/elsewhere',
-    inspect: async () => { throw new Error('not used'); }, createManual: async () => { throw new Error('this DSH files nothing itself'); },
-    tasks: { start: async () => { throw new Error('this DSH runs nothing itself'); }, sendBack: async () => { throw new Error('not used'); } },
-    async handOver(folder, line, pictures) { handed.push([folder, line, pictures]); return folder === '/air/web' ? { key: 'manual:7', ref: 'M7', title: line.title } : undefined; },
-  });
-  const run = async (id: string, rawInput: string, attachments: { type: string; attachment?: unknown }[] = []) => { const result = await command.handle({ agent: agent(id), rawInput, attachments }); return { kind: result.kind, ...parseRow(result.text) }; };
-  const reply = await run('air-chat', 'branch=dev 活动页白屏', [picture('a')]);
-  assert.deepEqual([reply.kind, reply.words, reply.meta], ['success', 'M7 · 活动页白屏', { key: 'manual:7', at: '/air/web' }]);
-  assert.deepEqual(handed[0], ['/air/web', { branch: 'dev', title: '活动页白屏', body: '' }, [{ attachmentId: 'a' }]]);
-  const nowhere = await run('other-chat', 'bug');
-  assert.deepEqual([nowhere.kind, nowhere.meta?.said?.key?.slice(0, 29)], ['error', 'Nothing can take this bug yet']);
 });
 
 test('a /flow that wants a worktree of its own becomes a task like a typed bug, as something to build', async t => {
@@ -176,17 +162,4 @@ test('a /flow that wants a worktree of its own becomes a task like a typed bug, 
   assert.equal(host.titled.length, 1, 'a conversation that already has turns keeps its name');
   const moved = await take(agent('task-chat'), 'x', [], { kind: 'feature', repo: 'Web' });
   assert.equal(moved.kind, 'error');
-});
-
-test('something to build is handed to the DSH that runs the repository with its kind and its choices', async t => {
-  const host = await setup(t, []), handed: unknown[][] = [];
-  const command = new FixCommand({
-    store: host.store, folder: () => '/air/web',
-    inspect: async () => { throw new Error('not used'); }, createManual: async () => { throw new Error('this DSH files nothing itself'); },
-    tasks: { start: async () => { throw new Error('this DSH runs nothing itself'); }, sendBack: async () => { throw new Error('not used'); } },
-    async handOver(folder, line, pictures, how) { handed.push([folder, line.title, pictures, how]); return { key: 'manual:7', ref: 'F7', title: line.title }; },
-  });
-  const result = await command.take(agent('air-chat'), '给导出加 CSV', [], { kind: 'feature', rounds: 4 });
-  assert.deepEqual(parseRow(result.text).meta, { key: 'manual:7', at: '/air/web' });
-  assert.deepEqual(handed, [['/air/web', '给导出加 CSV', [], { kind: 'feature', rounds: 4 }]]);
 });

@@ -27,8 +27,6 @@ export interface ServiceHost {
   /** The built-in source for bugs a person types in. */
   manual?: ManualSource;
   workplaces: Pick<Workplaces, 'projects' | 'inspect' | 'machine'>;
-  /** The machines on which other DSHes can hand bugs to this one, when that is switched on. */
-  relay?(): { label: string; routes: string[]; error?: string }[];
   folders: Pick<Folders, 'add' | 'repository'>;
   /** The plugins this one works through that are not running right now, by package name. */
   needs?(): string[];
@@ -43,7 +41,6 @@ export interface State {
   pool: PoolView[];
   /** `progress` is the flow a task is in this very moment, when it runs here and can say. */
   tasks: (Task & { running: boolean; sourceName: string; progress?: FlowProgress })[];
-  relay: { label: string; routes: string[]; error?: string }[];
   /** Plugins that are not running and without which repositories cannot be reached or fixes cannot run. */
   needs: string[];
 }
@@ -71,7 +68,6 @@ export class AutofixService implements Omit<Autofix, 'file'> {
       }),
       pool: ordered(store.pool).map(entry => ({ ...entry, sourceName: name(entry.item.source) })),
       tasks: Object.values(store.tasks).sort((a, b) => b.updatedAt - a.updatedAt).map(task => this.view(task)),
-      relay: this.host.relay?.() ?? [],
       needs: this.host.needs?.() ?? [],
     };
   }
@@ -86,6 +82,16 @@ export class AutofixService implements Omit<Autofix, 'file'> {
   }
   async saveSettings(raw: unknown): Promise<void> { const next: Settings = settingsFrom(raw); await this.host.store.saveSettings(next); }
   projects(signal?: AbortSignal) { return this.host.workplaces.projects(signal); }
+  /**
+   * The repositories' folders that no longer lead anywhere: not a workspace of this DSH any more (removed, or moved to
+   * another machine's own DSH), or on a machine Remote agents no longer has. A machine that cannot be told about right
+   * now, or a plugin that is not running, says nothing either way.
+   */
+  async missingProjects(signal?: AbortSignal): Promise<string[]> {
+    const paths = [...new Set(this.host.store.settings.routes.map(route => route.project).filter(Boolean))];
+    const gone = await Promise.all(paths.map(path => this.host.workplaces.machine(path, signal).then(() => false, (error: unknown) => (error as { status?: unknown } | undefined)?.status === 409)));
+    return paths.filter((_, index) => gone[index]);
+  }
   /** A folder on the computer DSH runs on, as a project to choose. Its repository may already be one under another folder. */
   async addFolder(path: unknown, signal?: AbortSignal) {
     const { folders } = this.host, added = await folders.add(text(path, 'The folder', 4096));

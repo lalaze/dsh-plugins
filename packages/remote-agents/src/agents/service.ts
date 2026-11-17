@@ -206,8 +206,6 @@ export class RemoteAgentsService {
         state.mainChatProjects = state.mainChatProjects?.filter(p => p.hostId !== id);
         state.relayCleanups = state.relayCleanups?.filter(c => c.hostId !== id);
         if (!state.relayCleanups?.length) delete state.relayCleanups;
-        delete state.sharedWithdrawals?.[id];
-        if (state.sharedWithdrawals && !Object.keys(state.sharedWithdrawals).length) delete state.sharedWithdrawals;
       });
       await this.hostConnections.release(id);
       this.sharing?.forget(id);

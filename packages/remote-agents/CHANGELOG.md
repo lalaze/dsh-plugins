@@ -4,6 +4,10 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.143 — No more withdrawing what 0.2.138 shared
+
+- Since 0.2.139, an upgraded DSH marked the sessions it had shared as withdrawn on each machine the first time it connected there, so that a DSH still on 0.2.138 would not take their CLIs over. That step is gone: connecting to a machine no longer writes into `~/.dsh-remote-agents/shared-v1`, and what this DSH kept for it is dropped from its state on the next save. A DSH still on 0.2.138 or earlier that uses one of your machines should be upgraded before this one.
+
 ## 0.2.142 — TUI conversations on this computer
 
 - With Remote Terminals 0.1.13 or newer, a folder on this computer offers TUI conversations with this computer's CLIs. Remote Agents now tells other plugins where a conversation's CLIs run, its remote workspace or this computer, and runs their commands for this computer without SSH. They still see the SSH machines only, so Git, files and terminals of a local folder stay DSH's own.

@@ -4,7 +4,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { fail, messageOf, render, say, type Route, type Task } from './domain.js';
-import { parseFix, type FixLine } from './fixline.js';
+import { parseFix } from './fixline.js';
 import type { ManualInput } from './manual.js';
 import { COMMAND, MARK, rowText, type RowMeta } from './shared.js';
 export { COMMAND };
@@ -28,17 +28,15 @@ export interface CommandHost {
   folder(agent: LiveAgent): string | undefined;
   /** Names a conversation that had nothing in it before the line was typed there, so it is not left untitled. */
   title?(agent: LiveAgent, title: string): Promise<void>;
-  /** Another DSH that runs fixes for the machine a folder is on: hands the bug to it, or answers undefined when there is none. */
-  handOver?(folder: string, line: FixLine, pictures: readonly unknown[], how?: Handed): Promise<{ key: string; ref: string; title: string } | undefined>;
   now?(): number;
 }
-/** What goes with a task to the DSH that runs it. */
-export type Handed = RunChoice & { kind?: 'feature' };
+/** What a task is, and what it runs with. */
+export type How = RunChoice & { kind?: 'feature' };
 /**
  * A task that did not come from a typed /fix: /flow hands in something to build, with where it goes and what it runs
  * with already read from its own line.
  */
-export interface TakeOptions extends Handed { repo?: string; branch?: string }
+export interface TakeOptions extends How { repo?: string; branch?: string }
 const MAX_PICTURES = 8;
 const machine = (location: Location | undefined) => location?.kind === 'remote' ? location.hostId : 'local';
 
@@ -83,7 +81,7 @@ export class FixCommand {
    */
   async take(agent: LiveAgent, text: string, attachments: readonly { type: string; attachment?: unknown }[] = [], options: TakeOptions = {}): Promise<RowResult> {
     const input = text.trim(), { store, tasks } = this.host, feature = options.kind === 'feature';
-    const how: Handed = { ...(feature ? { kind: 'feature' as const } : {}), ...(options.models ? { models: options.models } : {}), ...(options.rounds ? { rounds: options.rounds } : {}) };
+    const how: How = { ...(feature ? { kind: 'feature' as const } : {}), ...(options.models ? { models: options.models } : {}), ...(options.rounds ? { rounds: options.rounds } : {}) };
     this.last = { sessionId: agent.id, at: this.now() };
     try {
       // A conversation that began with this line is named after what was typed, like one that began with a message.
@@ -101,15 +99,7 @@ export class FixCommand {
       }
       const line = { ...parseFix(input), ...(options.repo ? { repo: options.repo } : {}), ...(options.branch ? { branch: options.branch } : {}) };
       if (!line.title && !pictures.length) throw fail(feature ? 'Say what to build' : 'Say what is wrong after /fix, and paste screenshots if they help. repo=<name> and branch=<name> may lead the line.');
-      let route: Route;
-      try { route = await this.route(agent, line.repo); }
-      catch (error) {
-        // Not a repository of this DSH: another one may run fixes for the machine this conversation works on.
-        const folder = this.host.folder(agent), handed = folder ? await this.host.handOver?.(folder, line, pictures, how) : undefined;
-        if (!handed || !folder) throw store.settings.routes.length ? error : fail('Nothing can take this bug yet. Add the repository in Settings → Autofix here; or, if another DSH should run the fix, add it there and switch on taking bugs from other DSHes.');
-        await name(line.title);
-        return { kind: 'success', text: rowText(`${handed.ref} · ${handed.title}`, { key: handed.key, at: folder }) };
-      }
+      const route = await this.route(agent, line.repo);
       const branch = line.branch || route.defaultBranch || (await this.host.inspect(route.project).catch(() => undefined))?.defaultBase || '';
       if (!branch) throw fail('{route} has no default branch; choose a branch for this bug', { route: route.name });
       const { key } = await this.host.createManual({ title: line.title || 'See the attached pictures', body: line.body, attached: pictures.length, assignment: { routeId: route.id, branch }, ...(feature ? { kind: 'feature' } : {}) });
@@ -125,7 +115,8 @@ export class FixCommand {
   /** The repository a bug typed here belongs to: the one named, or the one this conversation works in. */
   private async route(agent: LiveAgent, name: string | undefined): Promise<Route> {
     const { routes } = this.host.store.settings, names = routes.map(route => route.name).join(', ');
-    if (!routes.length) throw fail('Add a repository in Settings → Autofix so bugs have somewhere to go.');
+    // Each DSH fixes the repositories of its own machine; with DSH Link, another machine's DSH is a switch away.
+    if (!routes.length) throw fail('Add the repository in Settings → Autofix of this DSH so bugs have somewhere to go. If it is on another machine with a DSH of its own, switch to that machine and type /fix there.');
     if (name) {
       const wanted = name.toLowerCase(), exact = routes.filter(route => route.name.toLowerCase() === wanted || route.id.toLowerCase() === wanted);
       const found = exact.length ? exact : routes.filter(route => route.name.toLowerCase().startsWith(wanted));

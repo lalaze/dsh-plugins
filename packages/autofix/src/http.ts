@@ -11,13 +11,7 @@ const key = (value: unknown): string => {
 };
 
 /** One JSON route for the board and the settings page. Only pages of this DSH reach it, and only with the plugin's own header. */
-/** Tasks another DSH runs, reached through a workspace of this one. */
-export interface Remote {
-  task(at: string, key: string): Promise<{ task: unknown; route: unknown } | undefined>;
-  diff(at: string, key: string): Promise<unknown>;
-  act(at: string, ask: { kind: 'sendBack'; key: string; feedback: string } | { kind: 'accept' | 'stop' | 'retryReport' | 'removeWorkspace'; key: string }, pictures?: ReturnType<typeof decodePictures>): Promise<void>;
-}
-export function createHandler(service: AutofixService, tasks: Tasks, chat: { lastCommand(): string | undefined } = { lastCommand: () => undefined }, remote?: Remote) {
+export function createHandler(service: AutofixService, tasks: Tasks, chat: { lastCommand(): string | undefined } = { lastCommand: () => undefined }) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
     try {
@@ -25,19 +19,6 @@ export function createHandler(service: AutofixService, tasks: Tasks, chat: { las
       if (request.headers.get('X-DSH-Autofix') !== '1' || !request.headers.get('content-type')?.startsWith('application/json')) return Response.json({ error: 'Use the Autofix board.' }, { status: 403, headers });
       const input = await request.json() as Record<string, unknown>;
       let result: unknown = {};
-      // A card that follows a task of another DSH names the workspace it reaches that DSH through.
-      const at = typeof input.at === 'string' && input.at.length <= 4096 ? input.at : '';
-      if (at) {
-        if (!remote) return Response.json({ error: 'Handing bugs to another DSH is not available.' }, { status: 400, headers });
-        switch (input.action) {
-          case 'task': { const found = await remote.task(at, key(input.key)); return Response.json({ task: found?.task ?? null, routes: found ? [found.route] : [] }, { headers }); }
-          case 'diff': return Response.json(await remote.diff(at, key(input.key)), { headers });
-          case 'sendBack': await remote.act(at, { kind: 'sendBack', key: key(input.key), feedback: typeof input.feedback === 'string' ? input.feedback.slice(0, 8000) : '' }, decodePictures(input.images)); break;
-          case 'accept': case 'stop': case 'retryReport': case 'removeWorkspace': await remote.act(at, { kind: input.action, key: key(input.key) }); break;
-          default: return Response.json({ error: 'Unknown action' }, { status: 400, headers });
-        }
-        return Response.json({}, { headers });
-      }
       switch (input.action) {
         case 'state': break;
         // A card in a conversation follows one task; the settings come along for the words it needs.
@@ -46,7 +27,8 @@ export function createHandler(service: AutofixService, tasks: Tasks, chat: { las
         // What one step of the task's flow said in full, asked for when its line in the card is opened.
         case 'stepBody': return Response.json({ body: Number.isSafeInteger(input.index) ? tasks.stepBody(key(input.key), input.index as number) ?? null : null }, { headers });
         case 'saveSettings': await service.saveSettings(input.settings); break;
-        case 'projects': result = { projects: await service.projects(request.signal) }; break;
+        // With the repositories whose folder is no longer a workspace of this DSH, for the settings page to point out.
+        case 'projects': { const [projects, missing] = await Promise.all([service.projects(request.signal), service.missingProjects(request.signal)]); result = { projects, missing }; break; }
         case 'addFolder': result = await service.addFolder(input.path, request.signal); break;
         case 'project': result = await service.project(String(input.path ?? ''), Array.isArray(input.globs) ? input.globs.map(String) : [], request.signal); break;
         case 'fetch': result = await service.fetch(typeof input.source === 'string' ? input.source : undefined); break;

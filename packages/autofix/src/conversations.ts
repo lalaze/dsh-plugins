@@ -33,7 +33,6 @@ interface PermissionPresets { set(session: unknown, preset: string): void }
 /** DSH's attachment store: a saved picture is named by a reference that prompts carry. */
 interface Attachments {
   saveImage(input: { data: Uint8Array; mediaType: string; name?: string }): Promise<unknown>;
-  readImage(ref: unknown): Promise<{ ref: { mediaType: string }; data: Uint8Array }>;
 }
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
@@ -75,12 +74,6 @@ export class Conversations {
     const mediaType = image.mediaType === 'image/jpg' ? 'image/jpeg' : image.mediaType;
     if (!IMAGE_TYPES.includes(mediaType)) throw new Error(`DSH does not read ${image.mediaType} pictures`);
     return this.need<Attachments>('attachments', 'Attachments').saveImage({ data: image.data, mediaType, ...(image.name ? { name: image.name } : {}) });
-  }
-
-  /** A picture DSH keeps, as its bytes: for handing it to another DSH. */
-  async image(ref: unknown): Promise<{ data: Uint8Array; mediaType: string }> {
-    const stored = await this.need<Attachments>('attachments', 'Attachments').readImage(ref);
-    return { data: stored.data, mediaType: stored.ref.mediaType };
   }
 
   /** Runs a command line in a conversation, as if it had been typed there. */

@@ -85,8 +85,8 @@ function FolderBox({ onAdded }: { onAdded(project: string, projects: Project[]):
 }
 
 /** One repository: a line that says what it is, and everything about it once opened. */
-function Repo({ route, projects, startOpen, onChange, onProjects, onRemove }: {
-  route: Route; projects: readonly Project[]; startOpen: boolean;
+function Repo({ route, projects, missing, startOpen, onChange, onProjects, onRemove }: {
+  route: Route; projects: readonly Project[]; missing: boolean; startOpen: boolean;
   onChange(change: (route: Route) => Route): void; onProjects(next: Project[]): void; onRemove(): void;
 }) {
   const [open, setOpen] = useState(startOpen), [typing, setTyping] = useState(false), [branches, setBranches] = useState<Branches>();
@@ -120,6 +120,7 @@ function Repo({ route, projects, startOpen, onChange, onProjects, onRemove }: {
       <span className="tp-repo-name">{route.name || ui("New repository")}</span>
       <span className="tp-repo-meta">{[where, route.defaultBranch].filter(Boolean).join(' · ')}</span>
       {!route.project ? <span className="tp-badge" data-warn>{ui("No project yet")}</span>
+        : missing ? <span className="tp-badge" data-warn>{ui("Workspace gone")}</span>
         : <span className="tp-badge">{route.accept === 'push-branch' ? ui("Pushes the branch") : ui("Merges and pushes")}</span>}
     </button>
     {open && <div className="tp-repo-body">
@@ -127,6 +128,7 @@ function Repo({ route, projects, startOpen, onChange, onProjects, onRemove }: {
         <Pick label={ui("Project")} value={route.project} placeholder={ui("Choose a project…")} onChange={path => choose(path)}
           options={[...(!project && route.project ? [{ value: route.project, label: route.project }] : []), ...projects.map(entry => ({ value: entry.path, label: `${entry.title} · ${machineOf(entry)}` }))]} />
       </Row>
+      {missing && <p className="tp-error">{ui("This folder is no longer a workspace of this DSH, or its machine was removed from Remote agents, so no fix can start here. Choose the project again, or remove this repository. If it moved to another machine with a DSH of its own, add it in Settings → Autofix there.")}</p>}
       {typing && <FolderBox onAdded={(path, list) => { onProjects(list); choose(path, list); }} />}
       <Row title={ui("Name")} hint={ui("What the board calls this repository.")}>
         <input aria-label={ui("Name")} value={route.name} onChange={event => set('name', event.target.value)} /></Row>
@@ -184,15 +186,15 @@ function SourceCard({ name, says, ready, panel }: { name: string; says?: string;
  */
 export function AutofixSettings({ board, leave }: { board(): void; leave(): void }) {
   useLocale();
-  const [form, setForm] = useState<Form>(), [sources, setSources] = useState<State['sources']>([]), [projects, setProjects] = useState<Project[]>([]), [relay, setRelay] = useState<State['relay']>([]);
+  const [form, setForm] = useState<Form>(), [sources, setSources] = useState<State['sources']>([]), [projects, setProjects] = useState<Project[]>([]), [missing, setMissing] = useState<ReadonlySet<string>>(new Set());
   const [needs, setNeeds] = useState<string[]>([]), [, redraw] = useState(0), panels = useSourcePanels();
   // Each repository card keeps its own state; a number that stays with it tells React which is which when one is removed.
   const [cards, setCards] = useState<{ id: number; fresh: boolean }[]>([]), nextCard = useRef(1);
   const [message, setMessage] = useState<Note>(), [saving, setSaving] = useState(false), [dirty, setDirty] = useState(false);
   const show = (settings: Form) => { setForm(settings); setCards(settings.routes.map(() => ({ id: nextCard.current++, fresh: false }))); setDirty(false); };
-  const around = (state: State) => { setSources(state.sources); setRelay(state.relay ?? []); setNeeds(state.needs ?? []); };
+  const around = (state: State) => { setSources(state.sources); setNeeds(state.needs ?? []); };
   const load = () => call('state').then(reply => { if (reply.state) { show(reply.state.settings); around(reply.state); } }, reason => setMessage({ kind: 'error', text: told(reason) }));
-  const loadProjects = () => call<{ projects: Project[] }>('projects').then(reply => setProjects(reply.projects ?? []), () => undefined);
+  const loadProjects = () => call<{ projects: Project[]; missing?: string[] }>('projects').then(reply => { setProjects(reply.projects ?? []); setMissing(new Set(reply.missing ?? [])); }, () => undefined);
   /** What other plugins brought or took away, without touching what is being edited. */
   const look = () => call('state').then(reply => { if (reply.state) around(reply.state); redraw(count => count + 1); }, () => undefined);
   useEffect(() => { void load(); }, []);
@@ -243,7 +245,7 @@ export function AutofixSettings({ board, leave }: { board(): void; leave(): void
     <p className="tp-muted">{ui("Where bugs can be sent. Each bug is fixed in a new worktree of its repository.")}</p>
     {needs.filter(plugin => plugin !== 'dsh-model-flow').map(need)}
     {form.routes.length === 0 && reaches && <div className="tp-empty">{ui("No repository yet. Add one so bugs have somewhere to go.")}</div>}
-    {form.routes.map((route, index) => <Repo key={cards[index]?.id ?? index} route={route} projects={projects} startOpen={cards[index]?.fresh ?? false} onProjects={setProjects}
+    {form.routes.map((route, index) => <Repo key={cards[index]?.id ?? index} route={route} projects={projects} missing={!!route.project && missing.has(route.project)} startOpen={cards[index]?.fresh ?? false} onProjects={setProjects}
       onChange={next => change(current => ({ ...current, routes: current.routes.map((entry, at) => at === index ? next(entry) : entry) }))} onRemove={() => remove(index)} />)}
     {reaches && <button type="button" className="tp-button tp-add" onClick={add}><span aria-hidden="true">+</span>{ui("Add a repository")}</button>}
 
@@ -262,10 +264,6 @@ export function AutofixSettings({ board, leave }: { board(): void; leave(): void
         <Stepper label={ui("Review rounds")} min={1} max={5} value={form.run.rounds} onChange={next => run('rounds', next)} /></Row>
       <Row title={ui("Send failed checks back")} hint={ui("How many times before the task fails.")}>
         <Stepper label={ui("Send failed checks back")} min={0} max={5} value={form.run.checkRetries} onChange={next => run('checkRetries', next)} /></Row>
-      <Row title={ui("Take bugs from other DSHes")} hint={ui("For when you type /fix in another DSH, such as the one on your laptop: the bug is handed over through the machine that holds the repository, and this DSH runs the fix.")}>
-        <button type="button" className="tp-switch" role="switch" aria-checked={form.run.relay} aria-label={ui("Take bugs from other DSHes")} onClick={() => run('relay', !form.run.relay)} /></Row>
-      {form.run.relay && relay.length > 0 && <ul className="tp-relay">{relay.map((entry, index) => <li key={index} data-error={entry.error ? true : undefined}>
-        <i aria-hidden="true" />{entry.error ? ui("{0}: not reachable", { 0: entry.label }) : ui("{0}: taking bugs for {1}", { 0: entry.label === 'this computer' ? ui("this computer") : entry.label, 1: entry.routes.join(', ') })}{entry.error && <small>{entry.error}</small>}</li>)}</ul>}
       <Row stacked title={ui("Never hand these labels to models")} hint={ui("A bug with one of these labels waits for a person.")}>
         <Chips label={ui("Never hand these labels to models")} value={form.run.denyLabels} placeholder="security" onChange={next => run('denyLabels', next)} /></Row>
     </div>

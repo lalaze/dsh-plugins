@@ -15,13 +15,11 @@ export interface RelayCleanup { hostId: string; relayId: string }
  * and the secret that derives each task's bridge token.
  */
 export interface SharingSettings { mcp?: Record<string, boolean>; skills?: Record<string, boolean>; secret?: string }
-/** This DSH instance, as the others saw it while 0.2.138 and earlier shared sessions between them. */
-export interface Instance { id: string; label: string }
 /**
- * `instance` is kept as saved: withdrawing names it. `sharedWithdrawals` lists, per host, the sessions 0.2.138 and earlier
- * shared with other DSH instances and that are still to be withdrawn from the host's registry; see {@link Store.open}.
+ * What 0.2.139 to 0.2.142 also kept, `instance` and `sharedWithdrawals` for withdrawing sessions 0.2.138 and earlier shared
+ * between DSH instances, is dropped on the next save: every DSH that shared is past that version now.
  */
-export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings; instance?: Instance; sharedWithdrawals?: Record<string, string[]>;
+export interface State { version: 1; hosts: HostConfig[]; tasks: Task[]; mainChatProjects?: ChatProject[]; relayCleanups?: RelayCleanup[]; chatEfforts?: Record<string, string>; chatFast?: string[]; sharing?: SharingSettings;
   /**
    * What 0.2.129 and earlier saved about TUI conversations. dsh-remote-terminals took them over and keeps them now; they
    * stay here untouched, so that it can find them on its first start and an older version still has them.
@@ -38,19 +36,15 @@ type SavedTask = Task & { shared?: { imported?: unknown }; chat?: Task['chat'] &
 /**
  * 0.2.138 and earlier shared a host's sessions with the other DSH instances using its SSH account. This DSH keeps the
  * sessions it started and drops its copies of the ones another DSH started, which that DSH still has. Their saved output
- * stays on disk. The sessions it started and shared are listed per host, to be withdrawn from that host's registry: a
- * DSH still on an earlier version would otherwise take over their CLIs once this one stops renewing its leases.
+ * stays on disk.
  */
-function withoutSharing(saved: SavedTask[], hosts: HostConfig[], pending: Record<string, string[]> | undefined): { tasks: Task[]; withdrawals?: Record<string, string[]> } {
-  const withdrawals: Record<string, string[]> = {};
-  for (const [hostId, ids] of Object.entries(pending ?? {})) if (ids.length && hosts.some(host => host.id === hostId)) withdrawals[hostId] = [...ids];
+function withoutSharing(saved: SavedTask[]): Task[] {
   const tasks = saved.filter(task => task.shared?.imported !== true);
   for (const task of tasks) {
-    if (task.shared) (withdrawals[task.hostId] ??= []).push(task.id);
     delete task.shared;
     if (task.chat) delete task.chat.history;
   }
-  return { tasks, ...(Object.keys(withdrawals).length ? { withdrawals } : {}) };
+  return tasks;
 }
 /** This computer's name as the local machine's label, `lalaze-mini.local` shown as `lalaze-mini`. */
 export function localMachineLabel(name = hostname()): string {
@@ -124,13 +118,11 @@ export class Store {
       for (const table of [sharing.mcp, sharing.skills]) if (table !== undefined && !Object.values(record(table)).every(shared => typeof shared === 'boolean')) throw new Error('Invalid saved sharing settings');
       if (sharing.secret !== undefined && (typeof sharing.secret !== 'string' || !/^[a-f0-9]{64}$/.test(sharing.secret))) throw new Error('Invalid saved sharing secret');
     }
-    if (value.instance !== undefined) { const instance = record(value.instance); identifier(instance.id); field(instance.label, 'instance name', 100); }
-    if (value.sharedWithdrawals !== undefined && !Object.values(record(value.sharedWithdrawals)).every(ids => Array.isArray(ids) && ids.every(id => typeof id === 'string'))) throw new Error('Invalid saved shared session withdrawals');
-    const { tasks, withdrawals } = withoutSharing(value.tasks as SavedTask[], value.hosts as HostConfig[], value.sharedWithdrawals as Record<string, string[]> | undefined);
+    const tasks = withoutSharing(value.tasks as SavedTask[]);
     this.state = { version: 1, hosts: value.hosts as HostConfig[], tasks, ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects as ChatProject[] } : {}),
       ...(value.relayCleanups ? { relayCleanups: value.relayCleanups as RelayCleanup[] } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts as Record<string, string> } : {}),
       ...(value.chatFast ? { chatFast: value.chatFast as string[] } : {}), ...(value.sharing ? { sharing: value.sharing as SharingSettings } : {}),
-      ...(value.instance ? { instance: value.instance as Instance } : {}), ...(withdrawals ? { sharedWithdrawals: withdrawals } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails as Record<string, unknown> } : {}),
+      ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions as string[] } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails as Record<string, unknown> } : {}),
       ...(typeof value.tuiLocalScroll === 'boolean' ? { tuiLocalScroll: value.tuiLocalScroll } : {}) };
   }
   snapshot(): State { return structuredClone(this.state); }
@@ -143,10 +135,6 @@ export class Store {
   chatFast(sessionId: string): boolean { return this.state.chatFast?.includes(sessionId) ?? false; }
   /** The reasoning effort last explicitly selected for a native chat model route, if any. */
   chatEffort(route: string): string | undefined { return Object.hasOwn(this.state.chatEfforts ?? {}, route) ? this.state.chatEfforts![route] : undefined; }
-  /** The identity this DSH had while sessions were shared, if it ever reached a host's registry. */
-  savedInstance(): Instance | undefined { return structuredClone(this.state.instance); }
-  /** Sessions of a host still to be withdrawn from its shared registry. */
-  sharedWithdrawals(hostId: string): string[] { return [...(this.state.sharedWithdrawals?.[hostId] ?? [])]; }
   relayCleanups(hostId: string): RelayCleanup[] { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }
   /** A copy of one saved agent record, without cloning the whole registry. */
   task(predicate: (task: Task) => boolean): Task | undefined { const found = this.state.tasks.find(predicate); return found && structuredClone(found); }

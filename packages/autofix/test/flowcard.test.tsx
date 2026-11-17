@@ -50,7 +50,7 @@ const view = (change: Partial<TaskView>): TaskView => ({
 const buttons = () => [...container.querySelectorAll('[data-more] button')].map(button => button.textContent);
 const press = (label: string) => act(async () => { [...container.querySelectorAll('button')].find(button => button.textContent === label)!.click(); });
 const settle = () => act(async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve)); });
-async function show(task: TaskView, acted: string[], more: { keep?: boolean; at?: string; flow?: FlowView } = { keep: true }) {
+async function show(task: TaskView, acted: string[], more: { keep?: boolean; flow?: FlowView } = { keep: true }) {
   const { createRoot } = await import('react-dom/client');
   root ??= createRoot(container);
   drawn = [];
@@ -95,10 +95,8 @@ test('a task shows its flow as a /flow does, and what comes after the flow at th
   assert.deepEqual([card.head, card.stages?.map(stage => stage.status)], [undefined, ['skipped', 'skipped']]);
 });
 
-test('a task another DSH runs, one from before flows had cards, and a page without Model flow', async () => {
+test('a task on the board, one from before flows had cards, and a page without Model flow', async () => {
   const acted: string[] = [];
-  const far = await show(view({}), acted, { keep: true, at: '/air/web' });
-  assert.deepEqual([far.card.parentId, far.canOpen, far.stepBody, far.card.elapsed], ['', false, undefined, undefined], 'its steps cannot be opened from here, and its clock is another computer\'s');
   // On the board a long report stays folded with the rest.
   const board = await show(view({ status: 'review', running: false, flow: { steps: [], end: passed, report: 'r', rounds: 3 } }), acted, {});
   assert.equal(board.report, undefined);

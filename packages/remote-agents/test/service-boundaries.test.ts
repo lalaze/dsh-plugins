@@ -150,18 +150,6 @@ test('host and task observations stay lazy and remain safe after close', async t
   await assert.rejects(service.connect(hostId), { status: 503 });
 });
 
-test('sessions an earlier version shared are withdrawn once the host connects, and only then', async t => {
-  let withdrawals = 0;
-  const { service, store, hostId, saveTask } = await setup(t, backend => {
-    backend.withdrawShared = async () => { withdrawals++; };
-  });
-  const task = await saveTask('task-read-one', { relay: { id: 'relay-one' }, chat: { sessionId: 'chat', route: 'route' } });
-  await service.timeline(task.id); await service.resumeConversation('chat');
-  assert.equal(withdrawals, 0, 'reading and restoring never reach the host for it');
-  await service.connect(hostId); assert.equal(withdrawals, 1);
-  assert.deepEqual(store.sharedWithdrawals(hostId), []);
-});
-
 test('restore deduplication and task mutations share one queue without connecting or replaying', async t => {
   const entered = deferred(), proceed = deferred();
   let restores = 0, connects = 0;
@@ -219,7 +207,6 @@ test('host removal forgets its sessions before atomically clearing bindings and 
     backend.forget = async task => {
       events.push(`forget:${task.id}`);
       assert.ok(store.hosts().some(h => h.id === task.hostId));
-      assert.ok(store.sharedWithdrawals(task.hostId).length);
     };
     backend.cleanup = async () => { events.push('cleanup'); };
     backend.close = async () => {
@@ -229,7 +216,6 @@ test('host removal forgets its sessions before atomically clearing bindings and 
       assert.equal(state.tasks.some(t => t.hostId === hostId), false);
       assert.equal(state.mainChatProjects?.some(p => p.hostId === hostId), false);
       assert.equal(state.relayCleanups?.some(c => c.hostId === hostId), false);
-      assert.equal(state.sharedWithdrawals?.[hostId], undefined);
     };
   });
   const first = await saveTask('task-first'), second = await saveTask('task-second');
@@ -237,7 +223,6 @@ test('host removal forgets its sessions before atomically clearing bindings and 
   await store.update(state => {
     state.mainChatProjects = [hostId, other].map(id => ({ id, hostId: id, cwd: '/srv/project', label: id, providers: [] }));
     state.relayCleanups = [hostId, other].map(id => ({ hostId: id, relayId: `relay-${id}` }));
-    state.sharedWithdrawals = { [hostId]: [first.id], [other]: ['task-kept'] };
   });
   let changes = 0; service.onCatalogChange(() => { changes++; });
   await service.removeHost(hostId, { deleteAgents: true });
@@ -245,7 +230,6 @@ test('host removal forgets its sessions before atomically clearing bindings and 
   assert.equal(connects, 0); assert.equal(changes, 1);
   assert.deepEqual(store.chatProjects().map(p => p.hostId), [other]);
   assert.equal(store.relayCleanups(other).length, 1);
-  assert.deepEqual(store.sharedWithdrawals(other), ['task-kept']);
 });
 
 test('delegation recovery waits for its retry window but a new relay gets an immediate attempt', async t => {
