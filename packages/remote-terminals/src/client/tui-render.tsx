@@ -309,7 +309,8 @@ const styles = `.ra-tui-render{position:absolute;right:3px;bottom:3px;z-index:2}
 .ra-tui-render-note{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:2px 8px 6px;color:var(--dsw-alias-label-secondary,#aaa);font-size:12px}
 .ra-tui-render-act{padding:3px 8px;border:1px solid rgba(127,127,127,.4);border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-primary,#eee);font:inherit;cursor:pointer}
 .ra-tui-render-act:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
-.ra-tui-render-act:disabled{cursor:default;opacity:.5}`;
+.ra-tui-render-act:disabled{cursor:default;opacity:.5}
+@media (pointer:coarse){.ra-tui-render{right:8px;bottom:8px}.ra-tui-render-button{width:32px;height:32px;opacity:.85;border-radius:10px;background:var(--dsw-alias-bg-layer-3,rgba(127,127,127,.2))}.ra-tui-render-button svg{width:18px;height:18px}.ra-tui-render-menu{bottom:38px}}`;
 
 function Switch({ label, hint, on, change }: { label: string; hint?: string; on: boolean; change(on: boolean): void }) {
   return <button type="button" role="switch" aria-checked={on} className="ra-tui-render-row" title={hint} onClick={() => change(!on)}>

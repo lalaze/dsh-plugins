@@ -34,6 +34,7 @@ export const zh: Record<string, string> = {
   "This conversation is not open in DSH. Open it there, then retry.": "这个对话没有在 DSH 里打开。打开后再试。",
   "Cancel upload": "取消上传",
   "Dismiss": "关闭",
+  "Add files to {cli}": "添加文件给 {cli}",
   "Files can only be added to a TUI conversation": "只能把文件添加到 TUI 对话",
   "History": "历史记录",
   "This session is active. Refresh before archiving.": "会话状态已变化，请刷新后再归档。",

@@ -276,7 +276,11 @@ export const fileStyles = `.ra-tui-files{position:absolute;top:12px;right:12px;z
 .ra-tui-files-text{min-width:0;overflow-wrap:anywhere}
 .ra-tui-files-error{color:var(--dsw-alias-state-error-primary,#d64545)}
 .ra-tui-files-close{flex:none;width:20px;height:20px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-secondary,#aaa);font-size:15px;line-height:20px;cursor:pointer}
-.ra-tui-files-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}`;
+.ra-tui-files-close:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
+.ra-tui-pick{position:absolute;right:27px;bottom:3px;z-index:2}
+.ra-tui-pick-button{display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-tertiary,#888);opacity:.55;cursor:pointer}
+.ra-tui-pick-button:hover{opacity:1;background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
+@media (pointer:coarse){.ra-tui-pick{right:46px;bottom:8px}.ra-tui-pick-button{width:32px;height:32px;opacity:.85;border-radius:10px;background:var(--dsw-alias-bg-layer-3,rgba(127,127,127,.2))}.ra-tui-pick-button svg{width:18px;height:18px}}`;
 
 /**
  * Where a TUI conversation's composer would be. It stands in for the composer on every tab of the conversation, unlike the
@@ -308,5 +312,27 @@ export function TuiFileStatus({ sessionId, uploads }: { sessionId: string; uploa
     </div>
     {/* Keeps the focus in the terminal. */}
     <button type="button" className="ra-tui-files-close" aria-label={close} title={close} onMouseDown={event => event.preventDefault()} onClick={() => uploads.close(sessionId)}>×</button>
+  </div>;
+}
+/**
+ * Opens the device's own file picker, for a phone, which can neither drop nor paste a file into a terminal. What is
+ * picked goes the way of a drop.
+ */
+export function TuiFilePicker({ sessionId, uploads, cli }: { sessionId: string; uploads: TuiUploads; cli: string }) {
+  useLocale();
+  const input = useRef<HTMLInputElement>(null);
+  const label = ui('Add files to {cli}', { cli });
+  // Not taking focus: typing goes on in the terminal.
+  return <div className="ra-tui-pick" data-remote-agents-tui-pick="" onMouseDown={event => event.preventDefault()}>
+    <button type="button" className="ra-tui-pick-button" aria-label={label} title={label} onClick={() => input.current?.click()}>
+      <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M13.5 7.6 8.1 13a3.4 3.4 0 0 1-4.8-4.8l5.6-5.6a2.2 2.2 0 0 1 3.2 3.2L6.5 11.4a1.1 1.1 0 0 1-1.6-1.6L10 4.7" />
+      </svg>
+    </button>
+    <input ref={input} hidden type="file" multiple onChange={event => {
+      const files = Array.from(event.target.files ?? []);
+      event.target.value = '';
+      if (files.length) uploads.add(sessionId, { files, folders: [] });
+    }} />
   </div>;
 }

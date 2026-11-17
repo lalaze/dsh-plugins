@@ -8,7 +8,7 @@ import { useCurrentModel } from '@dsh-plugins/remote-core/client/current-model.j
 import { localizeError, ui, useLocale } from './i18n.js';
 import type { Client } from './index.js';
 import { useTerminalCopy } from './tui-copy.js';
-import { fileStyles, sendTuiFile, TuiDropTarget, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
+import { fileStyles, sendTuiFile, TuiDropTarget, TuiFilePicker, TuiFileStatus, TuiUploads, useFilePaste, useUploadedPaths } from './tui-files.js';
 import { TuiPrompts, usePromptText } from './tui-prompt.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { findXterm, TuiRenderChoices, TuiRenderMenu, useWebglRenderer, type TuiScrollControl } from './tui-render.js';
@@ -286,6 +286,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     <div ref={seat} style={{ display: 'contents' }} />
     {!ready && <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
     <TuiFileStatus sessionId={sessionId} uploads={services.uploads} />
+    {ready && <TuiFilePicker sessionId={sessionId} uploads={services.uploads} cli={CLI_NAMES[cli]} />}
     <TuiRenderMenu choices={services.render} scroll={scroll} />
   </div>;
 }
