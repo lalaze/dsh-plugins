@@ -6,7 +6,7 @@ import { openMachine } from './navigate.js';
 import { RestartDialog } from './restart.js';
 import { keepPages, shell } from './shell.js';
 import { loadMachines, onScreen, SELF, useStore } from './store.js';
-import { dotOf, summaryOf } from './view.js';
+import { dotOf, noteOf } from './view.js';
 
 export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
   useLocale();
@@ -32,26 +32,28 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
   const finishedElsewhere = Object.entries(attention).reduce((sum, [id, entry]) => id === current ? sum : sum + entry.finished.length, 0);
 
   const items = useMemo<MenuEntry[]>(() => {
-    const row = (name: string, meta: string) => <span className="dl-row"><span className="dl-row-name">{name}</span><span className="dl-row-meta">{meta}</span></span>;
+    // One line per machine like DSH's own menus: the name, and at the far end a short note only when the dot needs one.
+    const row = (id: string, name: string, note: string) => <span className="dl-row" data-current={id === current ? '' : undefined}>
+      <span className="dl-row-name">{name}</span>{note && <span className="dl-row-note">{note}</span>}
+    </span>;
     return [
       { type: 'label', id: 'label', text: ui('DSH Link') },
-      { id: SELF, icon: <StateDot state={dotOf(undefined, attention[SELF])} size={8} />, label: row(selfName, summaryOf(undefined, attention[SELF], true)) },
+      { id: SELF, icon: <StateDot state={dotOf(undefined, attention[SELF])} size={8} />, label: row(SELF, selfName, noteOf(undefined, attention[SELF], true)) },
       ...machines.map(machine => ({
         id: machine.id, disabled: machine.state !== 'online',
         icon: <StateDot state={dotOf(machine, attention[machine.id])} size={8} />,
-        label: row(machine.name, summaryOf(machine, attention[machine.id], false)),
+        label: row(machine.id, machine.name, noteOf(machine, attention[machine.id], false)),
       })),
-      ...(machines.length === 0 ? [{ id: 'none', disabled: true, label: <span className="dl-row-meta">{answer ? ui('No other machine found yet') : ui('Loading…')}</span> }] : []),
+      ...(machines.length === 0 ? [{ id: 'none', disabled: true, label: <span className="dl-row-note">{answer ? ui('No other machine found yet') : ui('Loading…')}</span> }] : []),
     ];
-  }, [answer, attention, machines, selfName]);
-  // The actions on the machine on screen, laid out the way DSH's own menus end: rows pinned under a hairline with a
-  // 16px outline icon each (the workspace picker's 添加工作区…), under a small heading that names the machine
-  // (the view menu's 分组方式). DSH has no restart glyph: the refresh arrow is the page, the play circle starting DSH again.
+  }, [answer, attention, machines, selfName, current]);
+  // The actions on the machine on screen (the checked row), laid out the way DSH's own menus end: rows pinned under a
+  // hairline with a 16px outline icon each (the workspace picker's 添加工作区…). DSH has no restart glyph: the refresh
+  // arrow is the page, the play circle starting DSH again.
   const footer = useMemo<MenuEntry[]>(() => [
-    { type: 'label', id: 'actions', text: currentName },
     { id: 'reload', icon: <IconRefreshOutlineRegular />, label: ui('Reload page') },
     { id: 'restart', icon: <IconPlayOutlineRegular />, label: ui('Restart DSH…') },
-  ], [currentName]);
+  ], []);
 
   const select = (id: string) => {
     setOpen(false);

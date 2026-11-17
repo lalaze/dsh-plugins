@@ -35,6 +35,20 @@ export function dotOf(machine: Pick<MachineInfo, 'state'> | undefined, attention
   return 'done';
 }
 
+/** The short note at the end of a machine's menu row: only what the dot cannot say ('' when it is just ready). */
+export function noteOf(machine: Pick<MachineInfo, 'state'> | undefined, attention: MachineAttention | undefined, self: boolean): string {
+  if (machine?.state === 'offline') return ui('Offline');
+  if (machine?.state === 'unreachable') return ui('Unreachable');
+  const parts: string[] = [];
+  if (self) parts.push(ui('This computer'));
+  const waiting = attention?.waiting.length ?? 0;
+  if (waiting) parts.push(ui('{count} waiting', { count: waiting }));
+  const running = attention?.running.length ?? 0;
+  if (running) parts.push(ui('{count} running', { count: running }));
+  else if (!waiting && attention?.finished.length) parts.push(ui('{count} finished', { count: attention.finished.length }));
+  return parts.join(' · ');
+}
+
 /** One line under a machine's name. */
 export function summaryOf(machine: MachineInfo | undefined, attention: MachineAttention | undefined, self: boolean): string {
   if (machine?.state === 'offline') return machine.lastSeen ? ui('Offline · seen {time}', { time: since(machine.lastSeen) }) : ui('Offline');
