@@ -36,11 +36,6 @@ export class Conversations {
             throw new Error(`DSH does not read ${image.mediaType} pictures`);
         return this.need('attachments', 'Attachments').saveImage({ data: image.data, mediaType, ...(image.name ? { name: image.name } : {}) });
     }
-    /** A picture DSH keeps, as its bytes: for handing it to another DSH. */
-    async image(ref) {
-        const stored = await this.need('attachments', 'Attachments').readImage(ref);
-        return { data: stored.data, mediaType: stored.ref.mediaType };
-    }
     /** Runs a command line in a conversation, as if it had been typed there. */
     async command(sessionId, line) {
         const commands = this.need('commands', 'Commands');

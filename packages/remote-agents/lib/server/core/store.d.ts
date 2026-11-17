@@ -17,14 +17,9 @@ export interface SharingSettings {
     skills?: Record<string, boolean>;
     secret?: string;
 }
-/** This DSH instance, as the others saw it while 0.2.138 and earlier shared sessions between them. */
-export interface Instance {
-    id: string;
-    label: string;
-}
 /**
- * `instance` is kept as saved: withdrawing names it. `sharedWithdrawals` lists, per host, the sessions 0.2.138 and earlier
- * shared with other DSH instances and that are still to be withdrawn from the host's registry; see {@link Store.open}.
+ * What 0.2.139 to 0.2.142 also kept, `instance` and `sharedWithdrawals` for withdrawing sessions 0.2.138 and earlier shared
+ * between DSH instances, is dropped on the next save: every DSH that shared is past that version now.
  */
 export interface State {
     version: 1;
@@ -35,8 +30,6 @@ export interface State {
     chatEfforts?: Record<string, string>;
     chatFast?: string[];
     sharing?: SharingSettings;
-    instance?: Instance;
-    sharedWithdrawals?: Record<string, string[]>;
     /**
      * What 0.2.129 and earlier saved about TUI conversations. dsh-remote-terminals took them over and keeps them now; they
      * stay here untouched, so that it can find them on its first start and an older version still has them.
@@ -78,10 +71,6 @@ export declare class Store {
     chatFast(sessionId: string): boolean;
     /** The reasoning effort last explicitly selected for a native chat model route, if any. */
     chatEffort(route: string): string | undefined;
-    /** The identity this DSH had while sessions were shared, if it ever reached a host's registry. */
-    savedInstance(): Instance | undefined;
-    /** Sessions of a host still to be withdrawn from its shared registry. */
-    sharedWithdrawals(hostId: string): string[];
     relayCleanups(hostId: string): RelayCleanup[];
     /** A copy of one saved agent record, without cloning the whole registry. */
     task(predicate: (task: Task) => boolean): Task | undefined;

@@ -129,8 +129,6 @@ export interface RunSettings {
     flowModels: Partial<Record<FlowRole, string>>;
     /** How many times a failed check sends the work back to the models before the task fails. */
     checkRetries: number;
-    /** Whether other DSHes may hand bugs to this one, through the machines that hold its repositories. */
-    relay: boolean;
 }
 export interface Settings {
     routes: Route[];

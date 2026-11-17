@@ -22,12 +22,6 @@ export interface ServiceHost {
     /** The built-in source for bugs a person types in. */
     manual?: ManualSource;
     workplaces: Pick<Workplaces, 'projects' | 'inspect' | 'machine'>;
-    /** The machines on which other DSHes can hand bugs to this one, when that is switched on. */
-    relay?(): {
-        label: string;
-        routes: string[];
-        error?: string;
-    }[];
     folders: Pick<Folders, 'add' | 'repository'>;
     /** The plugins this one works through that are not running right now, by package name. */
     needs?(): string[];
@@ -56,11 +50,6 @@ export interface State {
         sourceName: string;
         progress?: FlowProgress;
     })[];
-    relay: {
-        label: string;
-        routes: string[];
-        error?: string;
-    }[];
     /** Plugins that are not running and without which repositories cannot be reached or fixes cannot run. */
     needs: string[];
 }
@@ -78,6 +67,12 @@ export declare class AutofixService implements Omit<Autofix, 'file'> {
     private view;
     saveSettings(raw: unknown): Promise<void>;
     projects(signal?: AbortSignal): Promise<import("./workplaces.js").Project[]>;
+    /**
+     * The repositories' folders that no longer lead anywhere: not a workspace of this DSH any more (removed, or moved to
+     * another machine's own DSH), or on a machine Remote agents no longer has. A machine that cannot be told about right
+     * now, or a plugin that is not running, says nothing either way.
+     */
+    missingProjects(signal?: AbortSignal): Promise<string[]>;
     /** A folder on the computer DSH runs on, as a project to choose. Its repository may already be one under another folder. */
     addFolder(path: unknown, signal?: AbortSignal): Promise<{
         project: string;

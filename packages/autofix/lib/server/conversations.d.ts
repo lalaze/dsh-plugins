@@ -92,11 +92,6 @@ export declare class Conversations {
         mediaType: string;
         name?: string;
     }): Promise<unknown>;
-    /** A picture DSH keeps, as its bytes: for handing it to another DSH. */
-    image(ref: unknown): Promise<{
-        data: Uint8Array;
-        mediaType: string;
-    }>;
     /** Runs a command line in a conversation, as if it had been typed there. */
     command(sessionId: string, line: string): Promise<void>;
     /** Plan, implement and review in that conversation; resolves once the flow has started. */

@@ -73,18 +73,7 @@ export class FixCommand {
             const line = { ...parseFix(input), ...(options.repo ? { repo: options.repo } : {}), ...(options.branch ? { branch: options.branch } : {}) };
             if (!line.title && !pictures.length)
                 throw fail(feature ? 'Say what to build' : 'Say what is wrong after /fix, and paste screenshots if they help. repo=<name> and branch=<name> may lead the line.');
-            let route;
-            try {
-                route = await this.route(agent, line.repo);
-            }
-            catch (error) {
-                // Not a repository of this DSH: another one may run fixes for the machine this conversation works on.
-                const folder = this.host.folder(agent), handed = folder ? await this.host.handOver?.(folder, line, pictures, how) : undefined;
-                if (!handed || !folder)
-                    throw store.settings.routes.length ? error : fail('Nothing can take this bug yet. Add the repository in Settings → Autofix here; or, if another DSH should run the fix, add it there and switch on taking bugs from other DSHes.');
-                await name(line.title);
-                return { kind: 'success', text: rowText(`${handed.ref} · ${handed.title}`, { key: handed.key, at: folder }) };
-            }
+            const route = await this.route(agent, line.repo);
             const branch = line.branch || route.defaultBranch || (await this.host.inspect(route.project).catch(() => undefined))?.defaultBase || '';
             if (!branch)
                 throw fail('{route} has no default branch; choose a branch for this bug', { route: route.name });
@@ -101,8 +90,9 @@ export class FixCommand {
     /** The repository a bug typed here belongs to: the one named, or the one this conversation works in. */
     async route(agent, name) {
         const { routes } = this.host.store.settings, names = routes.map(route => route.name).join(', ');
+        // Each DSH fixes the repositories of its own machine; with DSH Link, another machine's DSH is a switch away.
         if (!routes.length)
-            throw fail('Add a repository in Settings → Autofix so bugs have somewhere to go.');
+            throw fail('Add the repository in Settings → Autofix of this DSH so bugs have somewhere to go. If it is on another machine with a DSH of its own, switch to that machine and type /fix there.');
         if (name) {
             const wanted = name.toLowerCase(), exact = routes.filter(route => route.name.toLowerCase() === wanted || route.id.toLowerCase() === wanted);
             const found = exact.length ? exact : routes.filter(route => route.name.toLowerCase().startsWith(wanted));

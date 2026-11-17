@@ -23,15 +23,11 @@ The board still lists every bug and task; bugs from TAPD and other sources are h
 
 Something to build goes the same road: `/flow wt=on <what to build>` ([dsh-model-flow](../model-flow/README.md) 0.1.11 or newer) makes a task here on a branch `feat/<number>`, worded for the models as a task rather than a bug, committed as `feat: …`, and with the models and rounds its line chose. With that version a task's card is the flow's own card: the same progress a `/flow` shows, then **Checks** and **Acceptance** at the end of the bar, and what you can decide under the report. In the task's own conversation the newest flow's card carries the task, so there is one card instead of two; earlier flows' cards stay as records of their rounds.
 
-## Typing in one DSH, fixing in another
+## Several machines
 
-For working in the DSH on a laptop while a machine that is always on runs the fixes:
+Each DSH fixes the repositories in its own workspaces. Add a repository in Settings → Autofix of the DSH whose workspace holds it, and type `/fix` in that DSH. With [DSH Link](../link/README.md), the DSH on a laptop switches to that machine's DSH in place, cards included. A repository whose folder is no longer a workspace of this DSH (removed, or moved to another machine's own DSH), or whose machine was removed from Remote agents, is marked **Workspace gone** in the settings.
 
-- On the DSH that runs fixes, add the repository and switch on "Take bugs from other DSHes" in Settings → Autofix.
-- The laptop's DSH only needs this plugin: no repository to add, no address or password of the other one.
-- Type `/fix` in a conversation of that project on the laptop. The bug is handed over through the machine that holds the repository; the card stays in that conversation, with the progress, the report, the changes, and accepting or sending back.
-
-Both DSHes reach the machine that holds the repository, and the handover happens there, in `~/.dsh-autofix` of your own account. Whoever can sign in to that account can file and accept bugs, which is the boundary that already lets them change the repository. Both DSHes need `dsh-remote-agents` 0.2.130 or newer and `dsh-remote-terminals`; only the one that runs fixes needs `dsh-model-flow`.
+Until 0.1.4 a DSH could also take bugs typed in another DSH, handed over through the machine that holds the repository ("Take bugs from other DSHes"). That is gone in 0.1.5: cards of bugs handed over that way say the task was removed, and the files under `~/.dsh-autofix` on those machines can be deleted.
 
 ## Sources
 
@@ -107,5 +103,5 @@ A source's settings belong in Autofix's page. The source plugin's client registe
 
 ## Not there yet
 
-- Managing the pool from a second DSH, previews, and fetching on a timer.
+- Previews, and fetching on a timer.
 - A task interrupted by a DSH restart is marked stopped; **Continue** resumes it in the same worktree.

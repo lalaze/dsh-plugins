@@ -1,5 +1,4 @@
 import { type Task } from './domain.js';
-import { type FixLine } from './fixline.js';
 import type { ManualInput } from './manual.js';
 import { COMMAND } from './shared.js';
 export { COMMAND };
@@ -49,23 +48,17 @@ export interface CommandHost {
     folder(agent: LiveAgent): string | undefined;
     /** Names a conversation that had nothing in it before the line was typed there, so it is not left untitled. */
     title?(agent: LiveAgent, title: string): Promise<void>;
-    /** Another DSH that runs fixes for the machine a folder is on: hands the bug to it, or answers undefined when there is none. */
-    handOver?(folder: string, line: FixLine, pictures: readonly unknown[], how?: Handed): Promise<{
-        key: string;
-        ref: string;
-        title: string;
-    } | undefined>;
     now?(): number;
 }
-/** What goes with a task to the DSH that runs it. */
-export type Handed = RunChoice & {
+/** What a task is, and what it runs with. */
+export type How = RunChoice & {
     kind?: 'feature';
 };
 /**
  * A task that did not come from a typed /fix: /flow hands in something to build, with where it goes and what it runs
  * with already read from its own line.
  */
-export interface TakeOptions extends Handed {
+export interface TakeOptions extends How {
     repo?: string;
     branch?: string;
 }

@@ -42,8 +42,6 @@ export interface Backend {
      * when it ends. Returns the unsubscribe function.
      */
     onOwnTurn?(listener: (taskId: string) => void): () => void;
-    /** Withdraw the sessions an earlier version shared from this host's registry; see `Store.open`. */
-    withdrawShared?(): Promise<void>;
 }
 export type BackendFactory = (host: HostConfig) => Backend;
 export declare const CLI_PROVIDERS: ({
@@ -143,7 +141,6 @@ export declare class SshBackend implements Backend {
     private ending;
     private restoring;
     private cleaning?;
-    private withdrawing?;
     private readonly ownTurnListeners;
     constructor(host: HostConfig, store: Store, transport?: SshTransport, sharing?: () => LaunchSharing | undefined);
     onOwnTurn(listener: (taskId: string) => void): () => void;
@@ -179,13 +176,6 @@ export declare class SshBackend implements Backend {
     private relayEnded;
     /** Stop and delete relays queued for this host. Never blocks local deletion or archiving. */
     cleanup(): Promise<void>;
-    /**
-     * 0.2.138 and earlier shared this host's sessions with the other DSH instances using its SSH account, through a registry
-     * on the host. The sessions this DSH started are marked there as withdrawn by it, as that version did when sharing was
-     * switched off: a DSH still on that version then forgets its copies rather than take over their CLIs once this one's
-     * leases expire. Nothing else in the registry is touched, and a host that cannot be reached is asked again later.
-     */
-    withdrawShared(): Promise<void>;
     /** A link to a relay, installing the current relay script on the host before attaching. */
     private link;
     private session;

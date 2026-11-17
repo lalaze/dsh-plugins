@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { enabledProvidersOf, isLocalHost, list, LOCAL_SERVER_ID, permissionModes, PROVIDER_LABELS, RELAY_UNAVAILABLE, remotePath, RemoteError } from '../core/domain.js';
 import { connectionInput, JsonlPeer, LocalShellTransport, OpenSshTransport, quote } from '../core/ssh.js';
-import { MACHINE_IDENTITY, REMOTE_HOME, serverIdOf } from '../core/remote-host.js';
+import { MACHINE_IDENTITY, serverIdOf } from '../core/remote-host.js';
 import { CliSession, initializeAcp } from './runtime.js';
 import { initializeCodex } from '../core/codex.js';
 import { TaskHistory } from './history.js';
@@ -135,7 +135,6 @@ export class SshBackend {
     ending = new Map();
     restoring = new Map();
     cleaning;
-    withdrawing;
     ownTurnListeners = new Set();
     constructor(host, store, transport, sharing = () => undefined) {
         this.host = host;
@@ -410,39 +409,6 @@ done`}`, 15_000, { login: false });
         })().catch(() => { }).finally(() => { this.cleaning = undefined; });
         this.cleaning = cleaning;
         return cleaning;
-    }
-    /**
-     * 0.2.138 and earlier shared this host's sessions with the other DSH instances using its SSH account, through a registry
-     * on the host. The sessions this DSH started are marked there as withdrawn by it, as that version did when sharing was
-     * switched off: a DSH still on that version then forgets its copies rather than take over their CLIs once this one's
-     * leases expire. Nothing else in the registry is touched, and a host that cannot be reached is asked again later.
-     */
-    withdrawShared() {
-        const ids = this.store.sharedWithdrawals(this.host.id);
-        if (this.withdrawing || this.closed || !ids.length)
-            return this.withdrawing ?? Promise.resolve();
-        const withdrawing = (async () => {
-            // Without an identity this DSH never reached a registry.
-            const instance = this.store.savedInstance();
-            if (instance)
-                for (let at = 0; at < ids.length; at += 200) {
-                    const record = JSON.stringify({ by: instance.label, withdrawn: instance.id, at: new Date().toISOString() });
-                    await this.transport.exec(`cd ${REMOTE_HOME}/shared-v1/sessions 2>/dev/null || exit 0
-for dsh_id in ${ids.slice(at, at + 200).map(quote).join(' ')}; do
-  [ -f "$dsh_id/manifest.json" ] && [ ! -f "$dsh_id/deleted.json" ] || continue
-  printf '%s' ${quote(record)} > "$dsh_id/deleted.json.$$" && mv -f "$dsh_id/deleted.json.$$" "$dsh_id/deleted.json"
-done`, 30_000, { login: false });
-                    if (this.closed)
-                        return;
-                }
-            await this.store.update(state => {
-                delete state.sharedWithdrawals?.[this.host.id];
-                if (state.sharedWithdrawals && !Object.keys(state.sharedWithdrawals).length)
-                    delete state.sharedWithdrawals;
-            });
-        })().catch(() => { }).finally(() => { this.withdrawing = undefined; });
-        this.withdrawing = withdrawing;
-        return withdrawing;
     }
     /** A link to a relay, installing the current relay script on the host before attaching. */
     link(id, offset, onState) {

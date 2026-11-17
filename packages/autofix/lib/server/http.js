@@ -7,7 +7,8 @@ const key = (value) => {
         throw new Error('The bug is missing');
     return value;
 };
-export function createHandler(service, tasks, chat = { lastCommand: () => undefined }, remote) {
+/** One JSON route for the board and the settings page. Only pages of this DSH reach it, and only with the plugin's own header. */
+export function createHandler(service, tasks, chat = { lastCommand: () => undefined }) {
     return async (request) => {
         const headers = { 'Cache-Control': 'no-store' };
         try {
@@ -17,30 +18,6 @@ export function createHandler(service, tasks, chat = { lastCommand: () => undefi
                 return Response.json({ error: 'Use the Autofix board.' }, { status: 403, headers });
             const input = await request.json();
             let result = {};
-            // A card that follows a task of another DSH names the workspace it reaches that DSH through.
-            const at = typeof input.at === 'string' && input.at.length <= 4096 ? input.at : '';
-            if (at) {
-                if (!remote)
-                    return Response.json({ error: 'Handing bugs to another DSH is not available.' }, { status: 400, headers });
-                switch (input.action) {
-                    case 'task': {
-                        const found = await remote.task(at, key(input.key));
-                        return Response.json({ task: found?.task ?? null, routes: found ? [found.route] : [] }, { headers });
-                    }
-                    case 'diff': return Response.json(await remote.diff(at, key(input.key)), { headers });
-                    case 'sendBack':
-                        await remote.act(at, { kind: 'sendBack', key: key(input.key), feedback: typeof input.feedback === 'string' ? input.feedback.slice(0, 8000) : '' }, decodePictures(input.images));
-                        break;
-                    case 'accept':
-                    case 'stop':
-                    case 'retryReport':
-                    case 'removeWorkspace':
-                        await remote.act(at, { kind: input.action, key: key(input.key) });
-                        break;
-                    default: return Response.json({ error: 'Unknown action' }, { status: 400, headers });
-                }
-                return Response.json({}, { headers });
-            }
             switch (input.action) {
                 case 'state': break;
                 // A card in a conversation follows one task; the settings come along for the words it needs.
@@ -51,9 +28,12 @@ export function createHandler(service, tasks, chat = { lastCommand: () => undefi
                 case 'saveSettings':
                     await service.saveSettings(input.settings);
                     break;
-                case 'projects':
-                    result = { projects: await service.projects(request.signal) };
+                // With the repositories whose folder is no longer a workspace of this DSH, for the settings page to point out.
+                case 'projects': {
+                    const [projects, missing] = await Promise.all([service.projects(request.signal), service.missingProjects(request.signal)]);
+                    result = { projects, missing };
                     break;
+                }
                 case 'addFolder':
                     result = await service.addFolder(input.path, request.signal);
                     break;

@@ -12,23 +12,16 @@ const oldAntigravity = (provider) => provider.id === 'antigravity' && provider.n
 /**
  * 0.2.138 and earlier shared a host's sessions with the other DSH instances using its SSH account. This DSH keeps the
  * sessions it started and drops its copies of the ones another DSH started, which that DSH still has. Their saved output
- * stays on disk. The sessions it started and shared are listed per host, to be withdrawn from that host's registry: a
- * DSH still on an earlier version would otherwise take over their CLIs once this one stops renewing its leases.
+ * stays on disk.
  */
-function withoutSharing(saved, hosts, pending) {
-    const withdrawals = {};
-    for (const [hostId, ids] of Object.entries(pending ?? {}))
-        if (ids.length && hosts.some(host => host.id === hostId))
-            withdrawals[hostId] = [...ids];
+function withoutSharing(saved) {
     const tasks = saved.filter(task => task.shared?.imported !== true);
     for (const task of tasks) {
-        if (task.shared)
-            (withdrawals[task.hostId] ??= []).push(task.id);
         delete task.shared;
         if (task.chat)
             delete task.chat.history;
     }
-    return { tasks, ...(Object.keys(withdrawals).length ? { withdrawals } : {}) };
+    return tasks;
 }
 /** This computer's name as the local machine's label, `lalaze-mini.local` shown as `lalaze-mini`. */
 export function localMachineLabel(name = hostname()) {
@@ -141,18 +134,11 @@ export class Store {
             if (sharing.secret !== undefined && (typeof sharing.secret !== 'string' || !/^[a-f0-9]{64}$/.test(sharing.secret)))
                 throw new Error('Invalid saved sharing secret');
         }
-        if (value.instance !== undefined) {
-            const instance = record(value.instance);
-            identifier(instance.id);
-            field(instance.label, 'instance name', 100);
-        }
-        if (value.sharedWithdrawals !== undefined && !Object.values(record(value.sharedWithdrawals)).every(ids => Array.isArray(ids) && ids.every(id => typeof id === 'string')))
-            throw new Error('Invalid saved shared session withdrawals');
-        const { tasks, withdrawals } = withoutSharing(value.tasks, value.hosts, value.sharedWithdrawals);
+        const tasks = withoutSharing(value.tasks);
         this.state = { version: 1, hosts: value.hosts, tasks, ...(value.mainChatProjects ? { mainChatProjects: value.mainChatProjects } : {}),
             ...(value.relayCleanups ? { relayCleanups: value.relayCleanups } : {}), ...(value.chatEfforts ? { chatEfforts: value.chatEfforts } : {}),
             ...(value.chatFast ? { chatFast: value.chatFast } : {}), ...(value.sharing ? { sharing: value.sharing } : {}),
-            ...(value.instance ? { instance: value.instance } : {}), ...(withdrawals ? { sharedWithdrawals: withdrawals } : {}), ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails } : {}),
+            ...(Array.isArray(value.tuiSessions) ? { tuiSessions: value.tuiSessions } : {}), ...(value.tuiDetails ? { tuiDetails: value.tuiDetails } : {}),
             ...(typeof value.tuiLocalScroll === 'boolean' ? { tuiLocalScroll: value.tuiLocalScroll } : {}) };
     }
     snapshot() { return structuredClone(this.state); }
@@ -165,10 +151,6 @@ export class Store {
     chatFast(sessionId) { return this.state.chatFast?.includes(sessionId) ?? false; }
     /** The reasoning effort last explicitly selected for a native chat model route, if any. */
     chatEffort(route) { return Object.hasOwn(this.state.chatEfforts ?? {}, route) ? this.state.chatEfforts[route] : undefined; }
-    /** The identity this DSH had while sessions were shared, if it ever reached a host's registry. */
-    savedInstance() { return structuredClone(this.state.instance); }
-    /** Sessions of a host still to be withdrawn from its shared registry. */
-    sharedWithdrawals(hostId) { return [...(this.state.sharedWithdrawals?.[hostId] ?? [])]; }
     relayCleanups(hostId) { return structuredClone((this.state.relayCleanups ?? []).filter(c => c.hostId === hostId)); }
     /** A copy of one saved agent record, without cloning the whole registry. */
     task(predicate) { const found = this.state.tasks.find(predicate); return found && structuredClone(found); }

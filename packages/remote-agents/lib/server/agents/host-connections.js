@@ -99,7 +99,6 @@ export class HostConnections {
             if (expectedServerId && host.serverId !== expectedServerId)
                 throw new RemoteError('Agent belongs to a different remote SSH machine', 409);
             void current.backend.cleanup?.();
-            void current.backend.withdrawShared?.();
             return await action(current.backend, host);
         }
         catch (error) {

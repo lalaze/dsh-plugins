@@ -3,7 +3,7 @@ export const SOURCE_ID = /^[a-z][a-z0-9-]{0,30}$/u;
 export const SENSITIVE_LABELS = ['security', 'payment', 'auth', 'migration', 'prod-incident'];
 export const defaultSettings = () => ({
     routes: [],
-    run: { denyLabels: [...SENSITIVE_LABELS], permission: 'workspace-write', rounds: 3, flowModels: {}, checkRetries: 1, relay: false },
+    run: { denyLabels: [...SENSITIVE_LABELS], permission: 'workspace-write', rounds: 3, flowModels: {}, checkRetries: 1 },
 });
 export const say = (key, values, detail) => ({ key, ...(values ? { values } : {}), ...(detail ? { detail } : {}) });
 export const render = (message) => message.key.replace(/\{(\w+)\}/gu, (whole, name) => message.values?.[name] ?? whole) + (message.detail ? `\n${message.detail}` : '');
@@ -87,7 +87,6 @@ export function settingsFrom(raw) {
             rounds: whole(run.rounds, 'Review rounds', 1, 5, base.run.rounds),
             flowModels: Object.fromEntries(['plan', 'implement', 'review'].flatMap(role => typeof flowModels[role] === 'string' && flowModels[role].trim() ? [[role, str(flowModels[role], 'A flow model', 300)]] : [])),
             checkRetries: whole(run.checkRetries, 'Check retries', 0, 5, base.run.checkRetries),
-            relay: run.relay === true,
         },
     };
 }
