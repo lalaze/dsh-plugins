@@ -15,6 +15,12 @@ const LOADING_LINE = '[role="presentation"][class*="_onboardingOverlay"]>[class*
 // Any tint reads as a band over the wallpaper, so it draws the same wallpaper instead, aligned with the real one.
 // The strip is only cleared while that copy is present, so a missing one falls back to DSH's strip, never to overlapping text.
 // The automation page paints its own solid page, and its detail panel solid strips, none of them overlapping anything.
+// DSH lines the right sidebar's rule up with the conversation header's at 76px: the pane's 38px tab strip plus a 38px
+// row of its own (files, document preview). Over the wallpaper that header is see-through while the pane stayed solid
+// from its top, and the terminal has no such row, so its screen started above the header's rule. For those tabs the
+// pane shows the wallpaper down to that rule like the header beside it, and the terminal gets an empty row with the rule.
+// Only docked panes beside the conversation; fullscreen, floating and phone layouts keep DSH's own look.
+const SIDEBAR_PANE = '[data-sidebar-right-panel="push"] [data-dockkit-host="dock"]>[data-dockkit-pane]';
 export const backgroundStyles = `
 body[data-dsh-gallery-active]{isolation:isolate}
 [data-dsh-gallery-background]{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:var(--dsw-alias-bg-base,Canvas)}
@@ -27,6 +33,10 @@ body[data-dsh-gallery-active] [data-slot="main"],
 body[data-dsh-gallery-active] [data-slot="main"]>[data-phase],
 body[data-dsh-gallery-active] [data-slot="main.conversation"]>[data-phase]{background:transparent!important}
 body[data-dsh-gallery-active] [data-slot="sidebar"]>*{background:color-mix(in srgb,var(--dsw-specific-sidebar-fill,Canvas) 55%,transparent)!important}
+@media (min-width:768px){
+body[data-dsh-gallery-active] ${SIDEBAR_PANE}:has([data-sidebar-terminal],[data-files-page],[data-document-preview]){background:linear-gradient(transparent 76px,var(--dsw-alias-bg-base,Canvas) 76px)!important}
+body[data-dsh-gallery-active] ${SIDEBAR_PANE} [data-sidebar-terminal]{padding-top:46px;background:linear-gradient(transparent 37.5px,var(--dsw-alias-border-l3,GrayText) 37.5px 38px,transparent 38px) no-repeat}
+}
 body[data-dsh-gallery-active] [data-plugin-bar][data-natural]{animation:${PLUGIN_BAR_SEEN} 1ms}
 @keyframes ${PLUGIN_BAR_SEEN}{from{--dsh-gallery-seen:1}}
 body[data-dsh-gallery-active] [data-plugin-bar][data-natural]:has(>[data-dsh-gallery-mirror])::before{background:transparent!important}
