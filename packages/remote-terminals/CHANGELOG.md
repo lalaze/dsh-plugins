@@ -4,6 +4,19 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.14 — A TUI's text comes back whole after the GPU does; its history is rebuilt more often
+
+**Text missing from a TUI after coming back to it, mostly on a phone:**
+
+- With WebGL rendering, a TUI could come back with most of its text gone: no ASCII, no rules, and only some Chinese characters, always the same ones, while new text appeared normally. This happened when the browser dropped the graphics context, as Android does to a page left in the background. Every TUI drawn with WebGL shares one set of glyphs, and after the context returned the glyphs drawn before it stayed blank. Now the plugin draws every glyph again for all TUIs once the context comes back.
+
+**A TUI's history keeps one width more often:**
+
+- The copy of Claude Code that prints the history again at a new width was given 1.5 seconds to start, and on a busy machine it can take longer, so the rebuild was skipped. It now waits up to 10 seconds, and if the copy prints nothing it tries once more after the conversation goes quiet.
+- In auto mode Claude Code shows notes such as "Allowed by auto mode" under a tool call only in the session that ran it, and a few headers may keep the old width. These rows could stop the screen from being matched against the copy, which also skipped the rebuild. Such rows are now passed over.
+- As before, this needs a Claude Code started by the new version: a TUI conversation still running from an earlier version keeps mixing widths until it restarts, for example after archiving the row and restoring it.
+- It can be upgraded on its own; no restart is needed. Reload the DSH pages that show TUIs, the phone's too, to get the drawing fix.
+
 ## 0.1.13 — TUI conversations on this computer; a TUI's history keeps one width
 
 **TUI conversations in a folder on this computer** (needs Remote Agents 0.2.142 or newer):
