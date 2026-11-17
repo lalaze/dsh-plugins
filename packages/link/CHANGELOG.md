@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.9 — The machine menu looks like DSH's own menus
+
+Update every computer; no restart needed, reload the page once.
+
+- The machine menu now looks like DSH's own menus. The custom icon buttons at the bottom are replaced by two ordinary menu rows, **Reload page** and **Restart DSH…**, with DSH's own icons, under a small heading naming the machine on screen (the same layout as DSH's view and workspace menus). Machine descriptions use DSH's menu description size and colour.
+
 ## 0.1.8 — Removed machines leave the list; the menu's actions are icons
 
 Update every computer; no restart needed, reload the page once.
