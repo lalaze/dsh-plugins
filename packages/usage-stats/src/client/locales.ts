@@ -130,7 +130,6 @@ export const zh = {
   "{0} requests returned no usage. Token totals only include reported data.": "{0} 次调用未返回用量，Token 统计仅涵盖已返回的数据。",
   "Today, {2} machines: {0} tokens in {1} requests": "今日（{2} 台机器）：{1} 次调用，共 {0} Token",
   "(as of {0})": "（{0} 的数据）",
-  "{0} is offline; its usage is not included": "{0} 离线，未计入其用量",
   "{0} did not answer; its usage is not included": "{0} 未响应，未计入其用量",
   "{0} machines": "{0} 台机器",
   "Machines": "机器",
@@ -142,6 +141,7 @@ export const zh = {
   "Offline; not included": "离线，未计入",
   "Did not answer; not included": "未响应，未计入",
   "Unknown machine": "未知机器",
-  "are included in output. Each machine's DSH records the calls it makes, including titles and compaction, and the totals add up the machines DSH Link reaches; a turn is recorded only by the DSH that ran it. Remote agents are counted once per remote turn; independently running CLIs are excluded. Missing usage is not estimated. First record:": "已包含在输出中。每台机器的 DSH 记录自己发起的调用（含标题生成、压缩），合计为互联能连到的全部机器之和；每一轮只由运行它的 DSH 记录一次，不会重复计入。远程智能体按远端每轮汇总一次，远端独立运行的 CLI 不在范围内。未返回的用量不作估算。最早记录：",
+  "{0} records also on another machine, counted there": "{0} 条记录与其他机器重复，已在那边计入",
+  "are included in output. Each machine's DSH records the calls it makes, including titles and compaction, and the totals add up the machines DSH Link reaches; records that two machines both kept from a conversation they shared count once. Remote agents are counted once per remote turn; independently running CLIs are excluded. Missing usage is not estimated. First record:": "已包含在输出中。每台机器的 DSH 记录自己发起的调用（含标题生成、压缩），合计为互联能连到的全部机器之和；以前共享过的对话在两台机器上都有记录，相同的记录只计一次。远程智能体按远端每轮汇总一次，远端独立运行的 CLI 不在范围内。未返回的用量不作估算。最早记录：",
   "Each computer keeps its own records. Other machines' usage is read through DSH Link inside your tailnet; nothing is uploaded.": "每台电脑各自保存自己的记录；其他机器的用量经互联在你的 Tailscale 网络内读取，不会上传。"
 } as const;

@@ -6,10 +6,13 @@ import { compact, localDay, localOffset } from './metrics.js';
 import { usePreferences } from './preferences.js';
 
 const REFRESH_MS = 10_000;
-/** Machines whose usage is not in an all-machines total, one line each. */
+/**
+ * Machines that are online but did not answer, one line each: their usage is missing from the total. An offline machine
+ * is not one of them (it is listed under Data sources): it uses nothing while off, and its last answer stands in when
+ * there is one.
+ */
 export function machineNotes(machines: readonly MachineUsage[]): string[] {
-  return machines.flatMap(machine => machine.state === 'offline' ? [ui("{0} is offline; its usage is not included", { 0: machine.name })]
-    : machine.state === 'failed' ? [ui("{0} did not answer; its usage is not included", { 0: machine.name })] : []);
+  return machines.flatMap(machine => machine.state === 'failed' ? [ui("{0} did not answer; its usage is not included", { 0: machine.name })] : []);
 }
 // Sized like the header's other 24px controls: a hairline pill with a 12px label and a 6px state dot.
 const CSS = `.us-today{display:inline-flex;align-items:center;gap:6px;flex:none;box-sizing:border-box;height:24px;padding:0 8px;border:.5px solid var(--dsw-alias-border-l4,color-mix(in srgb,currentColor 16%,transparent));border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,inherit);font:inherit;font-family:var(--dsw-font-family,inherit);font-size:12px;line-height:18px;white-space:nowrap;font-variant-numeric:tabular-nums;cursor:pointer;-webkit-app-region:no-drag}

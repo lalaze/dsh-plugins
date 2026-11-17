@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -61,5 +61,40 @@ test('the book lists what answered, keeps tailnet machines it knew as offline, a
     await again.refresh([{ url: 'http://100.0.0.1:7390', source: 'tailnet', online: false }], probe);
     assert.equal(again.get(machineIdOf('http://100.0.0.1:7390'))?.name, 'lalazemacbook-air');
     assert.ok(Object.keys(JSON.parse(readFileSync(file, 'utf8'))).includes('http://100.0.0.1:7390'));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a tailnet machine whose plugin stopped answering for ten minutes is forgotten, and comes back when it answers', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dl-forget-'));
+  try {
+    const file = join(dir, 'machines.json');
+    const url = 'http://100.0.0.5:7390', id = machineIdOf(url);
+    const seen = (minutesAgo: number) => writeFileSync(file, JSON.stringify({ [url]: { name: 'docker', os: 'linux', lastSeen: Date.now() - minutesAgo * 60_000 } }));
+    const candidate = { url, source: 'tailnet' as const, online: true };
+    // DSH restarting there: nothing listens for a moment, the machine stays (unreachable).
+    seen(1);
+    let book = new MachineBook(file, () => 'me'); book.load();
+    await book.refresh([candidate], async () => { throw refused(); });
+    assert.deepEqual(book.list().map(machine => [machine.name, machine.state, machine.reason]), [['docker', 'unreachable', 'no-listener']]);
+    // DSH removed there: after ten minutes of nothing answering it is gone, from the file too.
+    seen(11);
+    book = new MachineBook(file, () => 'me'); book.load();
+    await book.refresh([candidate], async () => { throw Object.assign(new Error('not ours'), { code: 'not-plugin' }); });
+    assert.deepEqual(book.list(), []);
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), {});
+    // A machine that only does not answer in time stays, as does one Tailscale calls offline (asleep).
+    seen(60);
+    book = new MachineBook(file, () => 'me'); book.load();
+    await book.refresh([candidate], async () => { throw Object.assign(new Error('slow'), { code: 'ETIMEDOUT' }); });
+    assert.equal(book.get(id)?.state, 'unreachable');
+    await book.refresh([{ ...candidate, online: false }], async () => { throw refused(); });
+    assert.equal(book.get(id)?.state, 'offline');
+    // Installed again: it is found like any new machine.
+    seen(11);
+    book = new MachineBook(file, () => 'me'); book.load();
+    await book.refresh([candidate], async () => { throw refused(); });
+    assert.deepEqual(book.list(), []);
+    await book.refresh([candidate], async () => hello('docker-id', 'docker'));
+    assert.deepEqual(book.list().map(machine => [machine.name, machine.state]), [['docker', 'online']]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

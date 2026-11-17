@@ -70,7 +70,11 @@ export interface UsageReport {
  * One machine of an all-machines report. `counted`: its usage is in the totals (`stale` when its last answer stood in
  * for one that failed); `skipped`: not selected; `offline`: DSH Link cannot reach it; `failed`: it did not answer.
  */
-export interface MachineUsage { id: string; name: string; self?: true; state: 'counted' | 'skipped' | 'offline' | 'failed'; error?: string; stale?: true; asOf?: string; totals?: Totals }
+export interface MachineUsage {
+  id: string; name: string; self?: true; state: 'counted' | 'skipped' | 'offline' | 'failed'; error?: string; stale?: true; asOf?: string; totals?: Totals;
+  /** Records left out because another machine has the same ones (copies from shared conversations). */
+  copies?: number;
+}
 const counters = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens', 'totalTokens'] as const;
 const CLI_LABELS: Record<string, string> = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', codebuddy: 'CodeBuddy', antigravity: 'Antigravity', dsh: 'DSH' };
 /** Remote turns are named by their CLI, which merges a CLI's turns across machines; DSH providers keep their ID. */
@@ -165,13 +169,28 @@ const detailOrder = (map: Map<string, UsageGroup>, by: GroupBy) => [...map.value
 function sum(into: Totals, from: Totals): void { for (const key of Object.keys(into) as (keyof Totals)[]) into[key] += Number.isFinite(from[key]) ? from[key] : 0; }
 
 /** A machine's own report (or why there is none) for {@link combine}. */
-export interface MachinePart { id: string; name: string; self?: true; state: MachineUsage['state']; error?: string; stale?: true; asOf?: string; report?: UsageReport }
+export interface MachinePart { id: string; name: string; self?: true; state: MachineUsage['state']; error?: string; stale?: true; asOf?: string; report?: UsageReport; shares?: RecordShare[]; copies?: number }
+/**
+ * Takes out records another machine also has. Machines go by name, so every machine keeps the same copy: the first
+ * machine by name that has a record keeps it. A machine whose records are not known (`shares` missing) keeps all.
+ */
+export function withoutCopies(parts: readonly MachinePart[], query: Query): MachinePart[] {
+  const order = [...parts].filter(part => part.report && part.shares).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+  const seen = new Set<string>(), removed = new Map<MachinePart, RecordShare[]>();
+  for (const part of order) {
+    const copies = part.shares!.filter(share => seen.has(share.f));
+    for (const share of part.shares!) seen.add(share.f);
+    if (copies.length) removed.set(part, copies);
+  }
+  return parts.map(part => removed.has(part) ? { ...part, report: subtract(part.report!, removed.get(part)!, query), copies: removed.get(part)!.length } : part);
+}
 /**
  * Several machines' reports as one, each machine's DSH counting its own calls (a turn is recorded only by the DSH that
  * ran it, so nothing is counted twice). By host, a machine's own DSH model calls ("This computer") go under its name;
  * its workspaces stay apart from another machine's same folder and carry the machine's name.
  */
-export function combine(parts: readonly MachinePart[], query: Query): UsageReport {
+export function combine(all: readonly MachinePart[], query: Query): UsageReport {
+  const parts = withoutCopies(all, query);
   const totals = emptyTotals();
   const merge = (map: Map<string, UsageGroup>, group: UsageGroup, key = group.key, label = group.label, machine?: string) => {
     let into = map.get(key);
@@ -191,7 +210,7 @@ export function combine(parts: readonly MachinePart[], query: Query): UsageRepor
   };
   for (const part of parts) {
     const data = part.report;
-    machines.push({ id: part.id, name: part.name, ...(part.self ? { self: true as const } : {}), state: part.state, ...(part.error ? { error: part.error } : {}), ...(part.stale ? { stale: true as const } : {}), ...(part.asOf ? { asOf: part.asOf } : {}), ...(data ? { totals: data.totals } : {}) });
+    machines.push({ id: part.id, name: part.name, ...(part.self ? { self: true as const } : {}), state: part.state, ...(part.error ? { error: part.error } : {}), ...(part.stale ? { stale: true as const } : {}), ...(part.asOf ? { asOf: part.asOf } : {}), ...(part.copies ? { copies: part.copies } : {}), ...(data ? { totals: data.totals } : {}) });
     if (!data) continue;
     sum(totals, data.totals);
     for (const by of DIMENSIONS) for (const group of data.breakdowns?.[by] ?? []) merge(breakdowns[by], group, ...place(by, group, part));
@@ -211,6 +230,50 @@ export function combine(parts: readonly MachinePart[], query: Query): UsageRepor
     query, ...(recordedSince ? { recordedSince } : {}), failedWrites, generatedAt: new Date().toISOString(), machines };
 }
 
+/** A record's date in the query's time zone. */
+const dayOf = (r: UsageRecord, query: Query) => query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
+const matches = (r: UsageRecord, query: Query, day = dayOf(r, query)) => !((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source));
+
+/**
+ * One record of a conversation another machine's DSH also has, with where it counts in this machine's report, so that a
+ * copy can be taken out again. While DSHes shared conversations, both recorded their turns; such copies match in
+ * every field but the random id.
+ */
+export interface RecordShare { f: string; day: string; source: Source; session: string; keys: Record<Dimension, string>; totals: Totals }
+/** What makes two machines' records the same turn. */
+export const fingerprint = (r: UsageRecord) => [r.sessionId ?? '', r.startedAt, r.provider, r.model, r.status, ...counters.map(key => r.usage?.[key] ?? '')].join('|');
+/** The query's records of the given conversations. */
+export function shares(records: readonly UsageRecord[], query: Query, sessions: ReadonlySet<string>, workspaces?: WorkspaceNames): RecordShare[] {
+  const out: RecordShare[] = [];
+  for (const r of records) {
+    if (!r.sessionId || !sessions.has(r.sessionId)) continue;
+    const day = dayOf(r, query);
+    if (!matches(r, query, day)) continue;
+    const totals = emptyTotals(); add(totals, r);
+    out.push({ f: fingerprint(r), day, source: sourceOf(r.provider), session: r.sessionId, keys: Object.fromEntries(DIMENSIONS.map(by => [by, dimension(r, by, workspaces)[0]])) as Record<Dimension, string>, totals });
+  }
+  return out;
+}
+/** A machine's report without the given records. */
+export function subtract(data: UsageReport, removed: readonly RecordShare[], query: Query): UsageReport {
+  const out = JSON.parse(JSON.stringify(data)) as UsageReport;
+  const take = (list: UsageGroup[] | undefined, key: string, share: RecordShare) => {
+    const group = list?.find(g => g.key === key);
+    if (group) for (const name of Object.keys(group.totals) as (keyof Totals)[]) group.totals[name] -= share.totals[name] ?? 0;
+  };
+  for (const share of removed) {
+    for (const name of Object.keys(out.totals) as (keyof Totals)[]) out.totals[name] -= share.totals[name] ?? 0;
+    for (const by of DIMENSIONS) take(out.breakdowns?.[by], share.keys[by], share);
+    take(out.series, share.day, share);
+    take(out.sources, share.source, share);
+    if (!isDimension(query.groupBy)) take(out.groups, query.groupBy === 'day' ? share.day : query.groupBy === 'source' ? share.source : share.session, share);
+  }
+  const kept = (list: UsageGroup[] = []) => list.filter(g => g.totals.requests > 0);
+  for (const by of DIMENSIONS) if (out.breakdowns?.[by]) out.breakdowns[by] = kept(out.breakdowns[by]);
+  out.series = kept(out.series); out.sources = kept(out.sources); out.groups = isDimension(query.groupBy) ? out.breakdowns?.[query.groupBy] ?? [] : kept(out.groups);
+  return out;
+}
+
 export function report(records: readonly UsageRecord[], query: Query, failedWrites = 0, workspaces?: WorkspaceNames): UsageReport {
   const totals = emptyTotals();
   const groups = new Map<string, UsageGroup>();
@@ -222,8 +285,8 @@ export function report(records: readonly UsageRecord[], query: Query, failedWrit
     add(group.totals, r);
   };
   for (const r of records) {
-    const day = query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
-    if ((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source)) continue;
+    const day = dayOf(r, query);
+    if (!matches(r, query, day)) continue;
     add(totals, r);
     if (!isDimension(query.groupBy)) {
       const key = query.groupBy === 'day' ? day : query.groupBy === 'source' ? sourceOf(r.provider) : r.sessionId ?? '';

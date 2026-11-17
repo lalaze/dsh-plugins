@@ -1,6 +1,13 @@
 /** The machine switcher in the sidebar foot: which machine this page shows, and every other one to go to. */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Menu, StateDot, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives';
+
+/** The actions on the machine shown: reload its page, restart its DSH. 16px strokes like DSH's own icons. */
+function ActionIcon({ kind }: { kind: 'reload' | 'restart' }) {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {kind === 'reload' ? <><path d="M20 11a8 8 0 1 0-2.3 5.7" /><path d="M20 4v7h-7" /></> : <><path d="M12 3v8" /><path d="M6.3 6.8a8 8 0 1 0 11.4 0" /></>}
+  </svg>;
+}
 import { ui, useLocale } from './i18n.js';
 import { openMachine } from './navigate.js';
 import { RestartDialog } from './restart.js';
@@ -43,8 +50,6 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
       })),
       ...(machines.length === 0 ? [{ id: 'none', disabled: true, label: <span className="dl-row-meta">{answer ? ui('No other machine found yet') : ui('Loading…')}</span> }] : []),
       { type: 'separator', id: 'separator' },
-      { id: 'reload', label: ui('Reload {name}', { name: currentName }) },
-      { id: 'restart', label: ui('Restart DSH on {name}…', { name: currentName }) },
     ];
   }, [answer, attention, machines, selfName, currentName]);
 
@@ -55,6 +60,8 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
     else if (id === 'reload') location.reload();
     else if (id !== 'none') openMachine(id);
   };
+  // One row of icon buttons for the machine on screen, named in their tooltips; they join the menu's keyboard walk.
+  const actions = [['reload', ui('Reload {name}', { name: currentName })], ['restart', ui('Restart DSH on {name}…', { name: currentName })]] as const;
   const title = waitingElsewhere ? ui('{name} · {count} waiting on other machines', { name: currentName, count: waitingElsewhere })
     : finishedElsewhere ? ui('{name} · {count} finished on other machines', { name: currentName, count: finishedElsewhere })
     : ui('{name} · switch machine', { name: currentName });
@@ -67,7 +74,11 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
         : finishedElsewhere > 0 && <span className="dl-badge" data-tone="done">{finishedElsewhere}</span>}
     </button>
     <Menu open={open} anchor={null} items={items} selectedId={current} onSelect={select} onClose={() => setOpen(false)} side="top" align="start" portal
-      getAnchorRect={() => trigger.current?.getBoundingClientRect() ?? null} {...({ anchorRef: trigger } as object)} />
+      getAnchorRect={() => trigger.current?.getBoundingClientRect() ?? null} {...({ anchorRef: trigger } as object)}>
+      <div className="dl-actions" role="group" aria-label={currentName}>
+        {actions.map(([id, label]) => <button key={id} type="button" role="menuitem" className="dl-action" title={label} aria-label={label} onClick={() => select(id)}><ActionIcon kind={id} /></button>)}
+      </div>
+    </Menu>
     <RestartDialog open={restarting} onClose={() => setRestarting(false)} name={currentName} />
   </>;
 }

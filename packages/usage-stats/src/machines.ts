@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import type { MachinePart, UsageReport } from './domain.js';
+import type { MachinePart, RecordShare, UsageReport } from './domain.js';
 
 /** dsh-link's `dshLink` service (version 1), as far as this plugin uses it. */
 export interface LinkService {
@@ -14,6 +14,9 @@ const SHARED_MS = 3_000;
 /** Last answers kept per machine and query, to stand in while a machine sleeps or does not answer. */
 const KEPT = 200;
 
+/** Conversations asked about in one request, to keep its address short. */
+const SESSIONS_PER_REQUEST = 60;
+
 const usable = (value: unknown): value is UsageReport => {
   const totals = (value as UsageReport | undefined)?.totals;
   return !!totals && typeof totals === 'object' && Number.isFinite(totals.totalTokens) && Number.isFinite(totals.requests);
@@ -25,7 +28,7 @@ const usable = (value: unknown): value is UsageReport => {
  * query stands in, marked stale with its time: a sleeping laptop keeps the usage it had.
  */
 export class MachineReports {
-  private shared = new Map<string, { at: number; answer: Promise<UsageReport> }>();
+  private shared = new Map<string, { at: number; answer: Promise<unknown> }>();
   private kept = new Map<string, { at: number; report: UsageReport }>();
   constructor(private readonly timeoutMs = 6_000) {}
 
@@ -45,10 +48,8 @@ export class MachineReports {
       const key = `${machine.id}?${search}`;
       try {
         if (machine.state !== 'online') throw new Error(machine.state);
-        const report = await this.ask(link!, machine.id, search);
-        this.kept.delete(key);
-        this.kept.set(key, { at: Date.now(), report });
-        if (this.kept.size > KEPT) this.kept.delete(this.kept.keys().next().value!);
+        const report = await this.ask(link!, machine.id, `/api/usage-stats?${search}`, usable);
+        this.keep(key, report);
         return { ...base, state: 'counted', report };
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
@@ -60,17 +61,56 @@ export class MachineReports {
     return [own, ...others];
   }
 
-  private ask(link: LinkService, id: string, search: string): Promise<UsageReport> {
-    const key = `${id}?${search}`, now = Date.now();
+  /**
+   * Fills in `shares` for the conversations more than one counted machine has (copies kept from when DSHes shared
+   * conversations), so that `combine` counts each such record once. `own` answers for this computer. A machine that
+   * cannot say (an older version, or no answer and nothing kept) keeps all its records.
+   */
+  async addShares(parts: MachinePart[], link: LinkService | undefined, search: string, own: (sessions: ReadonlySet<string>) => RecordShare[]): Promise<void> {
+    const holders = new Map<string, number>();
+    for (const part of parts) for (const id of new Set(part.report?.filters?.sessions ?? [])) holders.set(id, (holders.get(id) ?? 0) + 1);
+    const shared = new Set([...holders].filter(([, count]) => count > 1).map(([id]) => id));
+    if (!shared.size) return;
+    await Promise.all(parts.map(async part => {
+      const mine = [...new Set(part.report?.filters?.sessions ?? [])].filter(id => shared.has(id)).sort();
+      if (!mine.length) return;
+      if (part.self) { part.shares = own(new Set(mine)); return; }
+      if (!link) return;
+      const found: RecordShare[] = [];
+      for (let i = 0; i < mine.length; i += SESSIONS_PER_REQUEST) {
+        const path = `/api/usage-stats?${search ? `${search}&` : ''}${new URLSearchParams({ shares: mine.slice(i, i + SESSIONS_PER_REQUEST).join(',') })}`;
+        const key = `${part.id}?${path}`;
+        try {
+          const answer = await this.ask(link, part.id, path, (value: unknown): value is { shares: RecordShare[] } => Array.isArray((value as { shares?: unknown } | undefined)?.shares));
+          this.keep(key, answer);
+          found.push(...answer.shares);
+        } catch {
+          const last = this.kept.get(key)?.report as { shares?: RecordShare[] } | undefined;
+          if (!last?.shares) return;
+          found.push(...last.shares);
+        }
+      }
+      part.shares = found;
+    }));
+  }
+
+  private keep(key: string, value: unknown): void {
+    this.kept.delete(key);
+    this.kept.set(key, { at: Date.now(), report: value as UsageReport });
+    if (this.kept.size > KEPT) this.kept.delete(this.kept.keys().next().value!);
+  }
+
+  private ask<T>(link: LinkService, id: string, path: string, check: (value: unknown) => value is T): Promise<T> {
+    const key = `${id}?${path}`, now = Date.now();
     const hit = this.shared.get(key);
-    if (hit && now - hit.at < SHARED_MS) return hit.answer;
+    if (hit && now - hit.at < SHARED_MS) return hit.answer as Promise<T>;
     for (const [old, entry] of this.shared) if (now - entry.at >= SHARED_MS) this.shared.delete(old);
     const answer = (async () => {
-      const response = await link.get(id, `/api/usage-stats?${search}`, { timeoutMs: this.timeoutMs });
+      const response = await link.get(id, path, { timeoutMs: this.timeoutMs });
       let body: unknown;
       try { body = JSON.parse(response.text); } catch { throw new Error(response.status === 404 ? 'Usage statistics is not installed there' : `It answered ${response.status}`); }
       if (response.status !== 200) throw new Error((body as { error?: unknown })?.error ? String((body as { error: unknown }).error) : `It answered ${response.status}`);
-      if (!usable(body)) throw new Error('Unexpected answer');
+      if (!check(body)) throw new Error('Unexpected answer');
       return body;
     })();
     this.shared.set(key, { at: now, answer });
@@ -81,6 +121,6 @@ export class MachineReports {
 /** The query a machine answers for its own report: this one without the machine scope and the export format. */
 export function ownQuery(url: URL): string {
   const params = new URLSearchParams(url.searchParams);
-  params.delete('machines'); params.delete('format');
+  params.delete('machines'); params.delete('format'); params.delete('shares');
   return params.toString();
 }

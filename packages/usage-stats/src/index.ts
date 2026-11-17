@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { acquireUsageStore } from './store.js';
 import { observe } from './observe.js';
-import { combine, parseQuery, report, toCsv, validRecord, type UsageRecord, type WorkspaceNames } from './domain.js';
+import { combine, parseQuery, report, shares, toCsv, validRecord, type UsageRecord, type WorkspaceNames } from './domain.js';
 import { MachineReports, ownQuery, type LinkService } from './machines.js';
 
 declare module '@deepseek-ai/cordis' {
@@ -80,7 +80,21 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
         const query = parseQuery(url), scope = url.searchParams.get('machines');
         if (scope !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(scope)) throw new Error("Unknown machine");
         const own = () => report(store.snapshot(), query, store.failedWrites, workspaceNames());
-        const data = scope === null ? own() : combine(await machineReports.parts(link(), scope, ownQuery(url), own), query);
+        const ownShares = (sessions: ReadonlySet<string>) => shares(store.snapshot(), query, sessions, workspaceNames());
+        // Another machine asking which of these conversations' records this one has (see `MachineReports.addShares`).
+        const asked = url.searchParams.get('shares');
+        if (asked !== null && scope === null) {
+          const sessions = asked.split(',').filter(Boolean);
+          if (sessions.length > 200 || sessions.some(id => id.length > 200)) throw new Error("Filter value is too long");
+          return Response.json({ shares: ownShares(new Set(sessions)) }, { headers: { 'Cache-Control': 'no-store' } });
+        }
+        let data;
+        if (scope === null) data = own();
+        else {
+          const parts = await machineReports.parts(link(), scope, ownQuery(url), own);
+          await machineReports.addShares(parts, link(), ownQuery(url), ownShares);
+          data = combine(parts, query);
+        }
         const headers = { 'Cache-Control': 'no-store' };
         if (format === 'csv') return new Response(toCsv(data), { headers: { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="dsh-usage.csv"' } });
         return Response.json(data, { headers });

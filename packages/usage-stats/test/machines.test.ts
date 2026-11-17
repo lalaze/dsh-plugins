@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Context } from '@deepseek-ai/cordis';
-import { combine, report, type Query, type UsageRecord, type UsageReport } from '../src/domain.js';
+import { combine, fingerprint, report, shares, type Query, type UsageRecord, type UsageReport } from '../src/domain.js';
 import { MachineReports, ownQuery, type LinkService } from '../src/machines.js';
 import { apply } from '../src/index.js';
 
@@ -88,7 +88,7 @@ test('逐台读取：离线、未响应分开标出；睡眠中的机器沿用�
 test('接口：machines=all 汇总 DSH Link 的机器；不带参数只答本机，供其他机器读取', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-usage-machines-'));
   try {
-    await writeFile(join(root, 'usage.json'), JSON.stringify({ version: 1, records: [record()] }));
+    await writeFile(join(root, 'usage.json'), JSON.stringify({ version: 1, records: [record({ sessionId: 's' })] }));
     const peer: UsageReport = report([record({ usage: { inputTokens: 90, outputTokens: 0 } })], { groupBy: 'day' });
     const { link, calls } = fakeLink({ a: () => json(peer) });
     let fetcher: ((r: Request) => Promise<Response>) | undefined;
@@ -102,7 +102,62 @@ test('接口：machines=all 汇总 DSH Link 的机器；不带参数只答本机
     assert.deepEqual(all.machines?.map(m => [m.name, m.self ?? false]), [['hub', true], ['name-a', false]]);
     const csv = await (await fetcher!(new Request('http://x/api/usage-stats?machines=all&format=csv&groupBy=host'))).text();
     assert.match(csv, /"hub"/); assert.match(csv, /"name-a"/);
+    const answered = await (await fetcher!(new Request('http://x/api/usage-stats?shares=s,nope&tz=0'))).json() as { shares: { session: string; totals: { totalTokens: number } }[] };
+    assert.deepEqual(answered.shares.map(share => [share.session, share.totals.totalTokens]), [['s', 10]]);
     assert.equal((await fetcher!(new Request('http://x/api/usage-stats?machines=../x'))).status, 400);
     assert.equal((await fetcher!(new Request('http://x/api/usage-stats?machines=zzz'))).status, 400);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('共享过的对话两边都记了同一轮：按记录指纹只计一次，名字靠前的机器保留，部分重叠只去掉相同的', () => {
+  const turn = record({ id: 'x1', sessionId: 's1', provider: 'remote-cli-claude', model: 'opus', host: 'Mac mini', workspace: '/w', usage: { inputTokens: 1000, outputTokens: 0 } });
+  const hubRecords = [turn, record({ id: 'h2', sessionId: 's2', usage: { inputTokens: 7, outputTokens: 0 } })];
+  const airRecords = [{ ...turn, id: 'x2' }, record({ id: 'a2', sessionId: 's1', startedAt: '2026-11-16T13:00:00.000Z', provider: 'remote-cli-claude', model: 'opus', host: 'Mac mini', workspace: '/w', usage: { inputTokens: 50, outputTokens: 0 } })];
+  assert.equal(fingerprint(turn), fingerprint({ ...turn, id: 'other' }), 'the random id is not part of it');
+  assert.notEqual(fingerprint(turn), fingerprint({ ...turn, model: 'sonnet' }));
+  const q: Query = { groupBy: 'session' };
+  const one = new Set(['s1']);
+  const parts = [
+    { id: 'air', name: 'lalazemacbook-air', state: 'counted' as const, report: report(airRecords, q), shares: shares(airRecords, q, one) },
+    { id: 'hub', name: 'lalazemac-mini', self: true as const, state: 'counted' as const, report: report(hubRecords, q), shares: shares(hubRecords, q, one) },
+  ];
+  const data = combine(parts, q);
+  assert.equal(data.totals.totalTokens, 1057); assert.equal(data.totals.requests, 3);
+  assert.deepEqual(data.groups.map(g => [g.key, g.totals.totalTokens]), [['s1', 1050], ['s2', 7]]);
+  assert.deepEqual(data.breakdowns.host.map(g => [g.key, g.totals.totalTokens]), [['Mac mini', 1050], ['lalazemac-mini', 7]]);
+  assert.deepEqual(data.machines?.map(m => [m.name, m.totals?.totalTokens, m.copies]), [['lalazemacbook-air', 50, 1], ['lalazemac-mini', 1007, undefined]]);
+  assert.equal(data.breakdowns.workspace.find(g => g.machine === 'lalazemacbook-air')?.totals.totalTokens, 50, 'the copy left the Air\'s workspace row');
+  // Without a machine's records nothing is taken out (an older version cannot say).
+  assert.equal(combine([{ ...parts[0], shares: undefined }, parts[1]], q).totals.totalTokens, 2057);
+});
+
+test('只为两台以上机器都有的对话要指纹；旧版本答不出时照常计入，自己这边直接算', async () => {
+  const turn = record({ sessionId: 's1', usage: { inputTokens: 1000, outputTokens: 0 } });
+  const own = report([turn, record({ sessionId: 'own-only' })], query);
+  const peer = report([{ ...turn, id: 'copy' }], query);
+  const asked: string[] = [];
+  const { link } = fakeLink({
+    a: () => json(peer),
+    old: () => json(report([{ ...turn, id: 'old-copy' }], query)),
+  });
+  link.get = async (id, path) => {
+    asked.push(`${id} ${path}`);
+    const url = new URL(path, 'http://x');
+    if (url.searchParams.has('shares')) {
+      if (id === 'old') return json(report([{ ...turn, id: 'old-copy' }], query)); // an older version ignores the parameter
+      return json({ shares: shares([{ ...turn, id: 'copy' }], query, new Set(url.searchParams.get('shares')!.split(','))) });
+    }
+    return json(id === 'a' ? peer : report([{ ...turn, id: 'old-copy' }], query));
+  };
+  const reports = new MachineReports();
+  const parts = await reports.parts(link, 'all', 'tz=480', () => own);
+  let ownAsked: string[] = [];
+  await reports.addShares(parts, link, 'tz=480', sessions => { ownAsked = [...sessions]; return shares([turn, record({ sessionId: 'own-only' })], query, sessions); });
+  assert.deepEqual(ownAsked, ['s1'], 'only conversations another machine also has');
+  assert.ok(asked.includes('a /api/usage-stats?tz=480&shares=s1'));
+  assert.equal(parts.find(p => p.id === 'old')?.shares, undefined);
+  const data = combine(parts, query);
+  // hub keeps its record ("hub" < "name-a" < "name-old"), a's copy goes, the old version's copy stays.
+  assert.equal(data.totals.totalTokens, 1010 + 1000);
+  assert.deepEqual(data.machines?.map(m => [m.name, m.copies]), [['hub', undefined], ['name-a', 1], ['name-old', undefined]]);
 });

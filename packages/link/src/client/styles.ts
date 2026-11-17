@@ -15,6 +15,9 @@ export const CSS = `
 .dl-row{display:flex;flex-direction:column;min-width:0;max-width:260px}
 .dl-row-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-row-meta{color:${tertiary};font-size:11.5px;line-height:16px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dl-actions{display:flex;gap:2px;padding:2px 4px 0}
+.dl-action{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:0;border-radius:var(--dsw-radius-sm,8px);background:transparent;color:${secondary};cursor:pointer}
+.dl-action:hover,.dl-action:focus-visible{background:${hover};color:var(--dsw-alias-label-primary,inherit);outline:none}
 .dl-muted{color:${tertiary};font-size:12px;line-height:18px}
 .dl-error{color:${error};font-size:12px;line-height:18px;overflow-wrap:anywhere}
 .dl-nowrap{white-space:nowrap;flex:none}
