@@ -56,6 +56,16 @@ export declare const SHELL_KEYS: {
  * nor for the machine the user chose to open directly.
  */
 export declare function injectShellReturn(html: string, id: string): string;
+/** The global a window's own page keeps its shell on (client/shell.ts). */
+export declare const SHELL_GLOBAL = "__dshLinkShell";
+/** On the shell page's root: the height of the title strip over its frames in a desktop window (client/styles.ts). */
+export declare const BAR_HEIGHT = "--dl-bar-height";
+/**
+ * A machine's page in a frame of the desktop window fills the whole window, so its background (and a wallpaper) reaches
+ * the top as on the window's own page. The shell's see-through title strip lies over the top band: the page starts
+ * below it, and its menus and dialogs keep clear of it. The band follows the window (none in full screen).
+ */
+export declare function injectFrameTop(html: string): string;
 /** Where the namespace script leaves the page's real localStorage, for the switcher to pick another machine's Session. */
 export declare const RAW_STORAGE = "__dshLinkStorage";
 /**

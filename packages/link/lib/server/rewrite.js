@@ -71,6 +71,20 @@ export function injectShellReturn(html, id) {
     const script = `<script>(()=>{try{if(window.top!==window)return;const s=window.sessionStorage,l=window.localStorage,id=${literal(id)};const k=l.getItem(${literal(SHELL_KEYS.keepPages)}),n=performance.getEntriesByType("navigation")[0];if(k==="off"||(k!=="on"&&n&&n.nextHopProtocol==="http/1.1")||s.getItem(${literal(SHELL_KEYS.direct)})===id)return;s.setItem(${literal(SHELL_KEYS.shown)},id);s.setItem(${literal(SHELL_KEYS.returned)},id);location.replace("/")}catch{}})()</script>`;
     return injectHead(html, script);
 }
+/** The global a window's own page keeps its shell on (client/shell.ts). */
+export const SHELL_GLOBAL = '__dshLinkShell';
+/** On the shell page's root: the height of the title strip over its frames in a desktop window (client/styles.ts). */
+export const BAR_HEIGHT = '--dl-bar-height';
+/**
+ * A machine's page in a frame of the desktop window fills the whole window, so its background (and a wallpaper) reaches
+ * the top as on the window's own page. The shell's see-through title strip lies over the top band: the page starts
+ * below it, and its menus and dialogs keep clear of it. The band follows the window (none in full screen).
+ */
+export function injectFrameTop(html) {
+    const style = '<style>html[data-dl-framed] body{box-sizing:border-box;padding-top:var(--dl-top,0px)}html[data-dl-framed]{--dsh-frame-overlay-top:calc(var(--dl-top,0px) + 12px)}</style>';
+    const script = `<script>(()=>{try{const p=window.parent;if(p===window||!p.${SHELL_GLOBAL})return;const h=document.documentElement,r=p.document.documentElement,set=()=>{try{const v=p.getComputedStyle(r).getPropertyValue(${literal(BAR_HEIGHT)}).trim();if(v&&parseFloat(v)>0)h.style.setProperty("--dl-top",v);else h.style.removeProperty("--dl-top")}catch{}};h.setAttribute("data-dl-framed","");set();new MutationObserver(set).observe(r,{attributes:true})}catch{}})()</script>`;
+    return injectHead(html, style + script);
+}
 /** Where the namespace script leaves the page's real localStorage, for the switcher to pick another machine's Session. */
 export const RAW_STORAGE = '__dshLinkStorage';
 /**
@@ -109,7 +123,7 @@ export function selectSession(storage, machineId, sessionId) {
 export function mountedIndex(html, id) {
     const manifest = credentialedManifest(html);
     const guarded = guardDesktopBoot(manifest.html, mountPrefix(id));
-    const page = injectRequestBase(injectStorageNamespace(guarded.html, id), mountPrefix(id));
+    const page = injectFrameTop(injectRequestBase(injectStorageNamespace(guarded.html, id), mountPrefix(id)));
     // First of all: a page about to go to this computer's own page does nothing else.
     return { html: injectShellReturn(page, id), misses: [...manifest.misses, ...guarded.misses] };
 }
