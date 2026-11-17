@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { Dimension, UsageReport, Totals } from '../domain.js';
 import { compact, dateRange, localOffset, trendBuckets } from './metrics.js';
 import { styles } from './styles.js';
-import { TodayBadge } from './today.js';
+import { TodayBadge, machineNotes } from './today.js';
 import { UsageSettings } from './settings.js';
 import { MonthlyHeatmap } from './heatmap.js';
 
@@ -54,15 +54,16 @@ function Status({ totals: t }: { totals: Totals }) {
 /** Data problems that make the totals partial: unsaved records and requests that returned no usage. */
 function attention(data: UsageReport): string[] {
   const missing = data.totals.requests - data.totals.withUsage;
-  return [data.failedWrites > 0 ? ui("{0} records could not be saved. Statistics may be incomplete. Check DSH logs and disk permissions.", { 0: number(data.failedWrites) }) : '',
+  return [...machineNotes(data.machines ?? []), data.failedWrites > 0 ? ui("{0} records could not be saved. Statistics may be incomplete. Check DSH logs and disk permissions.", { 0: number(data.failedWrites) }) : '',
     missing > 0 ? ui("{0} requests returned no usage. Token totals only include reported data.", { 0: number(missing) }) : ''].filter(Boolean);
 }
 /** The period's total in large type, its request count, then input and output; the exact total is in the tooltip. */
 function Headline({ data, onPartial }: { data: UsageReport; onPartial: () => void }) {
   const t = data.totals, notes = attention(data);
   const input = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens;
+  const counted = (data.machines ?? []).filter(machine => machine.state === 'counted').length;
   return <article className="us-hero" aria-label={ui("Recorded usage")}>
-    <div className="us-hero-head"><span>{ui("Recorded usage")}</span>{notes.length > 0 && <button type="button" className="us-partial" title={notes.join('\n')} onClick={onPartial}>{ui("Partial records")}</button>}</div>
+    <div className="us-hero-head"><span>{ui("Recorded usage")}{counted > 1 ? ` · ${ui("{0} machines", { 0: counted })}` : ''}</span>{notes.length > 0 && <button type="button" className="us-partial" title={notes.join('\n')} onClick={onPartial}>{ui("Partial records")}</button>}</div>
     <div className="us-hero-total"><strong className="us-number" title={number(t.totalTokens)}>{short(t.totalTokens)}</strong><span>{ui("tokens")}</span></div>
     <p className="us-hero-exact us-number">{ui("{0} requests", { 0: number(t.requests) })}</p>
     <div className="us-hero-split">
@@ -92,13 +93,15 @@ function Breakdown({ data, by }: { data: UsageReport; by: Dimension }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => { setAll(false); setOpen(new Set()); }, [by]);
   const rows = data.breakdowns?.[by] ?? [], total = data.totals.totalTokens;
+  // Workspaces of several machines name their machine.
+  const machines = (data.machines ?? []).filter(machine => machine.state === 'counted').length > 1;
   if (!rows.length) return <div className="us-empty" role="status"><Icon /><h3>{ui("No matching records")}</h3><p>{ui("Usage appears here after a model or remote agent request completes.")}</p></div>;
   const toggle = (key: string) => setOpen(previous => { const next = new Set(previous); if (!next.delete(key)) next.add(key); return next; });
   return <section className="us-breakdown" aria-label={ui("Usage breakdown")}>
     <ol>{(all ? rows : rows.slice(0, BREAKDOWN_ROWS)).map(g => {
       const { name, title } = groupName(g, by), expanded = open.has(g.key), t = g.totals;
       return <li key={g.key}>
-        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={title}>{name}</span><b className="us-number" title={number(t.totalTokens)}>{short(t.totalTokens)}</b><span className="us-row-share us-number">{percent(t.totalTokens, total)}</span><Chevron open={expanded} />
+        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={g.machine && machines ? `${title} · ${g.machine}` : title}>{name}{g.machine && machines && <small className="us-row-machine">{g.machine}</small>}</span><b className="us-number" title={number(t.totalTokens)}>{short(t.totalTokens)}</b><span className="us-row-share us-number">{percent(t.totalTokens, total)}</span><Chevron open={expanded} />
           <span className="us-meter" aria-hidden="true"><span style={{ width: `${total ? t.totalTokens / total * 100 : 0}%` }} /></span></button>
         {expanded && <dl className="us-row-detail">
           <div><dt>{ui("Requests")}</dt><dd>{number(t.requests)}<small>{ui("Usage reported {0}/{1}", { 0: number(t.withUsage), 1: number(t.requests) })}</small></dd></div>
@@ -119,12 +122,16 @@ function Sources({ data, open, onToggle, anchor }: { data: UsageReport; open: bo
   return <section ref={anchor} className="us-sources" aria-label={ui("Data sources")}>
     <button type="button" className="us-sources-head" aria-expanded={open} onClick={onToggle}><span className="us-sources-title">{ui("Data sources")}</span>
       <span className="us-sources-status">{notes.length ? <><i className="us-dot us-warn" />{ui("{0} need attention", { 0: notes.length })}</> : ui("Measurement and scope")}</span><Chevron open={open} /></button>
+    {(data.machines?.length ?? 0) > 1 && <ul className="us-source-list us-machine-list" aria-label={ui("Machines")}>{data.machines!.map(m => <li key={m.id} data-state={m.state}><div><span>{m.name}{m.self ? ` · ${ui("This computer")}` : ''}</span><small>{
+      m.state === 'counted' ? `${ui("{0} requests", { 0: number(m.totals?.requests ?? 0) })}${m.stale ? ` · ${ui("Last answer {0}; not answering now", { 0: new Date(m.asOf!).toLocaleString(formatLocale()) })}` : ''}`
+        : m.state === 'skipped' ? ui("Not selected") : m.state === 'offline' ? ui("Offline; not included") : ui("Did not answer; not included")}</small></div>
+      <b className="us-number" title={m.totals ? number(m.totals.totalTokens) : undefined}>{m.state === 'counted' && m.totals ? short(m.totals.totalTokens) : '—'}</b></li>)}</ul>}
     <ul className="us-source-list">{data.sources.map(s => <li key={s.key}><div><span>{ui(s.label)}</span><small>{ui("{0} requests", { 0: number(s.totals.requests) })} · {ui("Usage reported {0}/{1}", { 0: number(s.totals.withUsage), 1: number(s.totals.requests) })}</small></div><b className="us-number" title={number(s.totals.totalTokens)}>{short(s.totals.totalTokens)}</b></li>)}</ul>
     {open && <div className="us-sources-detail">
       {notes.map(note => <p key={note} className="us-notice us-warning">{note}</p>)}
       <p>{ui("Completion rate")} {percent(t.completed, t.requests)} · {ui("Failed {0} · Cancelled {1}", { 0: number(t.errors), 1: number(t.cancelled) })}</p>
-      <p>{ui("Dates use your local time zone and the request start time. Input excludes cache tokens; cache reads and writes are counted separately. Cache read share = cache reads ÷ (uncached input + cache reads + cache writes). Reasoning tokens")} {number(t.reasoningTokens)} {ui("are included in output. Only calls from this DSH instance are tracked, including titles and compaction. Remote agents are counted once per remote turn; independently running CLIs are excluded. Missing usage is not estimated. First record:")} {data.recordedSince ? new Date(data.recordedSince).toLocaleString(formatLocale()) : ui("None yet")}.</p>
-      <p>{ui("Only calls from this DSH instance are recorded, on this computer. Nothing is uploaded.")}</p>
+      <p>{ui("Dates use your local time zone and the request start time. Input excludes cache tokens; cache reads and writes are counted separately. Cache read share = cache reads ÷ (uncached input + cache reads + cache writes). Reasoning tokens")} {number(t.reasoningTokens)} {ui("are included in output. Each machine's DSH records the calls it makes, including titles and compaction, and the totals add up the machines DSH Link reaches; a turn is recorded only by the DSH that ran it. Remote agents are counted once per remote turn; independently running CLIs are excluded. Missing usage is not estimated. First record:")} {data.recordedSince ? new Date(data.recordedSince).toLocaleString(formatLocale()) : ui("None yet")}.</p>
+      <p>{ui("Each computer keeps its own records. Other machines' usage is read through DSH Link inside your tailnet; nothing is uploaded.")}</p>
     </div>}
   </section>;
 }
@@ -135,6 +142,8 @@ export function Dashboard() {
   const [from, setFrom] = useState(() => dateRange('today').from); const [to, setTo] = useState(() => dateRange('today').to);
   const [period, setPeriod] = useState<Period>('today');
   const [provider, setProvider] = useState(''); const [model, setModel] = useState(''); const [sessionId, setSessionId] = useState('');
+  // Every machine DSH Link reaches, or one of them.
+  const [machine, setMachine] = useState('all');
   const [data, setData] = useState<UsageReport>(); const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0); const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false); const [exportError, setExportError] = useState('');
@@ -142,7 +151,7 @@ export function Dashboard() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const params = new URLSearchParams();
   // Days follow the viewer's time zone, like the header pill.
-  for (const [key, value] of Object.entries({ from, to, provider, model, sessionId, tz: localOffset() })) if (value) params.set(key, value);
+  for (const [key, value] of Object.entries({ from, to, provider, model, sessionId, tz: localOffset(), machines: machine })) if (value) params.set(key, value);
   // Every category's groups arrive in one report, so switching categories needs no new request.
   const path = `/api/usage-stats?${params}`;
   const exportCsv = async () => {
@@ -185,9 +194,10 @@ export function Dashboard() {
     setPeriod(value);
     if (value !== 'custom') { const range = dateRange(value); setFrom(range.from); setTo(range.to); }
   };
-  const reset = () => { setProvider(''); setModel(''); setSessionId(''); choosePeriod('today'); };
+  const reset = () => { setProvider(''); setModel(''); setSessionId(''); setMachine('all'); choosePeriod('today'); };
   const showAttention = () => { setSourcesOpen(true); requestAnimationFrame(() => sources.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); };
-  const filterCount = [provider, model, sessionId].filter(Boolean).length;
+  const filterCount = [provider, model, sessionId, machine === 'all' ? '' : machine].filter(Boolean).length;
+  const machineChoices = data?.machines ?? [];
   const select = (label: string, value: string, set: (value: string) => void, options: string[]) => <label className="us-field">{label}<select aria-label={label} value={value} onChange={e => set(e.target.value)}><option value="">{ui("All {0}", { 0: label })}</option>{options.map(v => <option key={v} value={v}>{v}</option>)}</select></label>;
   const range = from && from === to ? from : from || to ? `${from || ui("First record")} → ${to || ui("Latest record")}` : ui("All records");
   const updateStatus = loading && data ? ui("Updating… showing previous results") : error && data ? ui("Could not refresh; showing previous results") :
@@ -197,10 +207,10 @@ export function Dashboard() {
       <div className="us-actions"><button type="button" className="us-link" onClick={() => setRefresh(n => n + 1)}><Icon kind="refresh" />{ui("Refresh")}</button><button type="button" className="us-link" disabled={exporting} onClick={() => void exportCsv()}><Icon kind="download" />{exporting ? ui("Exporting…") : ui("Export CSV")}</button></div></header>
     <Tabs label={ui("Time range")} value={period} options={PERIODS} onChange={choosePeriod} />
     {period === 'custom' && <div className="us-custom-dates"><label className="us-field">{ui("Start date")}<input aria-label={ui("Start date")} type="date" value={from} onChange={e => setFrom(e.target.value)} /></label><span className="us-muted">—</span><label className="us-field">{ui("End date")}<input aria-label={ui("End date")} type="date" value={to} onChange={e => setTo(e.target.value)} /></label></div>}
-    <div className="us-filter-row"><button type="button" className="us-filters" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}><Chevron open={filtersOpen} />{ui("More filters")}{filterCount ? ui(" · {0} applied", { 0: filterCount }) : ui(" · Provider, model, session")}</button>
+    <div className="us-filter-row"><button type="button" className="us-filters" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}><Chevron open={filtersOpen} />{ui("More filters")}{filterCount ? ui(" · {0} applied", { 0: filterCount }) : machineChoices.length > 1 ? ui(" · Machine, provider, model, session") : ui(" · Provider, model, session")}</button>
       <span className="us-range us-number">{range} · {timeZone()}</span>
       {(filterCount > 0 || period === 'custom') && <button type="button" className="us-link" onClick={reset}>{ui("Reset filters")}</button>}</div>
-    {filtersOpen && <div className="us-filter-grid">{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div>}
+    {filtersOpen && <div className="us-filter-grid">{machineChoices.length > 1 && <label className="us-field">{ui("Machine")}<select aria-label={ui("Machine")} value={machine} onChange={e => setMachine(e.target.value)}><option value="all">{ui("All machines")}</option>{machineChoices.map(m => <option key={m.id} value={m.self ? 'self' : m.id}>{m.self ? `${m.name} · ${ui("This computer")}` : m.name}</option>)}</select></label>}{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div>}
     {error && <div className="us-notice us-warning" role="alert">{ui("Could not load:")}{ui(error)}<button className="us-button" onClick={() => setRefresh(n => n + 1)}>{ui("Retry")}</button></div>}
     {exportError && <div className="us-notice us-warning" role="alert">{ui(exportError)}</div>}
     {loading && !data && <div className="us-loading" role="status">{ui("Loading usage…")}</div>}
@@ -209,7 +219,7 @@ export function Dashboard() {
       <Tabs label={ui("Group by")} value={groupBy} options={BREAKDOWNS} onChange={setGroupBy} compact />
       <Breakdown data={data} by={groupBy} />
       <Trend data={data} />
-      <MonthlyHeatmap provider={provider} model={model} sessionId={sessionId} refresh={refresh} />
+      <MonthlyHeatmap provider={provider} model={model} sessionId={sessionId} machine={machine} refresh={refresh} />
       <Sources data={data} open={sourcesOpen} onToggle={() => setSourcesOpen(!sourcesOpen)} anchor={sources} />
     </>}
   </section>;

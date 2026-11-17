@@ -38,7 +38,7 @@ export function UsageSettings({ details }: { details: ComponentType }) {
         <p className="us-settings-hint">{ui("Trends, breakdowns and details by provider, workspace, model and host, with CSV export.")}</p></div>
         <button type="button" className="us-settings-button" aria-haspopup="dialog" onClick={() => setOpen(true)}>{ui("Open")}</button></div>
       <div className="us-settings-row"><div><div className="us-settings-title">{ui("Stored locally")}</div>
-        <p className="us-settings-hint">{ui("Only calls from this DSH instance are recorded, on this computer. Nothing is uploaded.")}</p></div></div>
+        <p className="us-settings-hint">{ui("Each computer keeps its own records. Other machines' usage is read through DSH Link inside your tailnet; nothing is uploaded.")}</p></div></div>
     </div>
     {open && <UsageDialog Details={details} onClose={() => setOpen(false)} />}
   </section>;

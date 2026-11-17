@@ -67,5 +67,7 @@ export interface HostContext {
   readonly connection: HostConnection;
   effect(factory: () => () => void | Promise<void>, label?: string): void;
   get<K extends keyof OptionalServices>(name: K): OptionalServices[K] | undefined;
+  /** Offers a service to every plugin of this DSH (cordis' `provide`). */
+  provide(name: string, value: unknown): void;
   on<K extends keyof HostEvents>(event: K, listener: HostEvents[K], options?: { global?: boolean }): () => void;
 }

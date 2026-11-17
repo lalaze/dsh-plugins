@@ -6,7 +6,8 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { acquireUsageStore } from './store.js';
 import { observe } from './observe.js';
-import { parseQuery, report, toCsv, validRecord, type UsageRecord, type WorkspaceNames } from './domain.js';
+import { combine, parseQuery, report, toCsv, validRecord, type UsageRecord, type WorkspaceNames } from './domain.js';
+import { MachineReports, ownQuery, type LinkService } from './machines.js';
 
 declare module '@deepseek-ai/cordis' {
   interface Events {
@@ -65,13 +66,21 @@ export async function apply(ctx: Context, config: { stateDir?: string } = {}): P
       store.append({ id, startedAt, provider, model, ...(sessionId ? { sessionId } : {}), purpose, status, durationMs, ...(usage ? { usage } : {}), ...(host ? { host } : {}), ...(workspace ? { workspace } : {}) })
         .catch(error => console.warn("[dsh-usage-stats] Could not record remote agent usage", error));
     }, { global: true });
+    // DSH Link's machines, when it runs here: `machines=all` adds up every machine's own report.
+    const link = (): LinkService | undefined => {
+      try { const service = ctx.get('dshLink') as LinkService | undefined; return service?.version === 1 ? service : undefined; } catch { return undefined; }
+    };
+    const machineReports = new MachineReports();
     // The host connection supplies authentication, origin checks and native carriers.
     ctx.connection.fetch.register({ path: '/api/usage-stats', methods: ['GET'], requestBody: 'buffered', fetch: async request => {
       try {
         const url = new URL(request.url);
         const format = url.searchParams.get('format');
         if (format && format !== 'csv') throw new Error("Unsupported export format");
-        const data = report(store.snapshot(), parseQuery(url), store.failedWrites, workspaceNames());
+        const query = parseQuery(url), scope = url.searchParams.get('machines');
+        if (scope !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(scope)) throw new Error("Unknown machine");
+        const own = () => report(store.snapshot(), query, store.failedWrites, workspaceNames());
+        const data = scope === null ? own() : combine(await machineReports.parts(link(), scope, ownQuery(url), own), query);
         const headers = { 'Cache-Control': 'no-store' };
         if (format === 'csv') return new Response(toCsv(data), { headers: { ...headers, 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="dsh-usage.csv"' } });
         return Response.json(data, { headers });

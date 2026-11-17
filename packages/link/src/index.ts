@@ -25,6 +25,7 @@ import type { Hello, MachinesAnswer, SelfInfo } from './model.js';
 import { forwardHttp, forwardUpgrade, HOP_HEADER, locationUnder, readJson, requestHeaders, sendJson, sendText } from './proxy.js';
 import { MOUNT_ROOT, mountedIndex, mountPrefix } from './rewrite.js';
 import { RestartService } from './restart/service.js';
+import { createLinkService } from './service.js';
 import { inspectBusy, processFacts, readVersions, restartTarget } from './restart/target.js';
 import { readStatus, whois, type TailnetStatus } from './tailscale.js';
 
@@ -107,6 +108,9 @@ export function apply(ctx: HostContext, config: Config): void {
 
   const book = new MachineBook(join(dir, 'machines.json'), () => selfId);
   book.load();
+
+  // Other plugins reach the machines through this (dsh-usage-stats adds up every machine's usage).
+  ctx.provide('dshLink', createLinkService(() => ({ id: selfId, name: self.name }), book));
 
   const hello = (_req: IncomingMessage, res: ServerResponse) => sendJson(res, 200, { dshLink: 1, id: selfId, name: self.name, os: self.os, version } satisfies Hello);
 
