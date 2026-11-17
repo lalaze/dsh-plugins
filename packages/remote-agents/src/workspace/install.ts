@@ -69,7 +69,8 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
   };
   const placement = placed((cwd, signal) => access.resolve(cwd, signal)), cliPlacement = placed((cwd, signal) => access.resolveForCli(cwd, signal));
   const files = new WorkspaceService(machines, placement, sessionCwd, cliPlacement);
-  // Other plugins work on remote machines only: this computer's folders are DSH's own.
+  // Other plugins see remote machines only: this computer's folders are DSH's own. Only a conversation's CLI target
+  // (`cliTarget`) names the local machine, for what its CLIs need there, such as a TUI conversation.
   const local = (hostId: string) => isLocalHost(store.hosts().find(host => host.id === hostId));
   const remoteOnly = (hostId: string) => { if (local(hostId)) throw new RemoteError('This computer is not a remote machine', 400); };
   const unbounded = () => new AbortController().signal;
@@ -110,8 +111,9 @@ export async function installWorkspaces(ctx: Context, store: Store, machines: Wo
     version: 1, stateFile: join(store.directory, 'state.json'),
     hosts: () => machines.hosts().filter(host => !local(host.id)),
     browse: async (hostId, path, options) => { remoteOnly(hostId); return machines.browse(hostId, path, options); },
-    withWorkspace: async (hostId, verify, action) => { remoteOnly(hostId); return machines.withWorkspace(hostId, verify, action); },
+    withWorkspace: (hostId, verify, action) => machines.withWorkspace(hostId, verify, action),
     target: (sessionId, signal = unbounded(), expected) => files.target(sessionId, signal, expected),
+    cliTarget: (sessionId, signal = unbounded(), expected) => files.cliTarget(sessionId, signal, expected),
     resolve: (path, signal) => access.resolve(path, signal),
     resolveForCli: (path, signal) => access.resolveForCli(path, signal),
     localMachine: () => { const host = store.hosts().find(h => isLocalHost(h)); return host && { id: host.id, label: host.label }; },

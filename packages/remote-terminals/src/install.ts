@@ -43,10 +43,16 @@ export interface Terminals { terminal: { shell?: string }; worktrees: WorktreeSe
  * @param tuiFile - the file `store` saves to, which a terminal's launcher reads.
  */
 export function installTerminals(ctx: Context, machines: RemoteAgentsMachines, store: TuiStore, tuiFile: string): Terminals {
+  /**
+   * Where a conversation's CLIs run, which is where its TUI runs: its remote workspace, or a folder on this computer.
+   * An older Remote Agents knows remote workspaces only.
+   */
+  const cliTarget = (sessionId: string, signal: AbortSignal, expected?: WorkspaceTarget) =>
+    machines.cliTarget ? machines.cliTarget(sessionId, signal, expected) : machines.target(sessionId, signal, expected);
   /** Runs `action` on a conversation's machine, checked to be its machine still once the connection is ready. */
   const onMachine = async <T>(sessionId: string, signal: AbortSignal, action: (files: MachineFiles, target: WorkspaceTarget) => Promise<T>): Promise<T> => {
-    const target = await machines.target(sessionId, signal);
-    return machines.withWorkspace(target.hostId, async () => { await machines.target(sessionId, signal, target); }, files => action(files, target));
+    const target = await cliTarget(sessionId, signal);
+    return machines.withWorkspace(target.hostId, async () => { await cliTarget(sessionId, signal, target); }, files => action(files, target));
   };
   const remote = <T>(sessionId: string, signal: AbortSignal, action: (remote: TuiRemote, target: WorkspaceTarget) => Promise<T>) =>
     onMachine(sessionId, signal, (files, target) => action(new TuiRemote(files.transport), target));
@@ -54,10 +60,10 @@ export function installTerminals(ctx: Context, machines: RemoteAgentsMachines, s
 
   // TUI conversations' usage, read from their CLIs' logs, as no relay sees their turns.
   const tuiUsage = new TuiUsage(store, {
-    target: (id, signal) => machines.target(id, signal),
+    target: (id, signal) => cliTarget(id, signal),
     // Every conversation is verified to be on the machine again before its log is read.
     read: (hostId, sessions, entries, signal) => machines.withWorkspace(hostId,
-      async () => { for (const { sessionId, target } of sessions) await machines.target(sessionId, signal, target); },
+      async () => { for (const { sessionId, target } of sessions) await cliTarget(sessionId, signal, target); },
       files => new TuiRemote(files.transport).tuiUsageLines(entries, signal)),
     emit: record => ctx.emit('remote-agents/usage', record),
     warn: message => (ctx.get('logger') as { warn?(text: string): void } | undefined)?.warn?.(message),
@@ -99,7 +105,7 @@ export function installTerminals(ctx: Context, machines: RemoteAgentsMachines, s
     rename(input: { sessionId: string; title: string }): Promise<unknown>; selectModel(input: { sessionId: string; provider: string; model: string; reasoningEffort?: string }): Promise<unknown>;
   } | undefined;
   const tui = new TuiSessions(store, {
-    verify: (id, signal) => machines.target(id, signal),
+    verify: (id, signal) => cliTarget(id, signal),
     session: id => (ctx.get('sessions') as { get?(id: string): { append(type: string, data: unknown): unknown } | undefined } | undefined)?.get?.(id),
     agent: id => (ctx.get('agents') as { get?(id: string): unknown } | undefined)?.get?.(id),
     list: async () => (await sessionController()?.list({}))?.items ?? [],

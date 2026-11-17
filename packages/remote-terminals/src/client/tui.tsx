@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { offerTuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
+import { LOCAL_HOST_ID } from '@dsh-plugins/remote-core/domain.js';
 import { TUI_LAUNCHERS, type TuiCli } from '@dsh-plugins/remote-core/workspace.js';
 import { api } from './api.js';
 import { useCurrentModel } from '@dsh-plugins/remote-core/client/current-model.js';
@@ -317,14 +318,19 @@ function AntigravityMark({ size }: { size: number }) {
 const CliMark = ({ cli, large = false }: { cli: TuiCli; large?: boolean }) => (cli === 'codex' ? <CodexMark size={large ? 72 : 20} />
   : cli === 'antigravity' ? <AntigravityMark size={large ? 72 : 20} /> : <ClaudeMascot width={large ? 96 : 24} />);
 
-/** Offered in a new conversation of a remote workspace while a remote Claude, Codex or Antigravity model is selected; DSH lists it once started. */
+/**
+ * Offered in a new conversation while a Claude, Codex or Antigravity model of its machine is selected: in a remote
+ * workspace, or in a folder on this computer with one of this computer's models. DSH lists it once started.
+ */
 function StartButton({ sessionId, sessions, store }: { sessionId?: string; sessions: SessionList; store: TuiStore }) {
   useLocale();
   const session = useSyncExternalStore(sessions.subscribe, () => (sessionId === undefined ? undefined : sessions.getSnapshot()?.byId?.[sessionId]));
   const selection = useCurrentModel(sessionId);
   const [busy, setBusy] = useState(false), [error, setError] = useState('');
   const cli = selection ? PROVIDER_CLIS[selection.provider] : undefined;
-  if (sessionId === undefined || !session?.blank || !session.cwd || !REMOTE_ANCHOR.test(session.cwd) || store.has(sessionId) || !selection || !cli) return null;
+  // The model picker offers this computer's CLIs only in its folders, so such a model says the folder is here.
+  const here = selection?.model.startsWith(`${LOCAL_HOST_ID}/`) === true;
+  if (sessionId === undefined || !session?.blank || !session.cwd || !(REMOTE_ANCHOR.test(session.cwd) || here) || store.has(sessionId) || !selection || !cli) return null;
   const start = () => {
     setBusy(true); setError('');
     api('tuiStart', { sessionId, cli, model: selection.model, effort: selection.reasoningEffort }).then(() => store.add(sessionId, cli), cause => setError(localizeError(cause instanceof Error ? cause.message : String(cause)))).finally(() => setBusy(false));

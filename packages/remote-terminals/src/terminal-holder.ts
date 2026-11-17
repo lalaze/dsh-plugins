@@ -443,7 +443,9 @@ async function holderSocket(id: string, encoded: string, history: string): Promi
     fs.writeFileSync(join(dir, 'command'), encoded, { mode: 0o600 });
     if (history) fs.writeFileSync(join(dir, 'history'), history, { mode: 0o600 });
     const log = fs.openSync(join(dir, 'holder.log'), 'a', 0o600);
-    spawn(process.execPath, [process.argv[1]!, 'daemon', base, id, python], { cwd: dir, detached: true, stdio: ['ignore', 'ignore', log] }).unref();
+    // Through a shell that leaves at once, so the daemon's parent is init and not this client. DSH ends a terminal with
+    // every process descended from it: on this computer, with no ssh in between, that would take the holder along.
+    spawn('/bin/sh', ['-c', '"$0" "$@" & exit 0', process.execPath, process.argv[1]!, 'daemon', base, id, python], { cwd: dir, detached: true, stdio: ['ignore', 'ignore', log] }).unref();
     fs.closeSync(log);
   }
   throw new Error('The terminal holder did not start');

@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type StdioOptions } from 'node:child_process';
 import { createReadStream } from 'node:fs';
 import { quote, REMOTE_PATH } from '@dsh-plugins/remote-core/ssh.js';
 import { ATTACH_EXIT, HOLDER_FOLDER, HOLDERS_FOLDER } from './holder-protocol.js';
@@ -22,8 +22,13 @@ const DIRECT_NOTICE = 'This host has no Python 3 or Node.js 22, so this terminal
 const dim = (text: string) => `\r\n\x1b[2m${text}\x1b[0m\r\n`;
 
 export interface HoldOptions {
-  /** Arguments to ssh up to the host, whatever the command. */
-  ssh: string[];
+  /** Arguments to ssh up to the host, whatever the command. Absent for this computer: see `local`. */
+  ssh?: string[];
+  /**
+   * For a terminal on this computer: the environment its commands start from, as an SSH login's would, since they run in
+   * a local shell instead. The holder then outlives DSH as it outlives a connection.
+   */
+  local?: NodeJS.ProcessEnv;
   /** This terminal's holder on the host. See holder-protocol.ts. */
   holder: string;
   /** Run by a new holder. Unused if it is already running. */
@@ -49,10 +54,19 @@ mkdir -p "$HOME/${HOLDER_FOLDER}" "$HOME/${HOLDERS_FOLDER}" || exit 1
 dsh_file="$(mktemp "$HOME/${HOLDER_FOLDER}/.terminal.XXXXXXXXXX")" || exit 1
 cat > "$dsh_file" && mv -f "$dsh_file" ${remoteScript(version)}`);
 
+/** Runs a command on the host: over ssh, which allocates the terminal when `tty`, or in a shell on this computer. */
+function launch({ ssh, local }: HoldOptions, command: string, tty: boolean) {
+  const stdio: StdioOptions = tty ? 'inherit' : ['pipe', 'ignore', 'inherit'];
+  if (local) return spawn('/bin/sh', ['-c', command], { stdio, env: local, cwd: local.HOME });
+  if (!ssh) throw new Error('A terminal needs ssh arguments or a local environment');
+  return spawn('ssh', [...(tty ? ssh : ssh.map(arg => (arg === '-tt' ? '-T' : arg))), command], { stdio });
+}
+
 /** The script travels over stdin: Linux limits one argument to 128 KB. */
-function install({ ssh, script }: HoldOptions): Promise<boolean> {
+function install(options: HoldOptions): Promise<boolean> {
   return new Promise(resolve => {
-    const child = spawn('ssh', [...ssh.map(arg => (arg === '-tt' ? '-T' : arg)), installCommand(script.version)], { stdio: ['pipe', 'ignore', 'inherit'] });
+    const { script } = options, child = launch(options, installCommand(script.version), false);
+    if (!child.stdin) { resolve(false); return; }
     child.stdin.on('error', () => {});
     createReadStream(script.path).on('error', () => child.kill()).pipe(child.stdin);
     child.on('error', () => resolve(false));
@@ -61,9 +75,9 @@ function install({ ssh, script }: HoldOptions): Promise<boolean> {
 }
 
 /** One connection to the holder, which ends with the terminal or the connection. */
-function connection({ ssh }: HoldOptions, command: string): Promise<number | null> {
+function connection(options: HoldOptions, command: string): Promise<number | null> {
   return new Promise(resolve => {
-    const child = spawn('ssh', [...ssh, command], { stdio: 'inherit' });
+    const child = launch(options, command, true);
     let last = Date.now();
     // ssh would wait out its keepalive with a screen that does not respond. Starting over costs a redraw.
     const watch = setInterval(() => { const now = Date.now(); if (now - last > WAKE_MS) child.kill('SIGTERM'); last = now; }, 1000);

@@ -119,6 +119,13 @@ test('the picker offers this computer’s CLIs in its folders, detecting them on
   const machines = ctx.get('remoteAgentsMachines' as never) as unknown as RemoteAgentsMachines;
   assert.deepEqual(machines.hosts(), []);
   await assert.rejects(machines.browse(LOCAL_HOST_ID), /not a remote machine/);
+  // A TUI conversation works on this computer through its CLI target, and runs its commands here.
+  await assert.rejects(machines.target('local-session'), /verified remote workspace/);
+  const target = await machines.cliTarget!('local-session');
+  assert.deepEqual(target, { hostId: LOCAL_HOST_ID, label: localMachineLabel(), cwd: await realpath(folder) });
+  const here = await machines.withWorkspace(target.hostId, async () => { await machines.cliTarget!('local-session', undefined, target); },
+    files => files.transport.exec(`cd ${JSON.stringify(target.cwd)} && pwd -P`, 20_000, { login: false }));
+  assert.equal(here.trim(), target.cwd);
   assert.deepEqual(await machines.resolve(folder), { hostIds: [] });
   assert.match(JSON.stringify(await api({ action: 'createWorkspace', hostId: LOCAL_HOST_ID, path: folder })), /This computer/);
 });

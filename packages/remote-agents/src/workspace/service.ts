@@ -43,7 +43,7 @@ export class WorkspaceService {
     return this.targetOf(this.placement, sessionId, signal, expected);
   }
   /** Where the conversation's CLI works: its remote workspace, or a folder on this computer. */
-  private cliTarget(sessionId: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget> {
+  cliTarget(sessionId: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget> {
     return this.targetOf(this.cliPlacement, sessionId, signal, expected);
   }
   private async targetOf(placement: SessionPlacement, sessionId: string, signal: AbortSignal, expected?: WorkspaceTarget): Promise<WorkspaceTarget> {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, writeFile, chmod, realpath } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, chmod, realpath, symlink } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -15,14 +15,16 @@ import { installWorkspaceTerminal } from '../src/terminal.js';
  * Launchers installed as DSH has them, for a saved machine whose ssh is a stand-in that records what it is given. With
  * `holder`, the holder's script is there too, and terminals go through it.
  */
-async function launcherRig(t: TestContext, holder = false) {
+/** `holder` is the holder script's content, or true for a stand-in that does nothing. */
+async function launcherRig(t: TestContext, holder: boolean | string = false) {
   const f = await fixture(t);
   // macOS process.cwd() canonicalizes /var to /private/var; keep containment inputs identical.
   const directory = await realpath(f.directory), modules = join(directory, 'modules'), bin = join(directory, 'bin'), capture = join(directory, 'ssh-args.json');
   const shell = join(bin, 'local-shell'), omc = join(directory, 'omc');
   await mkdir(modules); await mkdir(bin); await writeFile(join(modules, 'package.json'), '{"type":"module"}');
   // Every launcher invocation has a finite fallback, never the developer's interactive shell.
-  await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
+  // A login environment drops DSH_TERMINAL_CAPTURE, so a shell started from one writes beside its HOME.
+  await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE||process.env.HOME+'/local-capture.json',JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
   for (const name of ['core/domain', 'core/saved-hosts', 'core/ssh', 'core/remote-host', 'core/access', 'tui', 'tui-state', 'holder-protocol', 'terminal-hold']) {
     // As the build lays them out: the shared core's files beside the plugin's own in core/, imported by relative path.
     const source = await readFile(new URL(name.startsWith('core/') ? `../../remote-core/src/${name.slice(5)}.ts` : `../src/${name}.ts`, import.meta.url), 'utf8');
@@ -33,7 +35,7 @@ async function launcherRig(t: TestContext, holder = false) {
   await writeFile(join(bin, 'ssh'), `#!${process.execPath}\nconst fs=require('node:fs');if(process.argv.includes('-G'))process.stdout.write('hostname build-box\\nuser builder\\nport 22\\n');else fs.writeFileSync(process.env.DSH_TERMINAL_CAPTURE,JSON.stringify(process.argv.slice(2)));\n`); await chmod(join(bin, 'ssh'), 0o700);
   const anchor = await ensureAnchor(directory, { host: 'build-box', username: 'builder', port: 22 }, '/srv/app');
   const controller = { config: { shellCandidates: ['/bin/sh'] } };
-  if (holder) await writeFile(join(directory, 'terminal-holder.mjs'), '// the holder');
+  if (holder) await writeFile(join(directory, 'terminal-holder.mjs'), typeof holder === 'string' ? holder : '// the holder');
   const { shell: launcher, dispose: cleanup } = await installWorkspaceTerminal(controller, join(directory, 'terminal'), { hosts: f.path, tui: f.path }, pathToFileURL(modules + '/')); t.after(cleanup);
   const env = { ...process.env, HOME: directory, SHELL: shell, DSH_HOME: directory, DSH_OMC_STATE_DIR: omc, DSH_TERMINAL_CAPTURE: capture, PATH: `${bin}:${process.env.PATH}` };
   return { f, directory, capture, omc, anchor, controller, launcher, cleanup, env };
@@ -112,10 +114,14 @@ test('native terminal launcher resolves the workspace, refuses an invalid bindin
   const { stderr } = await launch(local);
   assert.match(stderr, /Not a remote workspace/);
   assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
-  assert.match((await launchClaude(local)).stderr, /Not a remote workspace/, 'Remote Claude never starts Claude on the DSH machine');
-  assert.deepEqual(JSON.parse(await readFile(capture, 'utf8')), { args: ['-i'], cwd: local, electron: null });
-  assert.match((await promisify(execFile)(codex, [], { cwd: local, env, timeout: 15_000 })).stderr, /Not a remote workspace/, 'nor Remote Codex Codex');
-  assert.match((await promisify(execFile)(antigravity, [], { cwd: local, env, timeout: 15_000 })).stderr, /Not a remote workspace/, 'nor Remote Antigravity Antigravity');
+  // A CLI's launcher runs that CLI on this computer, from a login environment: none of DSH's variables, as over SSH.
+  const here = async (launcher: string) => {
+    assert.doesNotMatch((await promisify(execFile)(launcher, [], { cwd: local, env, timeout: 15_000 })).stderr, /Not a remote workspace/);
+    return JSON.parse(await readFile(join(directory, 'local-capture.json'), 'utf8'));
+  };
+  assert.deepEqual(await here(claude), { args: ['-lic', 'claude; exec "${SHELL:-/bin/sh}" -l'], cwd: local, electron: null }, 'Remote Claude starts Claude here');
+  assert.deepEqual((await here(codex)).args, ['-lic', 'codex --no-alt-screen -c check_for_update_on_startup=false; exec "${SHELL:-/bin/sh}" -l'], 'Remote Codex Codex');
+  assert.deepEqual((await here(antigravity)).args, ['-lic', 'agy; exec "${SHELL:-/bin/sh}" -l'], 'Remote Antigravity Antigravity');
   cleanup(); assert.deepEqual(controller.config.shellCandidates, ['/bin/sh']);
 });
 
@@ -137,4 +143,25 @@ test('a Claude conversation with local scrolling gives its holder the command th
   assert.equal((await launch(codex, 'session-codex')).history, undefined, 'Codex repaints its own history');
   await writeFile(f.path, JSON.stringify({ ...JSON.parse(await readFile(f.path, 'utf8')), tuiLocalScroll: false }));
   assert.equal((await launch(claude, 'session-tui')).history, undefined, 'the fullscreen renderer redraws everything itself');
+});
+
+test('in a folder on this computer a TUI conversation runs in a holder here, without SSH or DSH\'s variables', async t => {
+  if (process.platform === 'win32') { t.skip('POSIX terminal launcher test'); return; }
+  // A holder that only reports what it was started with.
+  const { f, directory, controller, env, capture } = await launcherRig(t, `import { writeFileSync } from 'node:fs';
+writeFileSync(process.env.HOME + '/holder.json', JSON.stringify({ args: process.argv.slice(2), electron: process.env.ELECTRON_RUN_AS_NODE ?? null, capture: process.env.DSH_TERMINAL_CAPTURE ?? null }));
+`);
+  // The login PATH finds Node.js where an account keeps its own tools.
+  await mkdir(join(directory, '.local', 'bin'), { recursive: true }); await symlink(process.execPath, join(directory, '.local', 'bin', 'node'));
+  const local = join(directory, 'project'); await mkdir(local);
+  await writeFile(f.path, JSON.stringify({ ...JSON.parse(await readFile(f.path, 'utf8')), tuiSessions: ['session-tui'] }));
+  const claude = controller.config.shellCandidates[2]!;
+  await promisify(execFile)(claude, [], { cwd: local, env: { ...env, DSH_SESSION_ID: 'session-tui' }, timeout: 15_000 });
+  const seen = JSON.parse(await readFile(join(directory, 'holder.json'), 'utf8')) as { args: string[]; electron: string | null; capture: string | null };
+  assert.equal(seen.args[0], 'attach'); assert.match(seen.args[2]!, /^tui-[0-9a-f]+$/);
+  const command = Buffer.from(seen.args[3]!, 'base64').toString(), id = /--resume ([0-9a-f-]{36});/.exec(command)?.[1];
+  assert.ok(id && command.startsWith(`cd '${local}' && export COLORTERM=truecolor CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 && exec`), command);
+  assert.ok(Buffer.from(seen.args[4]!, 'base64').toString().includes(`claude --resume ${id} --fork-session`), 'with the command that prints it again');
+  assert.deepEqual([seen.electron, seen.capture], [null, null], 'the holder starts from a login environment');
+  await assert.rejects(readFile(capture, 'utf8'), { code: 'ENOENT' }, 'ssh is never run');
 });

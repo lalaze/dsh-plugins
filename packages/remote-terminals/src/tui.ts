@@ -107,7 +107,7 @@ function routeModel(route: unknown, expected: TuiCli): string | undefined {
  */
 export class TuiSessions {
   constructor(private readonly store: TuiStore, private readonly dsh: {
-    /** Rejects a conversation that is not a verified remote workspace. */
+    /** Rejects a conversation that is neither in a verified remote workspace nor in a folder on this computer. */
     verify(sessionId: string, signal: AbortSignal): Promise<{ hostId: string }>;
     session(sessionId: string): TuiSession | undefined;
     agent?(sessionId: string): unknown;

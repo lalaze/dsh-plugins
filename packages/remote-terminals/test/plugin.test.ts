@@ -53,6 +53,13 @@ test('beside Remote Agents the plugin takes over the TUI conversations, serves i
   assert.deepEqual(await ask({ action: 'terminalShell', sessionId: 'local-session' }), { status: 200, body: {} });
   const started = await ask({ action: 'tuiStart', sessionId: 'local-session', cli: 'claude' });
   assert.equal(started.status, 409); assert.match(started.body.error, /verified remote workspace/);
+  // A conversation in a folder on this computer starts its TUI here, through Remote Agents' CLI target; its plain
+  // terminal stays DSH's own.
+  const folder = join(root, 'project'); await mkdir(folder);
+  ctx.provide('sessions', { get: (id: string) => (id === 'here-session' ? { header: { cwd: folder }, append() {} } : undefined) });
+  assert.deepEqual(await ask({ action: 'terminalShell', sessionId: 'here-session' }), { status: 200, body: {} });
+  assert.deepEqual(await ask({ action: 'tuiStart', sessionId: 'here-session', cli: 'claude', model: 'local-machine/claude/opus' }), { status: 200, body: { sessionId: 'here-session' } });
+  assert.ok((await ask({ action: 'tuiSessions' })).body.sessions.includes('here-session'));
   // Worktree workspaces keep the service name other plugins know.
   const worktrees = ctx.get('remoteAgentsWorktrees') as RemoteAgentsWorktrees;
   assert.equal(worktrees.version, 1); assert.deepEqual(await worktrees.projects(), []);

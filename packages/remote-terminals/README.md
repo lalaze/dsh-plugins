@@ -20,6 +20,10 @@ in a new conversation of a remote workspace, select a remote Claude, Codex or An
 
 A TUI conversation is in the DSH that started it only. One that 0.1.10 or earlier brought over from another DSH stays and still opens the same terminal; its title and archiving no longer follow the other DSH.
 
+### TUI conversations on this computer
+
+With Remote Agents 0.2.142 or newer, a folder on this computer, added with **Add workspace › This computer**, offers the same TUI conversations with this computer's Claude, Codex and Antigravity models. The CLI runs here without SSH, from a fresh login environment, and is kept by the same holder, under `~/.dsh-remote-agents/` of this account, so it keeps running while DSH restarts. Everything above applies, except that files dropped or pasted are kept in the project's own `.dsh-remote-agents/attachments/tui/`. In such a folder, **Remote Claude**, **Remote Codex** and **Remote Antigravity** in the shell menu start their CLI here; **Remote workspace** opens the local shell.
+
 ## New workspaces from a project
 
 **Add workspace › From a project** gives a project a second workspace on a branch of its own, so work there never touches the project's own folder, as Paseo's new worktree workspaces do. Choose a project — one entry per Git repository among your workspaces, on this computer or a saved machine — then either **New branch**, started from a branch you pick (the repository's default branch at first) and named by you or generated, such as `swift-otter`, or **Existing branch** to check out a local branch or one only on the remote, which then tracks it. **Create workspace** makes a Git worktree, adds it to DSH as `<project> · <branch>` right after the project, with the project's Workspace Tags, and opens it. A remote branch you start from is fetched first (up to 15 seconds; the copy already on the machine is used if that fails), and a new branch does not track the branch it started from. A workspace that is a folder inside its repository opens the same folder in the worktree.

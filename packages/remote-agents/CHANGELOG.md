@@ -4,6 +4,10 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.142 — TUI conversations on this computer
+
+- With Remote Terminals 0.1.13 or newer, a folder on this computer offers TUI conversations with this computer's CLIs. Remote Agents now tells other plugins where a conversation's CLIs run, its remote workspace or this computer, and runs their commands for this computer without SSH. They still see the SSH machines only, so Git, files and terminals of a local folder stay DSH's own.
+
 ## 0.2.141 — CLIs on this computer, without SSH
 
 - **This computer is a machine.** Every DSH now lists the computer it runs on in **Settings → Remote agents**, under its own name and marked **This computer**. In a folder on this computer, added with **Add workspace › This computer**, the model picker shows the CLIs installed and signed in here, and conversations run them directly, without SSH. Before, a folder on this computer showed no CLI models at all; you had to save the computer as an SSH machine (for example `127.0.0.1`) and add its folders as remote workspaces.

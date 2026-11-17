@@ -4,7 +4,16 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
-## Unreleased — A TUI's history keeps one width when you switch devices
+## 0.1.13 — TUI conversations on this computer; a TUI's history keeps one width
+
+**TUI conversations in a folder on this computer** (needs Remote Agents 0.2.142 or newer):
+
+- In a new conversation of a folder on this computer (added with **Add workspace › This computer**), select one of this computer's Claude, Codex or Antigravity models and click its icon at the bottom left of the composer, as in a remote workspace. The CLI runs here, without SSH, from a fresh login environment, as over SSH. Before, the icon was offered in remote workspaces only.
+- It is kept by the same holder as on a remote machine, so it keeps running while DSH restarts and selecting the row again shows the same process. Titles, the state in the sidebar, token usage, dropped and pasted files and archiving work as in a remote workspace.
+- **Remote Claude**, **Remote Codex** and **Remote Antigravity** in the terminal's shell menu now start their CLI here in such a folder, instead of opening the local shell. **Remote workspace** still opens the local shell, and DSH's own terminal is unchanged.
+- A terminal holder now starts detached from the terminal that opened it. DSH ends a terminal together with every process started under it, which on this computer would have taken the holder along.
+
+**A TUI's history keeps one width when you switch devices:**
 
 - With Local scrolling on, Claude Code breaks its lines itself, and when the width changes it repaints only the screen. Everything above kept the width it was printed at, so after switching between a phone and a computer the history came out partly narrow and partly wide, and the text where the two met showed twice.
 - Now, once the new width has held for a second, the remote machine runs a copy of Claude Code that prints the conversation again at that width, and everything above the screen is replaced with it, about four seconds after the switch in all. The copy is a fork of the session, which saves nothing, and runs without hooks, MCP servers or updates; it ends as soon as it has printed. While Claude Code is working, the history is put in during a pause in its output, or once the turn ends. The screen, and what you are typing there, stay as they are.
