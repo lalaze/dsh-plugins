@@ -186,12 +186,16 @@ export interface TokenUsage {
     last?: TokenUsageBreakdown;
     total?: TokenUsageBreakdown;
 }
-/** One plan rate-limit window of a CLI account; `label` is English and localized by the client. */
+/**
+ * One plan rate-limit window of a CLI account; `label` is English and localized by the client. `group` names the models
+ * that share the window when the account has separate limits for different models (Antigravity), as the CLI words it.
+ */
 export interface QuotaWindow {
     id: string;
     label: string;
     usedPercent: number;
     resetsAt?: string;
+    group?: string;
 }
 /** Plan limits of the account a CLI is signed in with on an SSH host, as that CLI reports them. */
 export interface AccountUsage {

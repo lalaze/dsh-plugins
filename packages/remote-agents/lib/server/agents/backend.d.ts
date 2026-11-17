@@ -95,6 +95,8 @@ export declare function codexServiceTiers(model: Record<string, unknown>): Choic
  * the code (measured on this repository: 8 of 20 and 4 of 71 tests passed, then all of them).
  */
 export declare const unattendedClaude: (task: Pick<Task, "unattended" | "modeId">, confined?: boolean) => string[];
+/** Whether a `--version` line names this release or a later one; an unreadable version is not. */
+export declare function versionAtLeast(version: string, floor: readonly number[]): boolean;
 /**
  * Whether an unattended Claude's commands can be left to its sandbox rather than refused. Only macOS has been measured:
  * on Linux it also needs bwrap and socat, and without them Claude Code runs commands unsandboxed.
@@ -212,6 +214,8 @@ export declare class SshBackend implements Backend {
     account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null>;
     /** Ask a running session of this CLI, or briefly start one without a prompt. */
     private readAccount;
+    /** Antigravity has no quota request over ACP; its print mode answers `/usage` without a model call or conversation. */
+    private readAntigravity;
     /** Shutdown releases persistent sessions, which keep running and are restored on the next start. */
     close(): Promise<void>;
 }
