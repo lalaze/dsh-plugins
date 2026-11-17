@@ -21,9 +21,21 @@ export interface FlowHost {
   finish?(end: FlowEnd): Promise<void>;
   /** What happened, for the conversation's own model: it took no part, and the next message may well be about it. */
   report?(text: string): void;
+  /** Before each step: where to go on from if the flow stops during it. */
+  reached?(point: FlowPoint): void;
   now?(): number;
 }
-export interface FlowInput { goal: string; routes: Routes; rounds: number; signal: AbortSignal }
+/**
+ * Where a flow stands before one of its steps: enough for a new run to go on from there. `summary` is the implementer's
+ * reply the step builds on (the round before for an implementation, this round's for a review), `findings` the last
+ * review's; `built` and `reviewed` are what the report would say so far.
+ */
+export interface FlowPoint { stage: Role; round: number; plan?: string; summary?: string; findings?: string; built?: string; reviewed?: string }
+/**
+ * `from` goes on from a point another run reached, skipping what was done; `retry` says the step there was cut off, so
+ * the implementer may find half its work in the tree. `spent` is how long the earlier runs took, which the end counts in.
+ */
+export interface FlowInput { goal: string; routes: Routes; rounds: number; signal: AbortSignal; from?: FlowPoint & { retry?: boolean }; spent?: number }
 export type FlowOutcome =
   | { status: 'passed'; round: number }
   | { status: 'rejected'; rounds: number; findings: string }
@@ -75,10 +87,10 @@ function flowReport(goal: string, ending: string, built?: string, reviewed?: str
 }
 
 export async function runFlow(input: FlowInput, host: FlowHost): Promise<FlowOutcome> {
-  const { goal, routes, rounds, signal } = input, text = flowText(goal), now = host.now ?? Date.now, startedAt = now();
+  const { goal, routes, rounds, signal, from } = input, text = flowText(goal), now = host.now ?? Date.now, startedAt = now() - (input.spent ?? 0);
   const elapsed = () => now() - startedAt;
   /** What the latest steps ended with, for the report however the flow ends. */
-  let built: string | undefined, reviewed: string | undefined;
+  let built = from?.built, reviewed = from?.reviewed;
   const stopped = async (): Promise<FlowOutcome> => { await host.finish?.({ kind: 'stopped', ms: elapsed() }); return { status: 'stopped' }; };
   /** One step, shown in the card from start to result. A returned outcome means the flow is over and has been reported. */
   const step = async (role: Role, round: number, prompt: string, readOnly: boolean, route: Route, describe?: (result: ChildResult) => { status: 'passed' | 'sentBack' | 'noVerdict'; body: string }): Promise<ChildResult | FlowOutcome> => {
@@ -106,8 +118,13 @@ export async function runFlow(input: FlowInput, host: FlowHost): Promise<FlowOut
   };
   const isOutcome = (value: ChildResult | FlowOutcome): value is FlowOutcome => 'status' in value;
 
-  let plan: string | undefined;
-  if (routes.plan) {
+  let plan = from?.plan, findings = from?.findings, summary = from?.summary;
+  const reached = (stage: Role, round: number) => host.reached?.({
+    stage, round, ...(plan !== undefined ? { plan } : {}), ...(summary !== undefined ? { summary } : {}), ...(findings !== undefined ? { findings } : {}),
+    ...(built !== undefined ? { built } : {}), ...(reviewed !== undefined ? { reviewed } : {}),
+  });
+  if (routes.plan && (!from || from.stage === 'plan')) {
+    reached('plan', 0);
     const result = await step('plan', 0, planPrompt(goal), true, routes.plan);
     if (isOutcome(result)) return result;
     plan = result.text;
@@ -116,11 +133,18 @@ export async function runFlow(input: FlowInput, host: FlowHost): Promise<FlowOut
     const { verdict } = parseVerdict(result.text);
     return { status: verdict === 'pass' ? 'passed' as const : verdict ? 'sentBack' as const : 'noVerdict' as const, body: parseVerdict(result.closing ?? result.text).body };
   };
-  let findings: string | undefined, summary: string | undefined;
-  for (let round = 1; round <= rounds; round++) {
-    const implemented = await step('implement', round, implementPrompt({ goal, plan, round, findings, lastSummary: summary }), false, routes.implement);
-    if (isOutcome(implemented)) return implemented;
-    summary = implemented.text; built = implemented.closing ?? implemented.text;
+  const resumed = from && from.stage !== 'plan' ? from : undefined;
+  // Going on with a review means this round's work is done: only the review is left of it.
+  let reviewNext = resumed?.stage === 'review', retry = resumed?.stage === 'implement' && !!resumed.retry;
+  for (let round = resumed ? Math.max(1, resumed.round) : 1; round <= rounds; round++) {
+    if (!reviewNext) {
+      reached('implement', round);
+      const implemented = await step('implement', round, implementPrompt({ goal, plan, round, findings, lastSummary: summary, retry }), false, routes.implement);
+      if (isOutcome(implemented)) return implemented;
+      summary = implemented.text; built = implemented.closing ?? implemented.text;
+    }
+    reviewNext = false; retry = false;
+    reached('review', round);
     const prompt = reviewPrompt({ goal, plan, round, summary, findings });
     let review = await step('review', round, prompt, true, routes.review, describeReview);
     if (isOutcome(review)) return review;

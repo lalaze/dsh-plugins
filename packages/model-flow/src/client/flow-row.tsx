@@ -37,6 +37,10 @@ const cardStyles = `
 .mf-card-stop{font:inherit;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary);background:none;border:1px solid var(--dsw-alias-border-l2,var(--mf-line));border-radius:999px;padding:3px 11px;cursor:pointer}
 .mf-card-stop:hover:enabled{color:var(--dsw-alias-label-primary);background:var(--mf-hover)}
 .mf-card-stop:disabled{opacity:.6;cursor:default}
+.mf-card-resume{color:var(--mf-run);border-color:color-mix(in srgb,var(--mf-run) 45%,transparent);white-space:nowrap}
+.mf-card-resume:hover:enabled{color:var(--mf-run);background:var(--mf-run-soft)}
+.mf-card-went-on{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);white-space:nowrap}
+.mf-card-error{padding:0 16px 0 56px;font-size:12px;line-height:18px;color:var(--mf-err);overflow-wrap:anywhere}
 .mf-track{display:grid;column-gap:6px;padding:0 16px}
 .mf-track-group{display:flex;flex-direction:column;gap:5px;min-width:0}
 .mf-track-segs{display:flex;gap:3px}
@@ -167,6 +171,32 @@ function useLiveCard(commandId: string | undefined): { card?: LiveCard; start?: 
 
 const useLabels = (): Labels => useMemo(() => ({ code: { copyLabel: ui('Copy'), copiedLabel: ui('Copied') }, footnotes: ui('Footnotes') }), []);
 const END_STATUS: Record<CardEnd['kind'], StepStatus> = { passed: 'passed', rejected: 'sentBack', failed: 'failed', stopped: 'stopped', noVerdict: 'noVerdict' };
+/** Ends a flow can go on from: it was cut off before it reached a verdict of its own. */
+const UNFINISHED = new Set<CardEnd['kind']>(['stopped', 'failed', 'noVerdict']);
+
+/** Whether this card's flow can go on, and going on with it: a new card in the same conversation picks up from the step it stopped at. */
+function useResume(commandId: string, eligible: boolean): Pick<FlowView, 'resume' | 'resuming' | 'resumeError' | 'continued'> {
+  const [state, setState] = useState<{ resumable?: boolean; continued?: boolean; resuming?: boolean; error?: string }>({});
+  useEffect(() => {
+    if (!eligible || !commandId) return undefined;
+    let alive = true;
+    post<{ resumable: boolean; continued?: boolean }>({ action: 'resumable', commandId })
+      .then(reply => { if (alive) setState({ resumable: reply.resumable, ...(reply.continued ? { continued: true } : {}) }); }, () => undefined);
+    return () => { alive = false; };
+  }, [commandId, eligible]);
+  const resume = useCallback(() => {
+    setState(value => ({ ...value, resuming: true, error: undefined }));
+    post<{ ok?: true; error?: string }>({ action: 'resume', commandId }).then(
+      reply => setState(reply.ok ? { continued: true } : { resumable: true, error: reply.error ?? ui('Could not continue.') }),
+      error => setState({ resumable: true, error: error instanceof Error ? error.message : ui('Could not continue.') }),
+    );
+  }, [commandId]);
+  if (!eligible) return {};
+  return {
+    ...(state.resumable && !state.continued ? { resume, resuming: !!state.resuming } : {}),
+    ...(state.error ? { resumeError: state.error } : {}), ...(state.continued ? { continued: true } : {}),
+  };
+}
 const NOTED = new Set<StepStatus>(['sentBack', 'noVerdict', 'failed']);
 
 function FlowCard({ node, parts, openStep }: { node: CommandNode; parts?: RowParts; openStep: OpenStep }) {
@@ -178,6 +208,10 @@ function FlowCard({ node, parts, openStep }: { node: CommandNode; parts?: RowPar
   }, [node.commandId]);
   const stepBody = useCallback((index: number) => post<{ body: string | null }>({ action: 'stepBody', commandId: node.commandId, index }).then(reply => reply.body, () => null), [node.commandId]);
   useExtensions();
+  const known = parts?.card ?? live.card;
+  // Another plugin's flows go on as that plugin decides, so only plain flows offer it here.
+  const unfinished = !known?.tag && (running ? !known?.end && (live.gone || !!live.card?.interrupted) : !!known?.end && UNFINISHED.has(known.end.kind));
+  const resumeView = useResume(node.commandId, !!known && unfinished);
   // Until the first answer, a running row may still turn out to be the /flow line itself.
   if (running && (!live.known || live.start)) return HIDDEN;
 
@@ -187,7 +221,7 @@ function FlowCard({ node, parts, openStep }: { node: CommandNode; parts?: RowPar
   const interrupted = running && !card.end && (live.gone || !!live.card?.interrupted);
   const view: FlowView = {
     card, active: running && !interrupted && !!live.card && !card.end, interrupted, stop, stopping,
-    ...(parts?.body ? { report: parts.body } : {}), ...(running ? { stepBody } : {}),
+    ...(parts?.body ? { report: parts.body } : {}), ...(running ? { stepBody } : {}), ...resumeView,
   };
   // The plugin that started this flow may draw its card: the same card, with what it has to add.
   const Own = extensionFor(card.tag)?.Card;
@@ -198,7 +232,7 @@ function FlowCard({ node, parts, openStep }: { node: CommandNode; parts?: RowPar
  * The card itself: what is happening, the progress bar, the steps and the report. Another plugin draws its own flows
  * with it too, through the client service `modelFlowCard`, and says what stands around them.
  */
-export function FlowCardView({ card, active, interrupted = false, report, stop, stopping, stepBody, canOpen = true, head, stages = [], caption, children, bare, openStep }: FlowView & ViewExtras & { bare?: boolean; openStep: OpenStep }) {
+export function FlowCardView({ card, active, interrupted = false, report, stop, stopping, resume, resuming, resumeError, continued, stepBody, canOpen = true, head, stages = [], caption, children, bare, openStep }: FlowView & ViewExtras & { bare?: boolean; openStep: OpenStep }) {
   const [showSteps, setShowSteps] = useState<boolean | undefined>(undefined);
   const labels = useLabels();
   const end = card.end;
@@ -224,8 +258,11 @@ export function FlowCardView({ card, active, interrupted = false, report, stop, 
       <span className="mf-card-side">
         {elapsed !== undefined ? <span className="mf-card-clock">{clock(elapsed)}</span> : undefined}
         {active && stop ? <button type="button" className="mf-card-stop" disabled={stopping} onClick={stop}>{ui(stopping ? 'Stopping' : 'Stop')}</button> : undefined}
+        {!active && resume ? <button type="button" className="mf-card-stop mf-card-resume" disabled={resuming} onClick={resume}>{ui(resuming ? 'Continuing' : 'Continue from here')}</button> : undefined}
+        {!active && continued ? <span className="mf-card-went-on">{ui('Continued below')}</span> : undefined}
       </span>
     </div>
+    {resumeError ? <div className="mf-card-error" role="alert">{resumeError}</div> : undefined}
     {bare ? undefined : <Track card={card} words={words} over={!!end || interrupted} interrupted={interrupted} stages={stages} />}
     {end && steps.length ? <button type="button" className="mf-card-toggle" aria-expanded={open} onClick={() => setShowSteps(!open)}>
       <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 3.5l4.5 4.5L6 12.5" /></svg>

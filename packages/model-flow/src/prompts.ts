@@ -8,9 +8,14 @@ export const planPrompt = (goal: string) => `You are the planner. Another model 
 
 Write a plan for the goal: the steps, the files likely to change, and a section "Acceptance criteria" with numbered checks a reviewer can verify, including any command to run. Stay within what the goal asks. Do not ask questions: when something is unclear, choose the simplest reading and say so. ${language}${section('Goal', goal)}`;
 
-export const implementPrompt = (input: { goal: string; plan?: string; round: number; findings?: string; lastSummary?: string }) => `You are the implementer. Do the work in this working directory and run the checks you can. Do not commit unless the goal says to. Do not ask questions: nobody can answer them here. End with a short summary of what changed and what you verified, including anything you could not do. ${language}${input.round > 1 ? `
+/** Told to an implementer whose step was stopped once, by a person or a failure, and is now done again. */
+export const retryNote = 'An earlier attempt at this step was stopped before it finished, so the working tree may already hold part of its changes. Look at them first (git status, git diff), keep what is right, and finish the work from there: do not start over.';
+/** `retry`: an earlier attempt at this same step was cut off, and may have left part of its work in the tree. */
+export const implementPrompt = (input: { goal: string; plan?: string; round: number; findings?: string; lastSummary?: string; retry?: boolean }) => `You are the implementer. Do the work in this working directory and run the checks you can. Do not commit unless the goal says to. Do not ask questions: nobody can answer them here. End with a short summary of what changed and what you verified, including anything you could not do. ${language}${input.round > 1 ? `
 
-A reviewer sent back the previous round. Its changes are already in the working tree: fix them there, do not start over. Fix every finding below, or say why one is wrong.` : ''}${section('Goal', input.goal)}${section('Plan', input.plan)}${section('Review findings to fix', input.findings)}${section('Summary from the previous round', input.lastSummary)}`;
+A reviewer sent back the previous round. Its changes are already in the working tree: fix them there, do not start over. Fix every finding below, or say why one is wrong.` : ''}${input.retry ? `
+
+${retryNote}` : ''}${section('Goal', input.goal)}${section('Plan', input.plan)}${section('Review findings to fix', input.findings)}${section('Summary from the previous round', input.lastSummary)}`;
 
 export const reviewPrompt = (input: { goal: string; plan?: string; round: number; summary?: string; findings?: string }) => `You are the reviewer, independent of the implementer. You work read-only: never change a file. Check the work against the goal and the acceptance criteria.
 

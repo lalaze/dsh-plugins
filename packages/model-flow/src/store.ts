@@ -2,9 +2,10 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { combosFrom, roundsFrom, type Combo, type Setup } from './combos.js';
+import type { FlowPoint } from './engine.js';
 import { DEFAULT_ROUNDS } from './line.js';
-import { routeFrom } from './routes.js';
-import type { CardState } from './shared.js';
+import { routeFrom, type Routes } from './routes.js';
+import type { CardEnd, CardState, CardStep } from './shared.js';
 
 /**
  * `combos` stays absent until the first ones are saved, so an emptied list is not filled again. `worktree` is where a
@@ -82,4 +83,26 @@ export class ReportStore extends JsonMap<string> {
  */
 export class CardStore extends JsonMap<CardState> {
   constructor(file: string) { super(file, 50); }
+}
+
+/**
+ * What a flow needs to go on from where it stopped, by its card's command: the goal, models and attachments it ran
+ * with, the point it had reached, and its steps so far for the card that goes on. `ms` is the time it took. A flow that
+ * went on in a later card keeps only `continued`, so its card can say so.
+ */
+export interface FlowRecord {
+  parentId: string;
+  goal?: string; routes?: Routes; rounds?: number; attachments?: unknown[];
+  point?: FlowPoint; steps?: CardStep[]; ms?: number; end?: CardEnd;
+  continued?: true;
+}
+/** Kept only while a flow runs or can still go on: one that passed, or was taken further, leaves little or nothing. */
+export class FlowRecords extends JsonMap<FlowRecord> {
+  constructor(file: string) { super(file, 30); }
+  /** Every flow of a conversation but `keep`: a newer flow there makes going on with an older one pointless. */
+  dropConversation(parentId: string, keep?: string): void {
+    let changed = false;
+    for (const [key, record] of this.entries) if (record.parentId === parentId && key !== keep && !record.continued) { this.entries.delete(key); changed = true; }
+    if (changed) this.persist();
+  }
 }
