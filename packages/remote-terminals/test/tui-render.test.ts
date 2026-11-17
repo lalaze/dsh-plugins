@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { emulatedScale, findXterm, TuiRenderChoices, withoutPaint } from '../src/client/tui-render.js';
+import { emulatedScale, findXterm, GlyphAtlases, TuiRenderChoices, withoutPaint, type AtlasDrawer } from '../src/client/tui-render.js';
 
 /** An element xterm opened in, carrying the fibers React would put on it. */
 function opened(fiber: unknown) {
@@ -106,4 +106,93 @@ test('an emulated screen scale is told apart from real ones, snapped to whole pi
   assert.equal(emulatedScale(358, 716, 3), true);
   // Out of view or too narrow to tell.
   for (const [width, device, ratio] of [[0, 0, 2], [20, 10, 2], [300, 0, 2], [300, 600, 0], [Number.NaN, 600, 2]] as const) assert.equal(emulatedScale(width, device, ratio), undefined);
+});
+
+/** A WebGL addon as GlyphAtlases sees it: its atlas canvas, and how often its atlas was cleared. */
+function drawer() {
+  const atlasChanged = new Set<(canvas: EventTarget) => void>();
+  const addon = {
+    cleared: 0,
+    textureAtlas: new EventTarget() as EventTarget | undefined,
+    clearTextureAtlas() { addon.cleared += 1; },
+    onChangeTextureAtlas(listener: (canvas: EventTarget) => void) { atlasChanged.add(listener); return { dispose: () => { atlasChanged.delete(listener); } }; },
+    changeAtlas(canvas: EventTarget) { addon.textureAtlas = canvas; for (const listener of atlasChanged) listener(canvas); },
+    listening: () => atlasChanged.size,
+  };
+  return addon satisfies AtlasDrawer;
+}
+const fire = (target: EventTarget | undefined, type: string) => target!.dispatchEvent(new Event(type));
+
+test('a WebGL context coming back draws the glyphs of every terminal again, as they share the atlas it lost', () => {
+  const atlases = new GlyphAtlases();
+  const a = drawer(), b = drawer(), canvasA = new EventTarget(), canvasB = new EventTarget();
+  atlases.add(a, [canvasA]);
+  atlases.add(b, [canvasB]);
+  assert.deepEqual([a.cleared, b.cleared], [0, 0]);
+  fire(canvasA, 'webglcontextlost');
+  fire(canvasB, 'webglcontextlost');
+  assert.deepEqual([a.cleared, b.cleared], [0, 0]);
+  // Each terminal's context comes back on its own; each time all of them draw again.
+  fire(canvasA, 'webglcontextrestored');
+  assert.deepEqual([a.cleared, b.cleared], [1, 1]);
+  fire(canvasB, 'webglcontextrestored');
+  assert.deepEqual([a.cleared, b.cleared], [2, 2]);
+});
+
+test('the atlas canvas coming back on its own draws the glyphs again, also on an atlas taken after loading', () => {
+  const atlases = new GlyphAtlases();
+  const a = drawer(), b = drawer();
+  const first = a.textureAtlas;
+  b.textureAtlas = first;
+  atlases.add(a, []);
+  atlases.add(b, []);
+  fire(first, 'contextlost');
+  fire(first, 'contextrestored');
+  // Both terminals watch the shared canvas: each of its events draws both again.
+  assert.deepEqual([a.cleared, b.cleared], [2, 2]);
+  const next = new EventTarget();
+  a.changeAtlas(next);
+  fire(next, 'contextrestored');
+  assert.deepEqual([a.cleared, b.cleared], [3, 3]);
+});
+
+test('a terminal taking WebGL up again after a loss draws the shared atlas again; one with no loss before does not', () => {
+  const atlases = new GlyphAtlases();
+  const a = drawer(), b = drawer(), canvasA = new EventTarget();
+  const stopA = atlases.add(a, [canvasA]);
+  atlases.add(b, []);
+  assert.equal(b.cleared, 0);
+  // A's context stays away: it goes back to the page's own drawing, and later loads WebGL again.
+  fire(canvasA, 'webglcontextlost');
+  stopA();
+  const again = drawer();
+  atlases.add(again, []);
+  assert.deepEqual([again.cleared, b.cleared, a.cleared], [1, 1, 0]);
+  // That drew everything again; the next terminal finds a sound atlas.
+  atlases.add(drawer(), []);
+  assert.equal(b.cleared, 1);
+});
+
+test('a terminal no longer drawn with WebGL is left alone and stops listening', () => {
+  const atlases = new GlyphAtlases();
+  const a = drawer(), b = drawer(), canvasA = new EventTarget(), canvasB = new EventTarget();
+  const stopA = atlases.add(a, [canvasA]);
+  atlases.add(b, [canvasB]);
+  stopA();
+  assert.equal(a.listening(), 0);
+  fire(canvasA, 'webglcontextrestored');
+  fire(a.textureAtlas, 'contextrestored');
+  assert.deepEqual([a.cleared, b.cleared], [0, 0]);
+  fire(canvasB, 'webglcontextrestored');
+  assert.deepEqual([a.cleared, b.cleared], [0, 1]);
+});
+
+test('a terminal that throws while clearing does not keep the others from drawing again', () => {
+  const atlases = new GlyphAtlases();
+  const broken = { ...drawer(), clearTextureAtlas() { throw new Error('disposed'); } };
+  const b = drawer(), canvas = new EventTarget();
+  atlases.add(broken, [canvas]);
+  atlases.add(b, []);
+  fire(canvas, 'webglcontextrestored');
+  assert.equal(b.cleared, 1);
 });

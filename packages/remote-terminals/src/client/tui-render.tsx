@@ -155,6 +155,71 @@ export function emulatedScale(width: number, device: number, ratio: number): boo
   return Math.abs(device / (width * ratio) - 1) > SCALE_TOLERANCE;
 }
 
+/** The part of xterm's WebGL addon that the atlas recovery uses. */
+export interface AtlasDrawer {
+  clearTextureAtlas(): void;
+  readonly textureAtlas?: EventTarget;
+  onChangeTextureAtlas(listener: (canvas: EventTarget) => void): { dispose(): void };
+}
+
+/**
+ * The terminals drawn with WebGL on this page. They share xterm's glyph atlas, one for each font, size and set of colors,
+ * whose pages are 2D canvases. Losing the GPU, as Android does to a page in the background, empties those canvases. When the
+ * context comes back xterm builds its WebGL state again, but it takes the same atlas while another terminal still uses it,
+ * and that atlas still lists every glyph it had drawn. Those glyphs then show blank and only glyphs drawn for the first time
+ * afterwards appear: ASCII, rules and common characters were gone, rarer ones were there (seen 2026-11-17 on a phone,
+ * reproduced in Chrome with xterm 6 and addon-webgl 0.19 by killing its GPU process with two terminals; one alone recovers).
+ * Clearing the atlas through each terminal draws every glyph again. In that Chrome the atlas canvas came back about 0.6 s
+ * before WebGL did, so either one coming back is the moment.
+ */
+export class GlyphAtlases {
+  private readonly drawing = new Set<AtlasDrawer>();
+  /**
+   * A context went since the glyphs were last drawn again. A terminal that went back to the page's own drawing because its
+   * context stayed away, and takes WebGL up again later, finds what is left of the atlas the others share.
+   */
+  private lost = false;
+  /**
+   * Follows a terminal from the moment it draws with WebGL.
+   * @param canvases - the canvases WebGL draws on, whose context can go and come back.
+   * @returns stops following it.
+   */
+  add(addon: AtlasDrawer, canvases: Iterable<EventTarget>): () => void {
+    this.drawing.add(addon);
+    const lost = () => { this.lost = true; };
+    const back = () => this.redraw();
+    const watched = new Map<EventTarget, [lost: string, back: string]>();
+    const watch = (target: EventTarget | undefined, events: [lost: string, back: string]) => {
+      if (!target || watched.has(target)) return;
+      watched.set(target, events);
+      // After xterm's own listeners, which it added when the addon loaded, have built its state again.
+      target.addEventListener(events[0], lost);
+      target.addEventListener(events[1], back);
+    };
+    for (const canvas of canvases) watch(canvas, ['webglcontextlost', 'webglcontextrestored']);
+    const atlas = (canvas: EventTarget | undefined) => watch(canvas, ['contextlost', 'contextrestored']);
+    const changes = addon.onChangeTextureAtlas(atlas);
+    atlas(addon.textureAtlas);
+    if (this.lost) this.redraw();
+    return () => {
+      this.drawing.delete(addon);
+      changes.dispose();
+      for (const [target, [gone, returned]] of watched) {
+        target.removeEventListener(gone, lost);
+        target.removeEventListener(returned, back);
+      }
+    };
+  }
+  /** Draws every glyph of every terminal again. */
+  redraw(): void {
+    this.lost = false;
+    for (const addon of this.drawing) {
+      try { addon.clearTextureAtlas(); } catch { /* a terminal being taken down draws nothing anyway */ }
+    }
+  }
+}
+const atlases = new GlyphAtlases();
+
 type ScreenScale = 'unknown' | 'real' | 'emulated';
 /** Whether the screen's scale is emulated where the terminal is, which is known once the terminal is shown with a size. */
 function useScreenScale(host: HTMLElement, visible: boolean): ScreenScale {
@@ -189,11 +254,12 @@ function useScreenScale(host: HTMLElement, visible: boolean): ScreenScale {
 export function useWebglRenderer(host: HTMLElement, visible: boolean, choices: TuiRenderChoices, theme: unknown): void {
   const { webgl: chosen } = useSyncExternalStore(choices.subscribe, choices.snapshot);
   const scale = useScreenScale(host, visible), webgl = chosen && scale === 'real';
-  const active = useRef<{ xterm: Xterm; addon: WebglAddon; background?: string }>();
+  const active = useRef<{ xterm: Xterm; addon: WebglAddon; background?: string; unwatch(): void }>();
   const unload = () => {
     const current = active.current;
     if (!current) return;
     active.current = undefined;
+    current.unwatch();
     current.addon.dispose();
     const { theme: colors } = current.xterm.options;
     if (colors && current.background !== undefined) current.xterm.options.theme = { ...colors, background: current.background };
@@ -213,7 +279,8 @@ export function useWebglRenderer(host: HTMLElement, visible: boolean, choices: T
       try {
         const addon = new WebglAddon();
         xterm.loadAddon(addon);
-        active.current = { xterm, addon };
+        const unwatch = atlases.add(addon as unknown as AtlasDrawer, xterm.element?.querySelectorAll('canvas') ?? []);
+        active.current = { xterm, addon, unwatch };
         // Back to the page's own drawing, which always works. Coming back into view tries again.
         addon.onContextLoss(() => { unload(); choices.report('lost'); });
         clearPaint();

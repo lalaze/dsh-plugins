@@ -37,6 +37,20 @@ test('a screen that is not in what the copy printed is not placed anywhere', () 
   assert.equal(alignScreen([], ['alpha beta', 'gamma delta', 'epsilon zeta']), undefined);
 });
 
+test('rows only the live screen has, as Claude Code\'s notes under a tool call, do not keep the screen from being found', () => {
+  // What a copy prints of the conversation: the notes under each tool call are not there.
+  const printed = ['banner', '', '❯ commit it', '', '⏺ Bash(git status --short)', '  ⎿   M notes.md', '', '⏺ Bash(git add notes.md)', '  ⎿  (No output)', '',
+    '⏺ Bash(git commit -m notes)', '  ⎿  [main 1a2b3c4] notes', '', '⏺ Committed as 1a2b3c4.', '', '❯ ', '────'];
+  // The live screen: the same, with a note after every call, so that no four rows sit where they do in the copy.
+  const screen = ['', '⏺ Bash(git status --short)', '  ⎿   M notes.md', '  ⎿  Allowed by auto mode', '', '⏺ Bash(git add notes.md)', '  ⎿  (No output)',
+    '  ⎿  Allowed by auto mode', '', '⏺ Bash(git commit -m notes)', '  ⎿  [main 1a2b3c4] notes', '  ⎿  (timeout 2m)', '  ⎿  Allowed by auto mode', '', '⏺ Committed as 1a2b3c4.', '', '❯ '];
+  assert.equal(alignScreen(printed, screen), 3, 'the blank row above the first call is the copy\'s row 3');
+  // A top row kept at the old width counts as one of those too.
+  assert.equal(alignScreen(printed, ['⏺ Bash(git', '  status --short)', ...screen.slice(2)]), 3);
+  // The rows must still come in order, close together: the same rows scattered are not this screen.
+  assert.equal(alignScreen(['⏺ Committed as 1a2b3c4.', 'a b c', 'd e f', '⏺ Bash(git commit -m notes)', 'g h i', 'j k l', 'm n o', '  ⎿  [main 1a2b3c4] notes', 'p q r', 's t u', 'v w x', '⏺ Bash(git add notes.md)'], screen), undefined);
+});
+
 test('the rebuilt terminal has the copy\'s rows above the screen, and the screen, cursor and modes as they were', async () => {
   const cols = 40, rows = 8;
   // What the CLI printed at 70 columns, then its repaint of the screen at 40, as clients have it.

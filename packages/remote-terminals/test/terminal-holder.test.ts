@@ -307,6 +307,22 @@ test('a CLI that never pauses gets its scrollback rebuilt once it is idle', opti
   assert.match(shown.at(-1)!, /^❯ /);
 });
 
+test('a copy slow to say anything is waited for, and one that printed nothing is tried again', options, async t => {
+  const id = newId(), cli = join(home, `classic-${id}.mjs`), runs = join(home, `copies-${id}`);
+  endHolder(t, id);
+  writeFileSync(cli, CLASSIC_CLI);
+  const node = JSON.stringify(process.execPath), copies = () => (existsSync(runs) ? readFileSync(runs, 'utf8').split('\n').length - 1 : 0);
+  // The first copy ends without a word; the next takes 2.5 s to start, as a login shell and Claude Code did on the Mac mini.
+  const history = `echo copy >> ${runs}; [ $(wc -l < ${runs}) -gt 1 ] || exit 0; sleep 2.5; exec ${node} ${cli} --history`;
+  const wide = attach(id, `exec ${node} ${cli}`, { COLUMNS: '120', LINES: '30', DSH_TERMINAL_REFLOW_MS: '150' }, history);
+  assert.ok(await until(() => wide.output().includes('❯')), wide.output());
+  const narrow = attach(id, 'exit 99', { COLUMNS: '50', LINES: '20' });
+  assert.ok(await until(() => narrow.output().includes('\x1b[3J'), 20_000), narrow.output().slice(-500));
+  assert.equal(copies(), 2);
+  await new Promise(resolve => setTimeout(resolve, 200));
+  assert.deepEqual(await shownRows(narrow.output(), 50, 20), [...wrapped(50), '❯ ']);
+});
+
 test('without a command that prints the conversation again, a change of width only resizes', options, async t => {
   const id = newId(), cli = join(home, `classic-${id}.mjs`);
   endHolder(t, id);

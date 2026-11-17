@@ -29,6 +29,46 @@ export function alignScreen(printed: readonly string[], screen: readonly string[
       if (anchor.every(row => printed[start + row.at] === row.text)) return start;
     }
   }
+  return alignLoosely(printed, rows);
+}
+
+/** Rows of the screen in order that must be found in the copy, when some of the screen's rows are not there. */
+const LOOSE_MATCHES = 4;
+/** Screen rows passed over while looking for those, and rows the copy may have between two of them that the screen lacks. */
+const LOOSE_SKIPS = 3, LOOSE_EXTRA = 2;
+/** How far down the screen the first of them may be. */
+const LOOSE_FIRST = 8;
+
+/**
+ * The screen of a live CLI can have rows that a copy printing the same conversation lacks, which no fixed offsets match.
+ * Claude Code 2.1.326 shows "⎿  Allowed by auto mode" and "⎿  (timeout 2m)" under a tool call only in the session that ran
+ * it, and after a change of width it may repaint a tool call's header as first drawn, at the old width (both seen
+ * 2026-11-17 on a phone's conversation in auto mode, whose every rebuild at the computer's width failed). Here the screen's
+ * rows are followed in order, each found a little below the one before in the copy, passing over the ones it lacks. The
+ * rows above the first match are taken to be in the copy one for one; when some were not, the scrollback ends a row or two
+ * short, which still beats a scrollback at the old width.
+ */
+function alignLoosely(printed: readonly string[], rows: readonly { text: string; at: number }[]): number | undefined {
+  const places = new Map<string, number[]>();
+  printed.forEach((text, at) => {
+    if (!informative(text)) return;
+    const list = places.get(text);
+    if (list) list.push(at); else places.set(text, [at]);
+  });
+  for (let first = 0; first < Math.min(rows.length, LOOSE_FIRST); first++) {
+    const head = rows[first]!, found = places.get(head.text) ?? [];
+    for (let k = found.length - 1; k >= 0; k--) {
+      let matched = 1, skipped = 0, copyAt = found[k]!, screenAt = head.at;
+      for (let next = first + 1; next < rows.length && matched < LOOSE_MATCHES && skipped <= LOOSE_SKIPS; next++) {
+        const row = rows[next]!, most = Math.min(printed.length - 1, copyAt + (row.at - screenAt) + LOOSE_EXTRA);
+        let hit = -1;
+        for (let at = copyAt + 1; at <= most && hit < 0; at++) if (printed[at] === row.text) hit = at;
+        if (hit < 0) { skipped++; continue; }
+        matched++; copyAt = hit; screenAt = row.at;
+      }
+      if (matched >= LOOSE_MATCHES) return Math.max(0, found[k]! - head.at);
+    }
+  }
   return undefined;
 }
 

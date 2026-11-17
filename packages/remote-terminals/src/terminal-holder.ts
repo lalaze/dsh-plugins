@@ -40,8 +40,14 @@ const REFLOW_MS = number('DSH_TERMINAL_REFLOW_MS', 1000);
  * may be slow, and the holder's own copy keeps SCROLLBACK of them.
  */
 const REFLOW_LINES = 5000;
-/** The copy that prints the conversation again has printed it once it has said nothing for this long; a mere start says little. */
-const PRINTED_QUIET_MS = 800, STARTED_QUIET_MS = 1500, PRINTED_BYTES = 2048, PRINT_MS = 20_000;
+/**
+ * The copy that prints the conversation again has printed it once it has said nothing for this long; a mere start says little.
+ * Its first byte can take a while, as it starts a login shell and then Claude Code: 0.8 to 2.2 s measured on the Mac mini
+ * (2026-11-17, load 3), where waiting 1.5 s for it lost the rebuild of a phone's width; the rest followed within 0.3 s.
+ */
+const PRINTED_QUIET_MS = 800, STARTED_QUIET_MS = 3000, PRINTED_BYTES = 2048, PRINT_MS = 20_000;
+/** How long the copy may take to say anything at all. */
+const FIRST_OUTPUT_MS = number('DSH_TERMINAL_FIRST_OUTPUT_MS', 10_000);
 
 const SHIM = String.raw`
 import fcntl, os, pty, select, signal, struct, sys, termios, time
@@ -249,7 +255,7 @@ async function daemon(id: string, python: string): Promise<void> {
     };
     const printed = await printAgain(history, cols, rows);
     try {
-      if (!printed) { note(`rebuild ${cols}x${rows}: the copy printed nothing`); return; }
+      if (!printed) { later('the copy printed nothing'); return; }
       // Between two of the CLI's writes: one cut in two by the rebuilt text would leave half an escape sequence on screen.
       // Its spinner leaves such gaps while it works.
       const calm = await quiet(80, 3000);
@@ -291,7 +297,8 @@ async function daemon(id: string, python: string): Promise<void> {
     child.stdout!.on('data', (chunk: Buffer) => { bytes += chunk.length; lastAt = Date.now(); terminal.write(chunk); });
     child.on('close', () => { exited = true; });
     child.on('error', () => { exited = true; });
-    while (!exited && Date.now() - started < PRINT_MS && Date.now() - lastAt < (bytes >= PRINTED_BYTES ? PRINTED_QUIET_MS : STARTED_QUIET_MS)) await sleep(50);
+    const quietFor = () => (bytes === 0 ? FIRST_OUTPUT_MS : bytes < PRINTED_BYTES ? STARTED_QUIET_MS : PRINTED_QUIET_MS);
+    while (!exited && Date.now() - started < PRINT_MS && Date.now() - lastAt < quietFor()) await sleep(50);
     // The shim hangs up on the copy and its children, and kills them if they linger.
     if (!exited) child.kill('SIGTERM');
     await new Promise<void>(resolve => terminal.write('', resolve));
