@@ -4,7 +4,7 @@ import { ChatProjects } from '../src/chat/projects.js';
 import { Store } from '../src/core/store.js';
 import { readFile, writeFile } from 'node:fs/promises';
 import { createHandler } from '../src/http.js';
-import { RemoteAgentsService } from '../src/agents/service.js';
+import { CATALOG_MAX_AGE_MS, RemoteAgentsService } from '../src/agents/service.js';
 import { fixture } from './fakes.js';
 
 test('a machine can be saved without starting discovery until a CLI is selected', async t => {
@@ -87,4 +87,51 @@ test('Antigravity models saved by 0.2.129 or earlier are dropped on opening, and
   const third = new Store(path); await third.open(); t.after(() => third.close());
   assert.equal(third.staleCatalogs.size, 0); assert.ok(third.hosts()[0].catalog!.providers.some(p => p.id === 'antigravity'));
   await again.refreshStaleCatalogs(); assert.equal(remote.discoveries, probes + 1, 'nothing to discover a second time');
+});
+
+test('a machine a conversation works on has its saved models checked again once they are an hour old', async t => {
+  const { service, remote, hostId } = await fixture(t);
+  await service.refreshAgedCatalogs([hostId], Date.now() + 10 * CATALOG_MAX_AGE_MS);
+  assert.equal(remote.discoveries, 0, 'a machine never discovered waits for Refresh models');
+  await service.discoverHost(hostId);
+  const discovered = Date.parse(service.store.hosts()[0].catalog!.checkedAt);
+  const models = () => new ChatProjects(service).hosts()[0].providers.find(p => p.id === 'codex')!.models.map(m => m.id);
+  remote.catalog[0].models.push({ id: 'new-model', label: 'New model' });
+  const probes = remote.discoveries;
+  await service.refreshAgedCatalogs([hostId], discovered + CATALOG_MAX_AGE_MS - 1);
+  assert.equal(remote.discoveries, probes, 'models under an hour old are not checked');
+  await service.refreshAgedCatalogs([hostId, hostId], discovered + CATALOG_MAX_AGE_MS);
+  assert.equal(remote.discoveries, probes + 1); assert.deepEqual(models(), ['remote-model', 'new-model']);
+  // The composer asks on every window focus: a machine is checked once per period, whatever the outcome.
+  await service.refreshAgedCatalogs([hostId], discovered + CATALOG_MAX_AGE_MS + 1);
+  assert.equal(remote.discoveries, probes + 1);
+  // A CLI that fails this once keeps its saved models, and nobody asked to be told.
+  remote.catalog[0] = { ...remote.catalog[0], status: 'error', error: 'Not signed in', models: [] };
+  await service.refreshAgedCatalogs([hostId], discovered + 2 * CATALOG_MAX_AGE_MS);
+  assert.equal(remote.discoveries, probes + 2); assert.deepEqual(models(), ['remote-model', 'new-model']);
+  assert.deepEqual(service.hosts()[0].providerErrors, []);
+  // So does a machine that cannot be reached.
+  remote.homeError = 'Machine is offline';
+  await service.refreshAgedCatalogs([hostId], discovered + 3 * CATALOG_MAX_AGE_MS);
+  assert.equal(service.hosts()[0].modelError, undefined); assert.deepEqual(models(), ['remote-model', 'new-model']);
+  // Refresh models still reports both, and drops what the CLI no longer offers.
+  await service.discoverHost(hostId);
+  assert.match(service.hosts()[0].modelError ?? '', /Machine is offline/);
+  remote.homeError = undefined; await service.discoverHost(hostId);
+  assert.equal(service.hosts()[0].modelError, undefined); assert.equal(service.hosts()[0].providerErrors?.length, 1);
+  assert.equal(new ChatProjects(service).hosts()[0].providers.find(p => p.id === 'codex')?.status, 'error');
+});
+
+test('a machine with no CLI enabled, or a stopped service, is not checked in the background', async t => {
+  const { service, remote, hostId } = await fixture(t);
+  await service.discoverHost(hostId);
+  const later = Date.parse(service.store.hosts()[0].catalog!.checkedAt) + 2 * CATALOG_MAX_AGE_MS, probes = remote.discoveries;
+  await service.setHostProviders(hostId, []);
+  await service.refreshAgedCatalogs([hostId], later);
+  assert.equal(remote.discoveries, probes);
+  await service.setHostProviders(hostId, ['codex']);
+  const enabled = remote.discoveries;
+  await service.close();
+  await service.refreshAgedCatalogs([hostId], later);
+  assert.equal(remote.discoveries, enabled);
 });
