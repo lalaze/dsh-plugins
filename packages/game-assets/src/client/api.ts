@@ -1,4 +1,4 @@
-import { CLIENT_HEADER, ROUTE, type Aspect, type AssetDetail, type BatchStatus, type BatchStatusAnswer, type FolderRule, type GeneratedImage, type ImageAnswer, type ProjectSourceStatus, type MadeInfo, type MoveResult, type ProjectStatus, type RevertResult, type SaveResult, type ScanResult, type SourceInput, type SourcesAnswer, type TabMode, type TagResult } from '../domain.js';
+import { CLIENT_HEADER, ROUTE, type Aspect, type AssetDetail, type BatchStatus, type BatchStatusAnswer, type FolderRule, type GeneratedImage, type ImageAnswer, type ProjectSourceStatus, type MadeInfo, type MoveResult, type ProjectStatus, type RevertResult, type SaveResult, type ScanResult, type SourceInput, type SourcesAnswer, type SpriteSheet, type TabMode, type TagResult } from '../domain.js';
 
 export class AssetRequestError extends Error { constructor(message: string, readonly status: number) { super(message); } }
 
@@ -46,7 +46,9 @@ export const projectSource = (sessionId: string) => post<ProjectSourceStatus>({ 
 export const setProjectSource = (sessionId: string, sourceId: string | null) => post<ProjectSourceStatus>({ action: 'setProjectSource', sessionId, sourceId });
 
 /** Starts an h3 batch redraw on the DSH host; returns at once while the Colab VM boots in the background. */
-export const h3Start = (sessionId: string, paths: string[], prompt: string) => post<BatchStatus>({ action: 'h3Start', sessionId, paths, prompt });
+/** `prepared` holds the sprite sheets the page made for GIF and see-through images (see sheets.ts). */
+export const h3Start = (sessionId: string, paths: string[], prompt: string, prepared?: Record<string, { data: string; sheet: SpriteSheet }>) =>
+  post<BatchStatus>({ action: 'h3Start', sessionId, paths, prompt, ...(prepared && Object.keys(prepared).length ? { prepared } : {}) });
 export const h3Status = (sessionId: string, id?: string, signal?: AbortSignal) => post<BatchStatusAnswer>({ action: 'h3Status', sessionId, ...(id ? { id } : {}) }, signal);
 export const h3Result = (sessionId: string, id: string, index: number, signal?: AbortSignal) => post<GeneratedImage>({ action: 'h3Result', sessionId, id, index }, signal);
 export const h3Stop = (sessionId: string, id?: string) => post<BatchStatus>({ action: 'h3Stop', sessionId, ...(id ? { id } : {}) });

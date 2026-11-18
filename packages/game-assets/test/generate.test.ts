@@ -192,7 +192,9 @@ test('a picture is saved at a free path, never over a file; replacing retires th
     [{ path: 'public/art/new/hero-redraw.png' }, 'A file of that name is already there'],
     [{ path: 'public/art/hero.png' }, 'A file of that name is already there'],
     [{ path: 'public/art/x.webp' }, 'The picture is not a WEBP file'],
-    [{ path: 'public/art/x.gif' }, 'Save pictures as .png, .webp or .jpg files in a visible folder of the workspace'],
+    // GIF is saved only by the page's sprite path, which encodes it; PNG bytes under a .gif name are refused.
+    [{ path: 'public/art/x.gif' }, 'The picture is not a GIF file'],
+    [{ path: 'public/art/x.svg' }, 'Save pictures as .png, .webp or .jpg files in a visible folder of the workspace'],
     [{ path: '_retired/x.png' }, 'Pictures cannot be saved in the retired folder'],
     [{ path: 'public/art/none.png', replace: true }, 'Only an image of the last scan can be replaced'],
     [{ path: 'public/art/x.png', data: Buffer.from('not a picture').toString('base64') }, 'The picture is not a PNG file'],

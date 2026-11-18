@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocale } from '@dsh-plugins/i18n/react';
-import { REFERENCE_LIMIT, ROOT_FOLDER, isBatchRunning, isReference, type Asset, type BatchStatus, type FolderRule, type SaveResult, type ScanResult } from '../domain.js';
+import { REFERENCE_LIMIT, ROOT_FOLDER, isBatchRunning, isBatchSource, isReference, type Asset, type BatchStatus, type FolderRule, type SaveResult, type ScanResult } from '../domain.js';
 import { configureFolders, h3Status, moveAssets, noteAsset, revertAsset, scanWorkspace, tagAssets } from './api.js';
 import { BatchRedrawDialog, pendingBatchItems } from './batch.js';
 import { RetireDialog, SendDialog, TagDialog } from './dialogs.js';
@@ -250,7 +250,11 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
   const allShown = items.length > 0 && items.every(asset => checked.has(asset.path));
   const batchBanner = useMemo((): { text: string; tone?: 'error' } | undefined => {
     if (!batchJob || dialog?.kind === 'batch') return undefined;
-    if (batchJob.phase === 'booting') return { text: ui('h3 batch redraw: booting VM · {count} images', { count: batchJob.items.length }) };
+    if (batchJob.phase === 'booting') {
+      return { text: batchJob.boot?.busy && !batchJob.boot.gpu
+        ? ui('h3 batch redraw: waiting for a free GPU · {count} images', { count: batchJob.items.length })
+        : ui('h3 batch redraw: booting VM · {count} images', { count: batchJob.items.length }) };
+    }
     if (batchJob.phase === 'drawing') {
       const drawing = batchJob.items.findIndex(item => item.status === 'drawing');
       const done = batchJob.items.filter(item => item.status !== 'waiting' && item.status !== 'drawing').length;
@@ -317,7 +321,7 @@ function Workspace({ sessionId, openFile, sendToChat }: { sessionId: string; ope
         {shelf ? <button type="button" className="ga-button" disabled={busy || !picked.some(asset => asset.origin)} onClick={() => move('restore', picked.filter(asset => asset.origin).map(asset => asset.path))}>{ui('Restore')}</button>
           : <button type="button" className="ga-button" disabled={busy} onClick={() => setDialog({ kind: 'retire', paths: pickedPaths() })}>{ui('Retire…')}</button>}
         {!shelf && <button type="button" className="ga-button" onClick={() => generateFrom(picked)}>{ui('Generate…')}</button>}
-        {!shelf && picked.some(asset => !asset.retired && isReference(asset.path)) && <button type="button" className="ga-button"
+        {!shelf && picked.some(asset => !asset.retired && isBatchSource(asset.path)) && <button type="button" className="ga-button"
           disabled={h3BusyElsewhere && !batchJob} title={h3BusyElsewhere && !batchJob ? ui('h3 is already redrawing a batch for another workspace') : undefined}
           onClick={() => setDialog({ kind: 'batch', paths: pickedPaths() })}>{ui('Batch redraw with h3…')}</button>}
         <button type="button" className="ga-button" onClick={() => setDialog({ kind: 'send', paths: pickedPaths() })}>{ui('Ask the agent…')}</button>

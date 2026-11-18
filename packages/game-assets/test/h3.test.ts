@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { after, before, beforeEach, test } from 'node:test';
-import { CLIENT_HEADER, H3_BATCH_LIMIT, H3_MADE, isBatchRunning, type BatchStatus, type BatchStatusAnswer, type GeneratedImage } from '../src/domain.js';
-import { h3Prompt } from '../src/h3.js';
+import { CLIENT_HEADER, H3_BATCH_LIMIT, H3_MADE, isBatchRunning, sheetHint, type BatchStatus, type BatchStatusAnswer, type GeneratedImage } from '../src/domain.js';
+import { bootProgress, h3Prompt } from '../src/h3.js';
 import { createHandler } from '../src/http.js';
 import { apply as applyServer } from '../src/index.js';
 import { AssetService } from '../src/service.js';
@@ -144,6 +144,48 @@ test('a batch of 5 images boots once, redraws each from its own reference, shuts
   await service.discardBatch('s1', started.id);
   assert.equal(await stat(tempDir).then(() => true, () => false), false, 'discard deletes the temporary directory');
   assert.equal(service.batchStatus('s1'), null);
+});
+
+test('h3 up lines are read for GPU progress; anything else is not progress', () => {
+  let now = bootProgress('申请 GPU：A100 → G4 → H100（都没空就每 30 秒再试一轮，最多等 10 分钟；分配到 VM 之前不扣 CU）', {})!;
+  assert.deepEqual(now, { gpus: ['A100', 'G4', 'H100'], round: 1 });
+  now = bootProgress('  A100：暂时没有空闲（Service Unavailable）', now)!;
+  assert.equal(now.busy, true);
+  assert.equal(bootProgress('  G4：暂时没有空闲（412：临时限额，或者开着的会话太多）', now), undefined, 'still busy is no news');
+  now = bootProgress('  H100：账号没有这种 GPU 的权限或配额，之后不再试', now)!;
+  assert.deepEqual(now.gpus, ['A100', 'G4']);
+  now = bootProgress('  第 3 轮（已等 1.0 分钟）', now)!;
+  assert.deepEqual([now.round, now.waitedMinutes], [3, 1]);
+  assert.equal(bootProgress('✓ 拿到 G4（第 3 轮，等了 1.0 分钟）', now)!.gpu, 'G4');
+  assert.equal(bootProgress('✓ 拿到 A100', {})!.gpu, 'A100');
+  assert.deepEqual(bootProgress('⚠️  和 VM 的连接断了（colab 报告连接断开（Connection was lost），之后 60 秒没有任何输出），在同一台 VM 上重新运行安装（第 2 次，已完成的步骤会跳过）', { gpu: 'A100' }), { gpu: 'A100', setupAttempt: 2 });
+  for (const other of ['[colab] Creating session', '下载权重…', '']) assert.equal(bootProgress(other, now), undefined);
+});
+
+test('while h3 up waits for a free GPU the status says so, then names the GPU it got; giving up still runs down once', async () => {
+  const root = await temp('dsh-h3-gpu-');
+  await writeFile(join(root, 'a.png'), png(7));
+  const service = await makeService({ s1: root });
+  await service.scan('s1');
+  process.env.FAKE_H3_MODE = 'gpu-wait';
+  const started = await service.startBatch('s1', { paths: ['a.png'], prompt: 'redraw' });
+  const waiting = await waitFor(() => service.batchStatus('s1', started.id), (job): job is BatchStatus => !!job?.boot?.busy);
+  assert.equal(waiting.phase, 'booting');
+  assert.deepEqual(waiting.boot, { gpus: ['A100'], round: 1, busy: true }, 'G4 the account may not use is dropped');
+  const got = await waitFor(() => service.batchStatus('s1', started.id), (job): job is BatchStatus => !!job?.boot?.gpu);
+  assert.deepEqual([got.boot!.gpu, got.boot!.round, got.boot!.waitedMinutes, typeof got.boot!.since], ['A100', 2, 0.5, 'number']);
+  const done = await waitFor(() => service.batchStatus('s1', started.id), (job): job is BatchStatus => !!job && !isBatchRunning(job.phase));
+  assert.equal(done.phase, 'done');
+  await service.discardBatch('s1', started.id);
+
+  await clearCalls();
+  process.env.FAKE_H3_MODE = 'no-gpu';
+  const second = await service.startBatch('s1', { paths: ['a.png'], prompt: 'redraw' });
+  const failed = await waitFor(() => service.batchStatus('s1', second.id), (job): job is BatchStatus => !!job && !isBatchRunning(job.phase));
+  assert.equal(failed.phase, 'failed');
+  assert.match(failed.error!, /^h3 could not start the VM: .*没有开机，没有扣 CU/);
+  assert.deepEqual((await calls()).map(entry => entry.sub), ['status', 'up', 'down']);
+  await service.discardBatch('s1', second.id);
 });
 
 test('boot failure calls down once without drawing and marks the job failed', async () => {
@@ -314,6 +356,34 @@ test('startBatch returns before boot finishes, reconnects the same session, refu
   assert.deepEqual(discarded, { status: 200, json: { ok: true } });
 });
 
+test('GIF and see-through images go as the sheets the page made: h3 gets those bytes and the sheet hint, the status carries the layout, other images go as they are', async () => {
+  const root = await temp('dsh-h3-sheets-');
+  await writeFile(join(root, 'walk.gif'), gif());
+  await writeFile(join(root, 'ghost.png'), png(40));
+  await writeFile(join(root, 'wall.png'), png(41));
+  const service = await makeService({ s1: root });
+  await service.scan('s1');
+  const walkSheet = { key: '#0000ff', bands: 3, gutter: 11 }, ghostSheet = { key: '#00ff00', bands: 1, gutter: 0 };
+  const walkRef = png(50, 80), ghostRef = png(51, 72);
+  const started = await service.startBatch('s1', {
+    paths: ['walk.gif', 'ghost.png', 'wall.png'],
+    prompt: 'snowy winter outfit',
+    prepared: { 'walk.gif': { data: walkRef.toString('base64'), sheet: walkSheet }, 'ghost.png': { data: ghostRef.toString('base64'), sheet: ghostSheet } },
+  });
+  assert.deepEqual(started.items.map(item => item.sheet), [walkSheet, ghostSheet, undefined]);
+  const done = await waitFor(() => service.batchStatus('s1', started.id), (job): job is BatchStatus => !!job && !isBatchRunning(job.phase));
+  assert.deepEqual(done.items.map(item => [item.status, item.sheet?.bands]), [['done', 3], ['done', 1], ['done', undefined]]);
+  const edits = (await calls()).filter(entry => entry.sub === 'edit');
+  assert.deepEqual(edits.map(entry => entry.refHex), [walkRef.toString('hex'), ghostRef.toString('hex'), png(41).toString('hex')]);
+  assert.match(edits[0].reference!, /\.png$/, 'a GIF\'s sheet is staged under a .png name');
+  assert.equal(edits[0].prompt, `<Picture 1> snowy winter outfit\n\n${sheetHint(walkSheet)}`);
+  assert.match(edits[0].prompt!, /flat #0000ff background.*The 3 rows are separate strips/s);
+  assert.equal(edits[1].prompt, `<Picture 1> snowy winter outfit\n\n${sheetHint(ghostSheet)}`);
+  assert.doesNotMatch(edits[1].prompt!, /rows are separate/);
+  assert.equal(edits[2].prompt, '<Picture 1> snowy winter outfit');
+  await service.discardBatch('s1', started.id);
+});
+
 test('invalid batch requests (over 20 images, unlisted paths, retired images, GIF/SVG, empty prompt) and missing h3 are rejected with clear reasons and never boot a VM', async () => {
   const root = await temp('dsh-h3-invalid-');
   for (let i = 0; i <= H3_BATCH_LIMIT; i++) await writeFile(join(root, `p-${i}.png`), png(i + 1));
@@ -329,10 +399,20 @@ test('invalid batch requests (over 20 images, unlisted paths, retired images, GI
   await assert.rejects(service.startBatch('s1', { paths: tooMany, prompt: 'redraw' }), /Up to 20 images/);
   await assert.rejects(service.startBatch('s1', { paths: ['missing.png'], prompt: 'redraw' }), /Not an image of this workspace/);
   await assert.rejects(service.startBatch('s1', { paths: ['_retired/retire-me.png'], prompt: 'redraw' }), /Retired images cannot be redrawn/);
-  await assert.rejects(service.startBatch('s1', { paths: ['anim.gif'], prompt: 'redraw' }), /Only PNG, WebP and JPEG/);
-  await assert.rejects(service.startBatch('s1', { paths: ['icon.svg'], prompt: 'redraw' }), /Only PNG, WebP and JPEG/);
+  await assert.rejects(service.startBatch('s1', { paths: ['anim.gif'], prompt: 'redraw' }), /anim\.gif must be sent as a PNG sprite sheet/);
+  await assert.rejects(service.startBatch('s1', { paths: ['icon.svg'], prompt: 'redraw' }), /Only PNG, WebP, JPEG and GIF/);
   await assert.rejects(service.startBatch('s1', { paths: ['p-0.png'], prompt: '   ' }), /Describe the picture/);
+  const sheet = { key: '#ff00ff', bands: 1, gutter: 0 }, data = png(5).toString('base64');
+  await assert.rejects(service.startBatch('s1', { paths: ['anim.gif'], prompt: 'redraw', prepared: [] }), /Invalid sprite sheets/);
+  await assert.rejects(service.startBatch('s1', { paths: ['anim.gif'], prompt: 'redraw', prepared: { 'p-0.png': { data, sheet } } }), /names an image outside the selection/);
+  for (const bad of [{ data, sheet: { ...sheet, key: 'magenta' } }, { data, sheet: { ...sheet, bands: 0 } }, { data, sheet: { ...sheet, gutter: 1.5 } }, { data: '', sheet }, { sheet }]) {
+    await assert.rejects(service.startBatch('s1', { paths: ['anim.gif'], prompt: 'redraw', prepared: { 'anim.gif': bad } }), /Invalid sprite sheet for anim\.gif/, JSON.stringify(bad));
+  }
   assert.deepEqual(await calls(), [], 'none of the invalid requests invoked h3');
+  // A sheet that is not a PNG is found only once staging begins, after `h3 status` and before any boot.
+  await assert.rejects(service.startBatch('s1', { paths: ['anim.gif'], prompt: 'redraw', prepared: { 'anim.gif': { data: gif().toString('base64'), sheet } } }), /The sheet made from anim\.gif is not a PNG/);
+  assert.deepEqual((await calls()).map(entry => entry.sub), ['status']);
+  await clearCalls();
 
   // Missing h3 executable reports a clear error without calling up or down.
   const missing = await makeService({ s1: root }, { command: join(bin, 'no-such-h3'), loginShell: false });

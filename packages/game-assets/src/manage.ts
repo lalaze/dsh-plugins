@@ -49,10 +49,14 @@ export function cleanRetireDir(value: unknown): string | undefined {
  * Hidden folders are not scanned, so a picture there would not be listed.
  */
 export function cleanImagePath(value: unknown): string | undefined {
+  return cleanPicturePath(value, isReference);
+}
+/** Like cleanImagePath, for file names `accepts` allows. */
+export function cleanPicturePath(value: unknown, accepts: (name: string) => boolean): string | undefined {
   if (typeof value !== 'string' || value.length > 1024) return undefined;
   const parts = value.replace(/\\/g, '/').split('/').map(part => part.trim()).filter(Boolean);
   const plain = parts.length && parts.every(part => /^[^.\u0000-\u001f:*?"<>|][^\u0000-\u001f:*?"<>|]*$/.test(part) && part !== 'node_modules');
-  return plain && isReference(parts[parts.length - 1]) ? parts.join('/') : undefined;
+  return plain && accepts(parts[parts.length - 1]) ? parts.join('/') : undefined;
 }
 
 /** Puts the finished file `from` at `to`, failing if something is already there. */

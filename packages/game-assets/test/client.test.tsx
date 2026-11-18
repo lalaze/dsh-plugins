@@ -9,6 +9,9 @@ import { fileURLToPath } from 'node:url';
 import type { Asset, BatchStatus, MadeInfo, ProjectSource, ScanResult, SourceView } from '../src/domain.js';
 import { SOURCE_KINDS } from '../src/domain.js';
 import { resetBatches } from '../src/client/batch.js';
+import { encodeGif } from '../src/client/gif.js';
+import { coloursOf, paletteOf, planSheet, referenceOf, type Pixels } from '../src/client/sprite.js';
+import { decodeGif } from './gif-decode.js';
 import { i18n, localizePictureError } from '../src/client/i18n.js';
 import { BUNDLE_KEY, VIEW_ID, apply, fileAddress } from '../src/client/index.js';
 import { resetProjects } from '../src/client/projects.js';
@@ -30,7 +33,7 @@ const scan = (): ScanResult => ({
 
 let root: Root | undefined, container: HTMLElement, requests: Record<string, unknown>[], opened: unknown[][];
 /** What the simulated host has saved: where the tab appears, and the user's choice per conversation's workspace. */
-let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string; project: ProjectSource | null; extra: Asset[]; made: Record<string, MadeInfo>; batchJobs: Record<string, BatchStatus>; failSave: Record<string, string>; h3Polls: Record<string, unknown>[] };
+let saved: { mode: 'games' | 'all'; overrides: Record<string, boolean | null>; down: boolean; retired: string[]; tags: Record<string, string[]>; sources: SourceView[]; defaultId: string | null; written: string[]; failGenerate?: string; project: ProjectSource | null; extra: Asset[]; made: Record<string, MadeInfo>; batchJobs: Record<string, BatchStatus>; failSave: Record<string, string>; h3Polls: Record<string, unknown>[]; files: Record<string, Uint8Array>; h3Picture?: Buffer };
 /** A PNG of 1024 × 1024, as an image API answers. */
 const GENERATED = (() => { const data = Buffer.alloc(40); data.writeUInt32BE(0x89504e47, 0); data.writeUInt32BE(0x0d0a1a0a, 4); data.writeUInt32BE(13, 8); data.write('IHDR', 12, 'latin1'); data.writeUInt32BE(1024, 16); data.writeUInt32BE(1024, 20); return data; })();
 /** The workspace as the simulated host answers it: retired images sit in the retired folder, tags are attached. */
@@ -49,10 +52,10 @@ const project = (sessionId: string) => {
 };
 beforeEach(() => {
   const { window } = new JSDOM('<!doctype html><body></body>', { url: 'http://localhost/', pretendToBeVisual: true });
-  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [], project: null, extra: [], made: {}, batchJobs: {}, failSave: {}, h3Polls: [] };
+  requests = []; opened = []; saved = { mode: 'games', overrides: {}, down: false, retired: [], tags: {}, sources: [], defaultId: null, written: [], project: null, extra: [], made: {}, batchJobs: {}, failSave: {}, h3Polls: [], files: {} };
   const fetch = async (url: string, init: { method?: string; body?: string; headers: Record<string, string> }) => {
     assert.equal(init.headers['X-DSH-Game-Assets'], '1');
-    if (!init.body) { requests.push({ image: new URL(url, 'http://localhost/').searchParams.get('path') }); return new Response(new Uint8Array([1, 2, 3])); }
+    if (!init.body) { const path = new URL(url, 'http://localhost/').searchParams.get('path')!; requests.push({ image: path }); return new Response(new Uint8Array(saved.files[path] ?? [1, 2, 3])); }
     const body = JSON.parse(init.body);
     // Thumbnails come in batches; they are kept apart from the requests the tests look at.
     if (body.action === 'images') { requests.push({ image: body.paths }); return Response.json({ images: body.paths.map((path: string) => ({ path, data: 'AQID' })) }); }
@@ -105,12 +108,12 @@ beforeEach(() => {
     if (body.action === 'h3Start') {
       const existing = saved.batchJobs[body.sessionId];
       if (existing && (existing.phase === 'booting' || existing.phase === 'drawing' || existing.phase === 'stopping')) return Response.json(existing);
-      const job: BatchStatus = { id: `batch-${Object.keys(saved.batchJobs).length + 1}`, sessionId: body.sessionId, phase: 'booting', startedAt: Date.now(), prompt: body.prompt, items: body.paths.map((path: string) => ({ path, status: 'waiting' as const })) };
+      const job: BatchStatus = { id: `batch-${Object.keys(saved.batchJobs).length + 1}`, sessionId: body.sessionId, phase: 'booting', startedAt: Date.now(), prompt: body.prompt, items: body.paths.map((path: string) => ({ path, status: 'waiting' as const, ...(body.prepared?.[path] ? { sheet: body.prepared[path].sheet } : {}) })) };
       saved.batchJobs[body.sessionId] = job;
       return Response.json(job);
     }
     if (body.action === 'h3Result') {
-      return Response.json({ data: GENERATED.toString('base64'), mediaType: 'image/png', width: 2048, height: 2048, model: 'MiniMax-H3-Image', source: 'h3', ms: 4200 });
+      return Response.json({ data: (saved.h3Picture ?? GENERATED).toString('base64'), mediaType: 'image/png', width: 2048, height: 2048, model: 'MiniMax-H3-Image', source: 'h3', ms: 4200 });
     }
     if (body.action === 'h3Stop') {
       const job = saved.batchJobs[body.sessionId]!;
@@ -758,35 +761,40 @@ test('batch redraw with h3 warns and requires confirmation under 4 images, and s
   saved.extra = [asset('public/art/slime.png', 'unused'), asset('public/art/coin.png', 'unused')];
   await mount('batch-select');
 
-  // Selecting only a GIF does not offer h3 batch redraw; adding PNGs offers it.
+  // A GIF alone is offered too: the page sends it as a sprite sheet.
   await check('public/art/hero.gif');
-  assert.equal(button('.ga-selbar', 'Batch redraw with h3…'), undefined);
+  assert.ok(button('.ga-selbar', 'Batch redraw with h3…'));
   await check('assets/cast-v1/hero.png');
   await check('public/art/npc.png');
-  assert.ok(button('.ga-selbar', 'Batch redraw with h3…'));
 
   await click(button('.ga-selbar', 'Batch redraw with h3…'));
   await settle();
-  // GIF is left out with an explanation; 2 PNGs (< 4) trigger the cost warning and require checking confirmation.
-  assert.deepEqual(texts('.ga-dialog .ga-refpic .ga-twin-path'), ['hero.png', 'npc.png']);
-  assert.match(container.querySelector('.ga-dialog')!.textContent!, /1 GIF or SVG images are left out/);
+  // The GIF is listed with a note on how it goes; 3 images (< 4) trigger the cost warning and require checking confirmation.
+  assert.deepEqual(texts('.ga-dialog .ga-refpic .ga-twin-path'), ['hero.png', 'hero.gif', 'npc.png']);
+  assert.doesNotMatch(container.querySelector('.ga-dialog')!.textContent!, /left out/);
+  assert.match(container.querySelector('.ga-dialog')!.textContent!, /GIF and see-through images go as sprite sheets/);
   assert.match(container.querySelector('.ga-dialog [data-tone=warn]')!.textContent!, /Fewer than 4 images is not cost-effective/);
-  const startSmall = button('.ga-dialog', 'Still boot and redraw 2 images') as HTMLButtonElement;
+  const startSmall = button('.ga-dialog', 'Still boot and redraw 3 images') as HTMLButtonElement;
   assert.equal(startSmall.disabled, true);
   await click(container.querySelector('.ga-dialog .ga-check-label input'));
   assert.equal(startSmall.disabled, false);
   await click(button('.ga-dialog', 'Cancel'));
 
-  // Selecting 4 PNGs shows no small-batch warning and enables starting directly.
+  // With 4 PNGs and the GIF there is no small-batch warning. A browser that cannot read pixels cannot send the GIF.
   await check('assets/cast-v2/hero.png');
   await check('public/art/slime.png');
   await click(button('.ga-selbar', 'Batch redraw with h3…'));
   await settle();
   assert.equal(container.querySelector('.ga-dialog [data-tone=warn]'), null);
   assert.equal(container.querySelector('.ga-dialog .ga-check-label input'), null);
+  await typeInto(container.querySelector('.ga-dialog textarea'), 'repaint with warm lighting');
+  await click(button('.ga-dialog', 'Boot and redraw 5 images'));
+  await settle();
+  assert.match(container.querySelector('.ga-dialog [data-tone=error]')!.textContent!, /This browser cannot prepare GIF images for h3/);
+  assert.equal(sent().filter(request => request.action === 'h3Start').length, 0);
+  await click(container.querySelector('.ga-dialog .ga-refpic[title="public/art/hero.gif"] button'));
   const startFour = button('.ga-dialog', 'Boot and redraw 4 images') as HTMLButtonElement;
   assert.equal(startFour.disabled, false);
-  await typeInto(container.querySelector('.ga-dialog textarea'), 'repaint with warm lighting');
   await click(startFour);
   await settle();
   assert.deepEqual(sent().find(request => request.action === 'h3Start'), {
@@ -795,6 +803,118 @@ test('batch redraw with h3 warns and requires confirmation under 4 images, and s
     paths: ['assets/cast-v1/hero.png', 'assets/cast-v2/hero.png', 'public/art/npc.png', 'public/art/slime.png'],
     prompt: 'repaint with warm lighting',
   });
+});
+
+/** Pixels in a made-up format the fake canvas below writes and reads, so the page's own pixel code runs in jsdom. */
+const FAKE = Buffer.from('FAKE');
+const fakeFile = (pixels: Pixels) => Buffer.concat([FAKE, Buffer.from([pixels.width & 0xff, pixels.width >> 8, pixels.height & 0xff, pixels.height >> 8]), Buffer.from(pixels.data)]);
+function pixelsOfFile(bytes: Uint8Array): Pixels {
+  if (Buffer.from(bytes.subarray(0, 4)).equals(FAKE)) return { width: bytes[4] | (bytes[5] << 8), height: bytes[6] | (bytes[7] << 8), data: new Uint8ClampedArray(bytes.subarray(8)) };
+  const gif = decodeGif(bytes), data = new Uint8ClampedArray(gif.width * gif.height * 4);
+  gif.indices.forEach((index, i) => {
+    if (index === gif.transparent) return;
+    const colour = gif.palette[index];
+    data.set([colour >> 16, (colour >> 8) & 0xff, colour & 0xff, 255], i * 4);
+  });
+  return { width: gif.width, height: gif.height, data };
+}
+/** A canvas that only copies pixels, enough for reading a picture whole and writing pixels back. */
+function fakeCanvas() {
+  type Canvas = HTMLCanvasElement & { pixels?: Pixels };
+  const prototype = (container.ownerDocument.defaultView as unknown as { HTMLCanvasElement: { prototype: Canvas } }).HTMLCanvasElement.prototype;
+  prototype.getContext = function (this: Canvas) {
+    const canvas = this;
+    return {
+      drawImage(bitmap: { pixels: Pixels }) { canvas.pixels = { ...bitmap.pixels, data: new Uint8ClampedArray(bitmap.pixels.data) }; },
+      getImageData: () => ({ data: canvas.pixels!.data }),
+      createImageData: (width: number, height: number) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+      putImageData(image: { data: Uint8ClampedArray }) { canvas.pixels = { width: canvas.width, height: canvas.height, data: image.data }; },
+    } as unknown as CanvasRenderingContext2D;
+  } as unknown as Canvas['getContext'];
+  prototype.toBlob = function (this: Canvas, done: BlobCallback, type?: string) { done(new Blob([fakeFile(this.pixels!)], { type: type ?? 'image/png' }) as unknown as globalThis.Blob); };
+  (globalThis as Record<string, unknown>).createImageBitmap = async (blob: Blob) => {
+    const pixels = pixelsOfFile(new Uint8Array(await blob.arrayBuffer()));
+    return { width: pixels.width, height: pixels.height, pixels, close() {} };
+  };
+}
+/** The reference at another scale by nearest neighbour, as a perfect h3 would draw it back. */
+function enlarged(pixels: Pixels, factor: number): Pixels {
+  const width = Math.round(pixels.width * factor), height = Math.round(pixels.height * factor), data = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const from = (Math.floor(((y + 0.5) * pixels.height) / height) * pixels.width + Math.floor(((x + 0.5) * pixels.width) / width)) * 4;
+    data.set(pixels.data.subarray(from, from + 4), (y * width + x) * 4);
+  }
+  return { width, height, data };
+}
+
+test('while h3 waits for a free GPU the banner and dialog say so, and name the GPU once it is assigned', async () => {
+  saved.batchJobs.gpu = { id: 'job-gpu', sessionId: 'gpu', phase: 'booting', startedAt: Date.now() - 95_000, prompt: 'redraw',
+    items: [{ path: 'public/art/npc.png', status: 'waiting' }], boot: { gpus: ['A100', 'G4'], round: 3, waitedMinutes: 1, busy: true } };
+  await mount('gpu');
+  assert.match(container.querySelector('.ga-batch-bar')!.textContent!, /h3 batch redraw: waiting for a free GPU · 1 images/);
+  await click(button('.ga-batch-bar', 'Open'));
+  await settle();
+  assert.match(container.querySelector('.ga-dialog [role=status]')!.textContent!, /^No A100 → G4 free yet; h3 asks again every 30 s for up to 10 min, nothing is billed meanwhile · round 3, 1m 3\ds$/);
+  await act(async () => root?.unmount()); root = undefined;
+  saved.batchJobs.gpu = { ...saved.batchJobs.gpu, boot: { gpus: ['A100', 'G4'], round: 3, busy: true, gpu: 'G4', since: Date.now() - 20_000 } };
+  await mount('gpu', 'zh-CN');
+  assert.match(container.querySelector('.ga-batch-bar')!.textContent!, /h3 批量重绘：正在开机/);
+  await click(button('.ga-batch-bar', '打开'));
+  await settle();
+  assert.match(container.querySelector('.ga-dialog [role=status]')!.textContent!, /^已拿到 G4，正在安装和启动 h3… 2\d 秒（约 11 分钟）$/);
+});
+
+test('a GIF sprite goes to h3 as a keyed PNG sheet and is saved back as a see-through GIF at its own size and colours', async () => {
+  fakeCanvas();
+  try {
+    // A 6 × 2 GIF sprite with three colours around see-through pixels; index 3 is see-through.
+    const indices = Uint8Array.from([3, 0, 0, 3, 1, 1, 3, 2, 2, 3, 0, 3]), colours = [0xc0392b, 0x5a3a29, 0xf2c49b];
+    saved.files['public/art/hero.gif'] = encodeGif(6, 2, indices, [...colours, 0], 3);
+    const sprite = pixelsOfFile(saved.files['public/art/hero.gif']);
+    const opaque = { width: 2, height: 2, data: Uint8ClampedArray.from({ length: 16 }, (_, i) => i % 4 === 3 ? 255 : 200) };
+    const ghost = { width: 2, height: 2, data: Uint8ClampedArray.from([9, 9, 9, 255, 0, 0, 0, 0, 9, 9, 9, 255, 9, 9, 9, 255]) };
+    saved.files['assets/cast-v1/hero.png'] = fakeFile(opaque);
+    saved.files['assets/cast-v2/hero.png'] = fakeFile(opaque);
+    saved.files['public/art/npc.png'] = fakeFile(ghost);
+    await mount('sprite');
+    for (const path of ['public/art/hero.gif', 'assets/cast-v1/hero.png', 'assets/cast-v2/hero.png', 'public/art/npc.png']) await check(path);
+    await click(button('.ga-selbar', 'Batch redraw with h3…'));
+    await settle();
+    await click(button('.ga-dialog', 'Boot and redraw 4 images'));
+    await settle();
+
+    // The GIF and the see-through PNG go as sheets; the opaque PNGs go as they are.
+    const start = sent().find(request => request.action === 'h3Start') as { paths: string[]; prepared: Record<string, { data: string; sheet: { key: string; bands: number; gutter: number } }> };
+    assert.deepEqual(Object.keys(start.prepared).sort(), ['public/art/hero.gif', 'public/art/npc.png']);
+    const sheet = start.prepared['public/art/hero.gif'].sheet;
+    assert.deepEqual(sheet, planSheet(sprite));
+    assert.deepEqual(sheet, { key: '#00ffff', bands: 1, gutter: 0 });
+    const reference = pixelsOfFile(Buffer.from(start.prepared['public/art/hero.gif'].data, 'base64'));
+    assert.deepEqual([reference.width, reference.height, [...reference.data]], [referenceOf(sprite, sheet).width, referenceOf(sprite, sheet).height, [...referenceOf(sprite, sheet).data]]);
+
+    // h3 drew the sheet back at a non-whole scale; the batch is done.
+    saved.h3Picture = fakeFile(enlarged(reference, 2048 / reference.width * 1.37));
+    saved.batchJobs.sprite = { ...saved.batchJobs.sprite, phase: 'done', items: saved.batchJobs.sprite.items.map(item => ({ ...item, status: 'done' as const, width: 2048, height: 683 })) };
+    await act(async () => root?.unmount()); root = undefined;
+    await mount('sprite');
+    await click(button('.ga-batch-bar', 'Open'));
+    await settle();
+    const row = '.ga-batch-item[data-path="public/art/hero.gif"]';
+    assert.match(container.querySelector(`${row} .ga-compare`)!.textContent!, /background removed/);
+    assert.ok(container.querySelector('.ga-dialog .ga-check-label input'), 'sprites offer keeping their colours');
+    await click(button(row, 'Replace'));
+    await settle();
+
+    const save = sent().filter(request => request.action === 'save').at(-1) as { path: string; data: string; replace: boolean };
+    assert.deepEqual([save.path, save.replace], ['public/art/hero.gif', true]);
+    const written = Buffer.from(save.data, 'base64');
+    assert.equal(written.subarray(0, 6).toString('latin1'), 'GIF89a');
+    const back = pixelsOfFile(written);
+    assert.deepEqual([back.width, back.height, [...back.data]], [6, 2, [...sprite.data]], 'same size, same colours, same see-through pixels');
+    assert.deepEqual(new Set(decodeGif(written).palette.slice(0, 3)), new Set(paletteOf(coloursOf(sprite))));
+  } finally {
+    delete (globalThis as Record<string, unknown>).createImageBitmap;
+  }
 });
 
 test('batch redraw replaces one image, saves as a free -redraw file, and handles per-row errors during Replace all', async () => {

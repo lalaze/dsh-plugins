@@ -46,7 +46,7 @@ export interface HandleExtras { signal?: AbortSignal; codexCommand?: string }
 
 /** Where Remote Agents' upload leaves a picture on a remote machine before the script puts it in place. */
 export const STAGING_DIR = '.dsh-remote-agents/attachments/game-assets';
-const STAGED = /^[a-f0-9]{64}\.(?:png|webp|jpe?g|json)$/;
+const STAGED = /^[a-f0-9]{64}\.(?:png|webp|jpe?g|gif|json)$/;
 
 /** The bytes of an uploaded picture, checked against its digest; the upload is removed either way. */
 async function takeStaged(root: string, staged: string | undefined, sha256: string | undefined): Promise<Buffer> {

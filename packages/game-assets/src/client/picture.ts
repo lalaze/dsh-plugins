@@ -83,3 +83,34 @@ export async function renderPicture(picture: Blob, type: string, fit: FitMode, s
     return blob;
   } finally { bitmap.close(); }
 }
+
+/** Whether this page can read and write pixels, which the sprite path for GIF and see-through images needs. */
+export const canEditPixels = (): boolean => typeof createImageBitmap === 'function' && typeof document !== 'undefined'
+  && !!document.createElement('canvas').getContext?.('2d');
+
+/** A picture's RGBA pixels; a GIF gives its first frame. */
+export async function pixelsOf(picture: Blob): Promise<{ width: number; height: number; data: Uint8ClampedArray }> {
+  const bitmap = await createImageBitmap(picture);
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width; canvas.height = bitmap.height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('This browser cannot read pictures');
+    context.drawImage(bitmap, 0, 0);
+    return { width: bitmap.width, height: bitmap.height, data: context.getImageData(0, 0, bitmap.width, bitmap.height).data };
+  } finally { bitmap.close(); }
+}
+
+/** RGBA pixels encoded as `type` (PNG or WebP). */
+export async function encodePixels(pixels: { width: number; height: number; data: Uint8ClampedArray }, type = 'image/png'): Promise<Blob> {
+  const canvas = document.createElement('canvas');
+  canvas.width = pixels.width; canvas.height = pixels.height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('This browser cannot write pictures');
+  const image = context.createImageData(pixels.width, pixels.height);
+  image.data.set(pixels.data);
+  context.putImageData(image, 0, 0);
+  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, type, 0.92));
+  if (!blob || blob.type !== type) throw new Error(type === 'image/webp' ? 'This browser cannot save WebP pictures; save it as .png' : 'The picture could not be encoded');
+  return blob;
+}

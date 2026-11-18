@@ -189,6 +189,32 @@ export const PROMPT_LIMIT = 8000;
 export const H3_BATCH_LIMIT = 20;
 export const H3_WORTH_IT = 4;
 export const H3_MADE = { source: 'h3', model: 'MiniMax-H3-Image' } as const;
+/** Formats an h3 batch takes: the reference formats, and GIF, which the page turns into a PNG sheet first. */
+export const isBatchSource = (path: string): boolean => isReference(path) || extensionOf(path) === 'gif';
+
+/**
+ * How the page laid out a sprite for h3, which reads and draws opaque pictures only: see-through pixels became the flat
+ * `key` colour, and a long strip was cut into `bands` equal parts stacked with `gutter` pixels of key colour between
+ * them, so the sheet is near square. The page undoes both on the picture h3 returns.
+ */
+export interface SpriteSheet { key: string; bands: number; gutter: number }
+export const SHEET_BANDS_LIMIT = 12;
+export const SHEET_GUTTER_LIMIT = 256;
+export function isSpriteSheet(value: unknown): value is SpriteSheet {
+  const sheet = value as SpriteSheet | undefined;
+  return !!sheet && typeof sheet === 'object' && typeof sheet.key === 'string' && /^#[0-9a-f]{6}$/.test(sheet.key)
+    && Number.isInteger(sheet.bands) && sheet.bands >= 1 && sheet.bands <= SHEET_BANDS_LIMIT
+    && Number.isInteger(sheet.gutter) && sheet.gutter >= 0 && sheet.gutter <= SHEET_GUTTER_LIMIT;
+}
+/** What h3 is told besides the user's prompt about a sprite sheet the page prepared. */
+export function sheetHint(sheet: SpriteSheet): string {
+  return [
+    `<Picture 1> is game sprite art on a flat ${sheet.key} background.`,
+    'Keep its exact layout: every figure and object stays in the same place, at the same size and in the same pose, with nothing added or removed.',
+    sheet.bands > 1 ? `The ${sheet.bands} rows are separate strips; keep the empty bands between them empty.` : '',
+    `Leave all empty space flat solid ${sheet.key}, with no shadow, gradient or texture, and never use that colour inside a figure.`,
+  ].filter(Boolean).join(' ');
+}
 
 export type BatchPhase = 'booting' | 'drawing' | 'stopping' | 'done' | 'failed' | 'stopped';
 export type BatchItemState = 'waiting' | 'drawing' | 'done' | 'failed' | 'skipped';
@@ -199,7 +225,15 @@ export interface BatchItemStatus {
   ms?: number;
   width?: number;
   height?: number;
+  /** Set when the page sent this image as a prepared sprite sheet. */
+  sheet?: SpriteSheet;
 }
+/**
+ * How `h3 up` is getting on with finding a GPU: the GPUs it asks for in order, the polling round and minutes waited
+ * while all are `busy`, the `gpu` it got with the time it got it (`since`, set by the host), and the `setupAttempt`
+ * h3 is on after its connection to the VM dropped during setup (colab-use eb925c6).
+ */
+export interface BootProgress { gpus?: string[]; round?: number; waitedMinutes?: number; busy?: boolean; gpu?: string; since?: number; setupAttempt?: number }
 export interface BatchStatus {
   id: string;
   sessionId: string;
@@ -209,6 +243,8 @@ export interface BatchStatus {
   items: BatchItemStatus[];
   error?: string;
   downError?: string;
+  /** Set while `h3 up` looks for a GPU and after it got one. */
+  boot?: BootProgress;
 }
 export interface BatchStatusAnswer {
   job: BatchStatus | null;

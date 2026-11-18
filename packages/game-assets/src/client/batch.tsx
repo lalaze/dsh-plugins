@@ -10,18 +10,21 @@ import {
   H3_WORTH_IT,
   extensionOf,
   isBatchRunning,
+  isBatchSource,
   isReference,
   type Asset,
   type BatchStatus,
   type GeneratedImage,
   type SaveResult,
+  type SpriteSheet,
 } from '../domain.js';
 import { h3Discard, h3Result, h3Start, h3Status, h3Stop, savePicture } from './api.js';
 import { freePath } from './generate.js';
 import { Picture } from './grid.js';
 import { localizePictureError, ui } from './i18n.js';
 import { dirOf, fitScale, nameOf, stemOf } from './model.js';
-import { base64Of, blobOf, defaultFit, mimeOfPath, renderPicture, type FitMode } from './picture.js';
+import { base64Of, blobOf, defaultFit, renderPicture, type FitMode } from './picture.js';
+import { prepareSheets, readOriginal, resetSheets, restoredPicture, spriteFit, spriteType } from './sheets.js';
 
 export type BatchFit = 'auto' | FitMode;
 
@@ -36,10 +39,35 @@ interface LoadedItem {
 const outcomesByJob = new Map<string, Record<number, ItemOutcome>>();
 export function resetBatches(): void {
   outcomesByJob.clear();
+  resetSheets();
+}
+
+/**
+ * The file a finished picture becomes: a sprite sent as a sheet comes back see-through at its own size and colours
+ * (GIF stays GIF); other pictures are fitted as before, cropped to fill since h3 draws opaque pictures.
+ */
+async function finalPicture(sessionId: string, path: string, picture: Blob, sheet: SpriteSheet | undefined, fitChoice: BatchFit, size: { width: number; height: number } | undefined, type: string, keepColours = true): Promise<Blob> {
+  if (sheet) {
+    const original = await readOriginal(sessionId, path);
+    return restoredPicture(picture, sheet, original, spriteFit(fitChoice, original, path), type, keepColours);
+  }
+  const chosen: FitMode = fitChoice === 'auto' ? defaultFit(size?.width, size?.height) : fitChoice;
+  return renderPicture(picture, type, typeof createImageBitmap === 'function' ? chosen : 'none', size, true);
 }
 export function pendingBatchItems(job: BatchStatus): number {
   const outcomes = outcomesByJob.get(job.id) ?? {};
   return job.items.filter((item, index) => item.status === 'done' && !outcomes[index]).length;
+}
+
+/** What booting is at: asking for a GPU, waiting for a free one, or setting up the one it got. */
+function bootText(job: BatchStatus, now: number): string {
+  const boot = job.boot, elapsed = (since: number) => formatElapsed(Math.round((now - since) / 1000));
+  if (boot?.gpu && boot.setupAttempt) return ui('Got a {gpu}; the connection to it dropped, setting up again (attempt {attempt})… {elapsed}', { gpu: boot.gpu, attempt: boot.setupAttempt, elapsed: elapsed(boot.since ?? job.startedAt) });
+  if (boot?.gpu) return ui('Got a {gpu}; setting up h3… {elapsed} (~11 min)', { gpu: boot.gpu, elapsed: elapsed(boot.since ?? job.startedAt) });
+  const gpus = boot?.gpus?.join(' → ') ?? 'GPU';
+  if (boot?.busy) return ui('No {gpus} free yet; h3 asks again every 30 s for up to 10 min, nothing is billed meanwhile · round {round}, {elapsed}', { gpus, round: boot.round ?? 1, elapsed: elapsed(job.startedAt) });
+  if (boot?.gpus) return ui('Asking Colab for a GPU ({gpus})… {elapsed}', { gpus, elapsed: elapsed(job.startedAt) });
+  return ui('Booting the h3 VM… {elapsed} (~11 min)', { elapsed: elapsed(job.startedAt) });
 }
 
 function formatElapsed(seconds: number): string {
@@ -50,14 +78,20 @@ function formatElapsed(seconds: number): string {
 
 function BatchComparison({
   sessionId,
+  path,
+  sheet,
   asset,
   loaded,
   fitChoice,
+  keepColours,
 }: {
   sessionId: string;
+  path: string;
+  sheet?: SpriteSheet;
   asset: Asset | undefined;
   loaded: LoadedItem | undefined;
   fitChoice: BatchFit;
+  keepColours: boolean;
 }) {
   const size = asset?.width && asset.height ? { width: asset.width, height: asset.height } : undefined;
   const fit: FitMode = fitChoice === 'auto' ? defaultFit(size?.width, size?.height) : fitChoice;
@@ -68,14 +102,14 @@ function BatchComparison({
       setPreview(undefined);
       return;
     }
-    if (fit === 'none' || !size || typeof createImageBitmap !== 'function') {
+    if (!sheet && (fit === 'none' || !size || typeof createImageBitmap !== 'function')) {
       setPreview(loaded.url);
       return;
     }
     let url: string | undefined;
     let gone = false;
-    // h3 outputs opaque PNGs without transparency, so resizing crops to fill (`cover = true`) like Gemini.
-    renderPicture(loaded.blob, 'image/png', fit, size, true).then(
+    // A sprite previews as the file it would be saved as; other pictures as a PNG fitted like the save.
+    finalPicture(sessionId, path, loaded.blob, sheet, fitChoice, size, sheet ? spriteType(path) ?? 'image/png' : 'image/png', keepColours).then(
       blob => {
         if (gone) return;
         url = URL.createObjectURL(blob);
@@ -89,9 +123,9 @@ function BatchComparison({
       gone = true;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [loaded, fit, size?.width, size?.height]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loaded, fit, fitChoice, keepColours, sheet, size?.width, size?.height]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const shown = fit !== 'none' && size ? size : loaded?.image.width ? { width: loaded.image.width, height: loaded.image.height! } : undefined;
+  const shown = (sheet ? fitChoice !== 'none' : fit !== 'none') && size ? size : loaded?.image.width ? { width: loaded.image.width, height: loaded.image.height! } : undefined;
   const scale = fitScale(shown?.width, shown?.height, 200);
 
   return (
@@ -113,7 +147,7 @@ function BatchComparison({
             <img
               src={preview}
               alt={ui('Generated picture')}
-              data-crisp={fit === 'pixel' || (!!scale && fit !== 'smooth') || undefined}
+              data-crisp={fit === 'pixel' || !!sheet || (!!scale && fit !== 'smooth') || undefined}
               style={scale && shown ? { width: shown.width * scale, height: shown.height * scale } : undefined}
             />
           ) : (
@@ -123,7 +157,8 @@ function BatchComparison({
         <figcaption>
           {ui('New')}
           {loaded?.image.width ? ` · ${loaded.image.width} × ${loaded.image.height}` : ''}
-          {size && fit !== 'none' ? ` → ${size.width} × ${size.height}` : ''}
+          {size && (sheet ? fitChoice !== 'none' : fit !== 'none') ? ` → ${size.width} × ${size.height}` : ''}
+          {sheet ? ` · ${ui('background removed')}` : ''}
         </figcaption>
       </figure>
     </div>
@@ -158,8 +193,8 @@ export function BatchRedrawDialog({
   onClose,
 }: BatchRedrawProps) {
   const retiredCount = useMemo(() => given.filter(asset => asset.retired).length, [given]);
-  const nonRefCount = useMemo(() => given.filter(asset => !asset.retired && !isReference(asset.path)).length, [given]);
-  const eligible = useMemo(() => given.filter(asset => !asset.retired && isReference(asset.path)), [given]);
+  const nonRefCount = useMemo(() => given.filter(asset => !asset.retired && !isBatchSource(asset.path)).length, [given]);
+  const eligible = useMemo(() => given.filter(asset => !asset.retired && isBatchSource(asset.path)), [given]);
   const overLimit = Math.max(0, eligible.length - H3_BATCH_LIMIT);
 
   const [targets, setTargets] = useState<Asset[]>(() => eligible.slice(0, H3_BATCH_LIMIT));
@@ -170,6 +205,7 @@ export function BatchRedrawDialog({
   const [stopping, setStopping] = useState(false);
   const [saving, setSaving] = useState(false);
   const [fitChoice, setFitChoice] = useState<BatchFit>('auto');
+  const [keepColours, setKeepColours] = useState(true);
   const [now, setNow] = useState(() => Date.now());
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState<Record<number, LoadedItem>>({});
@@ -288,8 +324,19 @@ export function BatchRedrawDialog({
     if (!targets.length || !prompt.trim()) return;
     setStarting(true);
     setError('');
-    h3Start(sessionId, targets.map(asset => asset.path), prompt)
+    const paths = targets.map(asset => asset.path);
+    prepareSheets(sessionId, paths)
+      .then(({ prepared, animated }) => {
+        if (!animated.length) return h3Start(sessionId, paths, prompt, prepared);
+        // Left out before booting, so the count the user confirmed is never silently smaller.
+        if (alive.current) {
+          setTargets(old => old.filter(asset => !animated.includes(asset.path)));
+          setError(ui('Animated GIFs cannot be redrawn yet and were taken out: {names}. Check the list and start again.', { names: animated.map(nameOf).join(', ') }));
+        }
+        return undefined;
+      })
       .then(started => {
+        if (!started) return;
         if (!alive.current) return;
         setNow(Date.now());
         setJob(started);
@@ -334,14 +381,12 @@ export function BatchRedrawDialog({
       const picture = await ensureLoaded(currentJob.id, index);
       const asset = assetsByPath.get(item.path);
       const size = asset?.width && asset.height ? { width: asset.width, height: asset.height } : undefined;
-      const chosenFit: FitMode = fitChoice === 'auto' ? defaultFit(size?.width, size?.height) : fitChoice;
-      const fit: FitMode = typeof createImageBitmap === 'function' ? chosenFit : 'none';
-      const ext = isReference(item.path) ? extensionOf(item.path) : 'png';
+      const ext = isBatchSource(item.path) ? extensionOf(item.path) : 'png';
       const dir = dirOf(item.path);
       const where = replace ? item.path : freePath(`${dir ? `${dir}/` : ''}${stemOf(item.path)}-redraw.${ext}`, takenRef.current);
-      const type = mimeOfPath(where);
+      const type = item.sheet ? spriteType(where) : isReference(where) ? spriteType(where) : undefined;
       if (!type) throw new Error(ui('Save pictures as .png, .webp or .jpg files in a visible folder of the workspace'));
-      const blob = await renderPicture(picture.blob, type, fit, size, true);
+      const blob = await finalPicture(sessionId, item.path, picture.blob, item.sheet, fitChoice, size, type, keepColours);
       const saved = await savePicture(sessionId, where, await base64Of(blob), replace, { ...H3_MADE, prompt: currentJob.prompt });
       takenRef.current.add(saved.path);
       const nextOutcomes: Record<number, ItemOutcome> = { ...currentOutcomes, [index]: { kind: 'saved', path: saved.path, replaced: replace } };
@@ -492,7 +537,10 @@ export function BatchRedrawDialog({
               </div>
             )}
             {nonRefCount > 0 && (
-              <p className="ga-dim">{ui('{count} GIF or SVG images are left out: image APIs take PNG, WebP and JPEG.', { count: nonRefCount })}</p>
+              <p className="ga-dim">{ui('{count} SVG images are left out: h3 takes PNG, WebP, JPEG and GIF.', { count: nonRefCount })}</p>
+            )}
+            {targets.some(asset => extensionOf(asset.path) === 'gif') && (
+              <p className="ga-dim">{ui('GIF and see-through images go as sprite sheets: the page fills their background with one flat colour for h3 and takes it out again, at the original size and colours.')}</p>
             )}
             {retiredCount > 0 && <p className="ga-dim">{ui('{count} retired images are left out.', { count: retiredCount })}</p>}
             {overLimit > 0 && (
@@ -509,7 +557,7 @@ export function BatchRedrawDialog({
               onChange={event => setPrompt(event.target.value)}
             />
             <p className="ga-dim">
-              {ui('Cost: booting the Colab A100 VM takes ~11 min and ~1.6 CU; h3 down runs automatically when the batch ends.')}
+              {ui('Cost: h3 asks Colab for an A100, then a G4, and waits up to 10 min for a free one, which costs nothing; booting then takes ~11 min and ~1.6 CU. h3 down runs automatically when the batch ends.')}
             </p>
             {busyElsewhere && (
               <div className="ga-banner" data-tone="warn" role="alert">
@@ -558,7 +606,7 @@ export function BatchRedrawDialog({
               <div className="ga-field ga-wrap">
                 <span role="status">
                   {job.phase === 'booting'
-                    ? ui('Booting the h3 VM… {elapsed} (~11 min)', { elapsed: formatElapsed(elapsed) })
+                    ? bootText(job, now)
                     : job.phase === 'drawing'
                       ? ui('Drawing {current}/{total} · {elapsed}', { current: currentStep, total: job.items.length, elapsed: formatElapsed(elapsed) })
                       : ui('Shutting down the h3 VM (h3 down)…')}
@@ -599,6 +647,14 @@ export function BatchRedrawDialog({
                     <option value="none">{ui('Keep h3’s size')}</option>
                   </select>
                 </div>
+                {job.items.some(item => item.sheet) && (
+                  <div className="ga-field">
+                    <label className="ga-check-label">
+                      <input type="checkbox" checked={keepColours} onChange={event => setKeepColours(event.target.checked)} />
+                      {ui('Sprites keep their original colours (turn off when the prompt changes colours)')}
+                    </label>
+                  </div>
+                )}
                 <p className="ga-dim">
                   {ui('Replacing retires the current image to “{folder}” first, where Restore brings it back. The new picture keeps the path, so the code still finds it.', { folder: `${retireDir}/` })}
                 </p>
@@ -645,7 +701,7 @@ export function BatchRedrawDialog({
                       )}
                     </div>
                     {item.status === 'done' && !outcome && (
-                      <BatchComparison sessionId={sessionId} asset={asset} loaded={loaded[index]} fitChoice={fitChoice} />
+                      <BatchComparison sessionId={sessionId} path={item.path} sheet={item.sheet} asset={asset} loaded={loaded[index]} fitChoice={fitChoice} keepColours={keepColours} />
                     )}
                     {rowError && <div className="ga-banner" data-tone="error" role="alert">{rowError}</div>}
                   </div>

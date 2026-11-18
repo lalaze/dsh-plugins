@@ -6,6 +6,8 @@
  * - `already-up`: `status` exits 0 as when another agent already has the `h3` Colab session running.
  * - `boot-fail`: `up` exits 1 with an error on stderr.
  * - `slow-boot`: `up` stays alive until killed by SIGTERM.
+ * - `gpu-wait`: `up` reports A100 busy and G4 not allowed, then 0.4 s later gets an A100 and finishes 0.4 s after that.
+ * - `no-gpu`: `up` reports A100 busy, then gives up as h3 does when `--wait` runs out.
  * - `draw-fail-2`: the 2nd `edit` call since the latest `up` fails with `ok: false` and exit 1; the others succeed.
  * - `vm-died-2`: the 2nd `edit` call fails with `没有名为 'h3' 的 Colab 会话`, indicating a dead VM.
  * - `slow`: the 1st `edit` since `up` succeeds at once; the 2nd `edit` stays alive until killed by SIGTERM.
@@ -79,6 +81,22 @@ if (sub === 'up') {
   }
   if (mode === 'slow-boot') {
     setTimeout(() => {}, 60000);
+    return;
+  }
+  if (mode === 'gpu-wait' || mode === 'no-gpu') {
+    const say = text => process.stdout.write(text + '\\n');
+    say('申请 GPU：A100 → G4（都没空就每 30 秒再试一轮，最多等 10 分钟；分配到 VM 之前不扣 CU）');
+    say('  A100：暂时没有空闲（Service Unavailable）');
+    say('  G4：账号没有这种 GPU 的权限或配额，之后不再试');
+    setTimeout(() => {
+      say('  第 2 轮（已等 0.5 分钟）');
+      if (mode === 'no-gpu') {
+        process.stderr.write('h3: 试了 2 轮（0.5 分钟），A100 都没有空闲。没有开机，没有扣 CU。\\n');
+        process.exit(1);
+      }
+      say('✓ 拿到 A100（第 2 轮，等了 0.5 分钟）');
+      setTimeout(() => { process.stderr.write('ComfyUI ready\\n'); process.exit(0); }, 400);
+    }, 400);
     return;
   }
   process.stderr.write('ComfyUI ready\\n');

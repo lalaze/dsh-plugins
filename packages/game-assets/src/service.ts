@@ -3,9 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { H3Batches, type H3BatchOptions } from './batch.js';
-import { DEFAULT_RETIRE_DIR, H3_BATCH_LIMIT, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, aspectOf, extensionOf, isReference, usesApi, type Aspect, type AssetDetail, type BatchStatus, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type TabMode } from './domain.js';
+import { DEFAULT_RETIRE_DIR, H3_BATCH_LIMIT, IMAGE_BATCH, NOTE_LIMIT_HINT, PROMPT_LIMIT, RAW_LIMIT, REFERENCE_LIMIT, REMOTE_ANCHOR, SELECTION_LIMIT, aspectOf, extensionOf, isBatchSource, isReference, isSpriteSheet, usesApi, type Aspect, type AssetDetail, type BatchStatus, type GeneratedImage, type ProjectSourceStatus, type ProjectStatus, type ScanResult, type ScannedAsset, type SourcesAnswer, type SpriteSheet, type TabMode } from './domain.js';
 import { rasterType } from './images.js';
-import { Library, cleanImagePath, cleanMade, cleanRetireDir, cleanTag, type Failure, type Making, type Moved, type Placed } from './manage.js';
+import { Library, cleanMade, cleanPicturePath, cleanRetireDir, cleanTag, type Failure, type Making, type Moved, type Placed } from './manage.js';
 import { REMOTE_CHUNK, runRemote, type RemoteMachines } from './remote.js';
 import { Scanner, type Rules } from './scan.js';
 import { SourceStore, generateImage } from './sources.js';
@@ -101,7 +101,9 @@ export interface ServiceOptions {
 }
 const ASPECTS: readonly Aspect[] = ['square', 'wide', 'tall'];
 /** The file type a saved picture's extension promises. */
-const TYPE_OF: Record<string, string> = { png: 'png', webp: 'webp', jpg: 'jpeg', jpeg: 'jpeg' };
+const TYPE_OF: Record<string, string> = { png: 'png', webp: 'webp', jpg: 'jpeg', jpeg: 'jpeg', gif: 'gif' };
+/** The largest sprite sheet the page may send for one image of an h3 batch. */
+const SHEET_LIMIT = 24 * 1024 * 1024;
 
 export class AssetService {
   private readonly scanner = new Scanner();
@@ -347,7 +349,8 @@ export class AssetService {
    * of an image of the last scan, which is retired first and can be restored.
    */
   async save(sessionId: string, path: unknown, data: unknown, replace: unknown, made?: unknown): Promise<Placed & { scan: FullScan }> {
-    const clean = cleanImagePath(path);
+    // GIF only comes from the page's sprite path, which encodes it itself.
+    const clean = cleanPicturePath(path, isBatchSource);
     if (!clean || clean !== path) throw new AssetError('Save pictures as .png, .webp or .jpg files in a visible folder of the workspace');
     if (typeof data !== 'string' || !data || data.length > Math.ceil(RAW_LIMIT / 3) * 4) throw new AssetError('The picture is missing or too large');
     const bytes = Buffer.from(data, 'base64');
@@ -395,7 +398,11 @@ export class AssetService {
    * Starts an h3 batch redraw on the DSH host for live PNG/WebP/JPEG images of the last scan, returning the job status at
    * once while the Colab VM boots and generates in the background.
    */
-  async startBatch(sessionId: string, input: { paths?: unknown; prompt?: unknown }): Promise<BatchStatus> {
+  /**
+   * `prepared` maps a path to the PNG sheet the page made of it (`data`, base64) and how (`sheet`): GIF images and
+   * images with see-through pixels go this way, other images are read from the workspace here.
+   */
+  async startBatch(sessionId: string, input: { paths?: unknown; prompt?: unknown; prepared?: unknown }): Promise<BatchStatus> {
     const existing = this.batches.runningFor(sessionId);
     if (existing) return existing;
     if (this.batches.busyFor(sessionId)) throw new AssetError('h3 is already redrawing a batch for another workspace', 409);
@@ -406,6 +413,15 @@ export class AssetService {
     }
     const unique = [...new Set(input.paths as string[])];
     if (unique.length > H3_BATCH_LIMIT) throw new AssetError(`Up to ${H3_BATCH_LIMIT} images can be redrawn in one batch`);
+    if (input.prepared !== undefined && (!input.prepared || typeof input.prepared !== 'object' || Array.isArray(input.prepared))) throw new AssetError('Invalid sprite sheets');
+    const sheets = (input.prepared ?? {}) as Record<string, unknown>;
+    const prepared = new Map<string, { data: Buffer; sheet: SpriteSheet }>();
+    for (const [path, value] of Object.entries(sheets)) {
+      if (!unique.includes(path)) throw new AssetError('A sprite sheet names an image outside the selection');
+      const { data, sheet } = (value ?? {}) as { data?: unknown; sheet?: unknown };
+      if (typeof data !== 'string' || !data || data.length > Math.ceil(SHEET_LIMIT / 3) * 4 || !isSpriteSheet(sheet)) throw new AssetError(`Invalid sprite sheet for ${path}`);
+      prepared.set(path, { data: Buffer.from(data, 'base64'), sheet });
+    }
     const workspace = await this.workspace(sessionId);
     const byPath = new Map((await this.last(workspace)).assets.map(asset => [asset.path, asset]));
     const picked: ScannedAsset[] = [];
@@ -413,13 +429,17 @@ export class AssetService {
       const asset = byPath.get(path);
       if (!asset) throw new AssetError('Not an image of this workspace', 404);
       if (asset.retired) throw new AssetError('Retired images cannot be redrawn in place');
-      if (!isReference(asset.path)) throw new AssetError('Only PNG, WebP and JPEG images can be sent to an image API');
+      if (!isBatchSource(asset.path)) throw new AssetError('Only PNG, WebP, JPEG and GIF images can be redrawn with h3');
+      if (!isReference(asset.path) && !prepared.has(path)) throw new AssetError(`${path} must be sent as a PNG sprite sheet`);
       picked.push(asset);
     }
     return this.batches.start(
       sessionId,
       prompt,
-      picked.map(asset => ({ path: asset.path, aspect: aspectOf(asset.width, asset.height), transparent: false })),
+      picked.map(asset => ({
+        path: asset.path, aspect: aspectOf(asset.width, asset.height), transparent: prepared.has(asset.path),
+        ...(prepared.has(asset.path) ? { prepared: prepared.get(asset.path)! } : {}),
+      })),
       path => this.raw(sessionId, path),
     );
   }
