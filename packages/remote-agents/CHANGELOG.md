@@ -4,6 +4,10 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.148 — Plan limits after signing in again
+
+- The usage panel no longer shows `401 Unauthorized … token_revoked` for Codex while chats on that machine still work. Limits were read from a running Codex session, and a session started before the machine's Codex sign-in was renewed (a new `codex login`, or another Codex process refreshing the token) keeps the old, revoked token for quota requests. When a running session cannot answer, the limits are now read by a short Codex (or Claude) process that starts with the current sign-in, sends no prompt and exits; the running conversation is left alone.
+
 ## 0.2.147 — Agent teamwork switch only for DSH models
 
 - **Enable agent teamwork** in the model menu is hidden while a remote CLI model (Claude, Codex, Antigravity and the others) is selected. That mode adds task-board tools and a team prompt to DSH's own model requests; a remote CLI receives neither, so the switch did nothing there. Select a DSH model and it is back, with the conversation's saved choice unchanged.

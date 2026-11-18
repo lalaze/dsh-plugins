@@ -216,7 +216,11 @@ export declare class SshBackend implements Backend {
     forget(task: Task): Promise<void>;
     private removeFiles;
     account(provider: string, cwd: string | undefined, refresh: boolean): Promise<AccountUsage | null>;
-    /** Ask a running session of this CLI, or briefly start one without a prompt. */
+    /**
+     * Ask a running session of this CLI, or briefly start one without a prompt. A running CLI keeps the sign-in it started
+     * with: after a new login, or a token refresh by another process, Codex rejects its quota request as `token_revoked`
+     * (model calls recover by rereading the login file, quota requests do not), so a failed answer falls back to a probe.
+     */
     private readAccount;
     /** Antigravity has no quota request over ACP; its print mode answers `/usage` without a model call or conversation. */
     private readAntigravity;
