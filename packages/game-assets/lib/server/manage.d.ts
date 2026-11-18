@@ -42,6 +42,8 @@ export declare function cleanRetireDir(value: unknown): string | undefined;
  * Hidden folders are not scanned, so a picture there would not be listed.
  */
 export declare function cleanImagePath(value: unknown): string | undefined;
+/** Like cleanImagePath, for file names `accepts` allows. */
+export declare function cleanPicturePath(value: unknown, accepts: (name: string) => boolean): string | undefined;
 export declare function readRetired(root: string, retireDir: string): Promise<RetiredEntry[]>;
 export declare function readTags(root: string): Promise<TagFile>;
 /** Changes to one workspace, one at a time, so two requests cannot both rewrite the retired list or the tag file. */

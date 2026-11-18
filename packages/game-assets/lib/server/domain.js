@@ -72,6 +72,25 @@ export const PROMPT_LIMIT = 8000;
 export const H3_BATCH_LIMIT = 20;
 export const H3_WORTH_IT = 4;
 export const H3_MADE = { source: 'h3', model: 'MiniMax-H3-Image' };
+/** Formats an h3 batch takes: the reference formats, and GIF, which the page turns into a PNG sheet first. */
+export const isBatchSource = (path) => isReference(path) || extensionOf(path) === 'gif';
+export const SHEET_BANDS_LIMIT = 12;
+export const SHEET_GUTTER_LIMIT = 256;
+export function isSpriteSheet(value) {
+    const sheet = value;
+    return !!sheet && typeof sheet === 'object' && typeof sheet.key === 'string' && /^#[0-9a-f]{6}$/.test(sheet.key)
+        && Number.isInteger(sheet.bands) && sheet.bands >= 1 && sheet.bands <= SHEET_BANDS_LIMIT
+        && Number.isInteger(sheet.gutter) && sheet.gutter >= 0 && sheet.gutter <= SHEET_GUTTER_LIMIT;
+}
+/** What h3 is told besides the user's prompt about a sprite sheet the page prepared. */
+export function sheetHint(sheet) {
+    return [
+        `<Picture 1> is game sprite art on a flat ${sheet.key} background.`,
+        'Keep its exact layout: every figure and object stays in the same place, at the same size and in the same pose, with nothing added or removed.',
+        sheet.bands > 1 ? `The ${sheet.bands} rows are separate strips; keep the empty bands between them empty.` : '',
+        `Leave all empty space flat solid ${sheet.key}, with no shadow, gradient or texture, and never use that colour inside a figure.`,
+    ].filter(Boolean).join(' ');
+}
 export const isBatchRunning = (phase) => phase === 'booting' || phase === 'drawing' || phase === 'stopping';
 /**
  * In the workspace: the image source agents working in the project generate with, and the script they run for it.

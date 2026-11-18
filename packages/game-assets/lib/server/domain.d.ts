@@ -252,6 +252,23 @@ export declare const H3_MADE: {
     readonly source: "h3";
     readonly model: "MiniMax-H3-Image";
 };
+/** Formats an h3 batch takes: the reference formats, and GIF, which the page turns into a PNG sheet first. */
+export declare const isBatchSource: (path: string) => boolean;
+/**
+ * How the page laid out a sprite for h3, which reads and draws opaque pictures only: see-through pixels became the flat
+ * `key` colour, and a long strip was cut into `bands` equal parts stacked with `gutter` pixels of key colour between
+ * them, so the sheet is near square. The page undoes both on the picture h3 returns.
+ */
+export interface SpriteSheet {
+    key: string;
+    bands: number;
+    gutter: number;
+}
+export declare const SHEET_BANDS_LIMIT = 12;
+export declare const SHEET_GUTTER_LIMIT = 256;
+export declare function isSpriteSheet(value: unknown): value is SpriteSheet;
+/** What h3 is told besides the user's prompt about a sprite sheet the page prepared. */
+export declare function sheetHint(sheet: SpriteSheet): string;
 export type BatchPhase = 'booting' | 'drawing' | 'stopping' | 'done' | 'failed' | 'stopped';
 export type BatchItemState = 'waiting' | 'drawing' | 'done' | 'failed' | 'skipped';
 export interface BatchItemStatus {
@@ -261,6 +278,22 @@ export interface BatchItemStatus {
     ms?: number;
     width?: number;
     height?: number;
+    /** Set when the page sent this image as a prepared sprite sheet. */
+    sheet?: SpriteSheet;
+}
+/**
+ * How `h3 up` is getting on with finding a GPU: the GPUs it asks for in order, the polling round and minutes waited
+ * while all are `busy`, the `gpu` it got with the time it got it (`since`, set by the host), and the `setupAttempt`
+ * h3 is on after its connection to the VM dropped during setup (colab-use eb925c6).
+ */
+export interface BootProgress {
+    gpus?: string[];
+    round?: number;
+    waitedMinutes?: number;
+    busy?: boolean;
+    gpu?: string;
+    since?: number;
+    setupAttempt?: number;
 }
 export interface BatchStatus {
     id: string;
@@ -271,6 +304,8 @@ export interface BatchStatus {
     items: BatchItemStatus[];
     error?: string;
     downError?: string;
+    /** Set while `h3 up` looks for a GPU and after it got one. */
+    boot?: BootProgress;
 }
 export interface BatchStatusAnswer {
     job: BatchStatus | null;

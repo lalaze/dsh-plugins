@@ -1,5 +1,6 @@
-import type { Aspect } from './domain.js';
+import type { Aspect, BootProgress } from './domain.js';
 import { AssetError } from './workspace.js';
+/** Up to 10 min waiting for a free GPU plus ~11 min of setup, with room for a slow weight download. */
 export declare const H3_BOOT_TIMEOUT_MS: number;
 export declare const H3_DRAW_TIMEOUT_MS: number;
 export declare const H3_DOWN_TIMEOUT_MS: number;
@@ -39,8 +40,10 @@ export declare function h3Prompt(prompt: string): string;
 export declare function status(options?: H3Options, signal?: AbortSignal): Promise<{
     running: boolean;
 }>;
-/** Boots the Colab VM and starts ComfyUI (`h3 up`). */
-export declare function up(options?: H3Options, signal?: AbortSignal): Promise<void>;
+/** What a line of `h3 up` says about finding a GPU, applied to the progress so far; undefined for other lines. */
+export declare function bootProgress(line: string, now: BootProgress): BootProgress | undefined;
+/** Boots the Colab VM and starts ComfyUI (`h3 up`), telling `onProgress` how the search for a GPU goes. */
+export declare function up(options?: H3Options, signal?: AbortSignal, onProgress?: (progress: BootProgress) => void): Promise<void>;
 /** Redraws one picture from its reference image at 16 MP (`h3 edit --mp 16 -o <outDir> --json`). */
 export declare function draw(request: H3DrawRequest, options?: H3Options, signal?: AbortSignal): Promise<H3Picture>;
 /** Shuts down the Colab VM (`h3 down`). */

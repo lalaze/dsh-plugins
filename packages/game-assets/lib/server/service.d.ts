@@ -128,9 +128,14 @@ export declare class AssetService {
      * Starts an h3 batch redraw on the DSH host for live PNG/WebP/JPEG images of the last scan, returning the job status at
      * once while the Colab VM boots and generates in the background.
      */
+    /**
+     * `prepared` maps a path to the PNG sheet the page made of it (`data`, base64) and how (`sheet`): GIF images and
+     * images with see-through pixels go this way, other images are read from the workspace here.
+     */
     startBatch(sessionId: string, input: {
         paths?: unknown;
         prompt?: unknown;
+        prepared?: unknown;
     }): Promise<BatchStatus>;
     batchStatus(sessionId: string, id?: unknown): BatchStatus | null;
     batchBusy(sessionId: string): boolean;

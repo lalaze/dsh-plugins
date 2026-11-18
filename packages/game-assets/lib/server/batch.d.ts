@@ -1,4 +1,4 @@
-import { type Aspect, type BatchStatus, type GeneratedImage } from './domain.js';
+import { type Aspect, type BatchStatus, type GeneratedImage, type SpriteSheet } from './domain.js';
 import { type H3Options } from './h3.js';
 export declare const H3_KEEP_MS: number;
 export interface H3BatchOptions extends H3Options {
@@ -9,6 +9,11 @@ export interface BatchRequestItem {
     path: string;
     aspect: Aspect;
     transparent: boolean;
+    /** A PNG the page made from the image, sent instead of the image itself, with how it was laid out. */
+    prepared?: {
+        data: Buffer;
+        sheet: SpriteSheet;
+    };
 }
 export declare class H3Batches {
     private readonly options;

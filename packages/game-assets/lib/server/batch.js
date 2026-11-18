@@ -9,8 +9,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
-import { H3_MADE, isBatchRunning } from './domain.js';
-import { H3FatalError, down, draw, status, up } from './h3.js';
+import { H3_MADE, isBatchRunning, sheetHint } from './domain.js';
+import { H3FatalError, down, draw, h3Prompt, status, up } from './h3.js';
 import { rasterType } from './images.js';
 import { AssetError } from './workspace.js';
 export const H3_KEEP_MS = 60 * 60_000;
@@ -38,9 +38,11 @@ export class H3Batches {
                 ...(item.ms !== undefined ? { ms: item.ms } : {}),
                 ...(item.width !== undefined ? { width: item.width } : {}),
                 ...(item.height !== undefined ? { height: item.height } : {}),
+                ...(item.sheet ? { sheet: item.sheet } : {}),
             })),
             ...(job.error ? { error: job.error } : {}),
             ...(job.downError ? { downError: job.downError } : {}),
+            ...(job.boot ? { boot: job.boot } : {}),
         };
     }
     /** Returns this session's currently running job when there is one. */
@@ -94,14 +96,14 @@ export class H3Batches {
                 const staged = [];
                 for (let i = 0; i < items.length; i++) {
                     const item = items[i];
-                    const data = await readRef(item.path);
+                    const data = item.prepared?.data ?? await readRef(item.path);
                     const type = rasterType(data);
-                    if (type !== 'png' && type !== 'jpeg' && type !== 'webp') {
-                        throw new AssetError(`${item.path} is not the image its name says`);
+                    if (item.prepared ? type !== 'png' : type !== 'png' && type !== 'jpeg' && type !== 'webp') {
+                        throw new AssetError(item.prepared ? `The sheet made from ${item.path} is not a PNG` : `${item.path} is not the image its name says`);
                     }
-                    const refFile = join(refsDir, `${i}-${safeFileName(item.path)}`);
+                    const refFile = join(refsDir, `${i}-${safeFileName(item.path)}${item.prepared ? '.png' : ''}`);
                     await writeFile(refFile, data);
-                    staged.push({ path: item.path, aspect: item.aspect, transparent: item.transparent, refFile, status: 'waiting' });
+                    staged.push({ path: item.path, aspect: item.aspect, transparent: item.transparent, refFile, ...(item.prepared ? { sheet: item.prepared.sheet } : {}), status: 'waiting' });
                 }
                 if (this.disposed)
                     throw new AssetError('h3 batch service is closed', 410);
@@ -139,7 +141,9 @@ export class H3Batches {
     }
     async runJob(job) {
         try {
-            await up(this.options, job.controller.signal);
+            await up(this.options, job.controller.signal, progress => {
+                job.boot = progress.gpu && !job.boot?.gpu ? { ...progress, since: Date.now() } : { ...progress, ...(job.boot?.since ? { since: job.boot.since } : {}) };
+            });
             job.phase = 'drawing';
             for (let i = 0; i < job.items.length; i++) {
                 if (job.stopping || job.controller.signal.aborted) {
@@ -155,7 +159,8 @@ export class H3Batches {
                 const outDir = join(job.dir, `out-${i}`);
                 await mkdir(outDir, { recursive: true });
                 try {
-                    const picture = await draw({ prompt: job.prompt, reference: entry.refFile, aspect: entry.aspect, transparent: entry.transparent, outDir }, this.options, job.controller.signal);
+                    const prompt = entry.sheet ? `${h3Prompt(job.prompt)}\n\n${sheetHint(entry.sheet)}` : job.prompt;
+                    const picture = await draw({ prompt, reference: entry.refFile, aspect: entry.aspect, transparent: entry.transparent, outDir }, this.options, job.controller.signal);
                     entry.status = 'done';
                     entry.ms = Date.now() - started;
                     entry.width = picture.width;

@@ -7,7 +7,12 @@
  *   Exits 0 when the Colab session (`h3`, or `H3_SESSION`) is running; exits 1 with
  *   `没有名为 'h3' 的 Colab 会话` (or `Session ... not found` / `No active sessions`) when no VM is up.
  * - Boot: `h3 up`
- *   Boots an A100 Colab VM, installs ComfyUI, downloads MiniMax-H3-Image weights and starts ComfyUI (~11 min, ~1.6 CU).
+ *   Asks Colab for a GPU in order (A100, then G4), polling every 30 s for up to 10 min while all are busy (no VM, no
+ *   CU while waiting; since colab-use 9db6418), then installs ComfyUI, downloads the weights and starts it (~11 min,
+ *   ~1.6 CU). While waiting it prints `申请 GPU：A100 → G4（…）`, `  A100：暂时没有空闲（Service Unavailable）`,
+ *   `  第 2 轮（已等 0.5 分钟）` and, once assigned, `✓ 拿到 G4…` on stdout, which Python only flushes per line when
+ *   PYTHONUNBUFFERED is set. Since colab-use eb925c6, a connection to the VM that drops during setup makes h3 run
+ *   setup again on the same VM (`⚠️  和 VM 的连接断了（…），在同一台 VM 上重新运行安装（第 2 次…`), up to 3 times.
  * - Draw one picture from its reference: `h3 edit --mp 16 -o <outDir> --json -- <prompt> <reference>`
  *   Uses 16 MP final quality (`--mp 16`), writes the PNG and `.json` metadata into `<outDir>`, and prints JSON Lines on
  *   stdout (`{"event":"image","ok":true,"path":"/abs/x.png","width":...,"height":...}`,
@@ -26,7 +31,8 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { imageSize, rasterType } from './images.js';
 import { AssetError } from './workspace.js';
-export const H3_BOOT_TIMEOUT_MS = 20 * 60_000;
+/** Up to 10 min waiting for a free GPU plus ~11 min of setup, with room for a slow weight download. */
+export const H3_BOOT_TIMEOUT_MS = 45 * 60_000;
 export const H3_DRAW_TIMEOUT_MS = 10 * 60_000;
 export const H3_DOWN_TIMEOUT_MS = 2 * 60_000;
 export const H3_STATUS_TIMEOUT_MS = 60_000;
@@ -52,7 +58,7 @@ function tail(text) {
         .join(' ');
     return said.length > 400 ? `${said.slice(0, 400)}…` : said;
 }
-async function runH3(args, timeoutMs, timeoutMessage, options = {}, signal) {
+async function runH3(args, timeoutMs, timeoutMessage, options = {}, signal, onLine) {
     if (signal?.aborted)
         throw new AssetError('Generation stopped', 499);
     const command = options.command ?? 'h3';
@@ -63,7 +69,8 @@ async function runH3(args, timeoutMs, timeoutMessage, options = {}, signal) {
     let stdout = '', stderr = '', size = 0, timedOut = false;
     const groupKill = process.platform !== 'win32';
     const code = await new Promise((resolve, reject) => {
-        const child = spawn(file, argv, { stdio: ['ignore', 'pipe', 'pipe'], env: process.env, detached: groupKill });
+        // h3 is Python, which holds piped output back until it exits unless told otherwise.
+        const child = spawn(file, argv, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, PYTHONUNBUFFERED: '1' }, detached: groupKill });
         const stop = () => {
             if (groupKill && child.pid) {
                 try {
@@ -86,6 +93,13 @@ async function runH3(args, timeoutMs, timeoutMessage, options = {}, signal) {
             const parts = pending.split('\n');
             pending = parts.pop() ?? '';
             lines.push(...parts);
+            if (onLine)
+                for (const line of parts) {
+                    try {
+                        onLine(line);
+                    }
+                    catch { /* progress only */ }
+                }
         });
         child.stderr.setEncoding('utf8');
         child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-8000); });
@@ -132,11 +146,34 @@ export async function status(options = {}, signal) {
         return { running: false };
     throw classifyFailure('h3 status failed', '', combined, true);
 }
-/** Boots the Colab VM and starts ComfyUI (`h3 up`). */
-export async function up(options = {}, signal) {
-    const out = await runH3(['up'], options.bootTimeoutMs ?? H3_BOOT_TIMEOUT_MS, 'h3 took too long to start the VM', options, signal);
+/** What a line of `h3 up` says about finding a GPU, applied to the progress so far; undefined for other lines. */
+export function bootProgress(line, now) {
+    let match = /申请 GPU[：:]\s*(.+?)（/.exec(line);
+    if (match)
+        return { ...now, gpus: match[1].split(/\s*→\s*/).filter(Boolean), round: 1 };
+    if ((match = /第\s*(\d+)\s*轮（已等\s*([\d.]+)\s*分钟）/.exec(line)))
+        return { ...now, round: Number(match[1]), waitedMinutes: Number(match[2]) };
+    if (/^\s*\S+[：:]\s*暂时没有空闲/.test(line))
+        return now.busy ? undefined : { ...now, busy: true };
+    if ((match = /^\s*(\S+?)[：:]\s*账号没有这种 GPU/.exec(line))) {
+        const denied = match[1];
+        return { ...now, gpus: now.gpus?.filter(gpu => gpu !== denied) };
+    }
+    if ((match = /✓\s*拿到\s*([A-Za-z0-9]+)/.exec(line)))
+        return { ...now, gpu: match[1] };
+    if ((match = /和 VM 的连接断了.*重新运行安装（第\s*(\d+)\s*次/.exec(line)))
+        return { ...now, setupAttempt: Number(match[1]) };
+    return undefined;
+}
+/** Boots the Colab VM and starts ComfyUI (`h3 up`), telling `onProgress` how the search for a GPU goes. */
+export async function up(options = {}, signal, onProgress) {
+    let progress = {};
+    const onLine = onProgress && ((line) => { const next = bootProgress(line, progress); if (next)
+        onProgress(progress = next); });
+    const out = await runH3(['up'], options.bootTimeoutMs ?? H3_BOOT_TIMEOUT_MS, 'h3 took too long to start the VM', options, signal, onLine);
+    // h3 says why it gave up on stderr; stdout ends with its search for a GPU, which is not the reason.
     if (out.code !== 0)
-        throw classifyFailure('h3 could not start the VM', '', `${out.stderr}\n${out.stdout}`, true);
+        throw classifyFailure('h3 could not start the VM', tail(out.stderr), `${out.stderr}\n${out.stdout}`, true);
 }
 /** Redraws one picture from its reference image at 16 MP (`h3 edit --mp 16 -o <outDir> --json`). */
 export async function draw(request, options = {}, signal) {
