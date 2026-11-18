@@ -1,4 +1,5 @@
 import { hostname } from 'node:os';
+import { parseQuery, report } from './domain.js';
 /** Pages polling at the same moment share one round of requests. */
 const SHARED_MS = 3_000;
 /** Last answers kept per machine and query, to stand in while a machine sleeps or does not answer. */
@@ -40,9 +41,9 @@ export class MachineReports {
             try {
                 if (machine.state !== 'online')
                     throw new Error(machine.state);
-                const report = await this.ask(link, machine.id, `/api/usage-stats?${search}`, usable);
-                this.keep(key, report);
-                return { ...base, state: 'counted', report };
+                const answer = await this.askReport(link, machine.id, search);
+                this.keep(key, answer);
+                return { ...base, state: 'counted', report: answer };
             }
             catch (error) {
                 const reason = error instanceof Error ? error.message : String(error);
@@ -101,6 +102,24 @@ export class MachineReports {
         this.kept.set(key, { at: Date.now(), report: value });
         if (this.kept.size > KEPT)
             this.kept.delete(this.kept.keys().next().value);
+    }
+    async askReport(link, id, search) {
+        try {
+            return await this.ask(link, id, `/api/usage-stats?${search}`, usable);
+        }
+        catch (error) {
+            // Older peers (<= 0.1.21) do not know `mausbot` or `without-mausbot` and also never collect OpenMausBot usage.
+            if (error instanceof Error && error.message === 'Unsupported request source') {
+                const params = new URLSearchParams(search), source = params.get('source');
+                if (source === 'mausbot')
+                    return report([], parseQuery(new URL(`http://peer/?${search}`)));
+                if (source === 'without-mausbot') {
+                    params.delete('source');
+                    return await this.ask(link, id, `/api/usage-stats?${params}`, usable);
+                }
+            }
+            throw error;
+        }
     }
     ask(link, id, path, check) {
         const key = `${id}?${path}`, now = Date.now();

@@ -28,6 +28,7 @@ export interface Totals {
     totalTokens: number;
 }
 export type Source = 'dsh' | 'remote-agents' | 'mausbot';
+export type SourceFilter = Source | 'without-mausbot';
 /** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. OpenMausBot ledger rows are `mausbot-<engine>`. */
 export declare const sourceOf: (provider: string) => Source;
 export declare const SOURCE_LABELS: Record<Source, string>;
@@ -40,7 +41,7 @@ export interface Query {
     provider?: string;
     model?: string;
     sessionId?: string;
-    source?: Source;
+    source?: SourceFilter;
     groupBy: GroupBy;
     tzOffset?: number;
 }
@@ -91,7 +92,7 @@ export interface MachineUsage {
     /** Records left out because another machine has the same ones (copies from shared conversations). */
     copies?: number;
 }
-/** Remote and MausBot turns are named by their CLI/engine, merging an engine's turns across sources and machines; DSH providers keep their ID. */
+/** Remote turns are named by their CLI, while MausBot turns are prefixed `MausBot · <engine>` so bot usage stays distinct. */
 export declare function providerLabel(provider: string): string;
 /** Older remote main-chat records kept the chat route as their model. */
 export declare const modelOf: (r: Pick<UsageRecord, "provider" | "model">) => string;

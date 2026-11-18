@@ -22,10 +22,15 @@ const CLI_LABELS = {
     droid: 'Droid', copilot: 'GitHub Copilot', 'command-code': 'Command Code', kiro: 'Kiro', cline: 'Cline',
     hermes: 'Hermes', deepseek: 'DeepSeek', 'muse-code': 'Muse Code', openai: 'OpenAI', openrouter: 'OpenRouter',
 };
-/** Remote and MausBot turns are named by their CLI/engine, merging an engine's turns across sources and machines; DSH providers keep their ID. */
+/** Remote turns are named by their CLI, while MausBot turns are prefixed `MausBot · <engine>` so bot usage stays distinct. */
 export function providerLabel(provider) {
-    const cli = /^(?:remote-cli|mausbot)-(.+)$/.exec(provider)?.[1];
-    return cli ? CLI_LABELS[cli] ?? cli : provider.startsWith('claude-ssh-') ? 'Claude Code' : provider;
+    const remote = /^remote-cli-(.+)$/.exec(provider)?.[1];
+    if (remote)
+        return CLI_LABELS[remote] ?? remote;
+    const bot = /^mausbot-(.+)$/.exec(provider)?.[1];
+    if (bot)
+        return `MausBot · ${CLI_LABELS[bot] ?? bot}`;
+    return provider.startsWith('claude-ssh-') ? 'Claude Code' : provider;
 }
 /** Older remote main-chat records kept the chat route as their model. */
 export const modelOf = (r) => r.provider.startsWith('remote-cli-') ? remoteModel(r.model) : r.model;
@@ -119,7 +124,7 @@ export function parseQuery(url) {
         throw new Error("Unsupported grouping");
     const rawSource = p.get('source');
     let source;
-    if (rawSource === 'dsh' || rawSource === 'remote-agents' || rawSource === 'mausbot')
+    if (rawSource === 'dsh' || rawSource === 'remote-agents' || rawSource === 'mausbot' || rawSource === 'without-mausbot')
         source = rawSource;
     else if (rawSource)
         throw new Error("Unsupported request source");
@@ -223,7 +228,8 @@ export function combine(all, query) {
 }
 /** A record's date in the query's time zone. */
 const dayOf = (r, query) => query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
-const matches = (r, query, day = dayOf(r, query)) => !((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source));
+const matchesSource = (r, source) => !source || (source === 'without-mausbot' ? sourceOf(r.provider) !== 'mausbot' : sourceOf(r.provider) === source);
+const matches = (r, query, day = dayOf(r, query)) => !((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || !matchesSource(r, query.source));
 /** What makes two machines' records the same turn. */
 export const fingerprint = (r) => [r.sessionId ?? '', r.startedAt, r.provider, r.model, r.status, ...counters.map(key => r.usage?.[key] ?? '')].join('|');
 /** The query's records of the given conversations. */

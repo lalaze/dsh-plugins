@@ -1,4 +1,4 @@
-import type { MachinePart, RecordShare, UsageReport } from './domain.js';
+import { type MachinePart, type RecordShare, type UsageReport } from './domain.js';
 /** dsh-link's `dshLink` service (version 1), as far as this plugin uses it. */
 export interface LinkService {
     version: number;
@@ -41,6 +41,7 @@ export declare class MachineReports {
      */
     addShares(parts: MachinePart[], link: LinkService | undefined, search: string, own: (sessions: ReadonlySet<string>) => RecordShare[]): Promise<void>;
     private keep;
+    private askReport;
     private ask;
 }
 /** The query a machine answers for its own report: this one without the machine scope and the export format. */
