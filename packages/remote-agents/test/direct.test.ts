@@ -20,6 +20,8 @@ class FakeCli implements Child {
   prompt?: WireMessage;
   configOptions?: any[];
   options?: StartOptions;
+  /** Holds a sign-in that a later login or another process's token refresh replaced. */
+  revokedLogin = false;
   constructor(readonly provider: string, readonly argv: string[], readonly transport: FakeSsh) {}
   write(line: string) {
     const m = JSON.parse(line); this.sent.push(m);
@@ -48,7 +50,8 @@ class FakeCli implements Child {
     if (m.method === 'model/list') this.reply(m, { data: [{ id: 'model-id', model: this.transport.model, displayName: 'Remote model', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high' }], ...this.transport.speeds }], nextCursor: null });
     if (m.method === 'thread/start' || m.method === 'thread/resume') this.reply(m, { thread: { id: m.params.threadId ?? 'thread-remote' } });
     if (m.method === 'account/read') this.reply(m, { account: { type: 'chatgpt', email: 'dev@example.com', planType: 'plus' } });
-    if (m.method === 'account/rateLimits/read') { this.transport.accountChecks.push(this.provider); this.reply(m, { rateLimits: { limitId: 'codex', primary: { usedPercent: 18, windowDurationMins: 300 } } }); }
+    if (m.method === 'account/rateLimits/read' && this.revokedLogin) { this.emit({ jsonrpc: '2.0', id: m.id, error: { code: -32603, message: 'failed to fetch codex rate limits: GET https://chatgpt.com/backend-api/wham/usage failed: 401 Unauthorized; "code": "token_revoked"' } }); return; }
+    if (m.method === 'account/rateLimits/read') { this.transport.accountChecks.push(this.provider); this.reply(m,{ rateLimits: { limitId: 'codex', primary: { usedPercent: 18, windowDurationMins: 300 } } }); }
     if (m.method === 'session/new' && this.transport.acpAuthRequired) { this.emit({ jsonrpc: '2.0', id: m.id, error: { code: -32000, message: 'Authentication required' } }); return; }
     if (m.method === 'session/new' || m.method === 'session/load' || m.method === 'session/resume') {
       this.configOptions = structuredClone(this.transport.configOptions);
@@ -380,6 +383,19 @@ test('plan limits are read through a running CLI or a prompt-free probe, cached 
   ssh.live.finish(); await tick();
   await service.usage('chat-limits', { route, account: true });
   assert.equal(ssh.accountChecks.length, 3, 'a finished turn changed the usage');
+});
+
+test('plan limits come from a fresh probe when the running CLI still holds a replaced sign-in', async t => {
+  const { service, ssh, request, hostId } = await fixture(t);
+  const route = `${hostId}/codex/codex-remote`;
+  await service.create(request, { chat: { sessionId: 'chat-stale', route } }); await tick();
+  const session = ssh.live; session.revokedLogin = true;
+  const children = ssh.children.length;
+  const report = await service.usage('chat-stale', { route, account: true, refresh: true });
+  assert.equal(report?.account?.error, undefined);
+  assert.deepEqual(report?.account?.windows, [{ id: 'codex:primary', label: 'Session', usedPercent: 18 }]);
+  assert.equal(ssh.children.length, children + 1); assert.ok(ssh.children.at(-1)!.stopped, 'the probe exits after reading');
+  assert.equal(session.stopped, false, 'the running conversation is left alone');
 });
 
 test('Claude plan limits come from its own /usage data on the SSH host', async t => {

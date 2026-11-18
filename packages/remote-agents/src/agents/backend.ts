@@ -652,11 +652,18 @@ done`}`, 15_000, { login: false });
     value.catch(() => { if (this.accounts.get(provider)?.value === value) this.accounts.delete(provider); });
     return value;
   }
-  /** Ask a running session of this CLI, or briefly start one without a prompt. */
+  /**
+   * Ask a running session of this CLI, or briefly start one without a prompt. A running CLI keeps the sign-in it started
+   * with: after a new login, or a token refresh by another process, Codex rejects its quota request as `token_revoked`
+   * (model calls recover by rereading the login file, quota requests do not), so a failed answer falls back to a probe.
+   */
   private async readAccount(definition: typeof CLI_PROVIDERS[number], cwd: string | undefined, lastPlan?: string): Promise<AccountUsage> {
     if (definition.id === 'antigravity') return this.readAntigravity(definition);
     const live = [...this.sessions.values()].find(s => s.alive && s.task.provider === definition.id && s.agent.status !== 'initializing');
-    if (live) return readAccountUsage(live.peer, definition.protocol, live.account, lastPlan);
+    if (live) {
+      try { return await readAccountUsage(live.peer, definition.protocol, live.account, lastPlan); }
+      catch { this.assertOpen(); }
+    }
     const path = await this.transport.exec(`printf '%s' "$(command -v ${quote(definition.command)} 2>/dev/null || true)"`);
     this.assertOpen();
     if (!path.startsWith('/')) throw new Error(`${definition.label} is not installed on this SSH host`);
