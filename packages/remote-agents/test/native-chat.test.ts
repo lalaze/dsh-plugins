@@ -1032,6 +1032,22 @@ for (const [who, overrides] of [
   assert.deepEqual(saved.filter(block => block.type === 'reasoning').map(block => block.text), ['Checking the port.']);
 });
 
+test('hidden thinking separates assistant text blocks in both interactive and delegated Claude turns', async t => {
+  for (const overrides of [{}, { unattended: () => true }] as Partial<ChatHost>[]) {
+    const { adapter, remote, claude } = await claudeSetup(t, overrides);
+    remote.onCreate = agent => {
+      remote.append(agent.id, { type: 'assistant_message', text: 'Cut off mid-' });
+      remote.append(agent.id, { type: 'reasoning', text: '' });
+      remote.append(agent.id, { type: 'assistant_message', text: '# Plan' });
+    };
+    const { saved } = replay(await collect(adapter.stream(claude('Plan it'))));
+    assert.deepEqual(saved.filter(block => block.type === 'text' && block.text), [
+      { type: 'text', text: 'Cut off mid-' },
+      { type: 'text', text: '# Plan' },
+    ]);
+  }
+});
+
 test('thinking too long to be a progress sentence stays folded', async t => {
   const { adapter, remote, claude } = await claudeSetup(t);
   remote.onCreate = agent => {

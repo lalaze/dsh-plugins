@@ -540,9 +540,12 @@ export class RemoteCliAdapter extends LlmAdapter {
           if (entry.item.type === 'reasoning') {
             const thought = String(entry.item.text ?? '');
             // What a delegated CLI writes is its result for whoever delegated: sentences about its progress stay out of it.
-            if (provider.id !== 'claude' || unattended || member) yield* textChunk('reasoning', thought);
+            if (provider.id !== 'claude' || unattended || member) {
+              if (open?.type === 'text') yield* endBlock();
+              yield* textChunk('reasoning', thought);
+            }
             // A hidden block between two sentences comes as empty deltas, so each sentence reads as its own paragraph.
-            else if (!thought) { if (progress) yield* endBlock(); progress = 0; }
+            else if (!thought) { if (progress || open?.type === 'text') yield* endBlock(); progress = 0; }
             else {
               if (!progress) yield* endBlock();
               progress += thought.length;
