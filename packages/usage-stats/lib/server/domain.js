@@ -1,6 +1,6 @@
-/** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. */
-export const sourceOf = (provider) => provider.startsWith('remote-cli-') || provider.startsWith('claude-ssh-') ? 'remote-agents' : 'dsh';
-export const SOURCE_LABELS = { dsh: "DSH model calls", 'remote-agents': "Remote agents" };
+/** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. OpenMausBot ledger rows are `mausbot-<engine>`. */
+export const sourceOf = (provider) => provider.startsWith('mausbot-') ? 'mausbot' : provider.startsWith('remote-cli-') || provider.startsWith('claude-ssh-') ? 'remote-agents' : 'dsh';
+export const SOURCE_LABELS = { dsh: "DSH model calls", 'remote-agents': "Remote agents", mausbot: "MausBot" };
 /** dsh-remote-agents chat routes are `<machine>/<cli>/<model>[/<speed>]`; statistics keep the model and speed. */
 export function remoteModel(route) {
     const [, cli, model, tier, ...extra] = route.split('/');
@@ -16,10 +16,15 @@ export function remoteModel(route) {
 export const DIMENSIONS = ['provider', 'workspace', 'model', 'vendor', 'host'];
 const isDimension = (value) => DIMENSIONS.includes(value);
 const counters = ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'reasoningTokens', 'totalTokens'];
-const CLI_LABELS = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', codebuddy: 'CodeBuddy', antigravity: 'Antigravity', dsh: 'DSH' };
-/** Remote turns are named by their CLI, which merges a CLI's turns across machines; DSH providers keep their ID. */
+const CLI_LABELS = {
+    claude: 'Claude Code', codex: 'Codex', grok: 'Grok', codebuddy: 'CodeBuddy', antigravity: 'Antigravity', dsh: 'DSH',
+    pi: 'Pi', gemini: 'Gemini CLI', kimi: 'Kimi', qwen: 'Qwen Code', opencode: 'OpenCode', cursor: 'Cursor',
+    droid: 'Droid', copilot: 'GitHub Copilot', 'command-code': 'Command Code', kiro: 'Kiro', cline: 'Cline',
+    hermes: 'Hermes', deepseek: 'DeepSeek', 'muse-code': 'Muse Code', openai: 'OpenAI', openrouter: 'OpenRouter',
+};
+/** Remote and MausBot turns are named by their CLI/engine, merging an engine's turns across sources and machines; DSH providers keep their ID. */
 export function providerLabel(provider) {
-    const cli = /^remote-cli-(.+)$/.exec(provider)?.[1];
+    const cli = /^(?:remote-cli|mausbot)-(.+)$/.exec(provider)?.[1];
     return cli ? CLI_LABELS[cli] ?? cli : provider.startsWith('claude-ssh-') ? 'Claude Code' : provider;
 }
 /** Older remote main-chat records kept the chat route as their model. */
@@ -28,20 +33,20 @@ export const modelOf = (r) => r.provider.startsWith('remote-cli-') ? remoteModel
 const MODEL_VENDORS = [
     [/claude|sonnet|opus|haiku/i, 'Anthropic'], [/deepseek/i, 'DeepSeek'], [/gemini|gemma/i, 'Google'], [/grok/i, 'xAI'], [/qwen|qwq/i, 'Qwen'],
     [/kimi|moonshot/i, 'Moonshot'], [/\bglm|chatglm/i, 'Zhipu'], [/doubao/i, 'Doubao'], [/minimax|\babab/i, 'MiniMax'],
-    [/mistral|codestral|devstral|magistral/i, 'Mistral'], [/\bgpt|\bo[1-9](?:-|$)|codex|chatgpt/i, 'OpenAI'],
+    [/mistral|codestral|devstral|magistral/i, 'Mistral'], [/\bgpt|\bo[1-9](?:-|$)|codex|chatgpt/i, 'OpenAI'], [/codebuddy|workbuddy/i, 'Tencent'],
 ];
 const PROVIDER_VENDORS = [
     [/anthropic|claude/i, 'Anthropic'], [/openai|codex|azure/i, 'OpenAI'], [/deepseek|^dsh$/i, 'DeepSeek'], [/gemini|google|vertex/i, 'Google'],
     [/xai|grok/i, 'xAI'], [/qwen|dashscope|bailian|alibaba/i, 'Qwen'], [/moonshot|kimi/i, 'Moonshot'], [/zhipu|bigmodel|glm/i, 'Zhipu'],
-    [/doubao|volcengine/i, 'Doubao'], [/minimax/i, 'MiniMax'], [/mistral/i, 'Mistral'], [/antigravity/i, 'Google'], [/codebuddy/i, 'Tencent'],
+    [/doubao|volcengine/i, 'Doubao'], [/minimax/i, 'MiniMax'], [/mistral/i, 'Mistral'], [/antigravity/i, 'Google'], [/codebuddy|workbuddy/i, 'Tencent'],
 ];
 export function vendorOf(r) {
-    const model = modelOf(r), provider = r.provider.replace(/^remote-cli-/, '');
+    const model = modelOf(r), provider = r.provider.replace(/^(?:remote-cli|mausbot)-/, '');
     return MODEL_VENDORS.find(([pattern]) => pattern.test(model))?.[1] ?? PROVIDER_VENDORS.find(([pattern]) => pattern.test(provider))?.[1] ?? 'Other';
 }
 /**
  * Group key and label; placeholder labels (empty or `?` keys) are translated by the dashboard. A record is grouped under
- * its DSH workspace when one is known, otherwise under the directory it recorded.
+ * its DSH workspace when one is known, otherwise under its MausBot bot or the directory it recorded.
  */
 function dimension(r, by, workspaces) {
     if (by === 'provider') {
@@ -50,7 +55,11 @@ function dimension(r, by, workspaces) {
     }
     if (by === 'workspace') {
         const named = workspaces?.(r);
-        return named ? [`workspace:${named.key}`, named.title] : r.workspace ? [r.workspace, r.workspace] : ['', "No workspace"];
+        if (named)
+            return [`workspace:${named.key}`, named.title];
+        if (r.workspace)
+            return [sourceOf(r.provider) === 'mausbot' ? `workspace:mausbot:${r.workspace}` : r.workspace, r.workspace];
+        return ['', "No workspace"];
     }
     if (by === 'model') {
         const model = modelOf(r);
@@ -60,7 +69,7 @@ function dimension(r, by, workspaces) {
         const vendor = vendorOf(r);
         return [vendor, vendor];
     }
-    return r.host ? [r.host, r.host] : sourceOf(r.provider) === 'dsh' ? ['', "This computer"] : ['?', "Unknown host"];
+    return r.host ? [r.host, r.host] : sourceOf(r.provider) !== 'remote-agents' ? ['', "This computer"] : ['?', "Unknown host"];
 }
 export function validUsage(value) {
     if (!value || typeof value !== 'object')
@@ -110,7 +119,7 @@ export function parseQuery(url) {
         throw new Error("Unsupported grouping");
     const rawSource = p.get('source');
     let source;
-    if (rawSource === 'dsh' || rawSource === 'remote-agents')
+    if (rawSource === 'dsh' || rawSource === 'remote-agents' || rawSource === 'mausbot')
         source = rawSource;
     else if (rawSource)
         throw new Error("Unsupported request source");

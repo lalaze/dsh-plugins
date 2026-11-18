@@ -5,12 +5,18 @@ import { acquireUsageStore } from './store.js';
 import { observe } from './observe.js';
 import { combine, parseQuery, report, shares, toCsv, validRecord } from './domain.js';
 import { MachineReports, ownQuery } from './machines.js';
+import { MausbotUsage } from './mausbot.js';
 export const name = 'dsh-usage-stats';
 export const inject = ['llm', 'connection'];
 const defaultStateDir = () => join(process.env.DSH_HOME?.trim() || join(homedir(), '.dsh'), 'storages', name);
-export const Config = Schema.object({ stateDir: Schema.string().default(defaultStateDir()) });
+const defaultMausbotDir = () => process.env.OMB_DATA_DIR?.trim() || join(homedir(), '.openmausbot');
+export const Config = Schema.object({
+    stateDir: Schema.string().default(defaultStateDir()),
+    mausbotDir: Schema.string().default(defaultMausbotDir()),
+});
 export async function apply(ctx, config = {}) {
     const path = join(config.stateDir ?? defaultStateDir(), 'usage.json');
+    const mausbot = new MausbotUsage(config.mausbotDir ?? (config.stateDir ? undefined : defaultMausbotDir()));
     const lease = acquireUsageStore(path);
     try {
         const store = await lease.ready;
@@ -96,22 +102,28 @@ export async function apply(ctx, config = {}) {
                     const query = parseQuery(url), scope = url.searchParams.get('machines');
                     if (scope !== null && !/^[A-Za-z0-9_-]{1,64}$/.test(scope))
                         throw new Error("Unknown machine");
-                    const own = () => report(store.snapshot(), query, store.failedWrites, workspaceNames());
-                    const ownShares = (sessions) => shares(store.snapshot(), query, sessions, workspaceNames());
+                    const currentLink = link(), selfId = currentLink?.self().id ?? 'self';
+                    const records = async () => {
+                        const local = store.snapshot(), extra = await mausbot.records();
+                        return extra.length ? [...local, ...extra] : local;
+                    };
                     // Another machine asking which of these conversations' records this one has (see `MachineReports.addShares`).
                     const asked = url.searchParams.get('shares');
                     if (asked !== null && scope === null) {
                         const sessions = asked.split(',').filter(Boolean);
                         if (sessions.length > 200 || sessions.some(id => id.length > 200))
                             throw new Error("Filter value is too long");
-                        return Response.json({ shares: ownShares(new Set(sessions)) }, { headers: { 'Cache-Control': 'no-store' } });
+                        return Response.json({ shares: shares(await records(), query, new Set(sessions), workspaceNames()) }, { headers: { 'Cache-Control': 'no-store' } });
                     }
+                    const ownRecords = scope === null || scope === 'all' || scope === 'self' || scope === selfId ? await records() : [];
+                    const own = () => report(ownRecords, query, store.failedWrites, workspaceNames());
+                    const ownShares = (sessions) => shares(ownRecords, query, sessions, workspaceNames());
                     let data;
                     if (scope === null)
                         data = own();
                     else {
-                        const parts = await machineReports.parts(link(), scope, ownQuery(url), own);
-                        await machineReports.addShares(parts, link(), ownQuery(url), ownShares);
+                        const parts = await machineReports.parts(currentLink, scope, ownQuery(url), own);
+                        await machineReports.addShares(parts, currentLink, ownQuery(url), ownShares);
                         data = combine(parts, query);
                     }
                     const headers = { 'Cache-Control': 'no-store' };
