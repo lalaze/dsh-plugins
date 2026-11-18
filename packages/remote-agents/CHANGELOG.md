@@ -4,6 +4,10 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.147 — Agent teamwork switch only for DSH models
+
+- **Enable agent teamwork** in the model menu is hidden while a remote CLI model (Claude, Codex, Antigravity and the others) is selected. That mode adds task-board tools and a team prompt to DSH's own model requests; a remote CLI receives neither, so the switch did nothing there. Select a DSH model and it is back, with the conversation's saved choice unchanged.
+
 ## 0.2.146 — New CLI models show up by themselves
 
 - The model picker now picks up a CLI's new models without **Refresh models**. While conversations work on a machine, its saved models are checked again in the background once they are an hour old: for example, Codex models released since the last check appear in the picker shortly after you open or return to such a conversation. Before, the models saved when the machine was first detected stayed until you used **Refresh models**.

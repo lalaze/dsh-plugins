@@ -81,28 +81,35 @@ export interface CatalogSlots<Component = unknown> {
   subscribe(name: string, listener: () => void): () => void;
   register(spec: Record<string, unknown>, component: Component): unknown;
 }
-/** Follow the original registration's lifetime, not store updates or React renders. */
+/** Wrap DSH's own subagent catalog in the conversation header; see {@link decorateSlotEntry}. */
 export function decorateCatalogSlot<Component>(slots: CatalogSlots<Component>, wrap: (entry: CatalogEntry<Component>) => Component): () => void {
+  return decorateSlotEntry(slots, DELEGATED_SLOT, DELEGATED_ID, wrap);
+}
+/**
+ * Shadow one native slot entry with a wrapper around it: the same id one priority step ahead (-10), which DSH renders
+ * instead of the native one. Follows the original registration's lifetime, not store updates or React renders.
+ */
+export function decorateSlotEntry<Component>(slots: CatalogSlots<Component>, slot: string, id: string, wrap: (entry: CatalogEntry<Component>) => Component): () => void {
   let original: CatalogEntry<Component> | undefined, wrapper: Component | undefined, dispose: (() => void) | undefined;
   let stopped = false, syncing = false;
   const sync = () => {
     if (stopped || syncing) return;
     syncing = true;
     try {
-      const entries = slots.entries(DELEGATED_SLOT);
-      const next = entries.find(entry => entry.options.id === DELEGATED_ID && (entry.options.priority ?? 0) === 0);
+      const entries = slots.entries(slot);
+      const next = entries.find(entry => entry.options.id === id && (entry.options.priority ?? 0) === 0);
       const oursPresent = wrapper !== undefined && entries.some(entry => entry.component === wrapper);
       if (next === original && (next === undefined || oursPresent)) return;
       dispose?.(); dispose = undefined; original = next; wrapper = undefined;
-      // Never replace a missing native component or another plugin's decorator with a fake menu.
-      if (!next || slots.entries(DELEGATED_SLOT).some(entry => entry.options.id === DELEGATED_ID && entry.options.priority === -10)) return;
+      // Never replace a missing native component or another plugin's decorator with a fake one.
+      if (!next || slots.entries(slot).some(entry => entry.options.id === id && entry.options.priority === -10)) return;
       wrapper = wrap(next);
-      const cleanup = slots.register({ ...next.options, name: DELEGATED_SLOT, id: DELEGATED_ID, priority: -10, inject: next.inject, locale: next.locale }, wrapper);
+      const cleanup = slots.register({ ...next.options, name: slot, id, priority: -10, inject: next.inject, locale: next.locale }, wrapper);
       if (typeof cleanup === 'function') dispose = cleanup as () => void;
     } finally { syncing = false; }
   };
   // Retain no service/global mutable cache; disposal removes the exact registration and subscription.
-  const unsubscribe = slots.subscribe(DELEGATED_SLOT, sync);
+  const unsubscribe = slots.subscribe(slot, sync);
   sync();
   return () => { if (stopped) return; stopped = true; unsubscribe(); dispose?.(); dispose = undefined; original = undefined; wrapper = undefined; };
 }

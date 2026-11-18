@@ -18,6 +18,7 @@ import { installToolStatusStyles } from './sessions/tool-status.js';
 import { installLiveImages } from './sessions/live-images.js';
 import { installUsageStyles, setModelDirectories, UsageRing, type ModelDirectories } from './composer/usage.js';
 import { FastToggle } from './composer/fast.js';
+import { installTeamToggleFilter } from './composer/team-toggle.js';
 import { DIRECTORY_FLOW_PRIORITY, DIRECTORY_FLOWS, workspaceFlow, type LocalDirectories } from './workspace/flow.js';
 import { symbols } from '@deepseek-ai/cordis';
 import { WorkspacePanel } from './workspace/panel.js';
@@ -67,6 +68,8 @@ export function apply(ctx: Client): void {
   ctx.effect(() => installLocale(ctx));
   // Decorate the existing native menu only on hosts exposing the supported slot ledger.
   if (ctx.slots.entries && ctx.slots.subscribe) ctx.effect(() => installDelegatedCatalog(ctx.slots as CatalogSlots<React.ComponentType<any>>));
+  // DSH's agent-team switch only reaches DSH's own models: hidden while a remote CLI is selected.
+  if (ctx.slots.entries && ctx.slots.subscribe) ctx.effect(() => installTeamToggleFilter(ctx.slots as CatalogSlots<React.ComponentType<any>>));
   const Surface = () => {
     useLocale(); const [visible, setVisible] = useState(false), [workspace, setWorkspace] = useState(false);
     const openChat = (id: string) => {
