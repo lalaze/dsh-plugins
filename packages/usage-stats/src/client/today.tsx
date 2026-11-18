@@ -58,7 +58,14 @@ export function TodayBadge({ details }: { details?: ComponentType }) {
   // Several machines: each one's share, and the ones whose usage is not in the total.
   const counted = (data.machines ?? []).filter(machine => machine.state === 'counted');
   const notes = machineNotes(data.machines ?? []);
+  const botTotals = data.sources.find(source => source.key === 'mausbot')?.totals;
+  const dshTokens = totals.totalTokens - (botTotals?.totalTokens ?? 0);
+  const dshRequests = totals.requests - (botTotals?.requests ?? 0);
   const title = [ui(counted.length > 1 ? "Today, {2} machines: {0} tokens in {1} requests" : "Today: {0} tokens in {1} requests", { 0: number(totals.totalTokens), 1: number(totals.requests), 2: counted.length }),
+    ...(botTotals ? [
+      `${ui("DSH & remote")}  ${compact(dshTokens, language, totals.totalTokens)} (${ui("{0} requests", { 0: number(dshRequests) })})`,
+      `MausBot  ${compact(botTotals.totalTokens, language, totals.totalTokens)} (${ui("{0} requests", { 0: number(botTotals.requests) })})`,
+    ] : []),
     ...(counted.length > 1 ? counted.map(machine => `${machine.name}  ${compact(machine.totals?.totalTokens ?? 0, language, totals.totalTokens)}${machine.stale ? `  ${ui("(as of {0})", { 0: new Date(machine.asOf!).toLocaleTimeString(formatLocale(), { hour: '2-digit', minute: '2-digit' }) })}` : ''}`) : []),
     ...notes.map(note => `* ${note}`),
     missing > 0 ? ui("* {0} requests returned no usage", { 0: number(missing) }) : '', stale ? ui("Could not refresh; showing the last value") : ''].filter(Boolean).join('\n');

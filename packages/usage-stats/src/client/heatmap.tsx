@@ -4,7 +4,7 @@ import { ui, formatLocale } from './i18n.js';
 import { calendarDays, heatLevel, localDay, localOffset, monthRange, shiftMonth } from './metrics.js';
 
 /** Independent whole-month query: changing the dashboard's time preset must not clip the calendar. */
-export function MonthlyHeatmap({ provider, model, sessionId, machine, refresh }: { provider: string; model: string; sessionId: string; machine: string; refresh: number }) {
+export function MonthlyHeatmap({ provider, model, sessionId, source, machine, refresh }: { provider: string; model: string; sessionId: string; source?: string; machine: string; refresh: number }) {
   const today = localDay(), currentMonth = today.slice(0, 7);
   const [month, setMonth] = useState(currentMonth);
   const [metric, setMetric] = useState<'tokens' | 'requests'>('tokens');
@@ -13,7 +13,7 @@ export function MonthlyHeatmap({ provider, model, sessionId, machine, refresh }:
   const [loading, setLoading] = useState(true), [error, setError] = useState('');
   const [retry, setRetry] = useState(0);
   const params = new URLSearchParams({ ...monthRange(month), tz: localOffset() });
-  for (const [key, value] of Object.entries({ provider, model, sessionId, machines: machine })) if (value) params.set(key, value);
+  for (const [key, value] of Object.entries({ provider, model, sessionId, source, machines: machine })) if (value) params.set(key, value);
   const path = `/api/usage-stats?${params}`;
   // A prior month/filter must never masquerade as the newly selected one, including during failures.
   const data = snapshot?.path === path ? snapshot.data : undefined;

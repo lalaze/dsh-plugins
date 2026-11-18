@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { appendFile, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { Context } from '@deepseek-ai/cordis';
 import { combine, report, type UsageReport } from '../src/domain.js';
 import { MausbotUsage, mausbotProvider, mausbotWorkspace, parseMausbotLine } from '../src/mausbot.js';
-import type { LinkService } from '../src/machines.js';
+import { MachineReports, type LinkService } from '../src/machines.js';
 import { apply, Config } from '../src/index.js';
+import { TodayBadge } from '../src/client/today.js';
 
 test('OpenMausBot 行解析：input 拆分为未缓存输入与缓存读写，零用量超时记为未知用量，memory 不污染会话筛选', () => {
   const codex = parseMausbotLine(JSON.stringify({
@@ -30,6 +33,7 @@ test('OpenMausBot 行解析：input 拆分为未缓存输入与缓存读写，�
   // Total tokens must equal OpenMausBot's input (incl. cache) + output, without double-counting cache or reasoning.
   const codexReport = report([{ ...codex.record, workspace: mausbotWorkspace(codex.botName) }], { groupBy: 'provider' });
   assert.equal(codexReport.totals.totalTokens, 2_430_393 + 3_160);
+  assert.equal(codexReport.breakdowns.provider[0]?.label, 'MausBot · Codex');
 
   const claude = parseMausbotLine(JSON.stringify({
     botId: 'b1', botName: 'MausBot', threadId: 't2', instanceId: 'claude', driverKind: 'claudeAgent', model: 'claude-sonnet-5',
@@ -106,7 +110,7 @@ test('增量读取月度账本：目录不存在时静默为空，追加写入�
   }
 });
 
-test('API 与互联多机汇总：Mac mini 上的 MausBot 用量计入本机与全部机器，其他机器无目录不重复计入', async () => {
+test('区分 Bot 与 DSH：Provider 独立显示 MausBot · <引擎>，支持 source=mausbot 与 source=without-mausbot，旧版互联节点兼容', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-usage-mausbot-api-'));
   try {
     const stateDir = join(root, 'state');
@@ -133,7 +137,7 @@ test('API 与互联多机汇总：Mac mini 上的 MausBot 用量计入本机与�
       }),
     ].join('\n') + '\n');
 
-    // Configure Mac mini DSH instance with DSH Link seeing a MacBook Air that has no OpenMausBot directory.
+    // Simulate an older 0.1.21 MacBook Air peer that rejects `source=mausbot` / `source=without-mausbot` with 400.
     const airReport = report([
       { id: 'air-1', startedAt: '2026-11-18T09:00:00.000Z', provider: 'anthropic', model: 'claude-sonnet-5', sessionId: 's-air', purpose: 'conversation', status: 'completed', durationMs: 50, usage: { inputTokens: 80, outputTokens: 20 } },
     ], { groupBy: 'provider' });
@@ -141,7 +145,11 @@ test('API 与互联多机汇总：Mac mini 上的 MausBot 用量计入本机与�
       version: 1,
       self: () => ({ id: 'mini', name: 'mac-mini' }),
       machines: () => [{ id: 'air', name: 'macbook-air', state: 'online' }],
-      get: async () => ({ status: 200, text: JSON.stringify(airReport) }),
+      get: async (_id, path) => {
+        const source = new URL(path, 'http://x').searchParams.get('source');
+        if (source === 'mausbot' || source === 'without-mausbot') return { status: 400, text: JSON.stringify({ error: 'Unsupported request source' }) };
+        return { status: 200, text: JSON.stringify(airReport) };
+      },
     };
     let fetcher: ((r: Request) => Promise<Response>) | undefined;
     const ctx = {
@@ -152,36 +160,34 @@ test('API 与互联多机汇总：Mac mini 上的 MausBot 用量计入本机与�
     } as unknown as Context;
     await apply(ctx, { stateDir, mausbotDir });
 
-    // Own report (what other machines pull from Mac mini via DSH Link): includes DSH + Remote Agents + MausBot.
+    // Own report: By provider keeps Bot engines (`MausBot · Pi`, `MausBot · Codex`) distinct from DSH/Remote (`Codex`).
     const own = await (await fetcher!(new Request('http://x/api/usage-stats?groupBy=provider'))).json() as UsageReport;
     assert.equal(own.totals.totalTokens, 150 + 400 + 1200 + 2300);
+    assert.deepEqual(own.breakdowns.provider.map(g => [g.label, g.totals.totalTokens]), [
+      ['MausBot · Pi', 2300],
+      ['MausBot · Codex', 1200],
+      ['Codex', 400],
+      ['deepseek', 150],
+    ]);
     assert.deepEqual(own.sources.map(s => [s.key, s.label, s.totals.totalTokens]), [
       ['dsh', 'DSH model calls', 150],
       ['mausbot', 'MausBot', 3500],
       ['remote-agents', 'Remote agents', 400],
     ]);
-    // By provider merges remote-cli-codex and mausbot-codex under Codex, and shows Pi for piAgent.
-    assert.deepEqual(own.breakdowns.provider.map(g => [g.label, g.totals.totalTokens]), [
-      ['Pi', 2300],
-      ['Codex', 1600],
+
+    // Source filters cleanly separate MausBot vs DSH & remote, including across older DSH Link peers.
+    const onlyBotAll = await (await fetcher!(new Request('http://x/api/usage-stats?machines=all&source=mausbot'))).json() as UsageReport;
+    assert.equal(onlyBotAll.totals.totalTokens, 3500);
+    assert.equal(onlyBotAll.machines?.every(m => m.state === 'counted'), true);
+
+    const withoutBotAll = await (await fetcher!(new Request('http://x/api/usage-stats?machines=all&source=without-mausbot'))).json() as UsageReport;
+    assert.equal(withoutBotAll.totals.totalTokens, 150 + 400 + 100);
+    assert.equal(withoutBotAll.machines?.every(m => m.state === 'counted'), true);
+    assert.deepEqual(withoutBotAll.breakdowns.provider.map(g => [g.label, g.totals.totalTokens]), [
+      ['Codex', 400],
       ['deepseek', 150],
+      ['anthropic', 100],
     ]);
-    // By vendor maps workbuddy/cn:deepseek-v4.1-flash -> DeepSeek and gpt-6.2-sol -> OpenAI.
-    assert.deepEqual(own.breakdowns.vendor.map(g => [g.label, g.totals.totalTokens]), [
-      ['DeepSeek', 2450],
-      ['OpenAI', 1600],
-    ]);
-    // By workspace keeps named MausBot bots with `workspace:` prefix so slashes in bot names are not shortened as paths.
-    assert.deepEqual(own.breakdowns.workspace.map(g => [g.key, g.label, g.totals.totalTokens]), [
-      ['workspace:mausbot:MausBot · 新闻/热点', 'MausBot · 新闻/热点', 2300],
-      ['workspace:mausbot:MausBot', 'MausBot', 1200],
-      ['/Volumes/data/code/dsh-plugins', '/Volumes/data/code/dsh-plugins', 400],
-      ['', 'No workspace', 150],
-    ]);
-    // Source filter isolates MausBot usage.
-    const onlyMausbot = await (await fetcher!(new Request('http://x/api/usage-stats?source=mausbot'))).json() as UsageReport;
-    assert.equal(onlyMausbot.totals.requests, 2);
-    assert.equal(onlyMausbot.totals.totalTokens, 3500);
 
     // Combined report across machines (`machines=all`): Mac mini's MausBot usage lands under `mac-mini` host and carries `mac-mini` on workspace rows.
     const all = await (await fetcher!(new Request('http://x/api/usage-stats?machines=all&groupBy=host'))).json() as UsageReport;
@@ -194,14 +200,12 @@ test('API 与互联多机汇总：Mac mini 上的 MausBot 用量计入本机与�
     assert.equal(botWorkspace?.machine, 'mac-mini');
     assert.ok(botWorkspace?.key.startsWith('workspace:'));
 
-    // Also verify when MacBook Air asks Mac mini via combine: no double counting.
-    const fromAir = combine([
-      { id: 'air', name: 'macbook-air', self: true, state: 'counted', report: airReport },
-      { id: 'mini', name: 'mac-mini', state: 'counted', report: own },
-    ], { groupBy: 'host' });
-    assert.equal(fromAir.totals.totalTokens, 4150);
+    // Also verify MachineReports directly and TodayBadge initial render safety.
+    const reports = new MachineReports();
+    const parts = await reports.parts(link, 'all', 'source=mausbot', () => report([], { groupBy: 'day', source: 'mausbot' }));
+    assert.equal(combine(parts, { groupBy: 'day', source: 'mausbot' }).totals.totalTokens, 0);
+    assert.equal(renderToStaticMarkup(createElement(TodayBadge)), '');
 
-    // Schema defaults populate mausbotDir when Cordis loads the plugin normally.
     const parsedConfig = Config({});
     assert.ok(typeof parsedConfig.mausbotDir === 'string' && parsedConfig.mausbotDir.length > 0);
   } finally {

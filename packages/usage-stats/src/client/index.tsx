@@ -1,7 +1,7 @@
 import type { LocaleContext } from '@dsh-plugins/i18n';
 import { ui, installLocale, useLocale, formatLocale, activeLocale } from './i18n.js';
 import React, { useEffect, useRef, useState } from 'react';
-import type { Dimension, UsageReport, Totals } from '../domain.js';
+import type { Dimension, SourceFilter, UsageReport, Totals } from '../domain.js';
 import { compact, dateRange, localOffset, trendBuckets } from './metrics.js';
 import { styles } from './styles.js';
 import { TodayBadge, machineNotes } from './today.js';
@@ -58,14 +58,25 @@ function attention(data: UsageReport): string[] {
     missing > 0 ? ui("{0} requests returned no usage. Token totals only include reported data.", { 0: number(missing) }) : ''].filter(Boolean);
 }
 /** The period's total in large type, its request count, then input and output; the exact total is in the tooltip. */
-function Headline({ data, onPartial }: { data: UsageReport; onPartial: () => void }) {
+function Headline({ data, onPartial, onSource }: { data: UsageReport; onPartial: () => void; onSource: (value: '' | SourceFilter) => void }) {
   const t = data.totals, notes = attention(data);
   const input = t.inputTokens + t.cacheReadTokens + t.cacheWriteTokens;
   const counted = (data.machines ?? []).filter(machine => machine.state === 'counted').length;
+  const botTotals = !data.query.source ? data.sources.find(s => s.key === 'mausbot')?.totals : undefined;
+  const dshTokens = t.totalTokens - (botTotals?.totalTokens ?? 0), dshRequests = t.requests - (botTotals?.requests ?? 0);
+  const scopeLabel = data.query.source === 'mausbot' ? 'MausBot' : data.query.source === 'without-mausbot' ? ui("DSH & remote") : data.query.source === 'dsh' ? ui("DSH model calls") : data.query.source === 'remote-agents' ? ui("Remote agents") : '';
   return <article className="us-hero" aria-label={ui("Recorded usage")}>
-    <div className="us-hero-head"><span>{ui("Recorded usage")}{counted > 1 ? ` · ${ui("{0} machines", { 0: counted })}` : ''}</span>{notes.length > 0 && <button type="button" className="us-partial" title={notes.join('\n')} onClick={onPartial}>{ui("Partial records")}</button>}</div>
+    <div className="us-hero-head"><span>{ui("Recorded usage")}{scopeLabel ? ` · ${scopeLabel}` : ''}{counted > 1 ? ` · ${ui("{0} machines", { 0: counted })}` : ''}</span>{notes.length > 0 && <button type="button" className="us-partial" title={notes.join('\n')} onClick={onPartial}>{ui("Partial records")}</button>}</div>
     <div className="us-hero-total"><strong className="us-number" title={number(t.totalTokens)}>{short(t.totalTokens)}</strong><span>{ui("tokens")}</span></div>
     <p className="us-hero-exact us-number">{ui("{0} requests", { 0: number(t.requests) })}</p>
+    {botTotals && <div className="us-hero-sources" role="group" aria-label={ui("Usage source")}>
+      <button type="button" className="us-hero-source" title={`${ui("DSH & remote")}: ${number(dshTokens)} Token · ${ui("{0} requests", { 0: number(dshRequests) })}`} onClick={() => onSource('without-mausbot')}>
+        <span>{ui("DSH & remote")}</span><span><b className="us-number">{short(dshTokens)}</b><small className="us-number">{percent(dshTokens, t.totalTokens)}</small></span>
+      </button>
+      <button type="button" className="us-hero-source" title={`MausBot: ${number(botTotals.totalTokens)} Token · ${ui("{0} requests", { 0: number(botTotals.requests) })}`} onClick={() => onSource('mausbot')}>
+        <span>MausBot</span><span><b className="us-number">{short(botTotals.totalTokens)}</b><small className="us-number">{percent(botTotals.totalTokens, t.totalTokens)}</small></span>
+      </button>
+    </div>}
     <div className="us-hero-split">
       <div><span>{ui("Input · incl. cache")}</span><b className="us-number" title={number(input)}>{short(input)}</b><small>{ui("Cache reads {0} · {1} of input", { 0: short(t.cacheReadTokens), 1: t.withUsage ? percent(t.cacheReadTokens, input) : '—' })}</small></div>
       <div><span>{ui("Output · incl. reasoning")}</span><b className="us-number" title={number(t.outputTokens)}>{short(t.outputTokens)}</b>{t.reasoningTokens > 0 && <small>{ui("Reasoning {0}", { 0: short(t.reasoningTokens) })}</small>}</div>
@@ -76,6 +87,8 @@ function Headline({ data, onPartial }: { data: UsageReport; onPartial: () => voi
 type Period = 'today' | '7d' | '30d' | 'all' | 'custom';
 const PERIODS = [['today', "Today"], ['7d', "Last 7 days"], ['30d', "Last 30 days"], ['all', "All"], ['custom', "Custom"]] as const;
 const BREAKDOWNS = [['provider', "By provider"], ['workspace', "By workspace"], ['model', "By model"], ['vendor', "By model vendor"], ['host', "By host"]] as const;
+const SOURCE_SCOPES = [['', "All"], ['without-mausbot', "DSH & remote"], ['mausbot', "MausBot"]] as const;
+const SOURCE_FILTERS: readonly (readonly ['' | SourceFilter, string])[] = [['', "All sources"], ['without-mausbot', "DSH & remote"], ['mausbot', "MausBot"], ['dsh', "DSH model calls"], ['remote-agents', "Remote agents"]];
 const BREAKDOWN_ROWS = 8;
 /** Long workspace paths keep their last two folders; the full path is in the tooltip. */
 const shortPath = (path: string) => { const parts = path.split(/[\\/]/).filter(Boolean); return parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : path; };
@@ -100,8 +113,9 @@ function Breakdown({ data, by }: { data: UsageReport; by: Dimension }) {
   return <section className="us-breakdown" aria-label={ui("Usage breakdown")}>
     <ol>{(all ? rows : rows.slice(0, BREAKDOWN_ROWS)).map(g => {
       const { name, title } = groupName(g, by), expanded = open.has(g.key), t = g.totals;
+      const isBotRow = by === 'workspace' && g.key.includes('mausbot:');
       return <li key={g.key}>
-        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={g.machine && machines ? `${title} · ${g.machine}` : title}>{name}{g.machine && machines && <small className="us-row-machine">{g.machine}</small>}</span><b className="us-number" title={number(t.totalTokens)}>{short(t.totalTokens)}</b><span className="us-row-share us-number">{percent(t.totalTokens, total)}</span><Chevron open={expanded} />
+        <button type="button" className="us-row" aria-expanded={expanded} onClick={() => toggle(g.key)}><span className="us-row-name" title={g.machine && machines ? `${title} · ${g.machine}` : title}>{name}{isBotRow && <small className="us-row-tag">Bot</small>}{g.machine && machines && <small className="us-row-machine">{g.machine}</small>}</span><b className="us-number" title={number(t.totalTokens)}>{short(t.totalTokens)}</b><span className="us-row-share us-number">{percent(t.totalTokens, total)}</span><Chevron open={expanded} />
           <span className="us-meter" aria-hidden="true"><span style={{ width: `${total ? t.totalTokens / total * 100 : 0}%` }} /></span></button>
         {expanded && <dl className="us-row-detail">
           <div><dt>{ui("Requests")}</dt><dd>{number(t.requests)}<small>{ui("Usage reported {0}/{1}", { 0: number(t.withUsage), 1: number(t.requests) })}</small></dd></div>
@@ -142,6 +156,7 @@ export function Dashboard() {
   const [from, setFrom] = useState(() => dateRange('today').from); const [to, setTo] = useState(() => dateRange('today').to);
   const [period, setPeriod] = useState<Period>('today');
   const [provider, setProvider] = useState(''); const [model, setModel] = useState(''); const [sessionId, setSessionId] = useState('');
+  const [source, setSource] = useState<'' | SourceFilter>('');
   // Every machine DSH Link reaches, or one of them.
   const [machine, setMachine] = useState('all');
   const [data, setData] = useState<UsageReport>(); const [error, setError] = useState('');
@@ -151,7 +166,7 @@ export function Dashboard() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const params = new URLSearchParams();
   // Days follow the viewer's time zone, like the header pill.
-  for (const [key, value] of Object.entries({ from, to, provider, model, sessionId, tz: localOffset(), machines: machine })) if (value) params.set(key, value);
+  for (const [key, value] of Object.entries({ from, to, provider, model, sessionId, source, tz: localOffset(), machines: machine })) if (value) params.set(key, value);
   // Every category's groups arrive in one report, so switching categories needs no new request.
   const path = `/api/usage-stats?${params}`;
   const exportCsv = async () => {
@@ -194,10 +209,14 @@ export function Dashboard() {
     setPeriod(value);
     if (value !== 'custom') { const range = dateRange(value); setFrom(range.from); setTo(range.to); }
   };
-  const reset = () => { setProvider(''); setModel(''); setSessionId(''); setMachine('all'); choosePeriod('today'); };
+  const reset = () => { setProvider(''); setModel(''); setSessionId(''); setSource(''); setMachine('all'); choosePeriod('today'); };
   const showAttention = () => { setSourcesOpen(true); requestAnimationFrame(() => sources.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })); };
-  const filterCount = [provider, model, sessionId, machine === 'all' ? '' : machine].filter(Boolean).length;
+  const filterCount = [provider, model, sessionId, source, machine === 'all' ? '' : machine].filter(Boolean).length;
   const machineChoices = data?.machines ?? [];
+  const hasMausbot = Boolean(source) || (data?.filters.providers ?? []).some(p => p.startsWith('mausbot-'));
+  const scopeOptions: readonly (readonly ['' | SourceFilter, string])[] = source === 'dsh' || source === 'remote-agents'
+    ? [...SOURCE_SCOPES, [source, source === 'dsh' ? "DSH model calls" : "Remote agents"]]
+    : SOURCE_SCOPES;
   const select = (label: string, value: string, set: (value: string) => void, options: string[]) => <label className="us-field">{label}<select aria-label={label} value={value} onChange={e => set(e.target.value)}><option value="">{ui("All {0}", { 0: label })}</option>{options.map(v => <option key={v} value={v}>{v}</option>)}</select></label>;
   const range = from && from === to ? from : from || to ? `${from || ui("First record")} → ${to || ui("Latest record")}` : ui("All records");
   const updateStatus = loading && data ? ui("Updating… showing previous results") : error && data ? ui("Could not refresh; showing previous results") :
@@ -210,16 +229,17 @@ export function Dashboard() {
     <div className="us-filter-row"><button type="button" className="us-filters" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(!filtersOpen)}><Chevron open={filtersOpen} />{ui("More filters")}{filterCount ? ui(" · {0} applied", { 0: filterCount }) : machineChoices.length > 1 ? ui(" · Machine, provider, model, session") : ui(" · Provider, model, session")}</button>
       <span className="us-range us-number">{range} · {timeZone()}</span>
       {(filterCount > 0 || period === 'custom') && <button type="button" className="us-link" onClick={reset}>{ui("Reset filters")}</button>}</div>
-    {filtersOpen && <div className="us-filter-grid">{machineChoices.length > 1 && <label className="us-field">{ui("Machine")}<select aria-label={ui("Machine")} value={machine} onChange={e => setMachine(e.target.value)}><option value="all">{ui("All machines")}</option>{machineChoices.map(m => <option key={m.id} value={m.self ? 'self' : m.id}>{m.self ? `${m.name} · ${ui("This computer")}` : m.name}</option>)}</select></label>}{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div>}
+    {filtersOpen && <div className="us-filter-grid">{machineChoices.length > 1 && <label className="us-field">{ui("Machine")}<select aria-label={ui("Machine")} value={machine} onChange={e => setMachine(e.target.value)}><option value="all">{ui("All machines")}</option>{machineChoices.map(m => <option key={m.id} value={m.self ? 'self' : m.id}>{m.self ? `${m.name} · ${ui("This computer")}` : m.name}</option>)}</select></label>}<label className="us-field">{ui("Source")}<select aria-label={ui("Source")} value={source} onChange={e => setSource(e.target.value as '' | SourceFilter)}>{SOURCE_FILTERS.map(([key, text]) => <option key={key} value={key}>{ui(text)}</option>)}</select></label>{select(ui("Provider"), provider, setProvider, data?.filters.providers ?? (provider ? [provider] : []))}{select(ui("Model"), model, setModel, data?.filters.models ?? (model ? [model] : []))}<label className="us-field">{ui("Session ID")}<input aria-label={ui("Session ID")} value={sessionId} onChange={e => setSessionId(e.target.value)} placeholder={ui("Filter by full session ID")} /></label></div>}
     {error && <div className="us-notice us-warning" role="alert">{ui("Could not load:")}{ui(error)}<button className="us-button" onClick={() => setRefresh(n => n + 1)}>{ui("Retry")}</button></div>}
     {exportError && <div className="us-notice us-warning" role="alert">{ui(exportError)}</div>}
     {loading && !data && <div className="us-loading" role="status">{ui("Loading usage…")}</div>}
     {data && <>
-      <Headline data={data} onPartial={showAttention} />
+      {hasMausbot && <Tabs label={ui("Usage source")} value={source} options={scopeOptions} onChange={setSource} compact />}
+      <Headline data={data} onPartial={showAttention} onSource={setSource} />
       <Tabs label={ui("Group by")} value={groupBy} options={BREAKDOWNS} onChange={setGroupBy} compact />
       <Breakdown data={data} by={groupBy} />
       <Trend data={data} />
-      <MonthlyHeatmap provider={provider} model={model} sessionId={sessionId} machine={machine} refresh={refresh} />
+      <MonthlyHeatmap provider={provider} model={model} sessionId={sessionId} source={source} machine={machine} refresh={refresh} />
       <Sources data={data} open={sourcesOpen} onToggle={() => setSourcesOpen(!sourcesOpen)} anchor={sources} />
     </>}
   </section>;

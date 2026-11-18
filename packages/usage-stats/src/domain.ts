@@ -29,6 +29,7 @@ export interface Totals {
   totalTokens: number;
 }
 export type Source = 'dsh' | 'remote-agents' | 'mausbot';
+export type SourceFilter = Source | 'without-mausbot';
 /** Remote CLI turns: dsh-remote-agents routes are `remote-cli-<cli>`; records from the retired dsh-claude-ssh source are `claude-ssh-<host>`. OpenMausBot ledger rows are `mausbot-<engine>`. */
 export const sourceOf = (provider: string): Source => provider.startsWith('mausbot-') ? 'mausbot' : provider.startsWith('remote-cli-') || provider.startsWith('claude-ssh-') ? 'remote-agents' : 'dsh';
 export const SOURCE_LABELS: Record<Source, string> = { dsh: "DSH model calls", 'remote-agents': "Remote agents", mausbot: "MausBot" };
@@ -39,7 +40,7 @@ export function remoteModel(route: string): string {
   try { return decodeURIComponent(model) + (tier ? ` · ${decodeURIComponent(tier)}` : ''); } catch { return route; }
 }
 /** `tzOffset` is minutes east of UTC for day boundaries; without it days are UTC. */
-export interface Query { from?: string; to?: string; provider?: string; model?: string; sessionId?: string; source?: Source; groupBy: GroupBy; tzOffset?: number }
+export interface Query { from?: string; to?: string; provider?: string; model?: string; sessionId?: string; source?: SourceFilter; groupBy: GroupBy; tzOffset?: number }
 export interface UsageGroup {
   key: string; label: string; totals: Totals;
   /** All-machines reports: the machine whose DSH holds this workspace. */
@@ -82,10 +83,13 @@ const CLI_LABELS: Record<string, string> = {
   droid: 'Droid', copilot: 'GitHub Copilot', 'command-code': 'Command Code', kiro: 'Kiro', cline: 'Cline',
   hermes: 'Hermes', deepseek: 'DeepSeek', 'muse-code': 'Muse Code', openai: 'OpenAI', openrouter: 'OpenRouter',
 };
-/** Remote and MausBot turns are named by their CLI/engine, merging an engine's turns across sources and machines; DSH providers keep their ID. */
+/** Remote turns are named by their CLI, while MausBot turns are prefixed `MausBot · <engine>` so bot usage stays distinct. */
 export function providerLabel(provider: string): string {
-  const cli = /^(?:remote-cli|mausbot)-(.+)$/.exec(provider)?.[1];
-  return cli ? CLI_LABELS[cli] ?? cli : provider.startsWith('claude-ssh-') ? 'Claude Code' : provider;
+  const remote = /^remote-cli-(.+)$/.exec(provider)?.[1];
+  if (remote) return CLI_LABELS[remote] ?? remote;
+  const bot = /^mausbot-(.+)$/.exec(provider)?.[1];
+  if (bot) return `MausBot · ${CLI_LABELS[bot] ?? bot}`;
+  return provider.startsWith('claude-ssh-') ? 'Claude Code' : provider;
 }
 /** Older remote main-chat records kept the chat route as their model. */
 export const modelOf = (r: Pick<UsageRecord, 'provider' | 'model'>) => r.provider.startsWith('remote-cli-') ? remoteModel(r.model) : r.model;
@@ -158,8 +162,8 @@ export function parseQuery(url: URL): Query {
   const groupBy = p.get('groupBy') ?? 'day';
   if (!isDimension(groupBy) && !['day', 'session', 'source'].includes(groupBy)) throw new Error("Unsupported grouping");
   const rawSource = p.get('source');
-  let source: Source | undefined;
-  if (rawSource === 'dsh' || rawSource === 'remote-agents' || rawSource === 'mausbot') source = rawSource;
+  let source: SourceFilter | undefined;
+  if (rawSource === 'dsh' || rawSource === 'remote-agents' || rawSource === 'mausbot' || rawSource === 'without-mausbot') source = rawSource;
   else if (rawSource) throw new Error("Unsupported request source");
   const from = date(p.get('from')); const to = date(p.get('to'));
   if (from && to && from > to) throw new Error("Start date must not be later than end date");
@@ -239,7 +243,8 @@ export function combine(all: readonly MachinePart[], query: Query): UsageReport 
 
 /** A record's date in the query's time zone. */
 const dayOf = (r: UsageRecord, query: Query) => query.tzOffset ? new Date(Date.parse(r.startedAt) + query.tzOffset * 60_000).toISOString().slice(0, 10) : r.startedAt.slice(0, 10);
-const matches = (r: UsageRecord, query: Query, day = dayOf(r, query)) => !((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || (query.source && sourceOf(r.provider) !== query.source));
+const matchesSource = (r: UsageRecord, source?: SourceFilter) => !source || (source === 'without-mausbot' ? sourceOf(r.provider) !== 'mausbot' : sourceOf(r.provider) === source);
+const matches = (r: UsageRecord, query: Query, day = dayOf(r, query)) => !((query.from && day < query.from) || (query.to && day > query.to) || (query.provider && r.provider !== query.provider) || (query.model && modelOf(r) !== query.model) || (query.sessionId && r.sessionId !== query.sessionId) || !matchesSource(r, query.source));
 
 /**
  * One record of a conversation another machine's DSH also has, with where it counts in this machine's report, so that a

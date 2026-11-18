@@ -1,5 +1,5 @@
 import { hostname } from 'node:os';
-import type { MachinePart, RecordShare, UsageReport } from './domain.js';
+import { parseQuery, report, type MachinePart, type RecordShare, type UsageReport } from './domain.js';
 
 /** dsh-link's `dshLink` service (version 1), as far as this plugin uses it. */
 export interface LinkService {
@@ -48,9 +48,9 @@ export class MachineReports {
       const key = `${machine.id}?${search}`;
       try {
         if (machine.state !== 'online') throw new Error(machine.state);
-        const report = await this.ask(link!, machine.id, `/api/usage-stats?${search}`, usable);
-        this.keep(key, report);
-        return { ...base, state: 'counted', report };
+        const answer = await this.askReport(link!, machine.id, search);
+        this.keep(key, answer);
+        return { ...base, state: 'counted', report: answer };
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
         const last = this.kept.get(key);
@@ -98,6 +98,23 @@ export class MachineReports {
     this.kept.delete(key);
     this.kept.set(key, { at: Date.now(), report: value as UsageReport });
     if (this.kept.size > KEPT) this.kept.delete(this.kept.keys().next().value!);
+  }
+
+  private async askReport(link: LinkService, id: string, search: string): Promise<UsageReport> {
+    try {
+      return await this.ask(link, id, `/api/usage-stats?${search}`, usable);
+    } catch (error) {
+      // Older peers (<= 0.1.21) do not know `mausbot` or `without-mausbot` and also never collect OpenMausBot usage.
+      if (error instanceof Error && error.message === 'Unsupported request source') {
+        const params = new URLSearchParams(search), source = params.get('source');
+        if (source === 'mausbot') return report([], parseQuery(new URL(`http://peer/?${search}`)));
+        if (source === 'without-mausbot') {
+          params.delete('source');
+          return await this.ask(link, id, `/api/usage-stats?${params}`, usable);
+        }
+      }
+      throw error;
+    }
   }
 
   private ask<T>(link: LinkService, id: string, path: string, check: (value: unknown) => value is T): Promise<T> {
