@@ -40,6 +40,7 @@ export const zh = {
   "Output tokens": "输出 Token",
   "DSH model calls": "DSH 模型调用",
   "Remote agents": "远程智能体",
+  "MausBot": "MausBot",
   "{0} failed": "{0} 失败",
   "{0} cancelled": "{0} 取消",
   "Completed": "已完成",
@@ -47,7 +48,7 @@ export const zh = {
   "Request failed {0}": "请求失败 {0}",
   "All": "全部",
   "Usage statistics": "使用量统计",
-  "Model usage from DSH and remote agents": "DSH 与远程智能体的模型调用用量",
+  "Model usage from DSH, remote agents and MausBot": "DSH、远程智能体与 MausBot 的模型调用用量",
   "Updates every 5 seconds": "每 5 秒更新",
   "Refresh": "刷新",
   "Exporting…": "正在导出…",
@@ -142,6 +143,6 @@ export const zh = {
   "Did not answer; not included": "未响应，未计入",
   "Unknown machine": "未知机器",
   "{0} records also on another machine, counted there": "{0} 条记录与其他机器重复，已在那边计入",
-  "are included in output. Each machine's DSH records the calls it makes, including titles and compaction, and the totals add up the machines DSH Link reaches; records that two machines both kept from a conversation they shared count once. Remote agents are counted once per remote turn; independently running CLIs are excluded. Missing usage is not estimated. First record:": "已包含在输出中。每台机器的 DSH 记录自己发起的调用（含标题生成、压缩），合计为互联能连到的全部机器之和；以前共享过的对话在两台机器上都有记录，相同的记录只计一次。远程智能体按远端每轮汇总一次，远端独立运行的 CLI 不在范围内。未返回的用量不作估算。最早记录：",
+  "are included in output. Each machine's DSH records the calls it makes, including titles and compaction, and reads OpenMausBot's local usage ledger when present; the totals add up the machines DSH Link reaches, and records that two machines both kept from a conversation they shared count once. Remote agents and MausBot are counted once per turn; independently running CLIs are excluded. Missing usage is not estimated. First record:": "已包含在输出中。每台机器的 DSH 记录自己发起的调用（含标题生成、压缩），并在本机装有 OpenMausBot 时读取其用量记录；合计为互联能连到的全部机器之和，以前共享过的对话在两台机器上都有记录时相同的只计一次。远程智能体与 MausBot 按每轮汇总一次，远端独立运行的 CLI 不在范围内。未返回的用量不作估算。最早记录：",
   "Each computer keeps its own records. Other machines' usage is read through DSH Link inside your tailnet; nothing is uploaded.": "每台电脑各自保存自己的记录；其他机器的用量经互联在你的 Tailscale 网络内读取，不会上传。"
 } as const;

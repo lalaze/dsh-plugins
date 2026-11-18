@@ -29,7 +29,7 @@ export function UsageSettings({ details }: { details: ComponentType }) {
   const { headerBadge } = usePreferences();
   const [open, setOpen] = useState(false);
   return <section className="us-settings" aria-label={ui("Usage statistics")}><style>{CSS}</style>
-    <header><h2>{ui("Usage statistics")}</h2><p className="us-settings-intro">{ui("Model usage from DSH and remote agents")}</p></header>
+    <header><h2>{ui("Usage statistics")}</h2><p className="us-settings-intro">{ui("Model usage from DSH, remote agents and MausBot")}</p></header>
     <div className="us-settings-list">
       <div className="us-settings-row"><div><div className="us-settings-title">{ui("Show today's usage in the conversation header")}</div>
         <p className="us-settings-hint">{ui("Click it to open the full statistics. Applies to this device only.")}</p></div>
