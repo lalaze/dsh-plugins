@@ -9,7 +9,7 @@ export const planPrompt = (goal: string) => `You are the planner. Another model 
 Write a plan for the goal: the steps, the files likely to change, and a section "Acceptance criteria" with numbered checks a reviewer can verify, including any command to run. Stay within what the goal asks. Do not ask questions: when something is unclear, choose the simplest reading and say so. ${language}${section('Goal', goal)}`;
 
 /** Told to an implementer whose step was stopped once, by a person or a failure, and is now done again. */
-export const retryNote = 'An earlier attempt at this step was stopped before it finished, so the working tree may already hold part of its changes. Look at them first (git status, git diff), keep what is right, and finish the work from there: do not start over.';
+export const retryNote = 'An earlier attempt at this step was stopped before it finished, so the working tree may already hold part of its changes. Look at them first (with git status and git diff where allowed, or by reading the files), keep what is right, and finish the work from there: do not start over.';
 /** `retry`: an earlier attempt at this same step was cut off, and may have left part of its work in the tree. */
 export const implementPrompt = (input: { goal: string; plan?: string; round: number; findings?: string; lastSummary?: string; retry?: boolean }) => `You are the implementer. Do the work in this working directory and run the checks you can. Do not commit unless the goal says to. Do not ask questions: nobody can answer them here. End with a short summary of what changed and what you verified, including anything you could not do. ${language}${input.round > 1 ? `
 
@@ -19,7 +19,7 @@ ${retryNote}` : ''}${section('Goal', input.goal)}${section('Plan', input.plan)}$
 
 export const reviewPrompt = (input: { goal: string; plan?: string; round: number; summary?: string; findings?: string }) => `You are the reviewer, independent of the implementer. You work read-only: never change a file. Check the work against the goal and the acceptance criteria.
 
-Look at the changes yourself with git status and git diff, and read the code. Treat the implementer's summary as claims to check. Uncommitted changes unrelated to the goal may predate this work: ignore them. Run the checks where this read-only session allows it, and say which you could not run. Report only real problems: bugs, unmet criteria, or missing work the goal asks for. Do not ask for style changes. ${language}${input.round > 1 ? '\n\nThis is a re-review: confirm that the earlier findings are fixed, and look for anything the fixes broke.' : ''}
+Look at the changes yourself (with git status and git diff where allowed) and read the code. Treat the implementer's summary as claims to check. Uncommitted changes unrelated to the goal may predate this work: ignore them. Run the checks where this read-only session allows it, and say which you could not run. Report only real problems: bugs, unmet criteria, or missing work the goal asks for. Do not ask for style changes. ${language}${input.round > 1 ? '\n\nThis is a re-review: confirm that the earlier findings are fixed, and look for anything the fixes broke.' : ''}
 
 If there are problems, list each with its file and what to change. The very last line of your reply must be exactly one of:
 ${VERDICT_MARK}: pass

@@ -127,7 +127,7 @@ export async function runFlow(input: FlowInput, host: FlowHost): Promise<FlowOut
     reached('plan', 0);
     const result = await step('plan', 0, planPrompt(goal), true, routes.plan);
     if (isOutcome(result)) return result;
-    plan = result.text;
+    plan = result.closing ?? result.text;
   }
   const describeReview = (result: ChildResult) => {
     const { verdict } = parseVerdict(result.text);

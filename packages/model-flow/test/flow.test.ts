@@ -202,13 +202,16 @@ test('a saved model moves to the conversation\'s machine only when that machine 
   assert.equal(relocate(terra, catalog, 'air').model, 'mini/codex/gpt-terra');
 });
 test('every step is one entry in the card, from running to how it ended', async () => {
-  const { rows } = await play(request => {
+  const { rows, calls, points } = await play(request => {
     if (request.role === 'review') return { text: 'Looks right.\n\nFine.\nFLOW_VERDICT: pass', closing: 'Fine.\nFLOW_VERDICT: pass', stopReason: 'completed' };
     return { text: 'progress\n\nthe result', closing: 'the result', stopReason: 'completed' };
   });
   assert.deepEqual(rows.map(row => `${row.role}${row.round} ${row.model} ${row.closed!.status}`), ['plan0 planner done', 'implement1 coder done', 'review1 checker passed']);
   assert.equal(rows[0].closed!.body, 'the result');
   assert.equal(rows[2].closed!.body, 'Fine.');
+  assert.doesNotMatch(calls[1].prompt, /progress/, 'the plan passed on leaves out earlier progress blocks');
+  assert.match(calls[1].prompt, /the result/);
+  assert.equal(points[1].plan, 'the result');
 });
 test('a review with no verdict is its own entry, then the one asked again', async () => {
   const { rows, end } = await play(reviewing(['no verdict here', 'FLOW_VERDICT: pass']));
