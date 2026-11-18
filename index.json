@@ -427,8 +427,8 @@
         "zh": "DSH 使用量统计"
       },
       "description": {
-        "en": "Track DSH and remote CLI token usage, added up over every DSH Link machine, with filters, grouped reports and CSV export",
-        "zh": "统计 DSH 模型与远程 CLI 的 Token 用量，可合计互联的全部机器，支持筛选、分组和 CSV 导出"
+        "en": "Track DSH, remote CLI and MausBot token usage, added up over every DSH Link machine, with filters, grouped reports and CSV export",
+        "zh": "统计 DSH 模型、远程 CLI 与 MausBot 的 Token 用量，可合计互联的全部机器，支持筛选、分组和 CSV 导出"
       },
       "author": "lalaze",
       "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/usage-stats",
@@ -444,12 +444,12 @@
       },
       "versions": [
         {
-          "version": "0.1.21",
-          "publishTimestamp": 1794891786,
+          "version": "0.1.22",
+          "publishTimestamp": 1794996124,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "b8bb9ebb47ed600f99c34a9bcd995cd42884aed4",
+            "commit": "54421bbb1f60a98f04dd88eed6778830aab464c7",
             "path": "packages/usage-stats"
           },
           "engines": {
