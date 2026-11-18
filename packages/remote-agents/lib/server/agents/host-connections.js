@@ -108,8 +108,12 @@ export class HostConnections {
     onCatalogChange(listener) { this.catalogListeners.add(listener); return () => this.catalogListeners.delete(listener); }
     catalogChanged() { for (const listener of this.catalogListeners)
         listener(); }
-    /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */
-    async discoverHost(hostId) {
+    /**
+     * Discover once per machine, independent of any configured project. Failed probes keep the saved catalog.
+     * A background check (`automatic`) also keeps the saved models of a CLI that fails only this time, and reports no
+     * error: nobody asked for it, and only Refresh models drops a CLI's models.
+     */
+    async discoverHost(hostId, options = {}) {
         await this.serial(`catalog:${hostId}`, async () => {
             const host = this.host(hostId);
             if (!enabledProvidersOf(host).length) {
@@ -127,11 +131,16 @@ export class HostConnections {
                     const host = state.hosts.find(h => h.id === hostId);
                     if (!host)
                         throw new RemoteError('Remote host was removed', 409);
+                    const saved = host.catalog?.providers;
+                    if (options.automatic && saved)
+                        catalog.providers = catalog.providers.map(p => p.status === 'ready' ? p : saved.find(s => s.id === p.id && s.status === 'ready') ?? p);
                     host.catalog = catalog;
                     delete host.modelError;
                 });
             }
             catch (error) {
+                if (options.automatic)
+                    return;
                 await this.store.update(state => { const host = state.hosts.find(h => h.id === hostId); if (host)
                     host.modelError = this.safeError(error); });
             }

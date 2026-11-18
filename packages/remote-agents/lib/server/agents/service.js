@@ -3,6 +3,8 @@ import { HostConnections } from './host-connections.js';
 import { readSshConfigHosts } from '../core/ssh-config.js';
 import { attachmentInput, inputModalitiesOf, isLocalHost, LOCAL_HOST_ID } from '../core/domain.js';
 import { browsePath, busy, enabledProvidersOf, permissionModes, field, identifier, questionsOf, record, RemoteError, taskInput } from '../core/domain.js';
+/** How old a machine's saved models get, while conversations work there, before they are checked again in the background. */
+export const CATALOG_MAX_AGE_MS = 3_600_000;
 export class RemoteAgentsService {
     store;
     readSshConfig;
@@ -12,6 +14,8 @@ export class RemoteAgentsService {
     locks = new Map();
     restoring = new Map();
     delegationRecovery = new Map();
+    /** When each machine's saved models were last checked in the background, successfully or not. */
+    catalogChecks = new Map();
     /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
     sharing;
     constructor(store, factory, readSshConfig = readSshConfigHosts) {
@@ -102,8 +106,8 @@ export class RemoteAgentsService {
     }
     /**
      * Detect this computer's CLIs, once while DSH runs, when a conversation works in one of its folders and none is ready:
-     * the first time, or after none was installed. A CLI installed here later shows up after Refresh models or a restart.
-     * Starting DSH detects nothing, as it connects to no machine.
+     * the first time, or after none was installed. A CLI installed here later shows up after Refresh models, a restart, or
+     * {@link refreshAgedCatalogs}. Starting DSH detects nothing, as it connects to no machine.
      */
     discoverLocalMachine() {
         const local = this.store.hosts().find(host => host.id === LOCAL_HOST_ID && isLocalHost(host));
@@ -112,6 +116,30 @@ export class RemoteAgentsService {
         return this.localDiscovery ??= this.hostConnections.discoverHost(local.id).catch(() => { });
     }
     localDiscovery;
+    /**
+     * Check again, in the background, the saved models of the machines a conversation works on once they are
+     * {@link CATALOG_MAX_AGE_MS} old, so a CLI's new models reach the picker without Refresh models. The composer asks on
+     * every window focus: each machine is checked at most once per period, whatever the outcome. Only machines already
+     * discovered are checked; one never discovered waits for Refresh models or {@link discoverLocalMachine}.
+     */
+    refreshAgedCatalogs(hostIds, now = Date.now()) {
+        if (this.stopped)
+            return Promise.resolve();
+        const due = [...new Set(hostIds)].filter(id => {
+            const host = this.store.hosts().find(h => h.id === id);
+            if (!host?.catalog || !enabledProvidersOf(host).length)
+                return false;
+            const checkedAt = Date.parse(host.catalog.checkedAt);
+            if (now - (Number.isFinite(checkedAt) ? checkedAt : 0) < CATALOG_MAX_AGE_MS)
+                return false;
+            const attempted = this.catalogChecks.get(id);
+            if (attempted !== undefined && now - attempted < CATALOG_MAX_AGE_MS)
+                return false;
+            this.catalogChecks.set(id, now);
+            return true;
+        });
+        return Promise.all(due.map(id => this.hostConnections.discoverHost(id, { automatic: true }).catch(() => { }))).then(() => { });
+    }
     async discoverHost(hostId) {
         await this.hostConnections.discoverHost(hostId);
         return this.snapshot();

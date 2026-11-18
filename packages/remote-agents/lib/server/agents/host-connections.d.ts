@@ -25,8 +25,14 @@ export declare class HostConnections {
     use<T>(hostId: string, action: (backend: Backend, host: HostConfig) => Promise<T>, expectedServerId?: string): Promise<T>;
     onCatalogChange(listener: () => void): () => void;
     catalogChanged(): void;
-    /** Discover once per machine, independent of any configured project. Failed probes keep the saved catalog. */
-    discoverHost(hostId: string): Promise<void>;
+    /**
+     * Discover once per machine, independent of any configured project. Failed probes keep the saved catalog.
+     * A background check (`automatic`) also keeps the saved models of a CLI that fails only this time, and reports no
+     * error: nobody asked for it, and only Refresh models drops a CLI's models.
+     */
+    discoverHost(hostId: string, options?: {
+        automatic?: boolean;
+    }): Promise<void>;
     setHostProviders(hostId: string, value: unknown): Promise<void>;
     addHost(input: unknown): Promise<string>;
     /** Remove before closing, so the next access uses the latest saved host configuration. */

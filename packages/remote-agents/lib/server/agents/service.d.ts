@@ -32,6 +32,8 @@ export interface SendOptions {
     interrupt?: boolean;
     signal?: AbortSignal;
 }
+/** How old a machine's saved models get, while conversations work there, before they are checked again in the background. */
+export declare const CATALOG_MAX_AGE_MS = 3600000;
 export declare class RemoteAgentsService {
     readonly store: Store;
     private readonly readSshConfig;
@@ -41,6 +43,8 @@ export declare class RemoteAgentsService {
     private readonly locks;
     private readonly restoring;
     private readonly delegationRecovery;
+    /** When each machine's saved models were last checked in the background, successfully or not. */
+    private readonly catalogChecks;
     /** DSH's MCP servers and skills for remote CLIs; set once DSH's registries are available. */
     sharing?: LaunchSharing;
     constructor(store: Store, factory?: BackendFactory, readSshConfig?: typeof readSshConfigHosts);
@@ -71,11 +75,18 @@ export declare class RemoteAgentsService {
     refreshStaleCatalogs(): Promise<void>;
     /**
      * Detect this computer's CLIs, once while DSH runs, when a conversation works in one of its folders and none is ready:
-     * the first time, or after none was installed. A CLI installed here later shows up after Refresh models or a restart.
-     * Starting DSH detects nothing, as it connects to no machine.
+     * the first time, or after none was installed. A CLI installed here later shows up after Refresh models, a restart, or
+     * {@link refreshAgedCatalogs}. Starting DSH detects nothing, as it connects to no machine.
      */
     discoverLocalMachine(): Promise<void>;
     private localDiscovery?;
+    /**
+     * Check again, in the background, the saved models of the machines a conversation works on once they are
+     * {@link CATALOG_MAX_AGE_MS} old, so a CLI's new models reach the picker without Refresh models. The composer asks on
+     * every window focus: each machine is checked at most once per period, whatever the outcome. Only machines already
+     * discovered are checked; one never discovered waits for Refresh models or {@link discoverLocalMachine}.
+     */
+    refreshAgedCatalogs(hostIds: readonly string[], now?: number): Promise<void>;
     discoverHost(hostId: string): Promise<Dashboard>;
     setHostProviders(hostId: string, value: unknown): Promise<Dashboard>;
     snapshot(): Promise<Dashboard>;

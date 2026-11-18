@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.2.146 — New CLI models show up by themselves
+
+- The model picker now picks up a CLI's new models without **Refresh models**. While conversations work on a machine, its saved models are checked again in the background once they are an hour old: for example, Codex models released since the last check appear in the picker shortly after you open or return to such a conversation. Before, the models saved when the machine was first detected stayed until you used **Refresh models**.
+- Each machine is checked at most once an hour, and only machines whose models were detected before. Starting DSH still connects to nothing, and machines no conversation works on are not contacted.
+- A background check only adds and updates. When the machine cannot be reached, or a CLI fails or is signed out just then, the picker keeps that CLI's models and nothing is reported. **Refresh models** still shows such errors and drops the models of a CLI that is no longer ready.
+
 ## 0.2.145 — Antigravity's sign-in on this computer
 
 - When Antigravity is not signed in for a folder on this computer, the model list and the plan limits now say to run `agy acp --login` in a terminal on this computer, not over SSH. Run on this computer, Antigravity reads its sign-in from the keychain, and a sign-in made over SSH is a separate one. Before, the message only explained the SSH case. Saved machines keep the SSH message.

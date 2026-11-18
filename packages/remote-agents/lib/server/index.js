@@ -33,6 +33,8 @@ export async function apply(ctx, config = {}) {
         // This computer's CLIs are detected when a conversation first works in one of its folders.
         if (placement.hostIds.includes(LOCAL_HOST_ID))
             void service.discoverLocalMachine();
+        // Their saved models are checked again once an hour old, so a CLI's new models show up without Refresh models.
+        void service.refreshAgedCatalogs(placement.hostIds);
         return placement;
     };
     const sharing = new Sharing(store, undefined, message => loggerOf(ctx)?.warn?.(message));
