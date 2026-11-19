@@ -35,6 +35,7 @@ export const zh: Record<string, string> = {
   "Cancel upload": "取消上传",
   "Dismiss": "关闭",
   "Add files to {cli}": "添加文件给 {cli}",
+  "Esc key": "Esc 键",
   "Files can only be added to a TUI conversation": "只能把文件添加到 TUI 对话",
   "History": "历史记录",
   "This session is active. Refresh before archiving.": "会话状态已变化，请刷新后再归档。",

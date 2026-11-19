@@ -12,6 +12,7 @@ import { fileStyles, sendTuiFile, TuiDropTarget, TuiFilePicker, TuiFileStatus, T
 import { TuiPrompts, usePromptText } from './tui-prompt.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { findXterm, TuiRenderChoices, TuiRenderMenu, useWebglRenderer, type TuiScrollControl } from './tui-render.js';
+import { keyStyles, TuiEscKey } from './tui-keys.js';
 import { useKeyboardFit } from './tui-keyboard.js';
 import { useScreenClaim } from './tui-screen.js';
 import { TuiScrollChoice, useConversationScrollback } from './tui-scroll.js';
@@ -284,10 +285,11 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
   // Before the browser paints, so the terminal is simply there.
   useLayoutEffect(() => (ready ? kept.show(sessionId, shell, seat.current!) : undefined), [kept, sessionId, ready]);
   return <div ref={root} data-remote-agents-tui="" style={{ position: 'relative', flex: '1 1 0', minHeight: 0, height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-    <style>{viewStyles}{fileStyles}</style>
+    <style>{viewStyles}{fileStyles}{keyStyles}</style>
     <div ref={seat} style={{ display: 'contents' }} />
     {!ready && <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
     <TuiFileStatus sessionId={sessionId} uploads={services.uploads} />
+    {ready && <TuiEscKey root={root} />}
     {ready && <TuiFilePicker sessionId={sessionId} uploads={services.uploads} cli={CLI_NAMES[cli]} />}
     <TuiRenderMenu choices={services.render} scroll={scroll} />
   </div>;
