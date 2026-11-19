@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import { createConnection, createServer, type Socket } from 'node:net';
 import { delimiter, join } from 'node:path';
 import type { Terminal as HeadlessTerminal } from '@xterm/headless';
-import { ATTACH_EXIT, attachExitCode, FOCUS_SETTLE_MS, FRAME, screenClaim } from './holder-protocol.js';
+import { ATTACH_EXIT, attachExitCode, FOCUS_SETTLE_MS, FocusReports, FRAME, onlyFocusReports, screenClaim } from './holder-protocol.js';
 import { HolderOutput } from './holder-output.js';
 import { alignScreen, reflowText } from './holder-reflow.js';
 
@@ -467,6 +467,7 @@ async function attach(id: string, encoded: string, history: string): Promise<voi
   /** The screen's size when another client last changed it. A holder from an earlier version never says, and nothing is taken back. */
   let theirs: { cols?: unknown; rows?: unknown } | undefined, theirsAt = 0;
   const settle = Number(process.env.DSH_TERMINAL_FOCUS_SETTLE_MS) || FOCUS_SETTLE_MS;
+  const focusReports = new FocusReports();
   socket.write(frame(FRAME.hello, size()));
   process.stdout.on('resize', () => socket.write(frame(FRAME.resize, size())));
   process.stdin.on('data', (data: Buffer) => {
@@ -477,6 +478,8 @@ async function attach(id: string, encoded: string, history: string): Promise<voi
       // Until the holder says what the size is now, this client has nothing more to ask for.
       theirs = undefined;
     }
+    // Only a page claiming the screen sends them to a CLI that did not ask for them.
+    if (!focusReports.on && onlyFocusReports(data)) return;
     socket.write(frame(FRAME.input, data));
   });
   // The other end of SSH went away. The holder carries on.
@@ -485,7 +488,7 @@ async function attach(id: string, encoded: string, history: string): Promise<voi
   socket.on('error', () => {});
   socket.on('close', () => process.exit(ATTACH_EXIT.lost));
   socket.on('data', frames((type, payload) => {
-    if (type === FRAME.output) { if (!process.stdout.write(Buffer.from(payload))) { socket.pause(); process.stdout.once('drain', () => socket.resume()); } return; }
+    if (type === FRAME.output) { focusReports.read(payload); if (!process.stdout.write(Buffer.from(payload))) { socket.pause(); process.stdout.once('drain', () => socket.resume()); } return; }
     if (type === FRAME.size) { try { theirs = JSON.parse(payload.toString('utf8')) as typeof theirs; theirsAt = Date.now(); } catch { /* as if it had not said */ } return; }
     if (type !== FRAME.exit) return;
     let code: number | null | undefined;

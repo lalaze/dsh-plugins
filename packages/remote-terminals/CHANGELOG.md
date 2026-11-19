@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.20 — An Antigravity TUI takes the size of the device you look at
+
+- An Antigravity TUI conversation used on a phone kept the phone's width on the computer: the computer showed it as a narrow column in the middle of the window until you typed there. Since 0.1.10 the screen follows the device you turn to by way of a focus report, and Antigravity never asks for focus reports (measured with 1.5.12), so turning back to the computer told it nothing.
+- Now the page claims the screen whatever the CLI: the conversation coming into view, its window or tab coming back, or a click into its terminal makes it this device's size, and Antigravity redraws the whole conversation at the new width. Claude Code and Codex behave as before. A CLI that did not ask for focus reports is no longer sent any.
+- Can be upgraded on its own, without a restart; reload the page on each device. A TUI whose terminal was opened before the upgrade still passes the claim on to the CLI until DSH opens its terminal again: Antigravity 1.5.12 ignores it, and a shell left after the CLI exited only beeps.
+
 ## 0.1.19 — An Esc button in TUI conversations, for phones
 
 - A phone's keyboard has no Esc key, so a dialog in the CLI, such as Claude Code's `/usage`, could not be closed from a phone, and a running turn could not be stopped. On a touch screen a TUI conversation now has an **Esc** button in its bottom-right corner, left of the paperclip. It sends Esc to the CLI exactly as the key does, and leaves the keyboard open or closed as it was.

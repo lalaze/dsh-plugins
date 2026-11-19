@@ -13,7 +13,7 @@ export const FRAME = { hello: 1, input: 2, resize: 3, output: 4, exit: 5, size: 
  * CLI's questions, focus-out, mouse reports, arrow keys — start with ESC and take nothing, or two terminals would fight
  * over the size every time the CLI asked them something.
  * A terminal also reports focus by itself whenever the CLI turns focus reports on, so a focus-in right after the size
- * changed hands may be that answer: see FOCUS_SETTLE_MS.
+ * changed hands may be that answer: see FOCUS_SETTLE_MS. A CLI that never turns them on still sees none: see FocusReports.
  */
 export function screenClaim(input: Uint8Array): 'typed' | 'focus' | undefined {
   if (input.length === 0) return undefined;
@@ -23,6 +23,28 @@ export function screenClaim(input: Uint8Array): 'typed' | 'focus' | undefined {
   return starts(PASTE_START) ? 'typed' : undefined;
 }
 const FOCUS_IN = '\x1b[I', PASTE_START = '\x1b[200~';
+/**
+ * Whether the CLI asked for focus reports (`CSI ? 1004 h`), followed through what it prints. A page claims the screen with
+ * a focus-in whether it did or not, as Antigravity never does (measured with 1.5.12), and a CLI that did not ask must not
+ * be sent them: it may read them as keys, as a shell does. A client that joins hears the mode in the holder's snapshot,
+ * which starts with a reset.
+ */
+export class FocusReports {
+  on = false;
+  /** The end of the last output, in case a sequence was split between two. */
+  private tail = '';
+  read(output: Uint8Array): void {
+    const text = this.tail + Buffer.from(output.buffer, output.byteOffset, output.byteLength).toString('latin1');
+    this.tail = text.slice(-32);
+    // Matches already read in the tail are read again, in order, so the last of them still decides.
+    for (const [sequence, params, final] of text.matchAll(/\x1bc|\x1b\[\?([\d;]*)([hl])/g)) {
+      if (sequence === '\x1bc') this.on = false;
+      else if (params!.split(';').includes('1004')) this.on = final === 'h';
+    }
+  }
+}
+/** Whether a terminal's input is nothing but focus reports: a focus change, or a page claiming the screen. */
+export const onlyFocusReports = (input: Uint8Array) => input.length > 0 && /^(?:\x1b\[[IO])+$/.test(Buffer.from(input.buffer, input.byteOffset, input.byteLength).toString('latin1'));
 /**
  * How long after the holder said the size changed a focus-in takes nothing. Neither Claude Code nor Codex turns focus
  * reports on again after a resize (measured 2026-11-15 with 2.1.325 and 0.166), but a CLI that did would have every

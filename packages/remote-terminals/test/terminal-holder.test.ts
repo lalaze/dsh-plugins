@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import { build } from 'esbuild';
 import xtermHeadless from '@xterm/headless';
-import { attachExitCode, ATTACH_EXIT, endHolderScript, HOLDERS_FOLDER, screenClaim, tabHolder, tuiHolder } from '../src/holder-protocol.js';
+import { attachExitCode, ATTACH_EXIT, endHolderScript, FocusReports, HOLDERS_FOLDER, onlyFocusReports, screenClaim, tabHolder, tuiHolder } from '../src/holder-protocol.js';
 import { attachCommand, holdTerminal } from '../src/terminal-hold.js';
 
 let python = false;
@@ -216,6 +216,60 @@ test('a terminal that gains focus takes the screen back, unless the size has onl
   narrow.send('\x1b[200~x\x1b[201~');
   assert.ok(await until(() => changes().length === 3), wide.output());
   assert.equal(changes().at(-1), '20x50');
+  const holder = Number(readFileSync(join(base, id, 'pid'), 'utf8'));
+  process.kill(holder, 'SIGTERM');
+  await Promise.all([wide.exited, narrow.exited]);
+});
+
+test('focus reports are followed through what the CLI prints, split or not', () => {
+  const focus = new FocusReports();
+  const read = (...chunks: string[]) => { for (const chunk of chunks) focus.read(Buffer.from(chunk, 'latin1')); return focus.on; };
+  assert.equal(focus.on, false, 'a terminal starts without them');
+  assert.equal(read('\x1b[?2004h\x1b[?25l'), false, 'other modes');
+  assert.equal(read('text\x1b[?10', '04h more'), true, 'split between two outputs');
+  assert.equal(read('x'.repeat(100)), true, 'output without modes changes nothing');
+  assert.equal(read('\x1b[?1004l'), false);
+  assert.equal(read('\x1b[?2004;1004h'), true, 'among other modes');
+  assert.equal(read('\x1b[?10040h'), true, 'another mode that only starts the same');
+  assert.equal(read('\x1bc\x1b[?25h'), false, 'a reset, as a joining client gets first');
+  assert.equal(read('\x1bc\x1b[?1004h'), true, 'the snapshot of a CLI that asked');
+  for (const reports of ['\x1b[I', '\x1b[O', '\x1b[I\x1b[O']) assert.equal(onlyFocusReports(Buffer.from(reports)), true, JSON.stringify(reports));
+  for (const other of ['', 'I', '\x1b[Ix', '\x1b[A', '\x1b[200~\x1b[I\x1b[201~']) assert.equal(onlyFocusReports(Buffer.from(other)), false, JSON.stringify(other));
+});
+
+test('a page claims the screen for a CLI that never asked for focus reports, which hears nothing of it', options, async () => {
+  const id = newId(), cli = join(home, `reader-${id}.py`);
+  // Says each size it gets and what it reads, and asks for focus reports once it reads an f.
+  writeFileSync(cli, `import os, signal, tty
+tty.setraw(0)
+signal.signal(signal.SIGWINCH, lambda *_: os.write(1, b'winch=%d %d\\r\\n' % os.get_terminal_size(0)[::-1]))
+os.write(1, b'ready\\r\\n')
+while True:
+    data = os.read(0, 1024)
+    if not data: break
+    os.write(1, b'got=' + data.hex().encode() + b'\\r\\n' + (b'\\x1b[?1004h' if data == b'f' else b''))
+`);
+  const wide = attach(id, `exec python3 ${cli}`, { COLUMNS: '120', LINES: '40', DSH_TERMINAL_FOCUS_SETTLE_MS: '200' });
+  assert.ok(await until(() => wide.output().includes('ready')), wide.output());
+  const changes = () => [...wide.output().matchAll(/winch=(\d+) (\d+)/g)].map(match => `${match[1]}x${match[2]}`);
+  const got = () => [...wide.output().matchAll(/got=([0-9a-f]*)/g)].map(match => match[1]);
+  const narrow = attach(id, 'exit 99', { COLUMNS: '50', LINES: '20' });
+  assert.ok(await until(() => changes().length === 1), wide.output());
+  await new Promise(resolve => setTimeout(resolve, 400));
+  // The computer's page comes back into view and claims the screen, as tui-screen.ts does.
+  wide.send('\x1b[I\x1b[O');
+  assert.ok(await until(() => changes().length === 2), wide.output());
+  assert.deepEqual(changes(), ['20x50', '40x120']);
+  wide.send('x');
+  assert.ok(await until(() => got().length > 0), wide.output());
+  assert.deepEqual(got(), ['78'], 'the reports never reached the CLI, and what was typed did');
+  // Once the CLI asks for them, it hears them.
+  wide.send('f');
+  assert.ok(await until(() => got().length === 2), wide.output());
+  await new Promise(resolve => setTimeout(resolve, 200));
+  wide.send('\x1b[I');
+  assert.ok(await until(() => got().length === 3), wide.output());
+  assert.equal(got().at(-1), '1b5b49');
   const holder = Number(readFileSync(join(base, id, 'pid'), 'utf8'));
   process.kill(holder, 'SIGTERM');
   await Promise.all([wide.exited, narrow.exited]);

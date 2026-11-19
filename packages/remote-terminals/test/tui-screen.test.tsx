@@ -44,14 +44,35 @@ const show = (host: HTMLElement, visible: boolean) => act(async () => {
 const tick = (ms: number) => act(async () => { mock.timers.tick(ms); });
 const CLAIM = [['\x1b[I', false], ['\x1b[O', false]];
 
-test('a terminal without focus reports focus in and out, and one with focus or without focus reports sends nothing', () => {
+test('a terminal without focus reports focus in and out, and one with focus sends nothing if the CLI asked for focus reports', () => {
   const { xterm, sent } = terminal();
   assert.equal(claimScreen(xterm, false), true);
   assert.deepEqual(sent, CLAIM);
   assert.equal(claimScreen(xterm, true), false, 'xterm said it by itself');
-  assert.equal(claimScreen(terminal(false).xterm, false), false, 'the CLI would read the reports as keys');
   assert.equal(claimScreen({ ...xterm, input: undefined }, false), false);
   assert.equal(sent.length, 2);
+  // Antigravity never asks, and its terminal says nothing by itself, focused or not; the host keeps the reports from it.
+  const quiet = terminal(false);
+  assert.equal(claimScreen(quiet.xterm, false), true);
+  assert.equal(claimScreen(quiet.xterm, true), true);
+  assert.deepEqual(quiet.sent, [...CLAIM, ...CLAIM]);
+});
+
+test('clicking into the terminal claims the screen for a CLI without focus reports, and leaves it to xterm for one with them', async () => {
+  for (const reports of [false, true]) {
+    const { xterm, host, sent } = terminal(reports);
+    const textarea = document.createElement('textarea'); host.append(textarea);
+    Object.assign(xterm, { textarea });
+    document.hasFocus = () => true;
+    await show(host, true);
+    await tick(300);
+    assert.deepEqual(sent, CLAIM, 'came into view without focus');
+    await act(async () => { textarea.focus(); });
+    await tick(300);
+    assert.deepEqual(sent, reports ? CLAIM : [...CLAIM, ...CLAIM], reports ? 'xterm reports it' : 'nothing else would');
+    await act(async () => root?.unmount()); root = undefined;
+    host.remove();
+  }
 });
 
 test('coming into view, and the window or tab coming back, claim the screen; out of view nothing does', async () => {
