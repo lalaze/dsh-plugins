@@ -62,7 +62,7 @@ export interface Xterm {
   input?(data: string, wasUserInput?: boolean): void;
   options: { theme?: { background?: string } & Record<string, unknown>; scrollback?: number };
   modes: { mouseTrackingMode: string; bracketedPasteMode?: boolean; sendFocusMode?: boolean };
-  buffer: { active: { type: string } };
+  buffer: { active: { type: string; cursorX?: number; cursorY?: number; baseY?: number } };
   parser: {
     registerOscHandler(ident: number, handler: (data: string) => boolean): { dispose(): void };
     registerCsiHandler(id: { prefix?: string; final: string }, handler: (params: Array<number | number[]>) => boolean): { dispose(): void };

@@ -11,14 +11,27 @@ const SETTLE_MS = 300;
  * focus the finger did not give, or after a click elsewhere on the page; and a CLI that never asks, as Antigravity, whose
  * terminal says nothing even with focus. Focus-out follows at once. The host keeps both from a CLI that did not ask (see
  * `FocusReports`), and one that did hears the truth: the terminal has no focus.
+ * Not before the host has drawn anything: see `drawn`.
  * @param focused - whether the terminal has focus, and so said it by itself if the CLI asked.
  * @returns whether it told the host.
  */
 export function claimScreen(xterm: Xterm, focused: boolean): boolean {
-  if (focused && xterm.modes.sendFocusMode || typeof xterm.input !== 'function') return false;
+  if (focused && xterm.modes.sendFocusMode || typeof xterm.input !== 'function' || !drawn(xterm)) return false;
   xterm.input('\x1b[I', false);
   xterm.input('\x1b[O', false);
   return true;
+}
+
+/**
+ * Whether the host has drawn anything in the terminal: DSH writes nothing else there, and a new one starts with its cursor
+ * home. Until then the launcher is starting, in a terminal that still echoes what it is sent, so a claim would show as
+ * `^[[I^[[O` above the CLI (measured: a TUI starting a new holder echoed for 0.6 s, and the claim goes 0.3 s after the TUI
+ * comes into view).
+ * Nothing is lost: a client joining the holder takes the screen anyway. An xterm that does not say counts as drawn.
+ */
+function drawn(xterm: Xterm): boolean {
+  const { cursorX, cursorY, baseY } = xterm.buffer.active;
+  return typeof cursorX !== 'number' || cursorX > 0 || !!cursorY || !!baseY;
 }
 
 /**

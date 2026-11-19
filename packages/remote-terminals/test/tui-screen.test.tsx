@@ -28,9 +28,10 @@ afterEach(async () => {
 });
 
 /** A terminal as findXterm reaches it: in a ref of the component that rendered the element xterm opened in. */
-function terminal(focusReports = true) {
+function terminal(focusReports = true, cursor = { cursorX: 2, cursorY: 5, baseY: 0 }) {
   const sent: Array<[string, boolean | undefined]> = [];
-  const xterm = { loadAddon() {}, modes: { mouseTrackingMode: 'none', sendFocusMode: focusReports }, input: (data: string, user?: boolean) => { sent.push([data, user]); } } as unknown as Xterm;
+  const xterm = { loadAddon() {}, modes: { mouseTrackingMode: 'none', sendFocusMode: focusReports }, buffer: { active: { type: 'normal', ...cursor } },
+    input: (data: string, user?: boolean) => { sent.push([data, user]); } } as unknown as Xterm;
   const host = document.createElement('div'), opened = document.createElement('div'), screen = document.createElement('div');
   screen.className = 'xterm'; opened.append(screen); host.append(opened); document.body.append(host);
   (opened as unknown as Record<string, unknown>).__reactFiber$test = { memoizedState: { memoizedState: { current: xterm }, next: null }, return: null };
@@ -56,6 +57,27 @@ test('a terminal without focus reports focus in and out, and one with focus send
   assert.equal(claimScreen(quiet.xterm, false), true);
   assert.equal(claimScreen(quiet.xterm, true), true);
   assert.deepEqual(quiet.sent, [...CLAIM, ...CLAIM]);
+});
+
+test('a terminal the host has drawn nothing in yet claims nothing, as its launcher would echo it', async () => {
+  const { xterm, host, sent } = terminal(false, { cursorX: 0, cursorY: 0, baseY: 0 });
+  assert.equal(claimScreen(xterm, false), false);
+  const textarea = document.createElement('textarea'); host.append(textarea);
+  Object.assign(xterm, { textarea });
+  document.hasFocus = () => true;
+  await show(host, true);
+  await tick(300);
+  await act(async () => { textarea.focus(); });
+  await tick(300);
+  assert.deepEqual(sent, [], 'new, then clicked into while starting');
+  // The CLI's first screen, or a joining client's snapshot, has arrived.
+  Object.assign(xterm.buffer.active, { cursorX: 0, cursorY: 3 });
+  await act(async () => { window.dispatchEvent(new window.Event('focus')); });
+  await tick(300);
+  assert.deepEqual(sent, CLAIM);
+  // Scrolled, with the cursor home again; and an xterm that does not say.
+  assert.equal(claimScreen({ ...xterm, buffer: { active: { type: 'normal', cursorX: 0, cursorY: 0, baseY: 40 } } }, false), true);
+  assert.equal(claimScreen({ ...xterm, buffer: { active: { type: 'normal' } } }, false), true);
 });
 
 test('clicking into the terminal claims the screen for a CLI without focus reports, and leaves it to xterm for one with them', async () => {

@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.21 — No `^[[I^[[O` at the top of a new TUI
+
+- A TUI conversation just opened could show `^[[I^[[O` in front of the CLI's first lines. These are the focus reports the page sends to say which device you are looking at (0.1.20 sends them whatever the CLI); the first went out while the terminal was still starting and echoed what it was sent. Only the screen was affected: the CLI never received them.
+- Now the page claims the screen only once something has been drawn in the terminal. A device opening a TUI takes its screen size anyway.
+- Can be upgraded on its own, without a restart; reload the page on each device.
+
 ## 0.1.20 — An Antigravity TUI takes the size of the device you look at
 
 - An Antigravity TUI conversation used on a phone kept the phone's width on the computer: the computer showed it as a narrow column in the middle of the window until you typed there. Since 0.1.10 the screen follows the device you turn to by way of a focus report, and Antigravity never asks for focus reports (measured with 1.5.12), so turning back to the computer told it nothing.
