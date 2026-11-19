@@ -21,6 +21,10 @@ const LOADING_LINE = '[role="presentation"][class*="_onboardingOverlay"]>[class*
 // pane shows the wallpaper down to that rule like the header beside it, and the terminal gets an empty row with the rule.
 // Only docked panes beside the conversation; fullscreen, floating and phone layouts keep DSH's own look.
 const SIDEBAR_PANE = '[data-sidebar-right-panel="push"] [data-dockkit-host="dock"]>[data-dockkit-pane]';
+// The left sidebar's scroll areas end in a 24px fade to its solid fill (the shell's scrollFade, the workspace list's fade).
+// DSH hides them on the macOS desktop, where the sidebar is see-through. Over the wallpaper it is see-through on every
+// platform, so on a web page (another machine's page in a DSH Link frame, a phone) they painted dark bars. Hidden the same way.
+const SIDEBAR_FADES = '[data-slot="sidebar"] :is([class$="_scrollFade"],[class*="_scrollFade "],[class$="_fade"],[class*="_fade "])';
 export const backgroundStyles = `
 body[data-dsh-gallery-active]{isolation:isolate}
 [data-dsh-gallery-background]{position:fixed;inset:0;z-index:-1;pointer-events:none;overflow:hidden;background:var(--dsw-alias-bg-base,Canvas)}
@@ -33,6 +37,7 @@ body[data-dsh-gallery-active] [data-slot="main"],
 body[data-dsh-gallery-active] [data-slot="main"]>[data-phase],
 body[data-dsh-gallery-active] [data-slot="main.conversation"]>[data-phase]{background:transparent!important}
 body[data-dsh-gallery-active] [data-slot="sidebar"]>*{background:color-mix(in srgb,var(--dsw-specific-sidebar-fill,Canvas) 55%,transparent)!important}
+body[data-dsh-gallery-active] ${SIDEBAR_FADES}{display:none!important}
 @media (min-width:768px){
 body[data-dsh-gallery-active] ${SIDEBAR_PANE}:has([data-sidebar-terminal],[data-files-page],[data-document-preview]){background:linear-gradient(transparent 76px,var(--dsw-alias-bg-base,Canvas) 76px)!important}
 body[data-dsh-gallery-active] ${SIDEBAR_PANE} [data-sidebar-terminal]{padding-top:46px;background:linear-gradient(transparent 37.5px,var(--dsw-alias-border-l3,GrayText) 37.5px 38px,transparent 38px) no-repeat}
