@@ -22,6 +22,7 @@ A pnpm workspace for independently versioned DeepSeek Harness plugins. Each plug
 | `dsh-game-assets` | [packages/game-assets](packages/game-assets/README.md) | An Assets tab for game projects: browse a workspace's 2D art, see which images the code still uses and which version of each pack is live, then retire, tag, redraw them with Codex or an image API (OpenAI compatible or Gemini) or a whole selection at once with h3 on Google Colab (GIF and see-through sprites keep their transparency), with every earlier version kept to go back to, which agents in the project can call too, or hand them to the agent |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.md) | Chrome-style Elements, Console and Network debugger in a separate Chrome/Edge window |
 | `dsh-translate` | [packages/translate](packages/translate/README.md) | Translate selected chat text and composer drafts through an OpenAI-compatible API |
+| `dsh-pwa` | [packages/pwa](packages/pwa/README.md) | Replace the white `theme_color` and `background_color` in DSH's Web App manifest with dark ones so installed mobile PWAs get a dark bottom navigation and keyboard bar |
 | `dsh-auth-cookie-cleanup` | [packages/auth-cookie-cleanup](packages/auth-cookie-cleanup/README.md) | Temporary fix for Desktop failing to open after ~70 launches: expires stale per-port `dsh-auth-*` cookies (deepseek-harness#10598) |
 
 ## Languages
@@ -104,6 +105,7 @@ packages/
   game-assets/          # Assets tab: a game project's images and whether the code still uses them
   browser-devtools/     # Separate-window debugger for Sidebar Browser tabs
   translate/            # Chat selection and composer translation
+  pwa/                  # Dark Web App manifest colors for installed mobile PWAs
   auth-cookie-cleanup/  # Temporary fix for stale dsh-auth cookies
 scripts/
   build-client.mjs      # Shared DSH web client bundler

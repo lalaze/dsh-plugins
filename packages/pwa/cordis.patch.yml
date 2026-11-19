@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-pwa
+      name: dsh-pwa
+      config: {}

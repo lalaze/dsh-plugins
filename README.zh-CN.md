@@ -22,6 +22,7 @@
 | `dsh-game-assets` | [packages/game-assets](packages/game-assets/README.zh-CN.md) | 游戏项目的素材标签页：浏览工作区里的 2D 素材，查看哪些图片代码还在用、每组素材哪个版本在生效，并可退役、打标签、用 Codex 或自选的生图接口（OpenAI 兼容或 Gemini）重绘、用 h3（Google Colab）批量重绘多选的图片（GIF 和透明精灵图保持透明），并保留历史版本可回退，项目里的 agent 也能调用，或交给智能体处理 |
 | `dsh-browser-devtools` | [packages/browser-devtools](packages/browser-devtools/README.zh-CN.md) | Chrome 风格元素、控制台和网络调试器，在 Chrome/Edge 独立窗口中打开 |
 | `dsh-translate` | [packages/translate](packages/translate/README.zh-CN.md) | 在聊天选中文本或输入框草稿中调用 OpenAI 兼容接口进行翻译 |
+| `dsh-pwa` | [packages/pwa](packages/pwa/README.zh-CN.md) | 把 DSH 网页版应用清单里的白色 `theme_color` 与 `background_color` 换成深色，让安装到手机主屏的 Web App 底部导航栏与键盘切换底栏变成深色 |
 | `dsh-auth-cookie-cleanup` | [packages/auth-cookie-cleanup](packages/auth-cookie-cleanup/README.zh-CN.md) | 临时修复 Desktop 启动约 70 次后无法打开：自动清理残留的按端口 `dsh-auth-*` cookie（deepseek-harness#10598） |
 
 ## 语言
@@ -104,6 +105,7 @@ packages/
   game-assets/          # 素材标签页：游戏项目的图片及代码是否还在引用
   browser-devtools/     # 在独立窗口中打开的网页调试器
   translate/            # DSH 聊天选区与草稿翻译
+  pwa/                  # 手机主屏 Web App 的深色清单配色
   auth-cookie-cleanup/  # 残留 dsh-auth cookie 的临时修复
 scripts/
   build-client.mjs      # 共用的 DSH Web 客户端打包脚本
