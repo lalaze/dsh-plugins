@@ -18,9 +18,23 @@ export declare const FRAME: {
  * CLI's questions, focus-out, mouse reports, arrow keys — start with ESC and take nothing, or two terminals would fight
  * over the size every time the CLI asked them something.
  * A terminal also reports focus by itself whenever the CLI turns focus reports on, so a focus-in right after the size
- * changed hands may be that answer: see FOCUS_SETTLE_MS.
+ * changed hands may be that answer: see FOCUS_SETTLE_MS. A CLI that never turns them on still sees none: see FocusReports.
  */
 export declare function screenClaim(input: Uint8Array): 'typed' | 'focus' | undefined;
+/**
+ * Whether the CLI asked for focus reports (`CSI ? 1004 h`), followed through what it prints. A page claims the screen with
+ * a focus-in whether it did or not, as Antigravity never does (measured with 1.5.12), and a CLI that did not ask must not
+ * be sent them: it may read them as keys, as a shell does. A client that joins hears the mode in the holder's snapshot,
+ * which starts with a reset.
+ */
+export declare class FocusReports {
+    on: boolean;
+    /** The end of the last output, in case a sequence was split between two. */
+    private tail;
+    read(output: Uint8Array): void;
+}
+/** Whether a terminal's input is nothing but focus reports: a focus change, or a page claiming the screen. */
+export declare const onlyFocusReports: (input: Uint8Array) => boolean;
 /**
  * How long after the holder said the size changed a focus-in takes nothing. Neither Claude Code nor Codex turns focus
  * reports on again after a resize (measured 2026-11-15 with 2.1.325 and 0.166), but a CLI that did would have every
