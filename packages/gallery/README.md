@@ -13,6 +13,7 @@ A device-local wallpaper library for DeepSeek Harness, inspired by Paseo's wallp
 - Filter, search, preview, navigate with arrow keys, zoom, download and delete.
 - Adjust opacity, blur and Bing region while preserving menu and composer surfaces.
 - With the right sidebar beside a conversation, a terminal, file or document preview tab shows the wallpaper down to the conversation header's rule, and the terminal starts below that rule, so both sides line up.
+- The left sidebar's fade strips at the bottom of its lists are hidden while a wallpaper is on, as DSH does in the macOS desktop app, so another machine's page in DSH Link or a phone shows no dark bars there.
 - The desktop app's “Loading settings…” line at startup becomes a small chip in the middle of the window that fades in after 0.4 s, so a quick start shows only the wallpaper.
 - Restore images and preferences from IndexedDB after reload; cached images work offline.
 
