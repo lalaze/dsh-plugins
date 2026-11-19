@@ -614,6 +614,47 @@
       ]
     },
     {
+      "name": "dsh-pwa",
+      "title": {
+        "en": "DSH PWA",
+        "zh": "手机 Web App (PWA)"
+      },
+      "description": {
+        "en": "Replace the white `theme_color` and `background_color` in DSH's Web App manifest with dark ones so installed mobile PWAs get a dark bottom navigation and keyboard bar",
+        "zh": "把 DSH 网页版应用清单里的白色 `theme_color` 与 `background_color` 换成深色，让安装到手机主屏的 Web App 底部导航栏与键盘切换底栏变成深色"
+      },
+      "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0IiBmaWxsPSJub25lIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkRTSCBQV0EiPgogIDxkZWZzPgogICAgPGxpbmVhckdyYWRpZW50IGlkPSJ0aWxlIiB4MT0iOCIgeTE9IjQiIHgyPSI1NiIgeTI9IjY0IiBncmFkaWVudFVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+CiAgICAgIDxzdG9wIHN0b3AtY29sb3I9IiMyRTMyM0QiLz4KICAgICAgPHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMTUxNTE3Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KICA8cmVjdCB4PSI0IiB5PSI0IiB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHJ4PSIxNCIgZmlsbD0idXJsKCN0aWxlKSIvPgogIDxyZWN0IHg9IjE5IiB5PSIxMiIgd2lkdGg9IjI2IiBoZWlnaHQ9IjQwIiByeD0iNSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjMiLz4KICA8cGF0aCBkPSJNMjcgNDZoMTAiIHN0cm9rZT0iIzdBQTRGRiIgc3Ryb2tlLXdpZHRoPSIzIiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICA8cGF0aCBkPSJNMjUgMjJoMTRNMjUgMjhoMTAiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgb3BhY2l0eT0iLjgiLz4KPC9zdmc+Cg==",
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/pwa",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/pwa"
+      },
+      "metadata": {
+        "keywords": [
+          "pwa",
+          "mobile",
+          "android",
+          "manifest"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1795105855,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "c26ba3ecc44ed64aa7ab8185a69721042512967e",
+            "path": "packages/pwa"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
       "name": "dsh-auth-cookie-cleanup",
       "title": "DSH Auth Cookie Cleanup",
       "description": {
