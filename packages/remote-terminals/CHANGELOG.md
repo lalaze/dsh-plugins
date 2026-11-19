@@ -4,6 +4,11 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.19 — An Esc button in TUI conversations, for phones
+
+- A phone's keyboard has no Esc key, so a dialog in the CLI, such as Claude Code's `/usage`, could not be closed from a phone, and a running turn could not be stopped. On a touch screen a TUI conversation now has an **Esc** button in its bottom-right corner, left of the paperclip. It sends Esc to the CLI exactly as the key does, and leaves the keyboard open or closed as it was.
+- Computers are not affected: the button is not shown there. Can be upgraded on its own, without a restart; reload the page on the phone.
+
 ## 0.1.18 — TUI conversations fit above a phone's keyboard
 
 - On a phone, opening the keyboard in a TUI conversation pushed the whole page up: the conversation's header left the screen, the page jumped as the cursor moved, and once the keyboard closed the page could stay pushed up with a blank strip at the bottom. Since DSH Web Mobile was removed, nothing put the page back.
