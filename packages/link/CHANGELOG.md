@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.13 — The menu shows which machine the badge's count is on
+
+Update every computer whose page you look at; no restart needed, reload the page once.
+
+- The switcher's badge counted turns that finished on other machines, but a machine's menu row left them out while something else ran there, so a green 1 could point at nothing in the menu. The row now shows them next to what runs, e.g. *2 running · 1 finished*, and the finished count (or the waiting one) is in the badge's colour.
+- The badge's tooltip names the machines: *code · lalazemac-mini has 1 finished*.
+
 ## 0.1.12 — The Browser panel on other machines' pages, on their network
 
 Update every computer: the one whose desktop window shows the others, and each machine you open from it. No restart needed; reload the window once.
