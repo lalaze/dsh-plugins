@@ -1,12 +1,12 @@
 /** The machine switcher in the sidebar foot: which machine this page shows, and every other one to go to. */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { IconPlayOutlineRegular, IconRefreshOutlineRegular, Menu, StateDot, type MenuEntry } from '@deepseek-ai/dsh-client-ui-primitives';
-import { ui, useLocale } from './i18n.js';
+import { formatLocale, ui, useLocale } from './i18n.js';
 import { openMachine } from './navigate.js';
 import { RestartDialog } from './restart.js';
 import { keepPages, shell } from './shell.js';
 import { loadMachines, onScreen, SELF, useStore } from './store.js';
-import { dotOf, noteOf } from './view.js';
+import { dotOf, noteOf, type NotePart } from './view.js';
 
 export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
   useLocale();
@@ -28,13 +28,23 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
   const currentMachine = machines.find(machine => machine.id === current);
   const currentName = current === SELF ? selfName : currentMachine?.name ?? ui('Another machine');
   // What waits elsewhere is what the user cannot see on this page.
-  const waitingElsewhere = Object.entries(attention).reduce((sum, [id, entry]) => id === current ? sum : sum + entry.waiting.length, 0);
-  const finishedElsewhere = Object.entries(attention).reduce((sum, [id, entry]) => id === current ? sum : sum + entry.finished.length, 0);
+  const elsewhere = Object.entries(attention).filter(([id]) => id !== current);
+  const waitingElsewhere = elsewhere.reduce((sum, [, entry]) => sum + entry.waiting.length, 0);
+  const finishedElsewhere = elsewhere.reduce((sum, [, entry]) => sum + entry.finished.length, 0);
+  const nameOf = (id: string) => id === SELF ? selfName : machines.find(machine => machine.id === id)?.name ?? ui('Another machine');
+  // Where the badge's count is, by name: "lalazemac-mini has 1 finished and ubuntu-claude 2".
+  const where = (kind: 'waiting' | 'finished') => new Intl.ListFormat(formatLocale(), { type: 'conjunction' }).format(elsewhere
+    .filter(([, entry]) => entry[kind].length > 0)
+    .map(([id, entry]) => ui(kind === 'waiting' ? '{name}: {count} waiting' : '{name}: {count} finished', { name: nameOf(id), count: entry[kind].length })));
 
   const items = useMemo<MenuEntry[]>(() => {
     // One line per machine like DSH's own menus: the name, and at the far end a short note only when the dot needs one.
-    const row = (id: string, name: string, note: string) => <span className="dl-row" data-current={id === current ? '' : undefined}>
-      <span className="dl-row-name">{name}</span>{note && <span className="dl-row-note">{note}</span>}
+    // The counts the trigger's badge adds up wear its colour, so its number is easy to find here.
+    const row = (id: string, name: string, note: NotePart[]) => <span className="dl-row" data-current={id === current ? '' : undefined}>
+      <span className="dl-row-name">{name}</span>
+      {note.length > 0 && <span className="dl-row-note">{note.map((part, index) => <React.Fragment key={index}>
+        {index > 0 && ' · '}<span data-tone={part.tone}>{part.text}</span>
+      </React.Fragment>)}</span>}
     </span>;
     return [
       { type: 'label', id: 'label', text: ui('DSH Link') },
@@ -62,8 +72,8 @@ export function MachineSwitcher({ wide = true }: { wide?: boolean }) {
     else if (id === 'reload') location.reload();
     else if (id !== 'none') openMachine(id);
   };
-  const title = waitingElsewhere ? ui('{name} · {count} waiting on other machines', { name: currentName, count: waitingElsewhere })
-    : finishedElsewhere ? ui('{name} · {count} finished on other machines', { name: currentName, count: finishedElsewhere })
+  const title = waitingElsewhere ? `${currentName} · ${where('waiting')}`
+    : finishedElsewhere ? `${currentName} · ${where('finished')}`
     : ui('{name} · switch machine', { name: currentName });
 
   return <>

@@ -60,7 +60,7 @@ export const zh: Readonly<Record<string, string>> = {
   '{count} waiting': '{count} 个待处理',
   '{name} does not answer.': '{name} 没有响应。',
   '{name} · switch machine': '{name} · 切换机器',
-  '{name} · {count} waiting on other machines': '{name} · 其他机器有 {count} 个待处理',
+  '{name}: {count} waiting': '{name} 有 {count} 个待处理',
   '{name}: a question for you': '{name}：有问题等你回答',
   '{name}: approval needed': '{name}：需要你审批',
   '{name}: failed': '{name}：运行失败',
@@ -74,5 +74,5 @@ export const zh: Readonly<Record<string, string>> = {
   "Switching back to a machine is then instant and keeps where you were; each open machine uses memory like another tab. Off: each switch loads the machine's page again.": '这样切回一台机器是即时的，还停在原来的位置；每台打开过的机器会像多开一个标签页那样占用内存。关闭后每次切换都重新加载那台机器的页面。',
   "Other machines' notices show in this page; system notifications are for when it is not in front.": '其他机器的提醒会直接显示在页面里；页面不在前台时再用系统通知。',
   'This browser cannot show system notifications; the notices in the page still show.': '此浏览器不能显示系统通知；页面里的提醒照常显示。',
-  '{name} · {count} finished on other machines': '{name} · 其他机器有 {count} 个已完成',
+  '{name}: {count} finished': '{name} 有 {count} 个已完成',
 };

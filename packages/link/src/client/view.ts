@@ -35,18 +35,25 @@ export function dotOf(machine: Pick<MachineInfo, 'state'> | undefined, attention
   return 'done';
 }
 
-/** The short note at the end of a machine's menu row: only what the dot cannot say ('' when it is just ready). */
-export function noteOf(machine: Pick<MachineInfo, 'state'> | undefined, attention: MachineAttention | undefined, self: boolean): string {
-  if (machine?.state === 'offline') return ui('Offline');
-  if (machine?.state === 'unreachable') return ui('Unreachable');
-  const parts: string[] = [];
-  if (self) parts.push(ui('This computer'));
+/** A piece of a menu row's note; `tone` colours the counts the switcher's badge adds up, as the badge is coloured. */
+export interface NotePart { text: string; tone?: 'waiting' | 'done' }
+
+/**
+ * The short note at the end of a machine's menu row: only what the dot cannot say (none when it is just ready). Finished
+ * turns show even while others run there: the badge counts them, and this is where the user looks for which machine.
+ */
+export function noteOf(machine: Pick<MachineInfo, 'state'> | undefined, attention: MachineAttention | undefined, self: boolean): NotePart[] {
+  if (machine?.state === 'offline') return [{ text: ui('Offline') }];
+  if (machine?.state === 'unreachable') return [{ text: ui('Unreachable') }];
+  const parts: NotePart[] = [];
+  if (self) parts.push({ text: ui('This computer') });
   const waiting = attention?.waiting.length ?? 0;
-  if (waiting) parts.push(ui('{count} waiting', { count: waiting }));
+  if (waiting) parts.push({ text: ui('{count} waiting', { count: waiting }), tone: 'waiting' });
   const running = attention?.running.length ?? 0;
-  if (running) parts.push(ui('{count} running', { count: running }));
-  else if (!waiting && attention?.finished.length) parts.push(ui('{count} finished', { count: attention.finished.length }));
-  return parts.join(' · ');
+  if (running) parts.push({ text: ui('{count} running', { count: running }) });
+  const finished = attention?.finished.length ?? 0;
+  if (finished) parts.push({ text: ui('{count} finished', { count: finished }), tone: 'done' });
+  return parts;
 }
 
 /** One line under a machine's name. */

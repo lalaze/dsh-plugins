@@ -12,10 +12,12 @@ export const CSS = `
 .dl-trigger-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-badge{flex:none;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--dsw-alias-state-warning-primary,#b7791f);color:#fff;font-size:10.5px;line-height:16px;font-weight:600;text-align:center;font-variant-numeric:tabular-nums}
 .dl-trigger:not([data-wide]) .dl-badge{position:absolute;top:-2px;right:-4px}
-.dl-row{display:flex;align-items:baseline;gap:16px;min-width:176px;max-width:300px}
+.dl-row{display:flex;align-items:baseline;gap:16px;min-width:176px;max-width:360px}
 .dl-row:not([data-current]){padding-right:20px}
 .dl-row-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dl-row-note{flex:none;margin-left:auto;color:var(--dsw-alias-label-caption,${tertiary});font-size:12px;white-space:nowrap}
+.dl-row-note [data-tone=waiting]{color:var(--dsw-alias-state-warning-primary,#b7791f)}
+.dl-row-note [data-tone=done]{color:var(--dsw-alias-state-success-primary,#2f9e5b)}
 .dl-muted{color:${tertiary};font-size:12px;line-height:18px}
 .dl-error{color:${error};font-size:12px;line-height:18px;overflow-wrap:anywhere}
 .dl-nowrap{white-space:nowrap;flex:none}
