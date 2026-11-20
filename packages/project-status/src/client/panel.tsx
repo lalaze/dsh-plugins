@@ -1,19 +1,18 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocale } from '@dsh-plugins/i18n/react';
-import { FIELD_LIMIT, type Facts, type Field, type StatusAnswer } from '../domain.js';
+import { FIELD_LIMIT, PARTS, type Change, type Facts, type Goal, type GoalRef, type Part, type StatusAnswer } from '../domain.js';
 import { parseGoals, tally } from '../goals.js';
-import { useField, type FieldEdit } from './field.js';
-import { GoalList } from './goal-list.js';
-import { activeLocale, formatLocale, i18n, ui } from './i18n.js';
+import { changeStatus, StatusRequestError } from './api.js';
+import { useField, type FieldEdit, type Text } from './field.js';
+import { LineInput, NewLine, TodoList } from './goal-list.js';
+import { activeLocale, formatLocale, i18n, localizeError, ui } from './i18n.js';
 import { standingRule, updateRequest } from './prompt.js';
-import { refresh, useStatus } from './status.js';
+import { put, refresh, useStatus } from './status.js';
 import { styles } from './styles.js';
 import { clearTabDot, setTabDot } from './tab-dot.js';
 
-type TextName = Exclude<Field, 'goal'>;
-const TEXTS: TextName[] = ['progress', 'blockers', 'next'];
-const LABEL: Record<TextName, string> = { progress: 'Progress', blockers: 'Blockers', next: 'Next' };
-const HINT: Record<TextName, string> = {
+const LABEL: Record<Part, string> = { progress: 'Progress', blockers: 'Blockers', next: 'Next' };
+const HINT: Record<Part, string> = {
   progress: 'What is done and what is under way, with the branch',
   blockers: 'What it is stuck on and who it waits for: you, an agent or someone outside',
   next: 'One instruction an agent could carry out as it stands',
@@ -81,9 +80,9 @@ function Trouble({ edit }: { edit: FieldEdit }) {
   </>;
 }
 
-/** Progress, Blockers or Next: text that is edited where it stands. */
-function TextField({ sessionId, field, server }: { sessionId: string; field: TextName; server: string }) {
-  const edit = useField(sessionId, field, server), area = useRef<HTMLTextAreaElement>(null);
+/** A text that is edited where it stands: it reads as text until it is pointed at, and grows with its lines. */
+function TextArea({ edit, label, hint }: { edit: FieldEdit; label: string; hint: string }) {
+  const area = useRef<HTMLTextAreaElement>(null);
   useLayoutEffect(() => fit(area.current), [edit.value]);
   // The lines wrap anew when the view gets another width, or shows after being hidden.
   useEffect(() => {
@@ -94,26 +93,117 @@ function TextField({ sessionId, field, server }: { sessionId: string; field: Tex
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
-  return <section className="ps-field" data-field={field} data-filled={server.trim() ? '' : undefined}>
-    <h3>{ui(LABEL[field])}<Saving edit={edit} /></h3>
-    <textarea ref={area} className="ps-area" aria-label={ui(LABEL[field])} placeholder={ui(HINT[field])} maxLength={FIELD_LIMIT} rows={Math.max(1, edit.value.split('\n').length)} value={edit.value}
-      onChange={event => edit.type(event.target.value)} onFocus={() => edit.hold(true)} onBlur={() => { edit.hold(false); edit.commit(); }}
-      onKeyDown={event => {
-        if (event.nativeEvent.isComposing) return;
-        // Leaving the field saves it.
-        if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) { event.preventDefault(); event.currentTarget.blur(); }
-      }} />
+  return <textarea ref={area} className="ps-area" aria-label={label} placeholder={hint} maxLength={FIELD_LIMIT} rows={Math.max(1, edit.value.split('\n').length)} value={edit.value}
+    onChange={event => edit.type(event.target.value)} onFocus={() => edit.hold(true)} onBlur={() => { edit.hold(false); edit.commit(); }}
+    onKeyDown={event => {
+      if (event.nativeEvent.isComposing) return;
+      // Leaving the text saves it.
+      if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) { event.preventDefault(); event.currentTarget.blur(); }
+    }} />;
+}
+
+const AIM: Text = { change: (value, was) => ({ op: 'aim', value, was }), read: answer => answer.aim };
+/** What the project as a whole is for. */
+function AimField({ sessionId, server }: { sessionId: string; server: string }) {
+  const edit = useField(sessionId, server, AIM);
+  return <section className="ps-field" data-field="aim">
+    <h3>{ui('Overall goal')}<Saving edit={edit} /></h3>
+    <TextArea edit={edit} label={ui('Overall goal')} hint={ui('What the project as a whole is for, in a sentence or two')} />
     <Trouble edit={edit} />
   </section>;
 }
 
-/** Goal: goals and their steps, ticked off as they are reached. */
-function GoalField({ sessionId, server }: { sessionId: string; server: string }) {
-  const edit = useField(sessionId, 'goal', server), count = tally(parseGoals(edit.value));
-  return <section className="ps-field" data-field="goal">
-    <h3>{ui('Goal')}{count.total > 0 && <span className="ps-count">{count.done}/{count.total}</span>}<Saving edit={edit} /></h3>
-    <GoalList value={edit.value} onChange={text => edit.commit(text)} />
-    <Trouble edit={edit} />
+/** The goal a reference names in an answer: the nth of that name. */
+const goalOf = (answer: StatusAnswer, ref: GoalRef): Goal | undefined => answer.goals.filter(goal => goal.title === ref.title)[ref.nth ?? 0];
+const partText = (ref: GoalRef, part: Part | 'steps'): Text => ({ change: (value, was) => ({ op: 'part', goal: ref, part, value, was }), read: answer => goalOf(answer, ref)?.[part] });
+
+/** One of a goal's texts, beside its name. */
+function PartRow({ sessionId, goal, part, server }: { sessionId: string; goal: GoalRef; part: Part; server: string }) {
+  const edit = useField(sessionId, server, partText(goal, part));
+  return <div className="ps-part" data-part={part} data-filled={server.trim() ? '' : undefined}>
+    <div className="ps-part-name">{ui(LABEL[part])}<Saving edit={edit} /></div>
+    <div className="ps-part-body"><TextArea edit={edit} label={ui(LABEL[part])} hint={ui(HINT[part])} /><Trouble edit={edit} /></div>
+  </div>;
+}
+
+/** What a goal breaks down into, ticked off as it gets done. */
+function TodoRow({ sessionId, goal, server }: { sessionId: string; goal: GoalRef; server: string }) {
+  const edit = useField(sessionId, server, partText(goal, 'steps'));
+  return <div className="ps-part" data-part="steps">
+    <div className="ps-part-name">{ui('To-dos')}<Saving edit={edit} /></div>
+    <div className="ps-part-body"><TodoList value={edit.value} onChange={text => edit.commit(text)} /><Trouble edit={edit} /></div>
+  </div>;
+}
+
+const firstLine = (text: string) => text.trim().split('\n')[0].replace(/^[-*+]\s+(\[[ xX]\]\s*)?/, '');
+
+/**
+ * One goal, managed by itself: its name and whether it is reached, and under them its to-dos, how far it is, what blocks
+ * it and what comes next. Closed, it is one line that says where it stands.
+ */
+function GoalCard({ sessionId, goal, at, open, onToggle, act }: { sessionId: string; goal: Goal; at: GoalRef; open: boolean; onToggle(): void; act(change: Change): Promise<void> }) {
+  const [renaming, setRenaming] = useState(false), [confirming, setConfirming] = useState(false);
+  /** The tick shows at once, and gives way to what the host says when it has answered. */
+  const [ticked, setTicked] = useState<boolean | undefined>();
+  const done = ticked ?? goal.done;
+  const tick = () => { setTicked(!done); void act({ op: 'done', goal: at, value: !done }).finally(() => setTicked(undefined)); };
+  const steps = tally(parseGoals(goal.steps)), blocked = !goal.done && !!goal.blockers.trim();
+  const written = !!(goal.steps || goal.progress || goal.blockers || goal.next).trim();
+  const line = blocked ? ['Blockers', goal.blockers] : goal.next.trim() ? ['Next', goal.next] : goal.progress.trim() ? ['Progress', goal.progress] : undefined;
+  return <article className="ps-card" data-open={open ? '' : undefined} data-done={done ? '' : undefined} data-blocked={blocked ? '' : undefined}>
+    <header className="ps-card-head">
+      <input type="checkbox" checked={done} aria-label={ui('{goal} is reached', { goal: goal.title })} onChange={tick} />
+      {renaming
+        ? <LineInput initial={goal.title} label={ui('Rename')} onDone={(text, how) => { setRenaming(false); if (how !== 'cancel' && text && text !== goal.title) void act({ op: 'title', goal: at, value: text }); }} />
+        // Closed, the whole line opens it; open, the name is there to be typed over.
+        : <button type="button" className="ps-card-title" title={open ? ui('Rename') : undefined} onClick={() => open ? setRenaming(true) : onToggle()}>{goal.title}</button>}
+      {steps.total > 0 && <span className="ps-goal-count">{steps.done}/{steps.total}</span>}
+      <button type="button" className="ps-icon ps-fold" data-open={open ? '' : undefined} aria-expanded={open} title={ui(open ? 'Collapse' : 'Expand')} aria-label={ui(open ? 'Collapse' : 'Expand')} onClick={onToggle}>›</button>
+      {confirming
+        ? <button type="button" className="ps-button ps-goal-confirm" autoFocus onBlur={() => setConfirming(false)} onClick={() => { void act({ op: 'remove', goal: at }); }}>{ui('Delete it with what is written under it?')}</button>
+        : <button type="button" className="ps-icon" title={ui('Delete')} aria-label={ui('Delete')} onClick={() => { if (written) setConfirming(true); else void act({ op: 'remove', goal: at }); }}>×</button>}
+    </header>
+    {!open && line && <button type="button" className="ps-card-line" data-tone={blocked ? 'warn' : undefined} onClick={onToggle}><span>{ui(line[0])}</span>{firstLine(line[1])}</button>}
+    {open && <div className="ps-card-body">
+      <TodoRow sessionId={sessionId} goal={at} server={goal.steps} />
+      {PARTS.map(part => <PartRow key={part} sessionId={sessionId} goal={at} part={part} server={goal[part]} />)}
+    </div>}
+  </article>;
+}
+
+/** Which goals the user opened or closed, per project, kept in the browser. One never touched is open until it is reached. */
+function useOpen(projectId: string): [(key: string, done: boolean) => boolean, (key: string, done: boolean) => void] {
+  const store = `dsh-project-status.open.${projectId}`;
+  const [chosen, setChosen] = useState<Record<string, boolean>>(() => { try { return JSON.parse(localStorage.getItem(store) ?? '{}') as Record<string, boolean>; } catch { return {}; } });
+  const isOpen = (key: string, done: boolean) => chosen[key] ?? !done;
+  return [isOpen, (key, done) => {
+    const next = { ...chosen, [key]: !isOpen(key, done) };
+    setChosen(next);
+    try { localStorage.setItem(store, JSON.stringify(next)); } catch { /* private mode: it lasts for this page */ }
+  }];
+}
+
+/** The project's goals, each a card of its own, and the line that adds one. */
+function Goals({ sessionId, answer }: { sessionId: string; answer: StatusAnswer }) {
+  const [failure, setFailure] = useState(''), [isOpen, toggle] = useOpen(answer.project.id);
+  const act = (change: Change) => {
+    setFailure('');
+    return changeStatus(sessionId, change, activeLocale()).then(next => put(sessionId, next), async (problem: unknown) => {
+      // The goal is no longer as it was shown: the new status says how it is.
+      if (problem instanceof StatusRequestError && problem.status === 409) await refresh(sessionId);
+      else setFailure(localizeError(problem));
+    });
+  };
+  const seen = new Map<string, number>(), reached = answer.goals.filter(goal => goal.done).length;
+  return <section className="ps-goal-cards">
+    <h3 className="ps-section">{ui('Goals')}{answer.goals.length > 0 && <span className="ps-count">{reached}/{answer.goals.length}</span>}</h3>
+    {answer.goals.map(goal => {
+      const nth = seen.get(goal.title) ?? 0, key = `${goal.title}\u0000${nth}`;
+      seen.set(goal.title, nth + 1);
+      return <GoalCard key={key} sessionId={sessionId} goal={goal} at={{ title: goal.title, nth }} open={isOpen(key, goal.done)} onToggle={() => toggle(key, goal.done)} act={act} />;
+    })}
+    <div className="ps-card ps-card-new"><NewLine label={ui('Add a goal')} placeholder={ui(answer.goals.length ? 'Add a goal…' : 'Add a goal: each one gets its own to-dos, progress, blockers and next step')} onAdd={title => { void act({ op: 'add', title }); }} /></div>
+    {failure && <div className="ps-alert" data-tone="error" role="alert"><p>{failure}</p></div>}
   </section>;
 }
 
@@ -124,9 +214,10 @@ export interface PanelProps {
 }
 
 /**
- * The Status view of a conversation: what its project is for, how far it is, what blocks it and what comes next, beside
- * what Git says. The four are sections of a file on the DSH host that agents edit too. Each is edited where it stands and
- * saved by itself (see field.ts), so a change from elsewhere to the same one is shown instead of being overwritten.
+ * The Status view of a conversation: what its project is for, and the goals it is working towards, each with its own
+ * to-dos, progress, blockers and next step, beside what Git says. All of it is a file on the DSH host that agents edit
+ * too. Each text is edited where it stands and saved by itself (see field.ts), so a change from elsewhere to the same one
+ * is shown instead of being overwritten.
  */
 export function StatusPanel({ sessionId, sendToChat }: PanelProps) {
   useLocale(i18n);
@@ -157,10 +248,10 @@ export function StatusPanel({ sessionId, sendToChat }: PanelProps) {
     <FactList facts={facts} answer={answer} />
     {answer.factsError && <div className="ps-alert"><p>{ui(answer.factsError)}</p></div>}
     {error && <div className="ps-alert" data-tone="error" role="alert"><p>{ui(error)}</p></div>}
-    {/* A field belongs to one conversation's project: another conversation starts them afresh. */}
+    {/* What is being typed belongs to one conversation's project: another conversation starts afresh. */}
     <div className="ps-fields" key={sessionId}>
-      <GoalField sessionId={sessionId} server={answer.fields.goal} />
-      {TEXTS.map(field => <TextField key={field} sessionId={sessionId} field={field} server={answer.fields[field]} />)}
+      <AimField sessionId={sessionId} server={answer.aim} />
+      <Goals sessionId={sessionId} answer={answer} />
     </div>
     <div className="ps-actions">
       <button type="button" className="ps-button" disabled={!file || !sendToChat} onClick={() => { void askAgent(); }}>{ui('Ask the agent to update')}</button>
@@ -176,11 +267,11 @@ export function StatusPanel({ sessionId, sendToChat }: PanelProps) {
   </div></section>;
 }
 
-/** Renders nothing. Marks the Status tab while the conversation's project has a blocker written down. */
+/** Renders nothing. Marks the Status tab while a goal of the conversation's project that is not reached has a blocker written down. */
 export function TabMark({ sessionId }: { sessionId?: string }) {
   useLocale(i18n);
   const { answer } = useStatus(sessionId, 'slow'), owner = useRef(Symbol('project-status')), label = ui('Status');
-  const blocked = !!answer?.fields.blockers.trim();
+  const blocked = !!answer?.goals.some(goal => !goal.done && goal.blockers.trim());
   useEffect(() => {
     const who = owner.current;
     setTabDot(who, label, blocked);

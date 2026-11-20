@@ -28,7 +28,6 @@ export const styles = `
 .ps-alert p:last-child{margin:0}
 .ps-fields{display:grid;gap:10px;margin-top:14px}
 .ps-field{padding:10px 12px;border:1px solid var(--ps-line);border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-1,transparent)}
-.ps-field[data-field=blockers][data-filled]{border-color:color-mix(in srgb,var(--ps-warn) 55%,transparent)}
 .ps-field h3{display:flex;align-items:baseline;gap:8px;margin:0;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary,inherit)}
 .ps-count{font-weight:400;font-variant-numeric:tabular-nums;opacity:.7}
 .ps-state{margin-left:auto;font-weight:400;font-size:11px;letter-spacing:0;opacity:.6}
@@ -49,16 +48,43 @@ export const styles = `
 .ps-goal-plus{font-size:15px;line-height:15px;text-align:center;opacity:.45}
 .ps-goal-text{flex:1;min-width:0;padding:2px 4px;border:0;border-radius:4px;background:transparent;color:inherit;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;cursor:text}
 .ps-goal-text:hover{background:color-mix(in srgb,currentColor 6%,transparent)}
-.ps-goal[data-depth="0"]>.ps-goal-text{font-weight:600}
 .ps-goal[data-done]>.ps-goal-text{font-weight:400;text-decoration:line-through;opacity:.5}
 .ps-goal-input{flex:1;min-width:0;height:25px;padding:1px 4px;border:1px solid transparent;border-radius:4px;background:transparent;color:inherit;font:inherit}
 .ps-goal-input:hover{border-color:var(--ps-line)}
 .ps-goal-input:focus,.ps-goal-input:focus-visible{outline:none;border-color:var(--ps-accent)}
 .ps-goal-count{margin-top:4px;font-size:11px;font-variant-numeric:tabular-nums;white-space:nowrap;opacity:.6}
 .ps-goal-new{margin-top:2px}
-.ps-icon{flex:none;width:24px;height:24px;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;font-size:15px;line-height:1;opacity:.35;cursor:pointer}
+.ps-root .ps-icon{flex:none;width:24px;height:24px;padding:0;border:0;border-radius:4px;background:transparent;color:inherit;font-size:15px;line-height:1;opacity:.35;cursor:pointer}
 .ps-icon:hover,.ps-icon:focus-visible{opacity:1;background:color-mix(in srgb,currentColor 9%,transparent)}
-.ps-button.ps-goal-confirm{min-height:24px;padding:1px 8px;font-size:12px;border-color:color-mix(in srgb,var(--ps-error) 60%,transparent);color:var(--ps-error)}
+.ps-root .ps-button.ps-goal-confirm{min-height:24px;padding:1px 8px;font-size:12px;border-color:color-mix(in srgb,var(--ps-error) 60%,transparent);color:var(--ps-error)}
+/* One card per goal: each has a status of its own. */
+.ps-goal-cards{display:grid;gap:8px}
+.ps-section{display:flex;align-items:baseline;gap:8px;margin:6px 0 0;padding:0 2px;font-size:12px;font-weight:600;letter-spacing:.02em;color:var(--dsw-alias-label-secondary,inherit)}
+.ps-card{border:1px solid var(--ps-line);border-radius:var(--dsw-radius-md,8px);background:var(--dsw-alias-bg-layer-1,transparent)}
+.ps-card[data-blocked]{border-color:color-mix(in srgb,var(--ps-warn) 55%,transparent)}
+.ps-card-head{display:flex;align-items:flex-start;gap:6px;padding:7px 8px 7px 12px}
+.ps-card-head>input[type=checkbox]{flex:none;width:16px;height:16px;margin:5px 2px 0 0;accent-color:var(--ps-accent);cursor:pointer}
+/* The rule that makes buttons inherit the font outweighs a single class, so what sets a font of its own names the root too. */
+.ps-root .ps-card-title{flex:1;min-width:0;padding:2px 4px;border:0;border-radius:4px;background:transparent;color:inherit;font-size:14px;font-weight:600;line-height:1.5;text-align:left;overflow-wrap:anywhere;cursor:pointer}
+.ps-card[data-open] .ps-card-title{cursor:text}
+.ps-card-title:hover{background:color-mix(in srgb,currentColor 6%,transparent)}
+.ps-root .ps-card[data-done] .ps-card-title{font-weight:400;text-decoration:line-through;opacity:.5}
+.ps-card-head .ps-goal-input{font-size:14px;font-weight:600;height:27px}
+.ps-card-head .ps-goal-count{margin-top:6px}
+.ps-root .ps-card-line{display:block;width:100%;margin:-4px 0 0;padding:0 12px 8px 40px;border:0;background:transparent;color:var(--dsw-alias-label-secondary,inherit);font-size:12px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.ps-card-line span{margin-right:8px;opacity:.65}
+.ps-card-line[data-tone=warn]{color:var(--ps-warn)}
+.ps-card-body{display:grid;gap:2px;padding:2px 12px 10px 40px;border-top:1px solid var(--ps-line)}
+.ps-part{display:grid;grid-template-columns:56px minmax(0,1fr);gap:0 10px;padding-top:6px}
+.ps-part-name{padding-top:4px;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}
+.ps-part-name .ps-state{display:block;margin:0;font-size:10px}
+.ps-part[data-part=blockers][data-filled] .ps-part-name{color:var(--ps-warn)}
+.ps-part .ps-area{margin-top:0}
+.ps-part .ps-goals{margin-top:0}
+.ps-root .ps-fold{font-size:19px;transition:transform .12s}
+.ps-fold[data-open]{transform:rotate(90deg)}
+.ps-card-new{padding:4px 12px;border-style:dashed}
+.ps-card-new .ps-goal-new{margin:0}
 .ps-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px}
 .ps-button{min-height:28px;padding:3px 12px;border:1px solid var(--ps-line);border-radius:var(--dsw-radius-sm,6px);background:transparent;color:inherit;cursor:pointer;white-space:nowrap}
 .ps-button:hover:enabled{background:var(--dsw-alias-interactive-bg-hover,color-mix(in srgb,currentColor 9%,transparent))}
@@ -69,7 +95,7 @@ export const styles = `
 .ps-said{margin:8px 0 0;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}
 .ps-foot{margin-top:18px;padding-top:10px;border-top:1px solid var(--ps-line);font-size:11px;color:var(--dsw-alias-label-tertiary,inherit)}
 .ps-foot code{font-family:var(--dsw-font-mono,ui-monospace,monospace);overflow-wrap:anywhere;user-select:all}
-@media (max-width:520px){.ps-page{padding:12px 10px 150px}.ps-fact dd{max-width:160px}}
+@media (max-width:520px){.ps-page{padding:12px 10px 150px}.ps-fact dd{max-width:160px}.ps-card-body{padding-left:12px}.ps-card-line{padding-left:12px}.ps-part{grid-template-columns:minmax(0,1fr)}.ps-part-name{padding-top:2px}}
 /* Fingers need more to hit than a pointer does. */
-@media (pointer:coarse){.ps-icon{width:32px;height:32px}.ps-goal{min-height:34px}.ps-goal input[type=checkbox],.ps-goal-box,.ps-goal-plus{width:18px;height:18px;margin-top:7px}.ps-goal-text{padding:6px 4px}.ps-goal-input{height:32px}}
+@media (pointer:coarse){.ps-root .ps-icon{width:32px;height:32px}.ps-card-head>input[type=checkbox]{width:20px;height:20px;margin-top:6px}.ps-goal{min-height:34px}.ps-goal input[type=checkbox],.ps-goal-box,.ps-goal-plus{width:18px;height:18px;margin-top:7px}.ps-goal-text{padding:6px 4px}.ps-goal-input{height:32px}}
 `;

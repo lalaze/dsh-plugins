@@ -1,13 +1,14 @@
 /**
- * One field of the status while the user edits it in place. There is no edit mode and no Save button: the text is saved a
+ * One text of the status while the user edits it in place: the project's aim, or a goal's steps, progress, blockers or
+ * next step. There is no edit mode and no Save button: the text is saved a
  * moment after the typing stops, when the field is left, and at once for a tick of a box. Agents write the same file
  * meanwhile, so each save names the text the edit began from, and when the host has another by then the user's text is
  * kept and they choose between the two.
  */
 import { useEffect, useReducer, useRef } from 'react';
-import type { Field } from '../domain.js';
+import type { Change, StatusAnswer } from '../domain.js';
 import { tidy } from '../status-file.js';
-import { saveField, StatusRequestError } from './api.js';
+import { changeStatus, StatusRequestError } from './api.js';
 import { activeLocale, localizeError } from './i18n.js';
 import { put, refresh } from './status.js';
 
@@ -39,9 +40,20 @@ export interface FieldEdit {
 
 interface Box { draft?: string; base: string; server: string; want?: string; saving: boolean; held: boolean; failure: string; saved: boolean; timer?: ReturnType<typeof setTimeout>; flash?: ReturnType<typeof setTimeout>; gone: boolean }
 
-/** @param server - the field's text as the host last answered it. A component is for one conversation; key it by the session. */
-export function useField(sessionId: string, field: Field, server: string): FieldEdit {
+/** Which text an edit is of: the change that saves it, and where an answer has it. */
+export interface Text {
+  change(value: string, was: string): Change;
+  /** Undefined when the answer no longer has the goal the text belongs to. */
+  read(answer: StatusAnswer): string | undefined;
+}
+
+/**
+ * @param server - the text as the host last answered it.
+ * @param text - which one it is; only the first one given is used, so key the component by what it edits.
+ */
+export function useField(sessionId: string, server: string, text: Text): FieldEdit {
   const [, render] = useReducer((count: number) => count + 1, 0);
+  const which = useRef(text).current;
   const box = useRef<Box>({ base: server, server, saving: false, held: false, failure: '', saved: false, gone: false }).current;
   box.server = server;
   // With no text of the user's the edit begins from whatever the host says; so it does once the host says what they typed.
@@ -56,8 +68,8 @@ export function useField(sessionId: string, field: Field, server: string): Field
       while (box.want !== undefined) {
         const target = box.want;
         if (tidy(target) !== box.base) {
-          const answer = await saveField(sessionId, field, target, box.base, activeLocale());
-          box.base = answer.fields[field];
+          const answer = await changeStatus(sessionId, which.change(target, box.base), activeLocale());
+          box.base = which.read(answer) ?? tidy(target);
           put(sessionId, answer);
           box.saved = true;
           clearTimeout(box.flash);

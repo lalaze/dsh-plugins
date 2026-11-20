@@ -4,38 +4,51 @@ import { JSDOM } from 'jsdom';
 import React, { act } from 'react';
 import type { Root } from 'react-dom/client';
 import { offerTuiPrompt } from '@dsh-plugins/remote-core/client/tui-prompt.js';
-import type { Field, Fields, StatusAnswer } from '../src/domain.js';
+import type { Change, Goal, StatusAnswer } from '../src/domain.js';
 import { tidy } from '../src/status-file.js';
 import { VIEW_ID, apply } from '../src/client/index.js';
 import { TYPING_MS } from '../src/client/field.js';
 import { resetStatus } from '../src/client/status.js';
 
-const globals = ['window', 'document', 'navigator', 'fetch', 'HTMLElement', 'Node', 'NodeFilter', 'MutationObserver'] as const;
+const globals = ['window', 'document', 'navigator', 'localStorage', 'fetch', 'HTMLElement', 'Node', 'NodeFilter', 'MutationObserver'] as const;
 const FILE = '/home/me/.dsh/storages/dsh-project-status/projects/shop-1a2b3c4d.md';
-const GOALS = '- [ ] Ship the payment page\n  - [x] Design\n  - [ ] Build';
+const STEPS = '- [x] Design\n- [ ] Build';
+const goal = (title: string, rest: Partial<Goal> = {}): Goal => ({ title, done: false, steps: '', progress: '', blockers: '', next: '', ...rest });
 let root: Root | undefined, container: HTMLElement, requests: Record<string, any>[], copied: string[];
 /** The status as the simulated host has it. `remote` is a workspace on another machine. */
-let saved: { fields: Fields; revision: number; remote: boolean; down: boolean };
+let saved: { aim: string; goals: Goal[]; revision: number; remote: boolean; down: boolean };
 const answer = (): StatusAnswer => ({
   project: { id: 'shop-1a2b3c4d', name: 'shop', root: '/work/shop', git: true, ...(saved.remote ? { machine: 'box' } : {}) },
-  fields: saved.fields, more: false, revision: `r${saved.revision}`, updatedAt: Date.now() - 3 * 86_400_000, ...(saved.remote ? {} : { file: FILE }),
+  aim: saved.aim, goals: saved.goals, more: false, revision: `r${saved.revision}`, updatedAt: Date.now() - 3 * 86_400_000, ...(saved.remote ? {} : { file: FILE }),
   facts: { branch: 'feat/pay', dirty: 3, unpushed: 2, worktrees: 1, stashes: 0, lastCommit: Date.now() - 2 * 3_600_000 }, conversations: { count: 4, lastActive: Date.now() - 600_000 },
 });
+
+/** The simulated host makes a change the way the real one does; false is a conflict. */
+function host(change: Change): boolean {
+  const swap = (has: string, value: string, was: string) => has === tidy(was) || has === tidy(value) ? tidy(value) : undefined;
+  saved.revision++;
+  if (change.op === 'aim') { const next = swap(saved.aim, change.value, change.was); if (next === undefined) return false; saved.aim = next; return true; }
+  if (change.op === 'add') { if (!saved.goals.some(item => item.title === change.title)) saved.goals = [...saved.goals, goal(change.title)]; return true; }
+  const at = saved.goals.map((item, index) => item.title === change.goal.title ? index : -1).filter(index => index >= 0)[change.goal.nth ?? 0] ?? -1;
+  if (change.op === 'remove') { saved.goals = saved.goals.filter((_, index) => index !== at); return true; }
+  if (at < 0) return false;
+  const patch = (next: Partial<Goal>) => { saved.goals = saved.goals.map((item, index) => index === at ? { ...item, ...next } : item); return true; };
+  if (change.op === 'done') return patch({ done: change.value });
+  if (change.op === 'title') return patch({ title: change.value });
+  const next = swap(saved.goals[at][change.part], change.value, change.was);
+  return next === undefined ? false : patch({ [change.part]: next });
+}
 
 beforeEach(() => {
   const { window } = new JSDOM('<!doctype html><body><div data-conversation-tabs><button role="tab"><span>Chat</span></button><button role="tab"><span>Status</span></button><button role="tab"><span>状态</span></button></div></body>', { url: 'http://localhost/', pretendToBeVisual: true });
   requests = []; copied = [];
-  saved = { fields: { goal: GOALS, progress: '', blockers: '', next: 'Run the regression' }, revision: 1, remote: false, down: false };
+  saved = { aim: 'Bookkeeping without thinking', goals: [goal('Payment page', { steps: STEPS, next: 'Run the regression' }), goal('Icons', { done: true, progress: 'Shipped in 1.0.15' })], revision: 1, remote: false, down: false };
   const fetch = async (_url: string, init: { body: string; headers: Record<string, string> }) => {
     assert.equal(init.headers['X-DSH-Project-Status'], '1');
     const body = JSON.parse(init.body);
     requests.push(body);
     if (saved.down) return Response.json({ error: 'The status could not be read' }, { status: 500 });
-    if (body.action === 'save') {
-      const has = saved.fields[body.field as Field];
-      if (has !== tidy(body.was) && has !== tidy(body.value)) return Response.json({ error: 'The status changed while you were editing' }, { status: 409 });
-      saved.fields = { ...saved.fields, [body.field]: tidy(body.value) }; saved.revision++;
-    }
+    if (body.action === 'change' && !host(body.change as Change)) return Response.json({ error: 'The status changed while you were editing' }, { status: 409 });
     return Response.json(answer());
   };
   for (const name of globals) Object.defineProperty(globalThis, name, { configurable: true, writable: true, value: name === 'window' ? window : name === 'fetch' ? fetch : (window as unknown as Record<string, unknown>)[name] });
@@ -53,20 +66,24 @@ const settle = () => act(async () => { for (let i = 0; i < 10; i++) await new Pr
 const button = (text: string) => [...container.querySelectorAll('button')].find(node => node.textContent === text);
 const click = (text: string) => act(async () => { const node = button(text); assert.ok(node, `button ${text}`); node.click(); });
 const field = <T extends HTMLElement = HTMLTextAreaElement>(label: string) => { const node = container.querySelector<T>(`textarea[aria-label="${label}"],input[aria-label="${label}"]`); assert.ok(node, `field ${label}`); return node; };
-/** Types into a text field or a line of the goal list, as a person would: focus first, then the text. */
-const type = (label: string, value: string) => act(async () => {
-  const node = field<HTMLTextAreaElement | HTMLInputElement>(label);
+type Target = string | HTMLElement;
+const nodeOf = (target: Target) => typeof target === 'string' ? field<HTMLElement>(target) : target;
+/** Types into a text or a line, as a person would: focus first, then the text. */
+const type = (target: Target, value: string) => act(async () => {
+  const node = nodeOf(target) as HTMLTextAreaElement | HTMLInputElement;
   node.focus();
   Object.getOwnPropertyDescriptor(node instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype, 'value')!.set!.call(node, value);
   node.dispatchEvent(new window.Event('input', { bubbles: true }));
 });
-const leave = async (label: string) => { await act(async () => { field(label).blur(); }); await settle(); };
-const press = async (label: string, key: string) => { await act(async () => { field(label).dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); }); await settle(); };
+const leave = async (target: Target) => { await act(async () => { nodeOf(target).blur(); }); await settle(); };
+const press = async (target: Target, key: string) => { await act(async () => { nodeOf(target).dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); }); await settle(); };
 const labelled = (label: string) => [...container.querySelectorAll<HTMLElement>(`[aria-label="${label}"]`)];
 const press1 = (node: HTMLElement) => act(async () => { node.click(); });
-/** A field as the simulated host has it now. */
-const now = (name: Field): string => saved.fields[name];
-const lastSave = () => requests.filter(request => request.action === 'save').at(-1);
+/** A goal as the simulated host has it now. */
+const now = (title: string): Goal => saved.goals.find(item => item.title === title)!;
+const changes = () => requests.filter(request => request.action === 'change').map(request => request.change as Change);
+const card = (title: string) => [...container.querySelectorAll<HTMLElement>('.ps-card')].find(node => node.querySelector('.ps-card-title')?.textContent === title)!;
+const inCard = <T extends HTMLElement = HTMLTextAreaElement>(title: string, label: string) => card(title).querySelector<T>(`[aria-label="${label}"]`)!;
 const texts = (selector: string) => [...container.querySelectorAll(selector)].map(node => node.textContent);
 const dots = () => [...document.querySelectorAll('[data-conversation-tabs] button')].filter(tab => tab.querySelector('[data-ps-tab-dot]')).map(tab => tab.textContent);
 const reads = () => requests.filter(request => request.action === 'get').length;
@@ -103,14 +120,16 @@ test('the plugin adds a Status view between Git and Stats that shows the project
   assert.equal(container.querySelector('.ps-updated')!.textContent, 'Updated 3 days ago');
   assert.deepEqual(texts('.ps-fact'), ['Branchfeat/pay', 'Uncommitted3', 'Unpushed2', 'Worktrees1', 'Stashes0', 'Last commit2 hours ago', 'Conversations4 · last active 10 minutes ago']);
   assert.deepEqual([...container.querySelectorAll('.ps-fact[data-tone=warn] dt')].map(node => node.textContent), ['Uncommitted', 'Unpushed']);
-  // The goals are a list to tick off, with how many boxes are ticked; the other three are text, each saying what belongs there.
-  assert.deepEqual(texts('.ps-field h3'), ['Goal1/3', 'Progress', 'Blockers', 'Next']);
-  assert.deepEqual(texts('.ps-goal-text'), ['Ship the payment page', 'Design', 'Build']);
-  assert.deepEqual([...container.querySelectorAll<HTMLInputElement>('.ps-goals input[type=checkbox]')].map(box => box.checked), [false, true, false]);
-  assert.deepEqual([...container.querySelectorAll<HTMLElement>('.ps-goal')].map(row => row.dataset.depth), ['0', '1', '1', undefined]);
-  assert.deepEqual(texts('.ps-goal-count'), ['1/2']);
-  assert.deepEqual([...container.querySelectorAll('textarea')].map(area => [area.value, !!area.placeholder]), [['', true], ['', true], ['Run the regression', true]]);
-  // Nothing to switch on before editing.
+  // The project's aim, then one card per goal with how many are reached.
+  assert.equal(field('Overall goal').value, 'Bookkeeping without thinking');
+  assert.equal(container.querySelector('.ps-section')!.textContent, 'Goals1/2');
+  assert.deepEqual(texts('.ps-card-title'), ['Payment page', 'Icons']);
+  // A goal under way is open: its to-dos with their count, and its own three texts, each saying what belongs there.
+  assert.deepEqual([card('Payment page').dataset.open, card('Payment page').querySelector('.ps-goal-count')!.textContent], ['', '1/2']);
+  assert.deepEqual([...card('Payment page').querySelectorAll('.ps-goal-text')].map(node => node.textContent), ['Design', 'Build']);
+  assert.deepEqual([...card('Payment page').querySelectorAll('textarea')].map(area => [area.getAttribute('aria-label'), area.value, !!area.placeholder]), [['Progress', '', true], ['Blockers', '', true], ['Next', 'Run the regression', true]]);
+  // One that is reached is closed to a line that says where it stands.
+  assert.deepEqual([card('Icons').dataset.open, card('Icons').dataset.done, card('Icons').querySelector('.ps-card-line')!.textContent, card('Icons').querySelector('textarea')], [undefined, '', 'ProgressShipped in 1.0.15', null]);
   assert.equal(button('Edit'), undefined);
   assert.match(container.querySelector('.ps-foot')!.textContent!, /shop-1a2b3c4d\.md/);
 });
@@ -118,99 +137,118 @@ test('the plugin adds a Status view between Git and Stats that shows the project
 test('in Chinese the view and its texts for agents are Chinese', async () => {
   const { spec } = await mount('s1', { language: 'zh' });
   assert.equal(spec.label(), '状态');
-  assert.deepEqual(texts('.ps-field h3'), ['目标1/3', '进度', '卡点', '下一步']);
+  assert.deepEqual([texts('.ps-field h3'), texts('.ps-section'), texts('.ps-part-name')], [['大目标'], ['小目标1/2'], ['待办', '进度', '卡点', '下一步']]);
   await click('复制给 AGENTS.md 的规则');
   await settle();
   assert.match(copied[0], /^## 项目状态\n\n本项目的状态记录在 `\/home\/me\/.dsh\/storages\/dsh-project-status\/projects\/shop-1a2b3c4d\.md`/);
-  assert.match(copied[0], /任务列表：`- \[ \] 大目标`/);
+  assert.match(copied[0], /只更新你在做的那个小目标/);
   assert.equal(container.querySelector('.ps-said')!.textContent, '已复制');
 });
 
-test('a text is edited where it stands and saved by itself: on leaving the field, or a moment after the typing stops', async () => {
+test('a text is edited where it stands and saved by itself: on leaving it, or a moment after the typing stops', async () => {
   await mount('s1');
-  await type('Blockers', 'Waiting for me to approve the copy');
-  assert.equal(lastSave(), undefined);
-  await leave('Blockers');
-  assert.deepEqual(lastSave(), { action: 'save', sessionId: 's1', field: 'blockers', value: 'Waiting for me to approve the copy', was: '', language: 'en' });
-  assert.equal(field('Blockers').value, 'Waiting for me to approve the copy');
-  assert.equal(container.querySelector('[data-field=blockers] .ps-state')!.textContent, 'Saved');
-  // Still in the field: the text goes out after a pause, and stays as typed.
-  await type('Progress', 'Checkout works on feat/pay\n');
+  const blockers = inCard('Payment page', 'Blockers');
+  await type(blockers, 'Waiting for me to approve the copy');
+  assert.deepEqual(changes(), []);
+  await leave(blockers);
+  assert.deepEqual(requests.at(-1), { action: 'change', sessionId: 's1', change: { op: 'part', goal: { title: 'Payment page', nth: 0 }, part: 'blockers', value: 'Waiting for me to approve the copy', was: '' }, language: 'en' });
+  assert.equal(inCard('Payment page', 'Blockers').value, 'Waiting for me to approve the copy');
+  assert.equal(card('Payment page').querySelector('[data-part=blockers] .ps-state')!.textContent, 'Saved');
+  assert.equal(card('Payment page').dataset.blocked, '');
+  // Still in the text: it goes out after a pause, and stays as typed.
+  const progress = inCard('Payment page', 'Progress');
+  await type(progress, 'Checkout works on feat/pay\n');
   await act(async () => { await new Promise(resolve => setTimeout(resolve, TYPING_MS + 150)); });
   await settle();
-  assert.deepEqual([lastSave()!.field, lastSave()!.was, saved.fields.progress], ['progress', '', 'Checkout works on feat/pay']);
-  assert.equal(field('Progress').value, 'Checkout works on feat/pay\n');
+  assert.deepEqual([changes().at(-1), now('Payment page').progress], [{ op: 'part', goal: { title: 'Payment page', nth: 0 }, part: 'progress', value: 'Checkout works on feat/pay\n', was: '' }, 'Checkout works on feat/pay']);
+  assert.equal(progress.value, 'Checkout works on feat/pay\n');
   // Leaving it again has nothing more to save.
-  const saves = requests.filter(request => request.action === 'save').length;
-  await leave('Progress');
-  assert.equal(requests.filter(request => request.action === 'save').length, saves);
-  assert.equal(field('Progress').value, 'Checkout works on feat/pay');
+  const count = changes().length;
+  await leave(progress);
+  assert.deepEqual([changes().length, progress.value], [count, 'Checkout works on feat/pay']);
+  // The project's aim is a text like the others.
+  await type('Overall goal', 'Bookkeeping in ten seconds');
+  await leave('Overall goal');
+  assert.deepEqual([changes().at(-1), saved.aim], [{ op: 'aim', value: 'Bookkeeping in ten seconds', was: 'Bookkeeping without thinking' }, 'Bookkeeping in ten seconds']);
 });
 
-test('goals are ticked, added, broken into steps, renamed and removed in the list', async () => {
+test('a goal’s to-dos are ticked, added, renamed and removed in its own list', async () => {
   await mount('s1');
-  await press1(labelled('Build')[0]);
+  await press1(inCard('Payment page', 'Build'));
   await settle();
-  assert.deepEqual(lastSave(), { action: 'save', sessionId: 's1', field: 'goal', value: '- [ ] Ship the payment page\n  - [x] Design\n  - [x] Build', was: GOALS, language: 'en' });
-  assert.deepEqual(texts('.ps-goal-count'), ['2/2']);
-  await type('Add a goal', 'Tell the users');
-  await press('Add a goal', 'Enter');
-  assert.equal(now('goal'), '- [ ] Ship the payment page\n  - [x] Design\n  - [x] Build\n- [ ] Tell the users');
-  assert.equal(field<HTMLInputElement>('Add a goal').value, '');
-  // A step goes under its goal, after the steps already there; Enter goes on to the next one.
-  await press1(labelled('Add a step')[0]);
-  await type('Add a step', 'Test');
-  await press('Add a step', 'Enter');
-  assert.equal(now('goal'), '- [ ] Ship the payment page\n  - [x] Design\n  - [x] Build\n  - [ ] Test\n- [ ] Tell the users');
-  assert.equal(field<HTMLInputElement>('Add a step').value, '');
-  await press('Add a step', 'Escape');
-  assert.equal(container.querySelector('input[aria-label="Add a step"]'), null);
+  assert.deepEqual(changes().at(-1), { op: 'part', goal: { title: 'Payment page', nth: 0 }, part: 'steps', value: '- [x] Design\n- [x] Build', was: STEPS });
+  assert.equal(card('Payment page').querySelector('.ps-goal-count')!.textContent, '2/2');
+  const add = inCard<HTMLInputElement>('Payment page', 'Add a to-do');
+  await type(add, 'Test');
+  await press(add, 'Enter');
+  assert.deepEqual([now('Payment page').steps, add.value], ['- [x] Design\n- [x] Build\n- [ ] Test', '']);
   await click('Design');
   await type('Edit', 'Design it');
   await press('Edit', 'Enter');
-  assert.match(now('goal'), /\n {2}- \[x\] Design it\n/);
-  // A goal with steps under it goes only at the second click.
-  await press1(labelled('Delete')[0]);
-  assert.equal(now('goal').split('\n').length, 5);
-  await click('Delete it with its 3 steps?');
+  assert.equal(now('Payment page').steps, '- [x] Design it\n- [x] Build\n- [ ] Test');
+  await press1(card('Payment page').querySelectorAll<HTMLElement>('.ps-goals [aria-label="Delete"]')[1]);
   await settle();
-  assert.equal(now('goal'), '- [ ] Tell the users');
-  assert.deepEqual(texts('.ps-count'), ['0/1']);
+  assert.equal(now('Payment page').steps, '- [x] Design it\n- [ ] Test');
+  // The other goal was never touched.
+  assert.deepEqual(saved.goals[1], goal('Icons', { done: true, progress: 'Shipped in 1.0.15' }));
 });
 
-test('a sentence someone wrote as the goal is kept as it is, and becomes a to-do at a click', async () => {
-  saved.fields.goal = 'Ship the payment page\n- plain bullet';
+test('goals are added, ticked off, opened, renamed and removed, each by itself', async () => {
   await mount('s1');
-  assert.deepEqual(texts('.ps-goal-text'), ['Ship the payment page', 'plain bullet']);
-  assert.equal(container.querySelectorAll('.ps-goals input[type=checkbox]').length, 1);
-  await press1(labelled('Make it a to-do')[0]);
+  await type('Add a goal', 'Tell the users');
+  await press('Add a goal', 'Enter');
+  assert.deepEqual([changes().at(-1), texts('.ps-card-title'), texts('.ps-section')], [{ op: 'add', title: 'Tell the users' }, ['Payment page', 'Icons', 'Tell the users'], ['Goals1/3']]);
+  // A new one is open, with nothing written yet.
+  assert.deepEqual([...card('Tell the users').querySelectorAll('textarea')].map(area => area.value), ['', '', '']);
+  await type(inCard('Tell the users', 'Next'), 'Draft the post');
+  await leave(inCard('Tell the users', 'Next'));
+  assert.deepEqual([now('Tell the users').next, now('Payment page').next], ['Draft the post', 'Run the regression']);
+  // Reached: it closes to its line, and the count goes up.
+  await press1(inCard('Tell the users', 'Tell the users is reached'));
   await settle();
-  assert.equal(saved.fields.goal, '- [ ] Ship the payment page\n- [ ] plain bullet');
+  assert.deepEqual([now('Tell the users').done, card('Tell the users').dataset.open, card('Tell the users').querySelector('.ps-card-line')!.textContent, texts('.ps-section')], [true, undefined, 'NextDraft the post', ['Goals2/3']]);
+  // A closed one opens at a click on its name, and stays the way the user left it.
+  await click('Icons');
+  assert.deepEqual([card('Icons').dataset.open, inCard('Icons', 'Progress').value], ['', 'Shipped in 1.0.15']);
+  assert.match(window.localStorage.getItem('dsh-project-status.open.shop-1a2b3c4d')!, /Icons/);
+  // Open, the name is typed over.
+  await click('Icons');
+  await type('Rename', 'App icons');
+  await press('Rename', 'Enter');
+  assert.deepEqual([changes().at(-1), texts('.ps-card-title')], [{ op: 'title', goal: { title: 'Icons', nth: 0 }, value: 'App icons' }, ['Payment page', 'App icons', 'Tell the users']]);
+  // One with something written under it goes only at the second click.
+  await press1(card('Payment page').querySelector<HTMLElement>('.ps-card-head [aria-label="Delete"]')!);
+  assert.equal(saved.goals.length, 3);
+  await click('Delete it with what is written under it?');
+  await settle();
+  assert.deepEqual([changes().at(-1), saved.goals.map(item => item.title)], [{ op: 'remove', goal: { title: 'Payment page', nth: 0 } }, ['App icons', 'Tell the users']]);
 });
 
-test('a change from elsewhere to the field being edited is shown beside the user’s text, and they choose', async () => {
+test('a change from elsewhere to the text being edited is shown beside the user’s, and they choose', async () => {
   await mount('s1');
-  await type('Next', 'Mine');
-  saved.fields = { ...saved.fields, next: 'The agent’s' }; saved.revision++;
-  await leave('Next');
-  assert.equal(container.querySelector('[data-field=next] [role=alert] strong')!.textContent, 'This was changed elsewhere while you were editing');
+  const next = () => inCard('Payment page', 'Next'), agent = (patch: Partial<Goal>, title = 'Payment page') => { saved.goals = saved.goals.map(item => item.title === title ? { ...item, ...patch } : item); saved.revision++; };
+  await type(next(), 'Mine');
+  agent({ next: 'The agent’s' });
+  await leave(next());
+  assert.equal(card('Payment page').querySelector('[data-part=next] [role=alert] strong')!.textContent, 'This was changed elsewhere while you were editing');
   assert.equal(container.querySelector('.ps-theirs')!.textContent, 'The agent’s');
-  assert.deepEqual([field('Next').value, saved.fields.next], ['Mine', 'The agent’s']);
+  assert.deepEqual([next().value, now('Payment page').next], ['Mine', 'The agent’s']);
   await click('Keep mine');
   await settle();
-  assert.deepEqual([saved.fields.next, lastSave()!.was, container.querySelector('[role=alert]')], ['Mine', 'The agent’s', null]);
+  assert.deepEqual([now('Payment page').next, (changes().at(-1) as { was: string }).was, container.querySelector('[role=alert]')], ['Mine', 'The agent’s', null]);
   // The other way: theirs replaces what was typed.
-  await type('Next', 'Mine again');
-  saved.fields = { ...saved.fields, next: 'Theirs again' }; saved.revision++;
-  await leave('Next');
+  await type(next(), 'Mine again');
+  agent({ next: 'Theirs again' });
+  await leave(next());
   await click('Use the new text');
-  assert.deepEqual([field('Next').value, saved.fields.next, container.querySelector('[role=alert]')], ['Theirs again', 'Theirs again', null]);
-  // A change to another field is no conflict.
-  await type('Next', 'Run it twice');
-  saved.fields = { ...saved.fields, progress: 'The agent is at it' }; saved.revision++;
-  await leave('Next');
-  assert.deepEqual([saved.fields.next, saved.fields.progress, container.querySelector('[role=alert]')], ['Run it twice', 'The agent is at it', null]);
-  assert.equal(field('Progress').value, 'The agent is at it');
+  assert.deepEqual([next().value, now('Payment page').next, container.querySelector('[role=alert]')], ['Theirs again', 'Theirs again', null]);
+  // An agent writing another goal, or another text of this one, is no conflict.
+  await type(next(), 'Run it twice');
+  agent({ progress: 'The agent is at it' });
+  agent({ blockers: 'Waiting for the store' }, 'Icons');
+  await leave(next());
+  assert.deepEqual([now('Payment page').next, now('Payment page').progress, now('Icons').blockers, container.querySelector('[role=alert]')], ['Run it twice', 'The agent is at it', 'Waiting for the store', null]);
+  assert.equal(inCard('Payment page', 'Progress').value, 'The agent is at it');
 });
 
 test('asking the agent puts the request into the composer, or at the prompt of a TUI conversation, without sending it', async () => {
@@ -220,7 +258,7 @@ test('asking the agent puts the request into the composer, or at the prompt of a
   assert.equal(drafts.length, 1);
   // Chat comes forward once the composer has the text.
   assert.deepEqual(opened, ['chat']);
-  assert.match(drafts[0], /^Update this project's status file: \/home\/me\/.dsh\/storages\/dsh-project-status\/projects\/shop-1a2b3c4d\.md\n[\s\S]*## Blockers: /);
+  assert.match(drafts[0], /^Update this project's status file: \/home\/me\/.dsh\/storages\/dsh-project-status\/projects\/shop-1a2b3c4d\.md\n[\s\S]*#### Blockers: [\s\S]*Update only the goal this conversation worked on/);
   assert.deepEqual(activated, ['s1:chat']);
   assert.match(container.querySelector('.ps-said')!.textContent!, /send it when you are ready/);
   const pasted: string[] = [], withdraw = offerTuiPrompt({ has: id => id === 's1', paste: async (_id, text) => { pasted.push(text); return true; } });
@@ -235,21 +273,22 @@ test('a project on another machine can be edited here, but an agent there is not
   saved.remote = true;
   await mount('s1');
   assert.equal(container.querySelector('.ps-path')!.textContent, '/work/shop · on box');
-  assert.deepEqual([button('Ask the agent to update')!.disabled, button('Copy the rule for AGENTS.md')!.disabled, field('Next').disabled], [true, true, false]);
+  assert.deepEqual([button('Ask the agent to update')!.disabled, button('Copy the rule for AGENTS.md')!.disabled, inCard('Payment page', 'Next').disabled], [true, true, false]);
   assert.match(container.textContent!, /an agent on box cannot open it/);
 });
 
-test('the tab carries a mark while a blocker is written down', async () => {
+test('the tab carries a mark while a goal that is not reached has a blocker written down', async () => {
   await mount('s1');
   assert.deepEqual(dots(), []);
-  await type('Blockers', 'Waiting for review');
-  await leave('Blockers');
+  await type(inCard('Payment page', 'Blockers'), 'Waiting for review');
+  await leave(inCard('Payment page', 'Blockers'));
   assert.deepEqual(dots(), ['Status']);
   // DSH drawing the tabs again does not lose it.
   await act(async () => { document.querySelector('[data-ps-tab-dot]')!.remove(); await new Promise(resolve => setTimeout(resolve, 0)); });
   assert.deepEqual(dots(), ['Status']);
-  await type('Blockers', '  ');
-  await leave('Blockers');
+  // Reached, its blocker no longer counts.
+  await press1(inCard('Payment page', 'Payment page is reached'));
+  await settle();
   assert.deepEqual(dots(), []);
 });
 
