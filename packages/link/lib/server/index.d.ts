@@ -13,6 +13,8 @@ export interface Config {
     refreshSeconds: number;
     allowSelf: boolean;
     listenHost: string;
+    frameBrowser: boolean;
+    browserPort: number;
 }
 export declare const Config: Schema<Config>;
 export declare function apply(ctx: HostContext, config: Config): void;

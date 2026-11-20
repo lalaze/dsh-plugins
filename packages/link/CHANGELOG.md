@@ -4,6 +4,17 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.12 — The Browser panel on other machines' pages, on their network
+
+Update every computer: the one whose desktop window shows the others, and each machine you open from it. No restart needed; reload the window once.
+
+- In the desktop app, another machine's page now has DSH's **Browser** in the right sidebar (it was missing because DSH offers its browser only in the desktop app's own page). It is the desktop app's own browser, so sites behave as they do on this computer's page.
+- Addresses of that machine load over that machine's network: `http://localhost:5173` is the development server running there, and so are its private network, `.local` and tailnet addresses. Its API on another port, cookies and WebSockets work. The address bar shows the address as you typed it. Public sites load from this computer, as before.
+- Typing `localhost:5173` works even though DSH's address bar turns it into https: a plain-HTTP server there is opened at its http address.
+- Each machine's browser keeps its own cookies and storage.
+- A browser or phone showing another machine gets no panel there, and nothing changes on a machine's own page or on the phone.
+- To turn it off, switch off `frameBrowser` in DSH Link's settings. The forwarding port is `browserPort` (7389), on this computer's loopback only. See the README's Limits for what a page loaded this way sees differently.
+
 ## 0.1.11 — The sidebar reaches the top of the desktop window on other machines too
 
 Update the computer whose desktop window shows the other machines; reload the window once. The other machines need nothing.

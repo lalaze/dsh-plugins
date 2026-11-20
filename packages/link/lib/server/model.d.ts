@@ -27,6 +27,11 @@ export interface SelfInfo {
         address?: string;
         error?: string;
     };
+    /** The loopback port the Browser panel loads other machines' addresses from (forward/window.ts), or why there is none. */
+    browser?: {
+        port?: number;
+        error?: string;
+    };
 }
 /** `GET /dsh-link/peers`. */
 export interface MachinesAnswer {

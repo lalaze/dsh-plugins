@@ -1,5 +1,5 @@
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
-import type { Duplex } from 'node:stream';
+import type { Duplex, Transform } from 'node:stream';
 import type { LoopbackSession } from './login.js';
 import type { TailnetStatus, Whois } from './tailscale.js';
 export interface Verdict {
@@ -24,6 +24,15 @@ export declare class Admission {
 export interface FrontendRoutes {
     /** This plugin's own routes, by exact path; anything else goes into DSH. */
     http: Record<string, (req: IncomingMessage, res: ServerResponse) => void | Promise<void>>;
+    /** This machine's index as the other machines get it, after `ownsHost` (browser-panel.ts adds the panel). */
+    page?: (html: string) => string;
+    /** This machine's `/plugins/events` stream as the other machines get it. */
+    events?: () => Transform | undefined;
+    /** Requests a window marked for an address of this machine's network (forward/target.ts); refused without it. */
+    forward?: {
+        http(req: IncomingMessage, res: ServerResponse, origin: URL): void;
+        upgrade(req: IncomingMessage, socket: Duplex, head: Buffer, origin: URL): void;
+    };
 }
 /** Answers an admitted request: a plugin route, or this machine's DSH. */
 export declare class Frontend {

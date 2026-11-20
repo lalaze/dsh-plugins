@@ -4,17 +4,24 @@ import https from 'node:https';
 import zlib from 'node:zlib';
 /** Set on every request a mount forwards; a mount refuses one that already carries it, so hops never chain. */
 export const HOP_HEADER = 'x-dsh-link-hop';
-const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'trailers', 'transfer-encoding', 'upgrade']);
+export const HOP_BY_HOP = new Set(['connection', 'keep-alive', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'trailers', 'transfer-encoding', 'upgrade']);
 /**
  * What never crosses a hop: the browser's own credentials and markers (the next hop authenticates its own way and
  * runs its own fence), forwarding claims the browser could forge, and conditional headers of documents we rewrite.
  */
 const DROP_REQUEST = new Set([...HOP_BY_HOP, 'host', 'origin', 'referer', 'cookie', 'sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-user', 'forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-real-ip', HOP_HEADER]);
-/** Connections made by this plugin. Own agents: the global ones may be sent through an env proxy. */
-export const agents = { http: new http.Agent({ keepAlive: true, keepAliveMsecs: 4_000, maxSockets: 64 }), https: new https.Agent({ keepAlive: true, maxSockets: 64 }) };
-const agentFor = (url) => url.protocol === 'https:' ? agents.https : agents.http;
+/**
+ * Connections made by this plugin. Own agents: the global ones may be sent through an env proxy. `local` takes the
+ * self-signed certificate of a development server on this machine's own network (forward/target.ts).
+ */
+export const agents = {
+    http: new http.Agent({ keepAlive: true, keepAliveMsecs: 4_000, maxSockets: 64 }),
+    https: new https.Agent({ keepAlive: true, maxSockets: 64 }),
+    local: new https.Agent({ keepAlive: true, maxSockets: 64, rejectUnauthorized: false }),
+};
+const agentFor = (url, insecure = false) => url.protocol === 'https:' ? (insecure ? agents.local : agents.https) : agents.http;
 const moduleFor = (url) => url.protocol === 'https:' ? https : http;
-function connectionTokens(headers) {
+export function connectionTokens(headers) {
     const value = headers.connection;
     return new Set((Array.isArray(value) ? value.join(',') : value ?? '').split(',').map(token => token.trim().toLowerCase()).filter(Boolean));
 }
@@ -46,17 +53,19 @@ export function locationUnder(upstream, prefix) {
         return location;
     };
 }
-/** Response headers to pass back: no hop-by-hop headers and never a cookie of the next hop. */
-export function responseHeaders(headers, location) {
+/** Response headers to pass back: no hop-by-hop headers, and no cookie of the next hop unless `cookies`. */
+export function responseHeaders(headers, location, cookies = false) {
     const listed = connectionTokens(headers);
     const out = {};
     for (const [name, value] of Object.entries(headers)) {
-        if (value === undefined || HOP_BY_HOP.has(name) || listed.has(name) || name === 'set-cookie')
+        if (value === undefined || HOP_BY_HOP.has(name) || listed.has(name) || (name === 'set-cookie' && !cookies))
             continue;
         out[name] = name === 'location' && location && typeof value === 'string' ? location(value) : value;
     }
     return out;
 }
+/** Longest body {@link Forward.text} rewrites. */
+export const TEXT_LIMIT = 8 * 1024 * 1024;
 /** Text a navigation shows: Chromium replaces an error status without a body by its own error page. */
 export function sendText(res, status, text) {
     if (res.headersSent) {
@@ -71,7 +80,7 @@ export function sendJson(res, status, value) {
     res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'content-length': Buffer.byteLength(body) });
     res.end(body);
 }
-function decoded(body, encoding) {
+export function decoded(body, encoding) {
     switch ((encoding ?? '').trim().toLowerCase()) {
         case '':
         case 'identity': return body;
@@ -103,52 +112,137 @@ export function forwardHttp(req, res, forward) {
         delete headers['if-none-match'];
         delete headers['if-modified-since'];
     }
-    const out = moduleFor(target).request(target, { method: req.method, headers, agent: agentFor(target) });
+    const out = moduleFor(target).request(target, { method: req.method, headers, agent: agentFor(target, forward.insecure) });
     connectDeadline(out, forward.connectTimeoutMs ?? 6_000);
     let answered = false;
+    const headersOut = (incoming) => {
+        const passed = responseHeaders(incoming, forward.location, forward.cookies);
+        return forward.headersOut ? forward.headersOut(passed) : passed;
+    };
     out.on('response', up => {
         answered = true;
         const status = up.statusCode ?? 502;
         forward.onStatus?.(status);
+        up.on('error', () => res.destroy());
         const type = String(up.headers['content-type'] ?? '');
-        if (!(rewrite && status === 200 && /text\/html/i.test(type))) {
-            res.writeHead(status, up.statusMessage, responseHeaders(up.headers, forward.location));
-            up.pipe(res);
-            up.on('error', () => res.destroy());
+        if (rewrite && status === 200 && /text\/html/i.test(type)) {
+            rewriteHtml(up, res, status, headersOut, forward.html);
             return;
         }
-        const chunks = [];
-        up.on('data', (chunk) => chunks.push(chunk));
-        up.on('error', () => res.destroy());
-        up.on('end', () => {
-            let html;
-            try {
-                html = forward.html(decoded(Buffer.concat(chunks), up.headers['content-encoding']).toString('utf8'));
-            }
-            catch (error) {
-                sendText(res, 502, `Could not read the page: ${error.message}`);
-                return;
-            }
-            const outHeaders = responseHeaders(up.headers, forward.location);
-            for (const name of ['content-encoding', 'content-length', 'etag', 'last-modified'])
-                delete outHeaders[name];
-            const body = Buffer.from(html, 'utf8');
-            res.writeHead(status, up.statusMessage, { ...outHeaders, 'content-length': body.length, 'cache-control': 'no-store' });
-            res.end(body);
-        });
+        const text = req.method === 'HEAD' ? undefined : forward.text?.(status, up.headers);
+        if (text) {
+            rewriteText(up, res, status, headersOut, text);
+            return;
+        }
+        const stream = req.method === 'HEAD' ? undefined : forward.stream?.(status, up.headers);
+        res.writeHead(status, up.statusMessage, headersOut(up.headers));
+        if (stream) {
+            stream.on('error', () => res.destroy());
+            up.pipe(stream).pipe(res);
+        }
+        else
+            up.pipe(res);
     });
     out.on('error', error => {
         if (!answered)
             forward.onUnreachable?.(error);
-        if (!res.headersSent)
-            sendText(res, 502, `Cannot reach ${target.host}: ${describe(error)}`);
-        else
+        if (res.headersSent) {
             res.destroy();
+            return;
+        }
+        const answer = forward.unreachable ? forward.unreachable(error) : `Cannot reach ${target.host}: ${describe(error)}`;
+        if (typeof answer === 'string')
+            sendText(res, 502, answer);
+        else {
+            res.writeHead(307, { location: answer.location, 'cache-control': 'no-store', 'content-length': 0 });
+            res.end();
+        }
     });
     // An event stream lasts until the browser leaves; then the upstream request goes too.
     res.on('close', () => { if (!res.writableFinished)
         out.destroy(); });
     req.pipe(out);
+}
+/** A document this plugin changes: whole, decoded, never cached (the next load may change it differently). */
+function rewriteHtml(up, res, status, headersOut, html) {
+    const chunks = [];
+    up.on('data', (chunk) => chunks.push(chunk));
+    up.on('end', () => {
+        let page;
+        try {
+            page = html(decoded(Buffer.concat(chunks), up.headers['content-encoding']).toString('utf8'));
+        }
+        catch (error) {
+            sendText(res, 502, `Could not read the page: ${error.message}`);
+            return;
+        }
+        const outHeaders = headersOut(up.headers);
+        for (const name of ['content-encoding', 'content-length', 'etag', 'last-modified'])
+            delete outHeaders[name];
+        const body = Buffer.from(page, 'utf8');
+        res.writeHead(status, up.statusMessage, { ...outHeaders, 'content-length': body.length, 'cache-control': 'no-store' });
+        res.end(body);
+    });
+}
+/**
+ * A text body rewritten the same way every time, so its validators still hold. Passes as it came when it is longer
+ * than {@link TEXT_LIMIT}, not UTF-8, in an unknown encoding, or left unchanged.
+ */
+function rewriteText(up, res, status, headersOut, text) {
+    const declared = Number(up.headers['content-length'] ?? NaN);
+    const passAll = (head) => {
+        res.writeHead(status, up.statusMessage, headersOut(up.headers));
+        for (const chunk of head)
+            res.write(chunk);
+        up.pipe(res);
+    };
+    if (declared > TEXT_LIMIT) {
+        passAll([]);
+        return;
+    }
+    const chunks = [];
+    let size = 0;
+    let passing = false;
+    const onData = (chunk) => {
+        size += chunk.length;
+        chunks.push(chunk);
+        if (size <= TEXT_LIMIT)
+            return;
+        passing = true;
+        up.off('data', onData);
+        up.off('end', onEnd);
+        passAll(chunks.splice(0));
+    };
+    const onEnd = () => {
+        if (passing)
+            return;
+        const raw = Buffer.concat(chunks);
+        let next;
+        try {
+            const plain = decoded(raw, up.headers['content-encoding']);
+            const body = plain.toString('utf8');
+            // Not UTF-8 (a legacy charset): rewriting would garble it.
+            if (Buffer.from(body, 'utf8').equals(plain)) {
+                const changed = text(body);
+                if (changed !== body)
+                    next = Buffer.from(changed, 'utf8');
+            }
+        }
+        catch { /* an encoding this plugin cannot undo: pass it */ }
+        const outHeaders = headersOut(up.headers);
+        if (next) {
+            delete outHeaders['content-encoding'];
+            outHeaders['content-length'] = next.length;
+            res.writeHead(status, up.statusMessage, outHeaders);
+            res.end(next);
+        }
+        else {
+            res.writeHead(status, up.statusMessage, outHeaders);
+            res.end(raw);
+        }
+    };
+    up.on('data', onData);
+    up.on('end', onEnd);
 }
 /** A short reason for an upstream failure, no stack, no URL. */
 export function describe(error) {
@@ -164,10 +258,10 @@ export function describe(error) {
         default: return error instanceof Error ? error.message : String(error);
     }
 }
-function writeHead(socket, status, message, rawHeaders) {
+function writeHead(socket, status, message, rawHeaders, cookies = false) {
     let head = `HTTP/1.1 ${status} ${message}\r\n`;
     for (let i = 0; i + 1 < rawHeaders.length; i += 2) {
-        if (rawHeaders[i].toLowerCase() === 'set-cookie')
+        if (rawHeaders[i].toLowerCase() === 'set-cookie' && !cookies)
             continue;
         head += `${rawHeaders[i]}: ${rawHeaders[i + 1]}\r\n`;
     }
@@ -178,7 +272,7 @@ export function forwardUpgrade(req, socket, head, forward) {
     const { target } = forward;
     const headers = { ...forward.headers, connection: 'Upgrade', upgrade: req.headers.upgrade ?? 'websocket' };
     // One connection per WebSocket, never a pooled one.
-    const out = moduleFor(target).request(target, { method: 'GET', headers, agent: false });
+    const out = moduleFor(target).request(target, { method: 'GET', headers, agent: false, ...(forward.insecure ? { rejectUnauthorized: false } : {}) });
     connectDeadline(out, forward.connectTimeoutMs ?? 6_000);
     const fail = (status, text) => {
         if (socket.destroyed)
@@ -188,7 +282,7 @@ export function forwardUpgrade(req, socket, head, forward) {
     socket.on('error', () => out.destroy());
     out.on('upgrade', (up, upSocket, upHead) => {
         forward.onStatus?.(up.statusCode ?? 101);
-        writeHead(socket, up.statusCode ?? 101, up.statusMessage ?? 'Switching Protocols', up.rawHeaders);
+        writeHead(socket, up.statusCode ?? 101, up.statusMessage ?? 'Switching Protocols', up.rawHeaders, forward.cookies);
         if (upHead.length > 0)
             socket.write(upHead);
         if (head.length > 0)
@@ -210,11 +304,15 @@ export function forwardUpgrade(req, socket, head, forward) {
                 return;
             const body = Buffer.concat(chunks);
             const raw = up.rawHeaders.filter((_, i, all) => i % 2 === 0 ? !/^(content-length|transfer-encoding|connection)$/i.test(all[i]) : !/^(content-length|transfer-encoding|connection)$/i.test(all[i - 1]));
-            writeHead(socket, up.statusCode ?? 502, up.statusMessage ?? '', [...raw, 'content-length', String(body.length), 'connection', 'close']);
+            writeHead(socket, up.statusCode ?? 502, up.statusMessage ?? '', [...raw, 'content-length', String(body.length), 'connection', 'close'], forward.cookies);
             socket.end(body);
         });
     });
-    out.on('error', error => { forward.onUnreachable?.(error); fail(502, `Cannot reach ${target.host}: ${describe(error)}`); });
+    out.on('error', error => {
+        forward.onUnreachable?.(error);
+        const answer = forward.unreachable?.(error);
+        fail(502, typeof answer === 'string' ? answer : `Cannot reach ${target.host}: ${describe(error)}`);
+    });
     out.end();
 }
 /** One small request through the plugin's own agents, e.g. a hello probe or the loopback login. */

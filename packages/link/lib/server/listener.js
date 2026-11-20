@@ -4,6 +4,7 @@
  * the in-process login cookie. Other machines' mounts and the attention board talk to this.
  */
 import http from 'node:http';
+import { FORWARD_HEADER, forwardOrigin } from './forward/target.js';
 import { forwardHttp, forwardUpgrade, hostnameOf, locationUnder, remoteIp, requestHeaders, sendJson, sendText } from './proxy.js';
 import { injectOwnsHost } from './rewrite.js';
 /** No cross-site Fetch Metadata, and an `Origin`, when sent, naming the request's own authority. */
@@ -59,6 +60,8 @@ export class Admission {
         return who;
     }
 }
+/** DSH's graph stream (dsh-client-hmr `EVENTS_ENDPOINT`). */
+const EVENTS_PATH = '/plugins/events';
 /** Answers an admitted request: a plugin route, or this machine's DSH. */
 export class Frontend {
     session;
@@ -70,6 +73,15 @@ export class Frontend {
         this.routes = routes;
     }
     async http(req, res) {
+        if (req.headers[FORWARD_HEADER] !== undefined) {
+            const origin = forwardOrigin(req.headers[FORWARD_HEADER]);
+            if (!origin || !this.routes.forward) {
+                sendText(res, 403, 'This machine does not forward that address.');
+                return;
+            }
+            this.routes.forward.http(req, res, origin);
+            return;
+        }
         const path = new URL(req.url ?? '/', 'http://x').pathname;
         const route = this.routes.http[path];
         if (route) {
@@ -85,15 +97,28 @@ export class Frontend {
             return;
         }
         const target = new URL(req.url ?? '/', this.origin());
+        const { page, events } = this.routes;
         forwardHttp(req, res, {
             target, headers: requestHeaders(req.headers, { host: this.session.authority, cookie }),
             location: locationUnder(new URL(this.origin()), ''),
-            html: injectOwnsHost,
+            html: page ? html => page(injectOwnsHost(html)) : injectOwnsHost,
+            ...(events && path === EVENTS_PATH ? {
+                stream: (status, headers) => status === 200 && /text\/event-stream/i.test(String(headers['content-type'] ?? '')) && !headers['content-encoding'] ? events() : undefined,
+            } : {}),
             onStatus: status => { if (status === 401)
                 this.session.invalidate(); },
         });
     }
     async upgrade(req, socket, head) {
+        if (req.headers[FORWARD_HEADER] !== undefined) {
+            const origin = forwardOrigin(req.headers[FORWARD_HEADER]);
+            if (!origin || !this.routes.forward) {
+                socket.end('HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n');
+                return;
+            }
+            this.routes.forward.upgrade(req, socket, head, origin);
+            return;
+        }
         let cookie;
         try {
             cookie = await this.session.get();

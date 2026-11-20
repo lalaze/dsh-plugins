@@ -58,6 +58,10 @@ export declare const SHELL_KEYS: {
 export declare function injectShellReturn(html: string, id: string): string;
 /** The global a window's own page keeps its shell on (client/shell.ts). */
 export declare const SHELL_GLOBAL = "__dshLinkShell";
+/** What the desktop window's DSH Link lends a machine's page in one of its frames: its browser (frame/browser.ts). */
+export declare const DESKTOP_GLOBAL = "__dshLinkDesktop";
+/** The settings the frame browser script reads: `{ machine, port }`. */
+export declare const FRAME_CONFIG_GLOBAL = "__dshLinkFrame";
 /** On the shell page's root: the height of the title strip over its frames in a desktop window (client/styles.ts). */
 export declare const BAR_HEIGHT = "--dl-bar-height";
 /**
@@ -91,12 +95,22 @@ export declare function injectRequestBase(html: string, prefix: string): string;
 export declare function rawStorage(): Storage;
 /** Make a Session the one a machine's page restores at its next boot ('' as id: this host's own page). */
 export declare function selectSession(storage: Storage, machineId: string, sessionId: string): void;
+/** The frame browser script (frame/entry.ts, built to lib/frame-browser.js) and this host's forwarding port. */
+export interface FrameBrowser {
+    script: string;
+    port: number;
+}
+/**
+ * Lend a machine's page in a frame of the desktop window the window's browser (frame/browser.ts). The script does
+ * nothing anywhere else.
+ */
+export declare function injectFrameBrowser(html: string, id: string, browser: FrameBrowser): string;
 /**
  * A machine's index as this host serves it under its mount. Scripts run in head order, so the request base and the
  * namespace come first (everything after them requests from the machine and reads the namespaced storage), then the
  * desktop guard.
  */
-export declare function mountedIndex(html: string, id: string): Rewritten;
+export declare function mountedIndex(html: string, id: string, browser?: FrameBrowser): Rewritten;
 /** Reads the Session a page shows, '' when none: the store {@link CURRENT_SESSION_KEY} holds `{ sessionId }`. */
 export declare function currentSession(storage: {
     getItem(key: string): string | null;

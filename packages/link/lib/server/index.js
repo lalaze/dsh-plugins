@@ -8,13 +8,16 @@
  * On top: an attention board (waiting approvals and questions, finished turns) and a safe remote restart.
  */
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, platform } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Schema from '@deepseek-ai/schemastery';
 import { AttentionTracker } from './attention.js';
 import { AttentionBoard, SELF, serveEvents } from './attention-board.js';
+import { injectPanelBoot, loadPanel, PANEL_ROUTE, PanelFrames } from './browser-panel.js';
+import { serveForward, serveForwardUpgrade } from './forward/target.js';
+import { WindowForwarder } from './forward/window.js';
 import { Admission, Frontend, listen } from './listener.js';
 import { LoopbackSession } from './login.js';
 import { candidatesOf, MachineBook } from './machines.js';
@@ -34,6 +37,8 @@ export const Config = Schema.object({
     peers: Schema.array(Schema.string()).default([]).description('Machines added by address, e.g. http://100.96.195.115:7390 / 手动添加的机器地址'),
     tailscale: Schema.string().default('').description('Path of the tailscale command; empty finds it / tailscale 命令的路径，留空自动查找'),
     refreshSeconds: Schema.natural().min(10).max(600).default(30).description('How often other machines are checked, in seconds / 多久检查一次其他机器（秒）'),
+    frameBrowser: Schema.boolean().default(true).description('In the desktop app, give other machines\' pages the Browser panel; their own addresses (localhost, private network) load over their network / 在桌面 App 里给其他机器的页面提供浏览器面板，它们自己的地址（localhost、内网）走它们的网络'),
+    browserPort: Schema.natural().min(1024).max(65525).default(7389).description('Port on this computer\'s loopback that the Browser panel loads other machines\' addresses from / 浏览器面板在本机回环地址上用来打开其他机器地址的端口'),
     allowSelf: Schema.boolean().default(false).description('Testing: admit requests from this machine\'s own address / 测试用：接受来自本机地址的请求'),
     listenHost: Schema.string().default('').description('Testing: listen address; empty uses this machine\'s Tailscale IPv4 / 测试用：监听地址'),
 });
@@ -77,6 +82,17 @@ export function apply(ctx, config) {
         return `http://127.0.0.1:${port}`;
     };
     const self = { name: config.name || hostname().replace(/\.local$/, ''), os: OS_NAMES[platform()] ?? platform(), version, tailnet: { running: false } };
+    const logMisses = (() => {
+        const logged = new Set();
+        return (where, misses) => {
+            for (const miss of misses) {
+                if (logged.has(`${where} ${miss.point}`))
+                    continue;
+                logged.add(`${where} ${miss.point}`);
+                warn(`dsh-link: ${where}: ${miss.point}: ${miss.reason}`);
+            }
+        };
+    })();
     // Every Session's appends, open in a page or not.
     const tracker = new AttentionTracker(session => ctx.get('sessionTitle')?.get(ctx.get('sessions')?.get?.(session.id) ?? session)?.title);
     ctx.on('session/event', (session, event) => tracker.observe(session, event), { global: true });
@@ -163,9 +179,32 @@ export function apply(ctx, config) {
         return () => { for (const dispose of disposers)
             dispose(); };
     }, 'dsh-link: routes');
+    // ---- The Browser panel on other machines' pages in this computer's desktop window (frame/browser.ts).
+    const frameScript = (() => {
+        if (!config.frameBrowser)
+            return undefined;
+        try {
+            return readFileSync(new URL('../frame-browser.js', import.meta.url), 'utf8');
+        }
+        catch {
+            warn('dsh-link: lib/frame-browser.js is missing: other machines\' pages get no Browser panel here');
+            return undefined;
+        }
+    })();
+    const forwarder = new WindowForwarder({ machine: id => book.get(id), stateFile: join(dir, 'forward.json'), warn });
+    if (config.frameBrowser) {
+        ctx.effect(() => {
+            let stopped = false;
+            const started = forwarder.start(config.browserPort).then(() => {
+                if (!stopped)
+                    self.browser = forwarder.port ? { port: forwarder.port } : { error: forwarder.error ?? 'not listening' };
+            });
+            // Stopped while still binding: close what the start opened.
+            return async () => { stopped = true; await started; await forwarder.close(); self.browser = undefined; };
+        }, 'dsh-link: browser forwarding');
+    }
     // ---- Mounts: another machine's whole DSH under /dsh-link/peer/<id>/.
     let reprobe;
-    const loggedMisses = new Set();
     const mountTarget = (req, res) => {
         const url = new URL(req.url ?? '/', 'http://x');
         const match = /^\/dsh-link\/peer\/([A-Za-z0-9_-]+)(\/.*)?$/.exec(url.pathname);
@@ -202,13 +241,8 @@ export function apply(ctx, config) {
             headers: requestHeaders(req.headers, { host: upstream.host, [HOP_HEADER]: '1' }),
             location: locationUnder(upstream, mountPrefix(where.id)),
             html: html => {
-                const page = mountedIndex(html, where.id);
-                for (const miss of page.misses) {
-                    if (loggedMisses.has(miss.point))
-                        continue;
-                    loggedMisses.add(miss.point);
-                    warn(`dsh-link: ${machine.name}'s page: ${miss.point}: ${miss.reason}`);
-                }
+                const page = mountedIndex(html, where.id, frameScript ? { script: frameScript, port: forwarder.port ?? 0 } : undefined);
+                logMisses(`${machine.name}'s page`, page.misses);
                 return page.html;
             },
             onUnreachable: () => reprobe?.(),
@@ -267,7 +301,51 @@ export function apply(ctx, config) {
         let markedBack = false;
         const refused = new Map();
         const session = new LoopbackSession(ctx.connection, origin);
-        const frontend = new Frontend(session, origin, { http: { '/dsh-link/hello': hello, '/dsh-link/events': (_req, res) => serveEvents(tracker, res), '/dsh-link/restart': (req, res) => restart.serve(req, res) } });
+        // DSH's Browser panel for this machine's pages as the other machines' desktop windows show them (browser-panel.ts).
+        let panelRead;
+        const panel = () => {
+            if (!panelRead) {
+                const entry = (() => { try {
+                    return process.argv[1] ? realpathSync(process.argv[1]) : undefined;
+                }
+                catch {
+                    return process.argv[1];
+                } })();
+                const profile = ctx.get('profileContext')?.dir;
+                const read = loadPanel([profile ? join(profile, 'package.json') : undefined, entry, fileURLToPath(import.meta.url)]);
+                logMisses('Browser panel', read.misses);
+                panelRead = read;
+            }
+            return panelRead.panel;
+        };
+        const frontend = new Frontend(session, origin, {
+            http: {
+                '/dsh-link/hello': hello, '/dsh-link/events': (_req, res) => serveEvents(tracker, res), '/dsh-link/restart': (req, res) => restart.serve(req, res),
+                ...(config.frameBrowser ? {
+                    [PANEL_ROUTE]: (_req, res) => {
+                        const found = panel();
+                        if (!found) {
+                            sendText(res, 404, 'Not found');
+                            return;
+                        }
+                        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache', 'content-length': Buffer.byteLength(found.code) });
+                        res.end(found.code);
+                    },
+                } : {}),
+            },
+            ...(config.frameBrowser ? {
+                page: (html) => {
+                    const found = panel();
+                    if (!found)
+                        return html;
+                    const page = injectPanelBoot(html, found);
+                    logMisses('this machine\'s page', page.misses);
+                    return page.html;
+                },
+                events: () => { const found = panel(); return found ? new PanelFrames(found) : undefined; },
+                forward: { http: serveForward, upgrade: serveForwardUpgrade },
+            } : {}),
+        });
         const startListener = async (status) => {
             if (!config.listen || listening || starting || stopped)
                 return;
