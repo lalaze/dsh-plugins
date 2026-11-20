@@ -18,7 +18,9 @@ const RETRY_MS = [500, 1000, 2000, 4000, 8000, 15_000];
 /** A clock that jumped this far means the computer slept, and the connection is as good as gone. */
 const WAKE_MS = 10_000;
 const NOTICE = 'Connection lost, reconnecting… 连接中断，正在重连…';
-const DIRECT_NOTICE = 'This host has no Python 3 or Node.js 22, so this terminal ends with its connection. 这台机器缺 Python 3 或 Node.js 22，此终端断线后不会保留。';
+/** Seen only by a page that does not start the CLI again by itself, as one loaded before this version. */
+const IDLE_NOTICE = 'Ended after a day unused. Restart to resume the conversation. 闲置一天已结束，重启即可继续这个会话。';
+const DIRECT_NOTICE ='This host has no Python 3 or Node.js 22, so this terminal ends with its connection. 这台机器缺 Python 3 或 Node.js 22，此终端断线后不会保留。';
 const dim = (text: string) => `\r\n\x1b[2m${text}\x1b[0m\r\n`;
 
 export interface HoldOptions {
@@ -123,6 +125,7 @@ export async function holdTerminal(options: HoldOptions): Promise<number | 'dire
       output.write(dim(DIRECT_NOTICE));
       return 'direct';
     }
+    if (code === ATTACH_EXIT.idle) output.write(dim(IDLE_NOTICE));
     if (code !== null && code !== ATTACH_EXIT.ssh && code !== ATTACH_EXIT.lost) return code;
     // Lasted a while, so this is a new loss rather than the same one still going on.
     if (Date.now() - started > 30_000) { failures = 0; noticed = false; }

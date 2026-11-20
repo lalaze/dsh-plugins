@@ -3,6 +3,7 @@ import { afterEach, beforeEach, mock, test } from 'node:test';
 import { JSDOM } from 'jsdom';
 import React, { act, useEffect } from 'react';
 import type { Root } from 'react-dom/client';
+import { ATTACH_EXIT } from '../src/holder-exit.js';
 import { TuiTerminal } from '../src/client/tui.js';
 import { TuiUploads } from '../src/client/tui-files.js';
 import { KeptTerminals } from '../src/client/tui-kept.js';
@@ -11,7 +12,7 @@ import { TuiRenderChoices } from '../src/client/tui-render.js';
 import { TuiScrollChoice } from '../src/client/tui-scroll.js';
 
 type Props = Parameters<typeof TuiTerminal>[0];
-type State = { phase: string; writable: boolean; issue?: string; info: { state: string }; frame: number };
+type State = { phase: string; writable: boolean; issue?: string; info: { state: string; exitCode?: number }; frame: number };
 let root: Root | undefined, container: HTMLElement;
 const globals = ['window', 'document', 'navigator', 'HTMLElement', 'localStorage', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -37,7 +38,7 @@ function rig() {
   let state: State = { phase: 'connected', writable: true, info: { state: 'running' }, frame: 0 };
   const listeners = new Set<() => void>(), themeListeners = new Set<() => void>();
   let theme = { fontFamilies: { terminal: 'mono' } };
-  const counts = { wrapper: 0, body: 0, subscribed: 0, unsubscribed: 0, viewEffect: 0, tabEffect: 0, terminalEffect: 0, themeEffect: 0, connect: 0, restart: 0 };
+  const counts = { wrapper: 0, body: 0, subscribed: 0, unsubscribed: 0, viewEffect: 0, tabEffect: 0, terminalEffect: 0, themeEffect: 0, connect: 0, restart: 0, close: 0 };
   const store = {
     subscribe(listener: () => void) {
       assert.equal(this, store, 'the host store keeps its receiver');
@@ -62,7 +63,7 @@ function rig() {
   kept.restart = () => { counts.restart++; };
   const services: Props['services'] = {
     slots: { entries() { counts.wrapper++; return [{ options: { key: '@deepseek-ai/dsh-client-ui-sidebar-terminal' }, component: Body }]; }, inject() {}, register() {}, subscribe: () => () => {} },
-    terminals: { view: () => model, launchShells: async () => ({ shells: [] }), close() {} },
+    terminals: { view: () => model, launchShells: async () => ({ shells: [] }), close() { counts.close++; } },
     uploads: new TuiUploads(async () => '/uploaded'), prompts: new TuiPrompts(), t: {}, title: () => undefined, cli: () => 'claude', kept, shells: new Map(),
     render: new TuiRenderChoices({ getItem: () => null, setItem() {} }),
     scroll: new TuiScrollChoice(async () => {}, { getItem: () => null, setItem() {} }), running: () => false,
@@ -119,6 +120,22 @@ test('visibility reconnects only on return, while missing-terminal and theme cha
   await act(async () => root!.unmount()); root = undefined;
   assert.equal(r.listeners.size, 0);
   assert.equal(r.themeListeners.size, 0);
+});
+
+test('a terminal its holder ended unused is closed and replaced once the conversation is on screen', async () => {
+  const r = rig(); await r.render();
+  await r.update({ phase: 'closed', writable: false, info: { state: 'exited', exitCode: 3 } });
+  await r.render({ visible: true });
+  assert.equal(r.counts.restart, 0, 'a CLI that exited by itself stays as it ended');
+  await r.render({ visible: false });
+  await r.update({ info: { state: 'exited', exitCode: ATTACH_EXIT.idle } });
+  assert.equal(r.counts.restart, 0, 'out of view it waits');
+  await r.render({ visible: true });
+  assert.equal(r.counts.restart, 1);
+  assert.equal(r.counts.close, 1);
+  await r.update({ frame: 4 });
+  assert.equal(r.counts.restart, 1);
+  assert.equal(r.listeners.size, 2, 'still one subscription for the issue');
 });
 
 test('generation replacement releases the old subscriptions and opens a fresh wrapper', async () => {

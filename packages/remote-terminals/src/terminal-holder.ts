@@ -28,6 +28,13 @@ const ID = /^[a-z]+-[0-9a-f]{16,64}$/;
 const number = (name: string, fallback: number) => (Number(process.env[name]) > 0 ? Number(process.env[name]) : fallback);
 /** Only a machine's restart or this ends a terminal nobody came back to, so a forgotten one does not run for ever. A TUI conversation resumes its CLI afterwards. */
 const KEEP_MS = number('DSH_TERMINAL_KEEP_MS', 7 * 24 * 3600_000);
+/**
+ * A TUI conversation nobody typed in and whose CLI printed nothing for this long ends, attached or not: a DSH that keeps
+ * its terminal open would keep it for ever otherwise, and each one holds a CLI's memory. A turn under way keeps printing,
+ * as its spinner does. Opening the conversation again resumes the CLI. A sidebar terminal may run a server that says
+ * nothing for days, so only KEEP_MS ends one of those.
+ */
+const IDLE_MS = number('DSH_TERMINAL_IDLE_MS', 24 * 3600_000);
 /** Lines given to a client that joins. DSH's terminals keep 1000 unless configured otherwise. */
 const SCROLLBACK = 2000;
 /** The CLI waits for a client this long at most: a client that stopped reading is dropped, and comes back through a new connection. */
@@ -195,6 +202,9 @@ async function daemon(id: string, python: string): Promise<void> {
   fs.rmSync('history', { force: true });
   let screen: HeadlessTerminal | undefined, serialize: (() => string) | undefined, serializeScreen: (() => string) | undefined, shim: ChildProcess | undefined;
   let title = '', report = '', parsing = 0, detachedAt = Date.now(), ended = false, holding = false, outputAt = 0;
+  /** Typing in it or its CLI printing, which the start counts as. */
+  let usedAt = Date.now(), idled = false;
+  const idles = id.startsWith('tui-');
   /** Modes the serializer does not restore. */
   const modes = new Map<number, boolean>();
   const clients = new Map<Socket, { cols: number; rows: number }>(), stalled = new Map<Socket, NodeJS.Timeout>();
@@ -322,7 +332,8 @@ async function daemon(id: string, python: string): Promise<void> {
   const finish = (code: number | null) => {
     if (ended) return; ended = true;
     const leave = () => {
-      for (const socket of clients.keys()) send(socket, FRAME.exit, JSON.stringify({ code }));
+      // A client from before `idle` reads the CLI's own code.
+      for (const socket of clients.keys()) send(socket, FRAME.exit, JSON.stringify(idled ? { code, idle: true } : { code }));
       server.close();
       process.chdir('/');
       fs.rmSync(join(base, id), { recursive: true, force: true });
@@ -350,7 +361,7 @@ async function daemon(id: string, python: string): Promise<void> {
     child.stdin!.on('error', () => {});
     (child.stdio[3] as NodeJS.WritableStream).on('error', () => {});
     child.stdout!.on('data', (chunk: Buffer) => {
-      parsing += chunk.length; outputAt = Date.now();
+      parsing += chunk.length; outputAt = usedAt = Date.now();
       if (parsing > PARSE_HIGH) child.stdout!.pause();
       // Interactive output must not wait behind headless parsing. Joining clients alone wait for their snapshot.
       output.write(frame(FRAME.output, chunk));
@@ -373,7 +384,7 @@ async function daemon(id: string, python: string): Promise<void> {
       if (latest) resize(latest.cols, latest.rows); else detachedAt = Date.now();
     });
     socket.on('data', frames((type, payload) => {
-      if (type === FRAME.input) { if (clients.has(socket)) shim?.stdin?.write(Buffer.from(payload)); return; }
+      if (type === FRAME.input) { if (clients.has(socket)) { usedAt = Date.now(); shim?.stdin?.write(Buffer.from(payload)); } return; }
       if (type !== FRAME.hello && type !== FRAME.resize) return;
       let size: { cols?: unknown; rows?: unknown };
       try { size = JSON.parse(payload.toString('utf8')) as typeof size; } catch { return; }
@@ -392,10 +403,14 @@ async function daemon(id: string, python: string): Promise<void> {
   });
   process.on('SIGTERM', () => { if (shim) shim.kill('SIGTERM'); else finish(0); });
   setInterval(() => {
+    if (idles && shim && !idled && Date.now() - usedAt > IDLE_MS) {
+      idled = true; note(`ending: unused for ${Math.round((Date.now() - usedAt) / 60_000)} min`);
+      shim.kill('SIGTERM'); return;
+    }
     if (clients.size) return;
     if (!shim && Date.now() - detachedAt > 60_000) finish(0);
     if (shim && Date.now() - detachedAt > KEEP_MS) shim.kill('SIGTERM');
-  }, Math.min(60_000, KEEP_MS / 4));
+  }, Math.min(60_000, KEEP_MS / 4, IDLE_MS / 4));
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen('sock', resolve); });
   fs.writeFileSync('pid', String(process.pid), { mode: 0o600 });
 }
@@ -491,9 +506,9 @@ async function attach(id: string, encoded: string, history: string): Promise<voi
     if (type === FRAME.output) { focusReports.read(payload); if (!process.stdout.write(Buffer.from(payload))) { socket.pause(); process.stdout.once('drain', () => socket.resume()); } return; }
     if (type === FRAME.size) { try { theirs = JSON.parse(payload.toString('utf8')) as typeof theirs; theirsAt = Date.now(); } catch { /* as if it had not said */ } return; }
     if (type !== FRAME.exit) return;
-    let code: number | null | undefined;
-    try { code = (JSON.parse(payload.toString('utf8')) as { code?: number | null }).code; } catch { /* reported as a failure */ }
-    process.stdout.write('', () => process.exit(attachExitCode(code)));
+    let code: number | null | undefined, idle = false;
+    try { ({ code, idle = false } = JSON.parse(payload.toString('utf8')) as { code?: number | null; idle?: boolean }); } catch { /* reported as a failure */ }
+    process.stdout.write('', () => process.exit(idle ? ATTACH_EXIT.idle : attachExitCode(code)));
   }));
 }
 

@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.23 — A TUI left unused for a day ends by itself
+
+- A TUI conversation's CLI kept running for as long as a DSH had its terminal open, and only ended 7 days after the last device left it. With many conversations open, the idle CLIs added up: 42 on one machine, 4.3 GB between them. Now a TUI conversation that nobody has typed in and whose CLI has printed nothing for 24 hours ends, whether or not a DSH is attached. A turn under way keeps printing, so it never counts as unused. Anything left running inside the CLI, such as a background command, ends with it.
+- Opening the conversation again starts its CLI again on the same session (`claude --resume`, `codex resume`, `agy --conversation`), with its history; the first time takes a few seconds. A page loaded before this version shows a line saying so, and DSH's restart does the same.
+- Sidebar terminals are not affected: they may run a server that prints nothing for days, and still end only 7 days after the last device left.
+- Can be upgraded on its own, without a restart; reload the page on each device. TUI conversations already running keep the old rule until their CLI next starts.
+
 ## 0.1.22 — A row of keys under a TUI on phones, and narrower margins
 
 - A phone's keyboard has only letters and Enter, so in a TUI conversation on a phone you could not switch Claude Code's mode (Shift+Tab), move through its menus or history, or move the cursor in what you typed. On a touch screen a row of keys now sits under the terminal: **Esc · Tab · ⇧Tab · ↑ · ↓ · ← · →**, with the paperclip and sliders buttons at its right end. Each sends what the key sends (the arrows follow the cursor key mode the CLI asked for), a held arrow repeats, and none takes the focus, so the keyboard stays open or closed as it was. The row is part of the layout rather than floating over the terminal, so the last line is no longer covered; the terminal is about two lines shorter. The Esc button of 0.1.19 is now the row's first key.

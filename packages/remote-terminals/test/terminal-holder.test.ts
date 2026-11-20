@@ -140,6 +140,41 @@ test('a terminal nobody came back to ends in the end', options, async () => {
   assert.ok(await until(() => !existsSync(join(base, id)), 5000), 'it has expired');
 });
 
+const tuiId = () => `tui-${(++counter).toString(16).padStart(32, '0')}`;
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+test('a TUI conversation left unused ends with its own code, attached or not', options, async () => {
+  const id = tuiId();
+  const client = attach(id, `echo ready; ${SHELL}`, { DSH_TERMINAL_IDLE_MS: '600' });
+  assert.ok(await until(() => client.output().includes('> ')), client.output());
+  assert.equal(await client.exited, ATTACH_EXIT.idle);
+  assert.ok(await until(() => !existsSync(join(base, id))), 'an ended terminal leaves nothing behind');
+
+  const alone = tuiId(), first = attach(alone, SHELL, { DSH_TERMINAL_IDLE_MS: '600' });
+  assert.ok(await until(() => first.output().includes('> ')));
+  first.child.kill('SIGKILL'); await first.exited;
+  assert.ok(await until(() => !existsSync(join(base, alone))), 'with nobody attached as well');
+});
+
+test('typing or a CLI printing keeps a TUI conversation, and a sidebar terminal never ends unused', options, async () => {
+  const idle = { DSH_TERMINAL_IDLE_MS: '600' };
+  // Prints nothing at all, typing included.
+  const typed = tuiId(), typing = attach(typed, 'stty -echo; echo ready; exec cat > /dev/null', idle);
+  assert.ok(await until(() => typing.output().includes('ready')));
+  const printed = tuiId(), printing = attach(printed, 'while :; do sleep 0.2; printf .; done', idle);
+  const tab = newId(), sidebar = attach(tab, SHELL, idle);
+  assert.ok(await until(() => sidebar.output().includes('> ')));
+  for (let at = 0; at < 1800; at += 200) { typing.send('x'); await sleep(200); }
+  for (const id of [typed, printed, tab]) assert.ok(existsSync(join(base, id)), id);
+  assert.equal(await typing.exited, ATTACH_EXIT.idle, 'it ends once the typing stops');
+  printing.child.kill('SIGKILL'); await printing.exited;
+  assert.ok(existsSync(join(base, tab)));
+  sidebar.send('exit 4\n');
+  assert.equal(await sidebar.exited, 4);
+  process.kill(Number(readFileSync(join(base, printed, 'pid'), 'utf8')), 'SIGTERM');
+  assert.ok(await until(() => !existsSync(join(base, printed))));
+});
+
 test('a client that stopped reading is dropped rather than holding up the CLI, and others carry on', options, async () => {
   const id = newId(), env = { DSH_TERMINAL_STALLED_MS: '300' };
   const stuck = attach(id, `i=0; while :; do i=$((i+1)); echo "line $i of something long enough to fill the pipes quickly"; done`, env);
@@ -434,6 +469,12 @@ const hold = (fake: { input: string }, output = silent()) => {
 test('the launcher reports the terminal exit code', async () => {
   const fake = fakeSsh(['5']), { run } = hold(fake);
   assert.equal(await withPath(fake.bin, run), 5);
+});
+
+test('the launcher reports a conversation that ended unused as such, with a word for a page that does not restart it', async () => {
+  const fake = fakeSsh([String(ATTACH_EXIT.idle)]), { run, output } = hold(fake);
+  assert.equal(await withPath(fake.bin, run), ATTACH_EXIT.idle);
+  assert.match((output as unknown as { text(): string }).text(), /闲置一天已结束/);
 });
 
 test('the launcher installs the script once and tries again', async () => {

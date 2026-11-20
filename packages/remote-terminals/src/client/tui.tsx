@@ -18,6 +18,7 @@ import { useScreenClaim } from './tui-screen.js';
 import { TuiScrollChoice, useConversationScrollback } from './tui-scroll.js';
 import { followNewSessions } from './tui-new-sessions.js';
 import { KeptTerminals, type KeptTerminal } from './tui-kept.js';
+import { ATTACH_EXIT } from '../holder-exit.js';
 
 /** The right sidebar terminal's slot key; its body is reused so the TUI looks and behaves like every DSH terminal. */
 const TERMINAL_TAB = '@deepseek-ai/dsh-client-ui-sidebar-terminal', SHELL_KEY = 'dsh.terminal.shell';
@@ -78,7 +79,7 @@ interface Slots {
   entries(name: string): readonly SlotEntry[];
   subscribe(name: string, listener: () => void): () => void;
 }
-interface TerminalState { issue?: string; phase: string; writable?: boolean; info?: { state?: string } }
+interface TerminalState { issue?: string; phase: string; writable?: boolean; info?: { state?: string; exitCode?: number } }
 interface TerminalModel { connect(): void; state: { getSnapshot(): TerminalState; subscribe(listener: () => void): () => void } }
 interface Terminals {
   view(sessionId: string, key: string, contentId: string, terminalId?: string, shellPath?: string): TerminalModel;
@@ -174,8 +175,12 @@ export function TuiTerminal({ item, services }: { item: KeptTerminal; services: 
   const model = useMemo(() => terminals.view(sessionId, key, terminalContent(sessionId, generation), undefined, shell), [terminals, sessionId, key, generation, shell]);
   const subscribe = useMemo(() => model.state.subscribe.bind(model.state), [model]);
   const snapshot = useCallback(() => model.state.getSnapshot(), [model]);
-  // Output and ACK snapshots belong to DSH's body, not this lifecycle wrapper.
-  const issue = useSyncExternalStore(subscribe, useCallback(() => model.state.getSnapshot().issue, [model]));
+  // Output and ACK snapshots belong to DSH's body, not this lifecycle wrapper. Its holder ending a CLI left unused for a
+  // day reads as an issue of its own; see ATTACH_EXIT.
+  const issue = useSyncExternalStore(subscribe, useCallback(() => {
+    const { info, issue } = model.state.getSnapshot();
+    return info?.state === 'exited' && info.exitCode === ATTACH_EXIT.idle ? 'idle' : issue;
+  }, [model]));
   const view = useCallback(() => model, [model]);
   const useTabInfo = useCallback(() => ({ tab: { id: key, visible, actions: { openTab: restart } } }), [key, visible, restart]);
   const useTerminal = useCallback(() => useSyncExternalStore(subscribe, snapshot), [subscribe, snapshot]);
@@ -189,8 +194,13 @@ export function TuiTerminal({ item, services }: { item: KeptTerminal; services: 
     });
     return off;
   }, [model]);
-  // After DSH restarted the terminal is gone; a new one resumes the same CLI session.
-  useEffect(() => { if (visible && issue === 'missingTerminal') restart(); }, [visible, issue, restart]);
+  // After DSH restarted the terminal is gone; a new one resumes the same CLI session. So does one that ended unused,
+  // closed first so that ended ones do not pile up in DSH.
+  useEffect(() => {
+    if (!visible || (issue !== 'missingTerminal' && issue !== 'idle')) return;
+    if (issue === 'idle') terminals.close(sessionId, key, terminalContent(sessionId, generation));
+    restart();
+  }, [visible, issue, restart]);
   // Coming back to a conversation means typing in it, but only the page that attached last can type. And out of view, a
   // lost connection can end in a failure with no one to press Reconnect: DSH drops a reconnecting terminal's hold when
   // it opens another terminal, as it holds only the sidebar's.

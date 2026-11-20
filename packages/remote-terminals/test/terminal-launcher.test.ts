@@ -25,7 +25,7 @@ async function launcherRig(t: TestContext, holder: boolean | string = false) {
   // Every launcher invocation has a finite fallback, never the developer's interactive shell.
   // A login environment drops DSH_TERMINAL_CAPTURE, so a shell started from one writes beside its HOME.
   await writeFile(shell, `#!${process.execPath}\nrequire('node:fs').writeFileSync(process.env.DSH_TERMINAL_CAPTURE||process.env.HOME+'/local-capture.json',JSON.stringify({args:process.argv.slice(2),cwd:process.cwd(),electron:process.env.ELECTRON_RUN_AS_NODE??null}));\n`); await chmod(shell, 0o700);
-  for (const name of ['core/domain', 'core/saved-hosts', 'core/ssh', 'core/remote-host', 'core/access', 'tui', 'tui-state', 'holder-protocol', 'terminal-hold']) {
+  for (const name of ['core/domain', 'core/saved-hosts', 'core/ssh', 'core/remote-host', 'core/access', 'tui', 'tui-state', 'holder-exit', 'holder-protocol', 'terminal-hold']) {
     // As the build lays them out: the shared core's files beside the plugin's own in core/, imported by relative path.
     const source = await readFile(new URL(name.startsWith('core/') ? `../../remote-core/src/${name.slice(5)}.ts` : `../src/${name}.ts`, import.meta.url), 'utf8');
     await mkdir(dirname(join(modules, name)), { recursive: true });
