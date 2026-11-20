@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.24 — No piled-up text when switching to another machine
+
+- Switching machines with DSH Link could show a TUI conversation's text piled up for a moment: several screens of the conversation drawn over each other, until the CLI next printed something. DSH Link keeps the pages of machines you are not looking at hidden but still laid out, and a TUI there that went on running (a turn, a spinner, a status line) kept drawing. With WebGL rendering, which is the default, each of those draws went on top of the last, because the terminal's background is see-through so the window's background shows; the browser only empties the canvas once it has shown it, so the first frame after switching showed every screen drawn since you left.
+- Now each draw starts from an empty canvas. Rendering without WebGL was never affected.
+- Can be upgraded on its own, without a restart; reload the page on each device. The fix is in the page of the machine the TUI runs on, so update every machine whose TUI conversations you open through DSH Link.
+
 ## 0.1.23 — A TUI left unused for a day ends by itself
 
 - A TUI conversation's CLI kept running for as long as a DSH had its terminal open, and only ended 7 days after the last device left it. With many conversations open, the idle CLIs added up: 42 on one machine, 4.3 GB between them. Now a TUI conversation that nobody has typed in and whose CLI has printed nothing for 24 hours ends, whether or not a DSH is attached. A turn under way keeps printing, so it never counts as unused. Anything left running inside the CLI, such as a background command, ends with it.
