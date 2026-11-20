@@ -41,18 +41,7 @@ export declare const onlyFocusReports: (input: Uint8Array) => boolean;
  * focused terminal answer at once, and each answer would take the screen again.
  */
 export declare const FOCUS_SETTLE_MS = 1000;
-/**
- * What `terminal-holder.mjs attach` exits with, other than the terminal's own code. The launcher takes these codes as
- * meaning the holder, so a terminal that exits with one of them reports 1. ssh itself exits with 255 when the connection is lost.
- */
-export declare const ATTACH_EXIT: {
-    readonly noScript: 117;
-    readonly noRuntime: 118;
-    readonly noPty: 119;
-    readonly lost: 254;
-    readonly ssh: 255;
-};
-export declare const attachExitCode: (code: number | null | undefined) => number;
+export { ATTACH_EXIT, attachExitCode } from './holder-exit.js';
 /** The environment variable that tells the launcher which DSH terminal it is. See installWorkspaceTerminal. */
 export declare const TERMINAL_ID_ENV = "DSH_TERMINAL_ID";
 /** A TUI conversation has one CLI whatever DSH terminal shows it, and whichever DSH: `key` is its `tuiKey`. */

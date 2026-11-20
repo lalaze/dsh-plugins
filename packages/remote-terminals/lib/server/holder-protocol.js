@@ -55,13 +55,7 @@ export const onlyFocusReports = (input) => input.length > 0 && /^(?:\x1b\[[IO])+
  * focused terminal answer at once, and each answer would take the screen again.
  */
 export const FOCUS_SETTLE_MS = 1000;
-/**
- * What `terminal-holder.mjs attach` exits with, other than the terminal's own code. The launcher takes these codes as
- * meaning the holder, so a terminal that exits with one of them reports 1. ssh itself exits with 255 when the connection is lost.
- */
-export const ATTACH_EXIT = { noScript: 117, noRuntime: 118, noPty: 119, lost: 254, ssh: 255 };
-const RESERVED = new Set(Object.values(ATTACH_EXIT));
-export const attachExitCode = (code) => (code === null || code === undefined ? 1 : RESERVED.has(code) ? 1 : code);
+export { ATTACH_EXIT, attachExitCode } from './holder-exit.js';
 /** The environment variable that tells the launcher which DSH terminal it is. See installWorkspaceTerminal. */
 export const TERMINAL_ID_ENV = 'DSH_TERMINAL_ID';
 const hashed = (kind, ...parts) => `${kind}-${createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32)}`;
