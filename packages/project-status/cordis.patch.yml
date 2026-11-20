@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-project-status
+      name: dsh-project-status
+      config: {}
