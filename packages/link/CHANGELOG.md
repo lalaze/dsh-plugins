@@ -4,6 +4,12 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.11 — The sidebar reaches the top of the desktop window on other machines too
+
+Update the computer whose desktop window shows the other machines; reload the window once. The other machines need nothing.
+
+- In the desktop app, another machine's left sidebar started below the title strip, leaving a band of bare wallpaper (or page background) above it with the sidebar's edge line cut short. It now runs up under the window buttons, as on this computer's own page; everything in it stays where it was.
+
 ## 0.1.10 — A shorter machine menu, one line per machine
 
 Update every computer; no restart needed, reload the page once.

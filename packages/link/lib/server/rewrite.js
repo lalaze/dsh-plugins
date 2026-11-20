@@ -79,9 +79,20 @@ export const BAR_HEIGHT = '--dl-bar-height';
  * A machine's page in a frame of the desktop window fills the whole window, so its background (and a wallpaper) reaches
  * the top as on the window's own page. The shell's see-through title strip lies over the top band: the page starts
  * below it, and its menus and dialogs keep clear of it. The band follows the window (none in full screen).
+ *
+ * The left sidebar still reaches the top, as on the window's own page, where it runs under the window buttons: DSH's
+ * frame is pulled back up over the band with its columns starting below it, the sidebar column alone climbs back into
+ * it, and the sidebar's content keeps clear of it by a see-through top border, which its own fill (or a wallpaper tint)
+ * paints under. The frame's overlay layer and its leading controls (the drawer's opener) stay below the band.
  */
 export function injectFrameTop(html) {
-    const style = '<style>html[data-dl-framed] body{box-sizing:border-box;padding-top:var(--dl-top,0px)}html[data-dl-framed]{--dsh-frame-overlay-top:calc(var(--dl-top,0px) + 12px)}</style>';
+    const top = 'var(--dl-top,0px)';
+    const frame = `html[data-dl-framed] #root div:has(>[data-shell-overlay])`;
+    const style = `<style>html[data-dl-framed] body{box-sizing:border-box;padding-top:${top}}html[data-dl-framed]{--dsh-frame-overlay-top:calc(${top} + 12px)}`
+        + `${frame}{margin-top:calc(0px - ${top});height:calc(100% + ${top});padding-top:${top}}`
+        + `${frame}:not([data-sidebar-drawer])>:has(>[data-slot="sidebar"]){margin-top:calc(0px - ${top})}`
+        + `${frame}>*>[data-slot="sidebar"]>*{border-top:${top} solid transparent}`
+        + `${frame}>[data-shell-overlay]{top:${top}}${frame}>[data-shell-leading]{margin-top:${top}}</style>`;
     const script = `<script>(()=>{try{const p=window.parent;if(p===window||!p.${SHELL_GLOBAL})return;const h=document.documentElement,r=p.document.documentElement,set=()=>{try{const v=p.getComputedStyle(r).getPropertyValue(${literal(BAR_HEIGHT)}).trim();if(v&&parseFloat(v)>0)h.style.setProperty("--dl-top",v);else h.style.removeProperty("--dl-top")}catch{}};h.setAttribute("data-dl-framed","");set();new MutationObserver(set).observe(r,{attributes:true})}catch{}})()</script>`;
     return injectHead(html, style + script);
 }

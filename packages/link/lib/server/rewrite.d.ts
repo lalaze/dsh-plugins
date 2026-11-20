@@ -64,6 +64,11 @@ export declare const BAR_HEIGHT = "--dl-bar-height";
  * A machine's page in a frame of the desktop window fills the whole window, so its background (and a wallpaper) reaches
  * the top as on the window's own page. The shell's see-through title strip lies over the top band: the page starts
  * below it, and its menus and dialogs keep clear of it. The band follows the window (none in full screen).
+ *
+ * The left sidebar still reaches the top, as on the window's own page, where it runs under the window buttons: DSH's
+ * frame is pulled back up over the band with its columns starting below it, the sidebar column alone climbs back into
+ * it, and the sidebar's content keeps clear of it by a see-through top border, which its own fill (or a wallpaper tint)
+ * paints under. The frame's overlay layer and its leading controls (the drawer's opener) stay below the band.
  */
 export declare function injectFrameTop(html: string): string;
 /** Where the namespace script leaves the page's real localStorage, for the switcher to pick another machine's Session. */
