@@ -4,6 +4,13 @@
 
 What changed in each version and what to do after upgrading, newest first.
 
+## 0.1.22 — A row of keys under a TUI on phones, and narrower margins
+
+- A phone's keyboard has only letters and Enter, so in a TUI conversation on a phone you could not switch Claude Code's mode (Shift+Tab), move through its menus or history, or move the cursor in what you typed. On a touch screen a row of keys now sits under the terminal: **Esc · Tab · ⇧Tab · ↑ · ↓ · ← · →**, with the paperclip and sliders buttons at its right end. Each sends what the key sends (the arrows follow the cursor key mode the CLI asked for), a held arrow repeats, and none takes the focus, so the keyboard stays open or closed as it was. The row is part of the layout rather than floating over the terminal, so the last line is no longer covered; the terminal is about two lines shorter. The Esc button of 0.1.19 is now the row's first key.
+- On a screen up to 600 px wide the terminal's margins shrink from 24 px to 8 px: a phone shows about 49 columns instead of 46, and Claude Code's status line no longer gets cut off as soon.
+- The touch buttons (the keys, the paperclip and the sliders) were nearly invisible in the light theme; they now have a grey that shows in both themes.
+- Computers are not affected. Can be upgraded on its own, without a restart; reload the page on the phone.
+
 ## 0.1.21 — No `^[[I^[[O` at the top of a new TUI
 
 - A TUI conversation just opened could show `^[[I^[[O` in front of the CLI's first lines. These are the focus reports the page sends to say which device you are looking at (0.1.20 sends them whatever the CLI); the first went out while the terminal was still starting and echoed what it was sent. Only the screen was affected: the CLI never received them.

@@ -280,7 +280,7 @@ export const fileStyles = `.ra-tui-files{position:absolute;top:12px;right:12px;z
 .ra-tui-pick{position:absolute;right:27px;bottom:3px;z-index:2}
 .ra-tui-pick-button{display:flex;align-items:center;justify-content:center;width:20px;height:20px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-tertiary,#888);opacity:.55;cursor:pointer}
 .ra-tui-pick-button:hover{opacity:1;background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
-@media (pointer:coarse){.ra-tui-pick{right:46px;bottom:8px}.ra-tui-pick-button{width:32px;height:32px;opacity:.85;border-radius:10px;background:var(--dsw-alias-bg-layer-3,rgba(127,127,127,.2))}.ra-tui-pick-button svg{width:18px;height:18px}}`;
+@media (pointer:coarse){.ra-tui-pick{right:46px;bottom:8px}.ra-tui-pick-button{width:32px;height:32px;opacity:.85;border-radius:10px;background:rgba(127,127,127,.16)}.ra-tui-pick-button svg{width:18px;height:18px}}`;
 
 /**
  * Where a TUI conversation's composer would be. It stands in for the composer on every tab of the conversation, unlike the

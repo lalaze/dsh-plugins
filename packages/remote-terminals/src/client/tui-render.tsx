@@ -61,7 +61,7 @@ export interface Xterm {
   /** Sends data as if the terminal had: it reaches DSH, and the CLI, like a key. */
   input?(data: string, wasUserInput?: boolean): void;
   options: { theme?: { background?: string } & Record<string, unknown>; scrollback?: number };
-  modes: { mouseTrackingMode: string; bracketedPasteMode?: boolean; sendFocusMode?: boolean };
+  modes: { mouseTrackingMode: string; bracketedPasteMode?: boolean; sendFocusMode?: boolean; applicationCursorKeysMode?: boolean };
   buffer: { active: { type: string; cursorX?: number; cursorY?: number; baseY?: number } };
   parser: {
     registerOscHandler(ident: number, handler: (data: string) => boolean): { dispose(): void };
@@ -310,7 +310,7 @@ const styles = `.ra-tui-render{position:absolute;right:3px;bottom:3px;z-index:2}
 .ra-tui-render-act{padding:3px 8px;border:1px solid rgba(127,127,127,.4);border-radius:var(--dsw-radius-sm,6px);background:transparent;color:var(--dsw-alias-label-primary,#eee);font:inherit;cursor:pointer}
 .ra-tui-render-act:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
 .ra-tui-render-act:disabled{cursor:default;opacity:.5}
-@media (pointer:coarse){.ra-tui-render{right:8px;bottom:8px}.ra-tui-render-button{width:32px;height:32px;opacity:.85;border-radius:10px;background:var(--dsw-alias-bg-layer-3,rgba(127,127,127,.2))}.ra-tui-render-button svg{width:18px;height:18px}.ra-tui-render-menu{bottom:38px}}`;
+@media (pointer:coarse){.ra-tui-render{right:8px;bottom:8px}.ra-tui-render-button{width:32px;height:32px;opacity:.85;border-radius:10px;background:rgba(127,127,127,.16)}.ra-tui-render-button svg{width:18px;height:18px}.ra-tui-render-menu{bottom:38px}}`;
 
 function Switch({ label, hint, on, change }: { label: string; hint?: string; on: boolean; change(on: boolean): void }) {
   return <button type="button" role="switch" aria-checked={on} className="ra-tui-render-row" title={hint} onClick={() => change(!on)}>

@@ -12,7 +12,7 @@ import { fileStyles, sendTuiFile, TuiDropTarget, TuiFilePicker, TuiFileStatus, T
 import { TuiPrompts, usePromptText } from './tui-prompt.js';
 import { restoreRemoteTerminals } from './terminal-restore.js';
 import { findXterm, TuiRenderChoices, TuiRenderMenu, useWebglRenderer, type TuiScrollControl } from './tui-render.js';
-import { keyStyles, TuiEscKey } from './tui-keys.js';
+import { keyStyles, TuiKeys } from './tui-keys.js';
 import { useKeyboardFit } from './tui-keyboard.js';
 import { useScreenClaim } from './tui-screen.js';
 import { TuiScrollChoice, useConversationScrollback } from './tui-scroll.js';
@@ -41,6 +41,11 @@ ${cjkFace(700, ['PingFang SC Semibold', 'Microsoft YaHei Bold', 'Noto Sans CJK S
 /** The width xterm 6 gives its scrollbar, and its fit addon leaves free, when a terminal has scrollback. */
 const XTERM_SCROLLBAR = 14;
 /**
+ * Up to this width a column of text counts for more than a margin: a phone gets about 50 columns rather than 46, and
+ * Claude Code's status line fits. The right side keeps only the scrollbar's free space, so the text sits nearly centered.
+ */
+const PHONE_WIDTH = 600;
+/**
  * The terminal as the conversation area: a centered column over a faint trace of whatever wallpaper the window has (more
  * than this and a busy image turns the background muddy), up to
  * the window's edge rather than the chat's scrollbar gutter, as it scrolls by itself. Each
@@ -53,8 +58,9 @@ const terminalStyles = `[data-remote-agents-tui] [data-sidebar-terminal]{padding
 [data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(255,255,255,.92)!important;padding:18px calc(max(24px,(100% - 900px)/2) - ${XTERM_SCROLLBAR}px) 18px max(24px,calc((100% - 900px)/2))!important}
 [data-remote-agents-tui] .xterm-scrollable-element>.scrollbar{display:none!important}
 body[data-ds-dark-theme] [data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){background:rgba(21,21,23,.92)!important}
-[data-remote-agents-tui] .xterm-scrollable-element,[data-remote-agents-tui] .xterm-viewport,[data-remote-agents-tui] .xterm-screen{background:transparent!important}`;
-const blurStyles = '[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}';
+[data-remote-agents-tui] .xterm-scrollable-element,[data-remote-agents-tui] .xterm-viewport,[data-remote-agents-tui] .xterm-screen{background:transparent!important}
+@media (max-width:${PHONE_WIDTH}px){[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm){padding:8px 0 8px 8px!important}}`;
+const blurStyles = '[data-remote-agents-tui] [data-sidebar-terminal]>div:has(>.xterm),[data-remote-agents-tui] .ra-tui-keys{-webkit-backdrop-filter:blur(20px);backdrop-filter:blur(20px)}';
 const viewStyles = 'div:has(>[data-slot="conversation.session"] [data-remote-agents-tui]){scrollbar-gutter:auto;margin-right:0}';
 const startStyles = `.ra-tui-start{display:inline-flex;flex:none;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:none;border-radius:var(--dsw-radius-sm,6px);outline:none;background:transparent;cursor:pointer}
 .ra-tui-start:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(127,127,127,.12))}
@@ -289,7 +295,7 @@ function TuiView({ sessionId, services }: { sessionId: string; services: Service
     <div ref={seat} style={{ display: 'contents' }} />
     {!ready && <div className="ra-empty" role={error ? 'alert' : 'status'} style={{ margin: 'auto' }}>{error || ui('Starting {cli}…', { cli: CLI_NAMES[cli] })}</div>}
     <TuiFileStatus sessionId={sessionId} uploads={services.uploads} />
-    {ready && <TuiEscKey root={root} />}
+    {ready && <TuiKeys root={root} />}
     {ready && <TuiFilePicker sessionId={sessionId} uploads={services.uploads} cli={CLI_NAMES[cli]} />}
     <TuiRenderMenu choices={services.render} scroll={scroll} />
   </div>;
