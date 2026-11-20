@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { emulatedScale, findXterm, GlyphAtlases, TuiRenderChoices, withoutPaint, type AtlasDrawer } from '../src/client/tui-render.js';
+import { clearEachDraw, emulatedScale, findXterm, GlyphAtlases, TuiRenderChoices, withoutPaint, type AtlasDrawer, type DrawingRenderer } from '../src/client/tui-render.js';
 
 /** An element xterm opened in, carrying the fibers React would put on it. */
 function opened(fiber: unknown) {
@@ -195,4 +195,38 @@ test('a terminal that throws while clearing does not keep the others from drawin
   atlases.add(b, []);
   fire(canvas, 'webglcontextrestored');
   assert.equal(b.cleared, 1);
+});
+
+/** xterm's WebGL renderer as clearEachDraw sees it, noting each clear of its canvas and each draw in order. */
+function renderer(steps: string[]) {
+  return {
+    _gl: { COLOR_BUFFER_BIT: 0x4000, clearColor: (...rgba: number[]) => { steps.push(`color ${rgba.join(',')}`); }, clear: (mask: number) => { steps.push(`clear ${mask}`); } },
+    _isAttached: true as boolean,
+    _glyphRenderer: { value: {} as unknown },
+    _rectangleRenderer: { value: {} as unknown },
+    renderRows(start: number, end: number) { steps.push(`draw ${start}-${end}`); },
+  } satisfies DrawingRenderer;
+}
+
+test('each WebGL draw starts from an empty canvas, so screens drawn out of sight do not pile up', () => {
+  const steps: string[] = [], drawn = renderer(steps);
+  assert.equal(clearEachDraw({ _renderer: drawn }), true);
+  drawn.renderRows(0, 44);
+  drawn.renderRows(3, 3);
+  assert.deepEqual(steps, ['color 0,0,0,0', 'clear 16384', 'draw 0-44', 'color 0,0,0,0', 'clear 16384', 'draw 3-3']);
+});
+
+test('nothing is cleared for a draw xterm is not going to make, and an unknown renderer is left alone', () => {
+  const steps: string[] = [], drawn = renderer(steps);
+  clearEachDraw({ _renderer: drawn });
+  // Not in the page yet, or its context lost: xterm returns without drawing, and the canvas keeps what it shows.
+  drawn._isAttached = false;
+  drawn.renderRows(0, 1);
+  drawn._isAttached = true;
+  drawn._glyphRenderer.value = undefined;
+  drawn.renderRows(0, 1);
+  assert.deepEqual(steps, ['draw 0-1', 'draw 0-1']);
+  for (const addon of [undefined, {}, { _renderer: {} }, { _renderer: { renderRows() {} } }, { _renderer: { _gl: {}, renderRows() {}, _isAttached: true } }]) {
+    assert.equal(clearEachDraw(addon), false);
+  }
 });

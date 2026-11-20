@@ -220,6 +220,41 @@ export class GlyphAtlases {
 }
 const atlases = new GlyphAtlases();
 
+/** The part of xterm's WebGL renderer that `clearEachDraw` uses. These are its own fields: the addon offers no way to it. */
+export interface DrawingRenderer {
+  _gl?: { clearColor(red: number, green: number, blue: number, alpha: number): void; clear(mask: number): void; readonly COLOR_BUFFER_BIT: number };
+  _isAttached?: boolean;
+  _glyphRenderer?: { value?: unknown };
+  _rectangleRenderer?: { value?: unknown };
+  renderRows?(start: number, end: number): void;
+}
+
+/**
+ * Makes each WebGL draw of a terminal start from an empty canvas. xterm draws the whole screen every time on top of what the
+ * canvas holds, counting on its background, which covers the whole canvas, to hide the screen before; this plugin makes that
+ * background see-through. A browser empties a WebGL canvas once it has shown it, so a terminal drawing while laid out but out
+ * of sight piles its screens up: DSH Link keeps other machines' pages `visibility: hidden`, where xterm goes on drawing (it
+ * stops only for an element with no box), and the first frame after switching to that machine showed every screen since,
+ * until the next draw (seen 2026-11-20 on a Claude Code TUI that ran a turn while another machine was in view; reproduced in
+ * Chrome with xterm 6 and addon-webgl 0.19).
+ * @param addon - a WebGL addon already loaded into its terminal.
+ * @returns whether its renderer had the fields this needs; if not, it draws as before.
+ */
+export function clearEachDraw(addon: unknown): boolean {
+  const renderer = (addon as { _renderer?: DrawingRenderer } | undefined)?._renderer;
+  const gl = renderer?._gl, draw = renderer?.renderRows;
+  if (!renderer || !gl || typeof draw !== 'function' || typeof gl.clear !== 'function' || !('_isAttached' in renderer)) return false;
+  renderer.renderRows = function (this: DrawingRenderer, start: number, end: number) {
+    // Only when xterm is going to draw: a canvas emptied for a draw that does not come would show nothing until the next one.
+    if (this._isAttached && this._glyphRenderer?.value && this._rectangleRenderer?.value) {
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
+    draw.call(this, start, end);
+  };
+  return true;
+}
+
 type ScreenScale = 'unknown' | 'real' | 'emulated';
 /** Whether the screen's scale is emulated where the terminal is, which is known once the terminal is shown with a size. */
 function useScreenScale(host: HTMLElement, visible: boolean): ScreenScale {
@@ -279,6 +314,7 @@ export function useWebglRenderer(host: HTMLElement, visible: boolean, choices: T
       try {
         const addon = new WebglAddon();
         xterm.loadAddon(addon);
+        clearEachDraw(addon);
         const unwatch = atlases.add(addon as unknown as AtlasDrawer, xterm.element?.querySelectorAll('canvas') ?? []);
         active.current = { xterm, addon, unwatch };
         // Back to the page's own drawing, which always works. Coming back into view tries again.
