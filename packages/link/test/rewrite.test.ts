@@ -248,6 +248,16 @@ test('a machine\'s page in a desktop window\'s frame starts below the title stri
   const html = injectFrameTop(INDEX);
   assert.match(html, /html\[data-dl-framed\] body\{box-sizing:border-box;padding-top:var\(--dl-top,0px\)\}/);
   assert.match(html, /--dsh-frame-overlay-top:calc\(var\(--dl-top,0px\) \+ 12px\)/);
+  // The sidebar still reaches the top: DSH's frame climbs back over the band, its columns start below it, the sidebar
+  // column climbs back into it (not as the drawer, which is placed by the frame) and pads its content by a see-through
+  // border its fill paints under; the frame's overlays and leading controls stay below it.
+  const frame = 'html[data-dl-framed] #root div:has(>[data-shell-overlay])';
+  const rules = new Map([...html.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(m => [m[1]!.replace(/^<style>/, ''), m[2]!]));
+  assert.equal(rules.get(frame), 'margin-top:calc(0px - var(--dl-top,0px));height:calc(100% + var(--dl-top,0px));padding-top:var(--dl-top,0px)');
+  assert.equal(rules.get(`${frame}:not([data-sidebar-drawer])>:has(>[data-slot="sidebar"])`), 'margin-top:calc(0px - var(--dl-top,0px))');
+  assert.equal(rules.get(`${frame}>*>[data-slot="sidebar"]>*`), 'border-top:var(--dl-top,0px) solid transparent');
+  assert.equal(rules.get(`${frame}>[data-shell-overlay]`), 'top:var(--dl-top,0px)');
+  assert.equal(rules.get(`${frame}>[data-shell-leading]`), 'margin-top:var(--dl-top,0px)');
 });
 
 test('a page that is not in a frame of this plugin\'s shell is left as it is', () => {
