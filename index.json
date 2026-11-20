@@ -85,8 +85,8 @@
         "zh": "互联"
       },
       "description": {
-        "en": "Open the full DSH of your other computers on the same Tailscale account from the sidebar, see what waits for you there, and restart them remotely",
-        "zh": "在侧栏打开同一 Tailscale 账号下其他电脑的完整 DSH，查看那边等你处理的事项，并远程重启"
+        "en": "Open the full DSH of your other computers on the same Tailscale account from the sidebar, see what waits for you there, browse their `localhost` from the desktop app, and restart them remotely",
+        "zh": "在侧栏打开同一 Tailscale 账号下其他电脑的完整 DSH，查看那边等你处理的事项，在桌面 App 里浏览它们的 `localhost`，并远程重启"
       },
       "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0IiBmaWxsPSJub25lIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkRTSCBMaW5rIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0idGlsZSIgeDE9IjgiIHkxPSI0IiB4Mj0iNTYiIHkyPSI2NCIgZ3JhZGllbnRVbml0cz0idXNlclNwYWNlT25Vc2UiPgogICAgICA8c3RvcCBzdG9wLWNvbG9yPSIjM0ZBMzdBIi8+CiAgICAgIDxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzFGNkY1NSIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICA8L2RlZnM+CiAgPHJlY3QgeD0iNCIgeT0iNCIgd2lkdGg9IjU2IiBoZWlnaHQ9IjU2IiByeD0iMTQiIGZpbGw9InVybCgjdGlsZSkiLz4KICA8cmVjdCB4PSIxMyIgeT0iMTciIHdpZHRoPSIyNCIgaGVpZ2h0PSIxNyIgcng9IjMiIHN0cm9rZT0iI2ZmZiIgc3Ryb2tlLXdpZHRoPSIzIi8+CiAgPHBhdGggZD0iTTE5IDQwaDEyIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPHJlY3QgeD0iMzUiIHk9IjI5IiB3aWR0aD0iMTciIGhlaWdodD0iMjAiIHJ4PSIzIiBmaWxsPSJ1cmwoI3RpbGUpIiBzdHJva2U9IiNmZmYiIHN0cm9rZS13aWR0aD0iMyIvPgogIDxjaXJjbGUgY3g9IjQzLjUiIGN5PSI0MyIgcj0iMiIgZmlsbD0iI2ZmZiIvPgo8L3N2Zz4K",
       "author": "lalaze",
@@ -104,12 +104,12 @@
       },
       "versions": [
         {
-          "version": "0.1.11",
-          "publishTimestamp": 1795139925,
+          "version": "0.1.12",
+          "publishTimestamp": 1795148619,
           "source": {
             "type": "git",
             "url": "https://github.com/lalaze/dsh-plugins",
-            "commit": "dbffc212c96ce1ed43f0c0811c1b53a02696d594",
+            "commit": "d35c3849463602f1bf8c4738d121d0583704541c",
             "path": "packages/link"
           },
           "engines": {
