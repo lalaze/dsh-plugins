@@ -421,6 +421,45 @@
       ]
     },
     {
+      "name": "dsh-project-status",
+      "title": {
+        "en": "Project Status",
+        "zh": "项目状态"
+      },
+      "description": {
+        "en": "A Status tab: one status per project, shared by all of its worktrees and branches, with the goal, progress, blockers and next step beside what Git already knows, in a file the agents on the machine can update",
+        "zh": "状态标签页：一个项目一份状态，所有 worktree 和分支共用，目标、进度、卡点、下一步与 Git 事实并排显示，存成本机 agent 也能更新的文件"
+      },
+      "author": "lalaze",
+      "homepage": "https://github.com/lalaze/dsh-plugins/tree/main/packages/project-status",
+      "repository": {
+        "url": "https://github.com/lalaze/dsh-plugins",
+        "directory": "packages/project-status"
+      },
+      "metadata": {
+        "keywords": [
+          "project",
+          "status",
+          "worktree"
+        ]
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1795158374,
+          "source": {
+            "type": "git",
+            "url": "https://github.com/lalaze/dsh-plugins",
+            "commit": "da08875456d52fcb9db998103447ccdb52a12a8f",
+            "path": "packages/project-status"
+          },
+          "engines": {
+            "dsh": ">=0.2.1-rc.2 <0.3.0"
+          }
+        }
+      ]
+    },
+    {
       "name": "dsh-usage-stats",
       "title": {
         "en": "DSH Usage Statistics",
