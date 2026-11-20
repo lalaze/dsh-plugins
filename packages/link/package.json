@@ -1,6 +1,6 @@
 {
   "name": "dsh-link",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Open the full DSH of your other machines on the tailnet from the sidebar, see their waiting approvals and finished turns, and restart them remotely",
   "type": "module",
   "icon": "icon.svg",
@@ -13,7 +13,7 @@
   },
   "files": ["lib", "icon.svg", "cordis.patch.yml", "README.md", "README.zh-CN.md", "CHANGELOG.md", "CHANGELOG.zh-CN.md", "THIRD_PARTY_NOTICES.md", "LICENSE"],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs",
+    "build": "tsc -p tsconfig.build.json && node ../../scripts/build-client.mjs && node scripts/build-frame.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "check": "pnpm run typecheck && pnpm test && pnpm run build",

@@ -5,7 +5,8 @@
  */
 import http from 'node:http';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
-import type { Duplex } from 'node:stream';
+import type { Duplex, Transform } from 'node:stream';
+import { FORWARD_HEADER, forwardOrigin } from './forward/target.js';
 import type { LoopbackSession } from './login.js';
 import { forwardHttp, forwardUpgrade, hostnameOf, locationUnder, remoteIp, requestHeaders, sendJson, sendText } from './proxy.js';
 import { injectOwnsHost } from './rewrite.js';
@@ -56,28 +57,56 @@ export class Admission {
 export interface FrontendRoutes {
   /** This plugin's own routes, by exact path; anything else goes into DSH. */
   http: Record<string, (req: IncomingMessage, res: ServerResponse) => void | Promise<void>>;
+  /** This machine's index as the other machines get it, after `ownsHost` (browser-panel.ts adds the panel). */
+  page?: (html: string) => string;
+  /** This machine's `/plugins/events` stream as the other machines get it. */
+  events?: () => Transform | undefined;
+  /** Requests a window marked for an address of this machine's network (forward/target.ts); refused without it. */
+  forward?: {
+    http(req: IncomingMessage, res: ServerResponse, origin: URL): void;
+    upgrade(req: IncomingMessage, socket: Duplex, head: Buffer, origin: URL): void;
+  };
 }
+
+/** DSH's graph stream (dsh-client-hmr `EVENTS_ENDPOINT`). */
+const EVENTS_PATH = '/plugins/events';
 
 /** Answers an admitted request: a plugin route, or this machine's DSH. */
 export class Frontend {
   constructor(private readonly session: LoopbackSession, private readonly origin: () => string, private readonly routes: FrontendRoutes) {}
 
   async http(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    if (req.headers[FORWARD_HEADER] !== undefined) {
+      const origin = forwardOrigin(req.headers[FORWARD_HEADER]);
+      if (!origin || !this.routes.forward) { sendText(res, 403, 'This machine does not forward that address.'); return; }
+      this.routes.forward.http(req, res, origin);
+      return;
+    }
     const path = new URL(req.url ?? '/', 'http://x').pathname;
     const route = this.routes.http[path];
     if (route) { await route(req, res); return; }
     let cookie: string;
     try { cookie = await this.session.get(); } catch (error) { sendText(res, 502, (error as Error).message); return; }
     const target = new URL(req.url ?? '/', this.origin());
+    const { page, events } = this.routes;
     forwardHttp(req, res, {
       target, headers: requestHeaders(req.headers, { host: this.session.authority, cookie }),
       location: locationUnder(new URL(this.origin()), ''),
-      html: injectOwnsHost,
+      html: page ? html => page(injectOwnsHost(html)) : injectOwnsHost,
+      ...(events && path === EVENTS_PATH ? {
+        stream: (status, headers) => status === 200 && /text\/event-stream/i.test(String(headers['content-type'] ?? '')) && !headers['content-encoding'] ? events() : undefined,
+      } : {}),
       onStatus: status => { if (status === 401) this.session.invalidate(); },
     });
   }
 
   async upgrade(req: IncomingMessage, socket: Duplex, head: Buffer): Promise<void> {
+    if (req.headers[FORWARD_HEADER] !== undefined) {
+      const origin = forwardOrigin(req.headers[FORWARD_HEADER]);
+      if (!origin || !this.routes.forward) { socket.end('HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n'); return; }
+      this.routes.forward.upgrade(req, socket, head, origin);
+      return;
+    }
     let cookie: string;
     try { cookie = await this.session.get(); } catch { socket.destroy(); return; }
     forwardUpgrade(req, socket, head, {

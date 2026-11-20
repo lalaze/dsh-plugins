@@ -85,6 +85,10 @@ export function injectShellReturn(html: string, id: string): string {
 
 /** The global a window's own page keeps its shell on (client/shell.ts). */
 export const SHELL_GLOBAL = '__dshLinkShell';
+/** What the desktop window's DSH Link lends a machine's page in one of its frames: its browser (frame/browser.ts). */
+export const DESKTOP_GLOBAL = '__dshLinkDesktop';
+/** The settings the frame browser script reads: `{ machine, port }`. */
+export const FRAME_CONFIG_GLOBAL = '__dshLinkFrame';
 /** On the shell page's root: the height of the title strip over its frames in a desktop window (client/styles.ts). */
 export const BAR_HEIGHT = '--dl-bar-height';
 
@@ -105,7 +109,9 @@ export function injectFrameTop(html: string): string {
     + `${frame}{margin-top:calc(0px - ${top});height:calc(100% + ${top});padding-top:${top}}`
     + `${frame}:not([data-sidebar-drawer])>:has(>[data-slot="sidebar"]){margin-top:calc(0px - ${top})}`
     + `${frame}>*>[data-slot="sidebar"]>*{border-top:${top} solid transparent}`
-    + `${frame}>[data-shell-overlay]{top:${top}}${frame}>[data-shell-leading]{margin-top:${top}}</style>`;
+    + `${frame}>[data-shell-overlay]{top:${top}}${frame}>[data-shell-leading]{margin-top:${top}}`
+    // dsh-browser-devtools' debugger window would open on the machine, not in front of the user.
+    + `html[data-dl-framed] [data-dsh-browser-devtools="detach"]{display:none!important}</style>`;
   const script = `<script>(()=>{try{const p=window.parent;if(p===window||!p.${SHELL_GLOBAL})return;const h=document.documentElement,r=p.document.documentElement,set=()=>{try{const v=p.getComputedStyle(r).getPropertyValue(${literal(BAR_HEIGHT)}).trim();if(v&&parseFloat(v)>0)h.style.setProperty("--dl-top",v);else h.style.removeProperty("--dl-top")}catch{}};h.setAttribute("data-dl-framed","");set();new MutationObserver(set).observe(r,{attributes:true})}catch{}})()</script>`;
   return injectHead(html, style + script);
 }
@@ -145,17 +151,29 @@ export function selectSession(storage: Storage, machineId: string, sessionId: st
   storage.setItem(`${machineId ? storagePrefix(machineId) : ''}${CURRENT_SESSION_KEY}`, JSON.stringify({ sessionId }));
 }
 
+/** The frame browser script (frame/entry.ts, built to lib/frame-browser.js) and this host's forwarding port. */
+export interface FrameBrowser { script: string; port: number }
+
+/**
+ * Lend a machine's page in a frame of the desktop window the window's browser (frame/browser.ts). The script does
+ * nothing anywhere else.
+ */
+export function injectFrameBrowser(html: string, id: string, browser: FrameBrowser): string {
+  const config = `<script>globalThis.${FRAME_CONFIG_GLOBAL}=${literal({ machine: id, port: browser.port })}</script>`;
+  return injectHead(html, `${config}<script>${browser.script.replaceAll('</script', '<\\/script')}</script>`);
+}
+
 /**
  * A machine's index as this host serves it under its mount. Scripts run in head order, so the request base and the
  * namespace come first (everything after them requests from the machine and reads the namespaced storage), then the
  * desktop guard.
  */
-export function mountedIndex(html: string, id: string): Rewritten {
+export function mountedIndex(html: string, id: string, browser?: FrameBrowser): Rewritten {
   const manifest = credentialedManifest(html);
   const guarded = guardDesktopBoot(manifest.html, mountPrefix(id));
   const page = injectFrameTop(injectRequestBase(injectStorageNamespace(guarded.html, id), mountPrefix(id)));
   // First of all: a page about to go to this computer's own page does nothing else.
-  return { html: injectShellReturn(page, id), misses: [...manifest.misses, ...guarded.misses] };
+  return { html: injectShellReturn(browser ? injectFrameBrowser(page, id, browser) : page, id), misses: [...manifest.misses, ...guarded.misses] };
 }
 
 /** Reads the Session a page shows, '' when none: the store {@link CURRENT_SESSION_KEY} holds `{ sessionId }`. */
