@@ -12,11 +12,11 @@ const FAST_MS = 4000, SLOW_MS = 15_000;
 export type Pace = 'fast' | 'slow';
 export interface Snapshot { answer?: StatusAnswer; error?: string; status?: number }
 
-interface Entry { snapshot: Snapshot; key: string; listeners: Set<() => void>; fast: number; slow: number; timer?: ReturnType<typeof setInterval>; period?: number; loading?: Promise<void> }
+interface Entry { snapshot: Snapshot; key: string; listeners: Set<() => void>; fast: number; slow: number; timer?: ReturnType<typeof setInterval>; period?: number; loading?: Promise<void>; puts: number }
 const entries = new Map<string, Entry>(), EMPTY: Snapshot = {};
 const entryOf = (sessionId: string) => {
   let entry = entries.get(sessionId);
-  if (!entry) entries.set(sessionId, entry = { snapshot: EMPTY, key: '', listeners: new Set(), fast: 0, slow: 0 });
+  if (!entry) entries.set(sessionId, entry = { snapshot: EMPTY, key: '', listeners: new Set(), fast: 0, slow: 0, puts: 0 });
   return entry;
 };
 const set = (entry: Entry, snapshot: Snapshot) => {
@@ -29,14 +29,15 @@ const set = (entry: Entry, snapshot: Snapshot) => {
 
 /** Asks the host now. One request per conversation at a time. */
 export function refresh(sessionId: string): Promise<void> {
-  const entry = entryOf(sessionId);
+  const entry = entryOf(sessionId), puts = entry.puts;
   return entry.loading ??= readStatus(sessionId).then(
-    answer => { set(entry, { answer }); },
+    // An answer that was on its way while a save came back is older than what the save said.
+    answer => { if (entry.puts === puts) set(entry, { answer }); },
     (error: unknown) => { set(entry, { ...(entry.snapshot.answer ? { answer: entry.snapshot.answer } : {}), error: error instanceof Error ? error.message : String(error), ...(error instanceof StatusRequestError ? { status: error.status } : {}) }); },
   ).finally(() => { entry.loading = undefined; });
 }
 /** What a save answered is the status now. */
-export const put = (sessionId: string, answer: StatusAnswer) => set(entryOf(sessionId), { answer });
+export const put = (sessionId: string, answer: StatusAnswer) => { const entry = entryOf(sessionId); entry.puts++; set(entry, { answer }); };
 
 const awake = () => { if (!document.hidden) for (const [sessionId, entry] of entries) if (entry.fast + entry.slow > 0) void refresh(sessionId); };
 let watching = false;

@@ -74,29 +74,46 @@ test('a repository with no remote has nothing to push to', async () => {
   assert.equal((await service.get('lone')).facts!.unpushed, null);
 });
 
-test('a status saved from one checkout is read from another, in a private file', async () => {
-  const first = await post({ action: 'save', sessionId: 'main', fields: { goal: '上线支付页', progress: '', blockers: '等我确认文案', next: '跑通回归' }, revision: NO_REVISION, language: 'zh' });
+const save = (sessionId: string, field: string, value: string, was: string, language = 'zh') => post({ action: 'save', sessionId, field, value, was, language });
+
+test('a field saved from one checkout is read from another, in a private file', async () => {
+  const first = await save('main', 'goal', '- [ ] 上线支付页\n  - [x] 设计\n', '');
   assert.equal(first.status, 200);
+  await save('main', 'blockers', '等我确认文案', '');
   const file = first.body.file!;
-  assert.equal(await readFile(file, 'utf8'), '# My Shop\n\n## 目标\n\n上线支付页\n\n## 进度\n\n## 卡点\n\n等我确认文案\n\n## 下一步\n\n跑通回归\n');
+  assert.equal((await save('tree', 'next', '\n跑通回归\r\n\n', '')).status, 200);
+  assert.equal(await readFile(file, 'utf8'), '# My Shop\n\n## 目标\n\n- [ ] 上线支付页\n  - [x] 设计\n\n## 进度\n\n## 卡点\n\n等我确认文案\n\n## 下一步\n\n跑通回归\n');
   assert.equal((await stat(file)).mode & 0o777, 0o600);
   assert.equal((await stat(join(state, 'projects'))).mode & 0o777, 0o700);
   const seen = await post({ action: 'get', sessionId: 'tree' });
-  assert.deepEqual([seen.body.fields.blockers, seen.body.revision, typeof seen.body.updatedAt], ['等我确认文案', first.body.revision, 'number']);
+  assert.deepEqual([seen.body.fields.blockers, seen.body.fields.goal, typeof seen.body.updatedAt], ['等我确认文案', '- [ ] 上线支付页\n  - [x] 设计', 'number']);
 });
 
-test('an agent’s edit of the file shows at the next read, and a save made from the old text is refused', async () => {
+test('an agent’s edit shows at the next read; a save over a field it changed is refused, one of another field is not', async () => {
   const before = await service.get('main');
   await writeFile(before.file!, `${await readFile(before.file!, 'utf8')}\n## Notes\n\nfrom the agent\n`.replace('跑通回归', '发布 1.0.16'));
   const now = await service.get('tree');
   assert.deepEqual([now.fields.next, now.more, now.revision !== before.revision], ['发布 1.0.16', true, true]);
-  const stale = await post({ action: 'save', sessionId: 'main', fields: { ...before.fields, goal: 'mine' }, revision: before.revision, language: 'zh' });
+  const stale = await save('main', 'next', 'mine', before.fields.next);
   assert.deepEqual([stale.status, stale.body.error], [409, 'The status changed while you were editing']);
-  assert.match(await readFile(before.file!, 'utf8'), /上线支付页/);
-  // From the new revision the save goes through and the agent's own section stays.
-  const saved = await post({ action: 'save', sessionId: 'main', fields: { ...now.fields, goal: 'mine' }, revision: now.revision, language: 'en' });
+  assert.match(await readFile(before.file!, 'utf8'), /发布 1\.0\.16/);
+  // The goal is as it was when the edit began, whatever happened to the rest of the file; the agent's own section stays.
+  const saved = await save('main', 'goal', 'mine', before.fields.goal, 'en');
   assert.equal(saved.status, 200);
-  assert.match(await readFile(before.file!, 'utf8'), /^# My Shop\n\n## 目标\n\nmine\n[\s\S]*## Notes\n\nfrom the agent\n$/);
+  assert.match(await readFile(before.file!, 'utf8'), /^# My Shop\n\n## 目标\n\nmine\n[\s\S]*## 下一步\n\n发布 1\.0\.16\n\n## Notes\n\nfrom the agent\n$/);
+  // The same save again, as after an answer that got lost, changes nothing and is no conflict.
+  const text = await readFile(before.file!, 'utf8');
+  assert.equal((await save('main', 'goal', 'mine', before.fields.goal)).status, 200);
+  assert.equal(await readFile(before.file!, 'utf8'), text);
+});
+
+test('a line that would start a section of its own is not saved into a field', async () => {
+  const before = await service.get('main');
+  const refused = await save('main', 'progress', 'done so far\n## Later\nmore', before.fields.progress);
+  assert.deepEqual([refused.status, refused.body.error], [400, 'A line that starts with ## would begin another section']);
+  // Inside a code block it is code.
+  assert.equal((await save('main', 'progress', '```\n## not a heading\n```', before.fields.progress)).status, 200);
+  assert.equal((await save('main', 'progress', '', '```\n## not a heading\n```')).status, 200);
 });
 
 test('conversations are counted across the project’s checkouts, without blank ones and helpers', async () => {
@@ -116,6 +133,8 @@ test('requests without the client’s header, of another kind, or with a bad sta
   assert.equal((await post({ action: 'get', sessionId: 'main' }, {})).status, 403);
   assert.equal((await post({ action: 'get', sessionId: 'gone' })).status, 404);
   assert.equal((await post({ action: 'drop', sessionId: 'main' })).status, 400);
-  assert.equal((await post({ action: 'save', sessionId: 'main', fields: { goal: 'x' }, revision: 'r', language: 'en' })).status, 400);
+  assert.equal((await post({ action: 'save', sessionId: 'main', field: 'title', value: 'x', was: '' })).status, 400);
+  assert.equal((await post({ action: 'save', sessionId: 'main', field: 'goal', value: 'x' })).status, 400);
+  assert.equal((await post({ action: 'save', sessionId: 'main', field: 'goal', value: 'x'.repeat(8001), was: '' })).status, 400);
   assert.equal((await handle(new Request('http://localhost/api/project-status', { method: 'POST', headers: { [CLIENT_HEADER]: '1', 'content-type': 'text/plain' }, body: 'x' }))).status, 415);
 });

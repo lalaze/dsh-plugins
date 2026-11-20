@@ -1,16 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useLocale } from '@dsh-plugins/i18n/react';
-import { FIELDS, FIELD_LIMIT, type Facts, type Field, type Fields, type StatusAnswer } from '../domain.js';
-import { saveStatus, StatusRequestError } from './api.js';
-import { activeLocale, formatLocale, i18n, localizeError, ui } from './i18n.js';
+import { FIELD_LIMIT, type Facts, type Field, type StatusAnswer } from '../domain.js';
+import { parseGoals, tally } from '../goals.js';
+import { useField, type FieldEdit } from './field.js';
+import { GoalList } from './goal-list.js';
+import { activeLocale, formatLocale, i18n, ui } from './i18n.js';
 import { standingRule, updateRequest } from './prompt.js';
-import { put, refresh, useStatus } from './status.js';
+import { refresh, useStatus } from './status.js';
 import { styles } from './styles.js';
 import { clearTabDot, setTabDot } from './tab-dot.js';
 
-const LABEL: Record<Field, string> = { goal: 'Goal', progress: 'Progress', blockers: 'Blockers', next: 'Next' };
-const HINT: Record<Field, string> = {
-  goal: 'What this milestone has to deliver',
+type TextName = Exclude<Field, 'goal'>;
+const TEXTS: TextName[] = ['progress', 'blockers', 'next'];
+const LABEL: Record<TextName, string> = { progress: 'Progress', blockers: 'Blockers', next: 'Next' };
+const HINT: Record<TextName, string> = {
   progress: 'What is done and what is under way, with the branch',
   blockers: 'What it is stuck on and who it waits for: you, an agent or someone outside',
   next: 'One instruction an agent could carry out as it stands',
@@ -51,6 +54,69 @@ function FactList({ facts, answer }: { facts?: Facts; answer: StatusAnswer }) {
   </dl>;
 }
 
+/** Whether the browser sizes a textarea to its text by itself (`field-sizing`); where it does not, it is done here. */
+const SIZES = typeof CSS !== 'undefined' && !!CSS.supports?.('field-sizing', 'content');
+function fit(area: HTMLTextAreaElement | null): void {
+  if (!area || SIZES) return;
+  area.style.height = 'auto';
+  // Nothing to measure while the view is hidden; the rows it was given stand until it shows.
+  if (area.scrollHeight) area.style.height = `${area.scrollHeight + 2}px`;
+}
+
+/** Beside a field's name: that it is being saved, or was a moment ago. */
+const Saving = ({ edit }: { edit: FieldEdit }) => edit.saving || edit.saved ? <span className="ps-state" role="status">{ui(edit.saving ? 'Saving…' : 'Saved')}</span> : null;
+
+/** Under a field: a save that failed, or the text someone else wrote into it while the user was typing. */
+function Trouble({ edit }: { edit: FieldEdit }) {
+  return <>
+    {edit.failure && <div className="ps-alert" data-tone="error" role="alert"><p>{edit.failure}</p></div>}
+    {edit.theirs !== undefined && <div className="ps-alert" role="alert">
+      <p><strong>{ui('This was changed elsewhere while you were editing')}</strong></p>
+      <p className="ps-theirs">{edit.theirs || ui('(now empty)')}</p>
+      <p className="ps-choice">
+        <button type="button" className="ps-button" onClick={edit.takeTheirs}>{ui('Use the new text')}</button>
+        <button type="button" className="ps-button" onClick={edit.keepMine}>{ui('Keep mine')}</button>
+      </p>
+    </div>}
+  </>;
+}
+
+/** Progress, Blockers or Next: text that is edited where it stands. */
+function TextField({ sessionId, field, server }: { sessionId: string; field: TextName; server: string }) {
+  const edit = useField(sessionId, field, server), area = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => fit(area.current), [edit.value]);
+  // The lines wrap anew when the view gets another width, or shows after being hidden.
+  useEffect(() => {
+    const node = area.current;
+    if (!node || SIZES || typeof ResizeObserver === 'undefined') return;
+    let width = node.clientWidth;
+    const observer = new ResizeObserver(() => { if (node.clientWidth !== width) { width = node.clientWidth; fit(node); } });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return <section className="ps-field" data-field={field} data-filled={server.trim() ? '' : undefined}>
+    <h3>{ui(LABEL[field])}<Saving edit={edit} /></h3>
+    <textarea ref={area} className="ps-area" aria-label={ui(LABEL[field])} placeholder={ui(HINT[field])} maxLength={FIELD_LIMIT} rows={Math.max(1, edit.value.split('\n').length)} value={edit.value}
+      onChange={event => edit.type(event.target.value)} onFocus={() => edit.hold(true)} onBlur={() => { edit.hold(false); edit.commit(); }}
+      onKeyDown={event => {
+        if (event.nativeEvent.isComposing) return;
+        // Leaving the field saves it.
+        if (event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey))) { event.preventDefault(); event.currentTarget.blur(); }
+      }} />
+    <Trouble edit={edit} />
+  </section>;
+}
+
+/** Goal: goals and their steps, ticked off as they are reached. */
+function GoalField({ sessionId, server }: { sessionId: string; server: string }) {
+  const edit = useField(sessionId, 'goal', server), count = tally(parseGoals(edit.value));
+  return <section className="ps-field" data-field="goal">
+    <h3>{ui('Goal')}{count.total > 0 && <span className="ps-count">{count.done}/{count.total}</span>}<Saving edit={edit} /></h3>
+    <GoalList value={edit.value} onChange={text => edit.commit(text)} />
+    <Trouble edit={edit} />
+  </section>;
+}
+
 export interface PanelProps {
   sessionId?: string;
   /** Puts text into the conversation's input without sending it; answers false when nothing took it. */
@@ -59,16 +125,14 @@ export interface PanelProps {
 
 /**
  * The Status view of a conversation: what its project is for, how far it is, what blocks it and what comes next, beside
- * what Git says. The four texts are a file on the DSH host that agents edit too, so an edit here is held against the
- * revision it started from, and a change from elsewhere is shown instead of being overwritten.
+ * what Git says. The four are sections of a file on the DSH host that agents edit too. Each is edited where it stands and
+ * saved by itself (see field.ts), so a change from elsewhere to the same one is shown instead of being overwritten.
  */
 export function StatusPanel({ sessionId, sendToChat }: PanelProps) {
   useLocale(i18n);
   const { answer, error } = useStatus(sessionId, 'fast');
-  /** The edit in progress and the revision it began from; undefined while only reading. */
-  const [draft, setDraft] = useState<{ fields: Fields; base: string } | undefined>();
-  const [saving, setSaving] = useState(false), [failure, setFailure] = useState(''), [said, setSaid] = useState('');
-  useEffect(() => { setDraft(undefined); setFailure(''); setSaid(''); }, [sessionId]);
+  const [said, setSaid] = useState('');
+  useEffect(() => { setSaid(''); }, [sessionId]);
   const note = (body: React.ReactNode) => <section className="ps-root"><style>{styles}</style><div className="ps-note">{body}</div></section>;
   if (!sessionId) return note(ui('Open a conversation to see the status of its project.'));
   if (!answer) return note(error
@@ -76,19 +140,6 @@ export function StatusPanel({ sessionId, sendToChat }: PanelProps) {
     : ui('Reading the status…'));
 
   const { project, facts, file } = answer, language = activeLocale();
-  const conflict = draft !== undefined && draft.base !== answer.revision;
-  const save = async () => {
-    if (!draft) return;
-    setSaving(true); setFailure('');
-    try {
-      put(sessionId, await saveStatus(sessionId, draft.fields, draft.base, language));
-      setDraft(undefined);
-    } catch (problem) {
-      // Someone wrote meanwhile: the new revision shows the notice, and the draft stays.
-      if (problem instanceof StatusRequestError && problem.status === 409) await refresh(sessionId);
-      else setFailure(localizeError(problem));
-    } finally { setSaving(false); }
-  };
   const askAgent = async () => {
     if (!file || !sendToChat) return;
     setSaid((await sendToChat(sessionId, updateRequest(file, language)))
@@ -106,35 +157,15 @@ export function StatusPanel({ sessionId, sendToChat }: PanelProps) {
     <FactList facts={facts} answer={answer} />
     {answer.factsError && <div className="ps-alert"><p>{ui(answer.factsError)}</p></div>}
     {error && <div className="ps-alert" data-tone="error" role="alert"><p>{ui(error)}</p></div>}
-    {conflict && <div className="ps-alert" role="alert">
-      <p><strong>{ui('The status changed while you were editing')}</strong></p>
-      <p>{ui('Your text is kept below. Load the new status to see what changed; that discards your edits.')}</p>
-      <p><button type="button" className="ps-button" onClick={() => { setDraft(undefined); setFailure(''); }}>{ui('Load the new status')}</button></p>
-    </div>}
-    <div className="ps-fields">
-      {FIELDS.map(field => {
-        const value = draft ? draft.fields[field] : answer.fields[field];
-        return <section key={field} className="ps-field" data-field={field} data-filled={answer.fields[field].trim() ? '' : undefined}>
-          <h3>{ui(LABEL[field])}</h3>
-          {draft
-            ? <><p className="ps-hint">{ui(HINT[field])}</p>
-              <textarea className="ps-area" aria-label={ui(LABEL[field])} maxLength={FIELD_LIMIT} rows={Math.min(12, Math.max(3, value.split('\n').length + 1))} value={value} disabled={saving}
-                onChange={event => setDraft({ ...draft, fields: { ...draft.fields, [field]: event.target.value } })} /></>
-            : value.trim() ? <p className="ps-text">{value}</p> : <p className="ps-empty">{ui(HINT[field])}</p>}
-        </section>;
-      })}
+    {/* A field belongs to one conversation's project: another conversation starts them afresh. */}
+    <div className="ps-fields" key={sessionId}>
+      <GoalField sessionId={sessionId} server={answer.fields.goal} />
+      {TEXTS.map(field => <TextField key={field} sessionId={sessionId} field={field} server={answer.fields[field]} />)}
     </div>
-    {failure && <div className="ps-alert" data-tone="error" role="alert"><p>{failure}</p></div>}
     <div className="ps-actions">
-      {draft ? <>
-        <button type="button" className="ps-button" data-primary disabled={saving || conflict} onClick={() => { void save(); }}>{ui(saving ? 'Saving…' : 'Save')}</button>
-        <button type="button" className="ps-button" disabled={saving} onClick={() => { setDraft(undefined); setFailure(''); }}>{ui('Cancel')}</button>
-      </> : <>
-        <button type="button" className="ps-button" data-primary onClick={() => { setSaid(''); setDraft({ fields: { ...answer.fields }, base: answer.revision }); }}>{ui('Edit')}</button>
-        <button type="button" className="ps-button" disabled={!file || !sendToChat} onClick={() => { void askAgent(); }}>{ui('Ask the agent to update')}</button>
-        <span className="ps-spacer" />
-        <button type="button" className="ps-button" disabled={!file} onClick={() => { void copyRule(); }}>{ui('Copy the rule for AGENTS.md')}</button>
-      </>}
+      <button type="button" className="ps-button" disabled={!file || !sendToChat} onClick={() => { void askAgent(); }}>{ui('Ask the agent to update')}</button>
+      <span className="ps-spacer" />
+      <button type="button" className="ps-button" disabled={!file} onClick={() => { void copyRule(); }}>{ui('Copy the rule for AGENTS.md')}</button>
     </div>
     {said && <p className="ps-said" role="status">{said}</p>}
     {!file && project.machine && <p className="ps-said">{ui('The status is kept on this computer, where an agent on {machine} cannot open it. Edit it here.', { machine: project.machine })}</p>}

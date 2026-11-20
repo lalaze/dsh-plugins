@@ -37,6 +37,9 @@ const trimBlank = (lines: string[]) => {
   return lines.slice(start, end).join('\n');
 };
 
+/** A field's text as the file holds it: without the blank lines around it. */
+export const tidy = (text: string): string => trimBlank(text.replace(/\r\n?/g, '\n').split('\n'));
+
 export function parseStatus(text: string): ParsedStatus {
   const result: ParsedStatus = { preamble: '', fields: { goal: '', progress: '', blockers: '', next: '' }, headings: {}, extra: [] };
   let heading: string | undefined, body: string[] = [], fence: string | undefined;
@@ -68,8 +71,7 @@ export function parseStatus(text: string): ParsedStatus {
 export function serializeStatus(status: ParsedStatus, language: 'zh' | 'en', title: string): string {
   const parts = [status.preamble || `# ${title}`];
   for (const field of FIELDS) {
-    const body = status.fields[field].replace(/\r\n?/g, '\n').split('\n');
-    parts.push([`## ${status.headings[field] ?? HEADINGS[language][field]}`, trimBlank(body)].filter(Boolean).join('\n\n'));
+    parts.push([`## ${status.headings[field] ?? HEADINGS[language][field]}`, tidy(status.fields[field])].filter(Boolean).join('\n\n'));
   }
   parts.push(...status.extra);
   return `${parts.join('\n\n')}\n`;

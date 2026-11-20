@@ -1,9 +1,9 @@
 import { realpath } from 'node:fs/promises';
 import nodePath from 'node:path';
-import { FIELDS, FIELD_LIMIT, REMOTE_ANCHOR, type Conversations, type Fields, type ProjectStatusEntry, type StatusAnswer } from './domain.js';
+import { FIELDS, FIELD_LIMIT, REMOTE_ANCHOR, type Conversations, type Field, type ProjectStatusEntry, type StatusAnswer } from './domain.js';
 import { workplace, type RemoteWorktrees, type Workplace } from './git.js';
 import { inspect, type Inspection } from './project.js';
-import { parseStatus, serializeStatus } from './status-file.js';
+import { parseStatus, serializeStatus, tidy } from './status-file.js';
 import { StatusError, type StatusStore } from './store.js';
 
 /** A conversation as DSH lists it, as far as it is read here. */
@@ -37,24 +37,31 @@ export class ProjectStatusService {
   }
 
   /**
-   * Puts the four fields into the project's file, leaving its other sections as they are.
-   * @param base - the revision the tab showed when the edit began.
+   * Puts one field into the project's file, leaving the other three and the file's other sections as they are. The tab
+   * saves as the user types and ticks, while agents edit the same file, so what is checked is the field alone: a change to
+   * another one meanwhile is no conflict.
+   * @param was - the field's text when the edit began; another text in the file by now means someone else wrote it.
    * @param language - of the headings, for a file that has none yet.
    */
-  async save(sessionId: string, input: unknown, base: unknown, language: unknown, signal?: AbortSignal): Promise<StatusAnswer> {
-    if (typeof base !== 'string' || !base) throw new StatusError('Invalid revision');
-    if (!input || typeof input !== 'object') throw new StatusError('Invalid status');
-    const fields = {} as Fields;
-    for (const field of FIELDS) {
-      const value = (input as Record<string, unknown>)[field];
-      if (typeof value !== 'string' || value.length > FIELD_LIMIT) throw new StatusError('Invalid status');
-      fields[field] = value;
+  async save(sessionId: string, field: unknown, value: unknown, was: unknown, language: unknown, signal?: AbortSignal): Promise<StatusAnswer> {
+    if (!FIELDS.includes(field as Field)) throw new StatusError('Invalid status');
+    if (typeof value !== 'string' || value.length > FIELD_LIMIT || typeof was !== 'string') throw new StatusError('Invalid status');
+    const name = field as Field, next = tidy(value), from = tidy(was);
+    const folder = await this.folderOf(sessionId), { found: { project } } = await this.inspected(folder, signal);
+    for (let attempt = 0; ; attempt++) {
+      const current = await this.store.read(project.id), parsed = parseStatus(current.text);
+      // Already there: the same save came twice, or someone wrote the same thing.
+      if (parsed.fields[name] === next) break;
+      if (parsed.fields[name] !== from) throw new StatusError('The status changed while you were editing', 409);
+      const text = serializeStatus({ ...parsed, fields: { ...parsed.fields, [name]: next } }, language === 'zh' ? 'zh' : 'en', project.name);
+      // A line that reads as a heading would leave the field for a section of its own, and come back with every save.
+      if (parseStatus(text).fields[name] !== next) throw new StatusError('A line that starts with ## would begin another section');
+      try { await this.store.write(project.id, text, current.revision); break; }
+      catch (error) {
+        // The file was written between the read and the write: look again, a few times.
+        if (!(error instanceof StatusError && error.status === 409) || attempt >= 2) throw error;
+      }
     }
-    const folder = await this.folderOf(sessionId), { found } = await this.inspected(folder, signal);
-    const current = await this.store.read(found.project.id);
-    if (current.revision !== base) throw new StatusError('The status changed while you were editing', 409);
-    const text = serializeStatus({ ...parseStatus(current.text), fields }, language === 'zh' ? 'zh' : 'en', found.project.name);
-    await this.store.write(found.project.id, text, base);
     return this.answer(folder, signal);
   }
 

@@ -2,14 +2,14 @@ import { CLIENT_HEADER } from './domain.js';
 import type { ProjectStatusService } from './service.js';
 import { StatusError } from './store.js';
 
-/** Four fields of a few thousand characters each, with room to spare. */
+/** A field of a few thousand characters and the text it replaces, with room to spare. */
 const BODY_LIMIT = 256 * 1024;
 const sessionOf = (value: unknown): string => {
   if (typeof value !== 'string' || !value || value.length > 512) throw new StatusError('Invalid session ID');
   return value;
 };
 
-/** `POST` takes a JSON `action`: `get` reads the status of a conversation's project, `save` writes its four fields. */
+/** `POST` takes a JSON `action`: `get` reads the status of a conversation's project, `save` writes one of its fields. */
 export function createHandler(service: ProjectStatusService, log?: (message: string) => void) {
   return async (request: Request): Promise<Response> => {
     const headers = { 'Cache-Control': 'no-store' };
@@ -25,7 +25,7 @@ export function createHandler(service: ProjectStatusService, log?: (message: str
       const sessionId = sessionOf(input.sessionId);
       switch (input.action) {
         case 'get': return Response.json(await service.get(sessionId, request.signal), { headers });
-        case 'save': return Response.json(await service.save(sessionId, input.fields, input.revision, input.language, request.signal), { headers });
+        case 'save': return Response.json(await service.save(sessionId, input.field, input.value, input.was, input.language, request.signal), { headers });
         default: throw new StatusError('Unknown status action');
       }
     } catch (error) {
